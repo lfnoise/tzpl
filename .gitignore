@@ -18,3 +18,8 @@ lang/scratch/
 *.pem
 *.key
 *.profraw
+
+# Assembled docs site (site/build.py output)
+/_site/
+/site/_audio/
+__pycache__/

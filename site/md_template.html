@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{TITLE}</title>
+<style>
+  :root {
+    --bg: #1a1b26;
+    --fg: #c9d1d9;
+    --accent: #58a6ff;
+    --heading-fg: #e6edf3;
+    --muted-fg: #8b949e;
+    --code-bg: #21222c;
+    --code-border: #30363d;
+    --pre-bg: #161b22;
+    --table-th-bg: #2a2d3a;
+    --table-border: #30363d;
+    --table-stripe: #1f2028;
+  }
+  html.light {
+    --bg: #fdfdfd;
+    --fg: #1a1a1a;
+    --accent: #2563eb;
+    --heading-fg: #0f172a;
+    --muted-fg: #64748b;
+    --code-bg: #f3f4f6;
+    --code-border: #dde1e6;
+    --pre-bg: #f6f8fa;
+    --table-th-bg: #eef0f4;
+    --table-border: #dde1e6;
+    --table-stripe: #f8f9fa;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+                 'Helvetica Neue', Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.65;
+    color: var(--fg);
+    background: var(--bg);
+  }
+  main { max-width: 50rem; margin: 0 auto; padding: 2.5rem 1.4rem 3rem; }
+  a { color: var(--accent); }
+  h1, h2, h3, h4 { color: var(--heading-fg); line-height: 1.3; }
+  h1 { font-size: 1.9rem; margin-bottom: 0.4rem; }
+  h2 { font-size: 1.35rem; margin: 2.2rem 0 0.7rem; border-bottom: 1px solid
+       var(--table-border); padding-bottom: 0.35rem; }
+  h3 { font-size: 1.1rem; margin: 1.6rem 0 0.5rem; }
+  h4 { font-size: 1rem; margin: 1.2rem 0 0.4rem; }
+  p { margin: 0.7rem 0; }
+  ul, ol { margin: 0.7rem 0 0.7rem 1.6rem; }
+  li { margin: 0.25rem 0; }
+  hr { border: none; border-top: 1px solid var(--table-border); margin: 2rem 0; }
+  code {
+    font-family: 'SF Mono', SFMono-Regular, ui-monospace, Menlo, Consolas, monospace;
+    font-size: 0.85em;
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 4px;
+    padding: 0.1em 0.35em;
+  }
+  pre {
+    background: var(--pre-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 8px;
+    padding: 0.9rem 1.1rem;
+    overflow-x: auto;
+    margin: 0.9rem 0;
+    line-height: 1.5;
+  }
+  pre code { background: none; border: none; padding: 0; font-size: 0.84rem; }
+  .table-wrap { overflow-x: auto; margin: 0.9rem 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+  th, td { border: 1px solid var(--table-border); padding: 0.45rem 0.7rem;
+           text-align: left; vertical-align: top; }
+  th { background: var(--table-th-bg); color: var(--heading-fg); }
+  tr:nth-child(even) td { background: var(--table-stripe); }
+</style>
+<script>
+if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElement.classList.add('light');
+</script>
+</head>
+<body>
+<main>
+{CONTENT}
+</main>
+</body>
+</html>

@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tzopilotl — An Audio Coding Platform</title>
+<link rel="stylesheet" href="assets/tzpl-site.css">
+<script defer src="assets/tzpl-site.js"></script>
+<style>
+  :root {
+    --bg: #1a1b26;
+    --fg: #c9d1d9;
+    --accent: #58a6ff;
+    --heading-fg: #e6edf3;
+    --muted-fg: #8b949e;
+    --code-bg: #161b22;
+    --code-border: #30363d;
+    --card-bg: #1f2028;
+    --card-border: #2a2d3a;
+    --syn-kw: #c678dd;
+    --syn-typ: #56d4e0;
+    --syn-str: #4ec970;
+    --syn-cmt: #6a737d;
+    --syn-num: #e5a537;
+    --syn-fn: #58a6ff;
+  }
+  html.light {
+    --bg: #fdfdfd;
+    --fg: #1a1a1a;
+    --accent: #2563eb;
+    --heading-fg: #0f172a;
+    --muted-fg: #64748b;
+    --code-bg: #f3f4f6;
+    --code-border: #dde1e6;
+    --card-bg: #f8f9fb;
+    --card-border: #e2e5ea;
+    --syn-kw: #8b5cf6;
+    --syn-typ: #0891b2;
+    --syn-str: #16a34a;
+    --syn-cmt: #94a3b8;
+    --syn-num: #d97706;
+    --syn-fn: #2563eb;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+                 'Helvetica Neue', Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.65;
+    color: var(--fg);
+    background: var(--bg);
+  }
+  main { max-width: 58rem; margin: 0 auto; padding: 3rem 1.4rem 4rem; }
+  a { color: var(--accent); }
+  h1, h2, h3 { color: var(--heading-fg); line-height: 1.25; }
+
+  .hero { text-align: center; padding: 1.5rem 0 2.5rem; }
+  .hero .splash {
+    width: 15rem; height: auto; max-width: 70%; border-radius: 18px;
+    background: #000; border: 1px solid var(--card-border);
+    margin-bottom: 1.3rem;
+  }
+  .hero h1 { font-size: 2.6rem; letter-spacing: 0.01em; }
+  .hero .subtitle {
+    font-size: 1.25rem; color: var(--fg); max-width: 40rem;
+    margin: 0.9rem auto 0;
+  }
+  .hero .platform {
+    color: var(--muted-fg); max-width: 42rem; margin: 0.7rem auto 0;
+  }
+  .hero-actions {
+    display: flex; gap: 0.8rem; justify-content: center; flex-wrap: wrap;
+    margin-top: 1.6rem;
+  }
+  .hero-actions a {
+    display: inline-block; padding: 0.55rem 1.2rem; border-radius: 8px;
+    text-decoration: none; font-weight: 600; font-size: 0.95rem;
+  }
+  .hero-actions a.primary { background: var(--accent); color: #fff; }
+  .hero-actions a.secondary {
+    border: 1px solid var(--card-border); color: var(--fg);
+  }
+  .hero-actions a.secondary:hover { border-color: var(--accent); color: var(--accent); }
+
+  .sample { margin: 2.2rem 0 0; }
+  .sample pre {
+    background: var(--code-bg); border: 1px solid var(--code-border);
+    border-radius: 10px; padding: 1.1rem 1.3rem; overflow-x: auto;
+    font-family: 'SF Mono', SFMono-Regular, ui-monospace, Menlo, Consolas, monospace;
+    font-size: 0.86rem; line-height: 1.55;
+  }
+  .hero-audio { margin: 1rem 0 0; }
+  .hero-audio figcaption {
+    color: var(--muted-fg); font-size: 0.85rem; margin-bottom: 0.4rem;
+  }
+  .hero-audio audio { width: 100%; display: block; }
+  .sample .caption {
+    color: var(--muted-fg); font-size: 0.9rem; margin-top: 0.7rem;
+    max-width: 46rem;
+  }
+  .kw { color: var(--syn-kw); }
+  .typ { color: var(--syn-typ); }
+  .str { color: var(--syn-str); }
+  .cmt { color: var(--syn-cmt); font-style: italic; }
+  .num { color: var(--syn-num); }
+  .fnm { color: var(--syn-fn); }
+
+  section { margin-top: 3.2rem; }
+  section > h2 {
+    font-size: 1.35rem; margin-bottom: 1rem;
+    border-bottom: 1px solid var(--card-border); padding-bottom: 0.4rem;
+  }
+
+  .pillars { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+  @media (max-width: 720px) { .pillars { grid-template-columns: 1fr; } }
+  .pillar {
+    background: var(--card-bg); border: 1px solid var(--card-border);
+    border-radius: 10px; padding: 1.1rem 1.2rem;
+  }
+  .pillar h3 { font-size: 1.02rem; margin-bottom: 0.5rem; }
+  .pillar p { font-size: 0.92rem; color: var(--fg); }
+  .pillar p + p { margin-top: 0.5rem; }
+
+  .tzpl-cards-heading {
+    font-size: 0.78rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--muted-fg); margin: 1.4rem 0 0.6rem;
+  }
+  .tzpl-cards {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+    gap: 0.8rem;
+  }
+  .tzpl-card {
+    display: block; background: var(--card-bg);
+    border: 1px solid var(--card-border); border-radius: 10px;
+    padding: 0.8rem 1rem; text-decoration: none;
+  }
+  .tzpl-card:hover { border-color: var(--accent); }
+  .tzpl-card strong { color: var(--accent); font-size: 0.98rem; }
+  .tzpl-card span {
+    display: block; color: var(--muted-fg); font-size: 0.86rem;
+    margin-top: 0.25rem; line-height: 1.45;
+  }
+
+  .install pre {
+    background: var(--code-bg); border: 1px solid var(--code-border);
+    border-radius: 10px; padding: 1rem 1.3rem; overflow-x: auto;
+    font-family: 'SF Mono', SFMono-Regular, ui-monospace, Menlo, Consolas, monospace;
+    font-size: 0.86rem; line-height: 1.6;
+  }
+  .install p { margin-bottom: 0.8rem; }
+  .install .reqs { color: var(--muted-fg); font-size: 0.9rem; margin-top: 0.7rem; }
+
+  footer {
+    max-width: 58rem; margin: 0 auto; padding: 0 1.4rem 3rem;
+    color: var(--muted-fg); font-size: 0.88rem;
+    border-top: 1px solid var(--card-border);
+    padding-top: 1.4rem;
+  }
+</style>
+<script>
+if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElement.classList.add('light');
+</script>
+</head>
+<body>
+<!-- tzpl:source-note-begin -->
+<div style="background:#7a2d2d;color:#fff;padding:0.8rem 1.2rem;font-size:0.95rem;">
+This is the <strong>source</strong> of the landing page — its links only work
+in the assembled site. Run <code>python3 site/build.py</code> and open
+<code>_site/index.html</code> instead. (This banner is removed at build time.)
+</div>
+<!-- tzpl:source-note-end -->
+<!-- tzpl:header -->
+
+<main>
+  <div class="hero">
+    <img class="splash" src="assets/tzopilotl-splash.png"
+         alt="Tzopilotl emblem: a vulture over an audio spectrum"
+         width="480" height="480">
+    <h1>Tzopilotl</h1>
+    <p class="subtitle">A statically typed live-coding language for real-time audio.</p>
+    <p class="platform">The language of <strong>TZPL</strong>, an open-source audio coding
+    platform for composing, experimenting with, and performing music — a signal-graph
+    compiler that turns synth definitions into native plugins, and a real-time engine
+    that hot-loads them while the music plays.</p>
+    <div class="hero-actions">
+      <a class="primary" href="Getting_Started.html">Get Started</a>
+      <a class="secondary" href="Tzopilotl_by_Example.html">By Example</a>
+      <a class="secondary" href="Tzopilotl_Music_Cookbook.html">Music Cookbook</a>
+      <a class="secondary" href="Gallery.html">Audio Gallery</a>
+      <a class="secondary" href="https://github.com/lfnoise/tzpl">GitHub</a>
+    </div>
+  </div>
+
+  <div class="sample">
+<pre><code><span class="kw">import</span> synthdef.*;
+<span class="kw">import</span> synthc.compile.*;   <span class="cmt">-- defSynthX</span>
+<span class="kw">import</span> common_ugens.*;
+
+<span class="cmt">-- An LFO-driven sine through a comb filter. `nnhz` converts a MIDI-style</span>
+<span class="cmt">-- note number to Hz; `|&gt;` pipes the left value in as the last argument.</span>
+<span class="kw">fn</span> <span class="fnm">bubbles</span>() <span class="typ">S</span> =
+    <span class="num">0.4</span> lfsaw * <span class="num">24</span>
+    + [<span class="num">8</span>, <span class="num">7.23</span>] lfsaw * <span class="num">3</span>
+    + <span class="num">81</span>
+    |&gt; nnhz sinosc * <span class="num">0.04</span>
+    |&gt; combn(<span class="num">0.2</span>, <span class="num">4</span>) outlet;
+
+bubbles <span class="fnm">defSynthX</span>(<span class="str">"bubbles"</span>) <span class="kw">await</span>;</code></pre>
+    <!-- tzpl:hero-audio -->
+    <p class="caption">Evaluate this in the app and <code>defSynthX</code> walks the
+    signal graph, generates SIMD C++, compiles and links a native plugin in the
+    background, and registers it with the running engine — music that is already
+    playing never pauses.</p>
+  </div>
+
+  <section>
+    <h2>One platform, three engines</h2>
+    <div class="pillars">
+      <div class="pillar">
+        <h3>The language</h3>
+        <p>Statically typed and type-inferred, immutable by default, with
+        auto-mapping over arrays, pattern matching, coroutines, and a
+        left-to-right pipeline style built for live coding.</p>
+        <p>The VM is real-time safe: a direct-threaded interpreter with an O(1)
+        TLSF allocator and an incremental GC with sub-millisecond pauses.</p>
+      </div>
+      <div class="pillar">
+        <h3>The synthdef compiler</h3>
+        <p>Signal graphs written in Tzopilotl compile to optimized native
+        plugins: ~200 unit generators, a 14-pass analysis pipeline, an
+        algebraic rewrite engine, and SIMD C++ code generation.</p>
+        <p>Compilation is asynchronous — redefine a synth and players hot-swap
+        to the new version when it loads.</p>
+      </div>
+      <div class="pillar">
+        <h3>The engine</h3>
+        <p>A real-time engine with dynamic graph patching, crossfaded
+        connection changes, lock-free RT/NRT communication, multi-core silo
+        parallelism, and sample-accurate scheduling.</p>
+        <p>Polyphonic voicers, live controls, and notebook documents connect
+        the language to sound in the desktop app.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Documentation</h2>
+    <!-- tzpl:doccards -->
+  </section>
+
+  <section class="install">
+    <h2>Build from source</h2>
+    <p>TZPL currently runs on macOS (cross-platform support is planned):</p>
+<pre><code>git clone https://github.com/lfnoise/tzpl.git
+cd tzpl
+./build.sh              <span class="cmt"># Release build, all cores</span>
+./build/lang/tzpl       <span class="cmt"># start the Tzopilotl REPL</span></code></pre>
+    <p class="reqs">Requires Clang (or GCC 15+), CMake 3.21+, and a C++23
+    toolchain. See <a href="Getting_Started.html">Getting Started</a> for the
+    desktop app, packaged releases, and first sounds.</p>
+  </section>
+</main>
+
+<footer>
+  TZPL is free software under the
+  <a href="https://github.com/lfnoise/tzpl/blob/main/LICENSE">GNU GPL v3</a>.
+  Documentation sources live in
+  <a href="https://github.com/lfnoise/tzpl/tree/main/lang/docs">lang/docs</a>;
+  this site is assembled by <code>site/build.py</code>.
+</footer>
+</body>
+</html>

@@ -1,7 +1,9 @@
 name: deploy-docs
 
-# Publishes the rendered HTML documentation in lang/docs/ to GitHub Pages.
-# Requires Pages to be enabled with "GitHub Actions" as the source
+# Publishes the documentation site to GitHub Pages: renders the gallery
+# audio on a macOS runner (the platform is macOS-only), then assembles the
+# site, builds the search index, and validates links on ubuntu. Requires
+# Pages to be enabled with "GitHub Actions" as the source
 # (Settings -> Pages) once the repository is public.
 
 on:
@@ -9,6 +11,12 @@ on:
     branches: [ main ]
     paths:
       - 'lang/docs/**'
+      - 'site/**'
+      - 'NEWS.md'
+      - 'lang/Theory_of_Operation.md'
+      - 'engine/Architecture.md'
+      - 'synthdef-compiler/ARCHITECTURE.md'
+      - 'examples/music_fx_demos.x'
       - '.github/workflows/deploy-docs.yml'
   workflow_dispatch:
 
@@ -22,7 +30,41 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Renders the gallery clips offline with the headless app (no audio
+  # device, no GUI deps) and hands them to the deploy job as an artifact.
+  # Audio is never committed to the repository. If this job fails, the
+  # deploy still proceeds -- the gallery just omits the players.
+  render-audio:
+    runs-on: macos-14
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache build directory
+        uses: actions/cache@v4
+        with:
+          path: build-nrt
+          key: nrt-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', '*/CMakeLists.txt', 'lang/src/**', 'engine/src/**', 'synthdef-compiler/src/**', 'bridge/**', 'app/src/**', 'shared/**') }}
+          restore-keys: nrt-${{ runner.os }}-
+
+      - name: Build headless app
+        run: |
+          cmake -B build-nrt -DCMAKE_BUILD_TYPE=Release \
+            -DTZPL_BUILD_APP=ON -DTZPL_BUILD_GUI=OFF
+          cmake --build build-nrt --target tzpl_app -j"$(sysctl -n hw.ncpu)"
+
+      - name: Render gallery clips
+        run: python3 site/render_gallery.py --app build-nrt/app/tzpl_app
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gallery-audio
+          path: site/_audio
+          retention-days: 3
+
   deploy:
+    needs: render-audio
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -30,12 +72,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Only the rendered guides are published; Markdown dev notes stay
-      # repo-only.
+      - name: Fetch rendered audio
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: gallery-audio
+          path: site/_audio
+
+      # Assembles the landing page, the guides (shared shell injected,
+      # monoliths split per-chapter), the markdown-authored pages, and the
+      # gallery into _site/; Markdown dev notes stay repo-only.
       - name: Stage site
-        run: |
-          mkdir -p _site
-          cp lang/docs/*.html _site/
+        run: python3 site/build.py
+
+      # Builds the client-side full-text search index the ⌘K modal loads.
+      - name: Build search index
+        run: npx --yes pagefind@1 --site _site
+
+      - name: Check internal links
+        run: python3 site/check_links.py
 
       - uses: actions/configure-pages@v5
 
