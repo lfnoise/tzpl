@@ -75,8 +75,9 @@ def build_header(nav, current_file):
         "</details>"
         '<nav class="tzpl-quicklinks">'
         '<a href="Getting_Started.html">Get Started</a>'
-        '<a href="Gallery.html">Audio Gallery</a>'
+        '<a href="Tzopilotl_by_Example.html">By Example</a>'
         '<a href="Tzopilotl_Music_Cookbook.html">Music Cookbook</a>'
+        '<a href="Gallery.html">Audio Gallery</a>'
         "</nav>"
         '<div class="tzpl-header-right">'
         '<button class="tzpl-search-btn" aria-label="Search the docs">'
