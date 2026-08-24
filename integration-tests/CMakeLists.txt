@@ -41,6 +41,14 @@ target_link_libraries(test_metering
     PRIVATE audio_engine_lib
 )
 
+add_executable(test_stopped_engine
+    src/test_stopped_engine.cpp
+)
+
+target_link_libraries(test_stopped_engine
+    PRIVATE audio_engine_lib
+)
+
 if(TARGET tzpl_synthdef_compiler_bridge)
     add_executable(test_synthdef_compiler_ffi
         src/test_synthdef_compiler_ffi.cpp
