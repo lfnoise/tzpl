@@ -1685,6 +1685,16 @@ bool MainComponent::perform(InvocationInfo const& info) {
             logLine("reveal skipped under selftest");
         } else {
             mods.revealToUser();
+            // A dev build has further stdlib directories (bridge/modules);
+            // an installed distribution has just the one merged folder.
+            if (appCtx_.moduleCompiler) {
+                for (auto const& p : appCtx_.moduleCompiler->systemPaths()) {
+                    juce::File dir((juce::String(p)));
+                    if (dir.isDirectory() && dir != mods)
+                        logLine("also on the module search path: "
+                                + dir.getFullPathName());
+                }
+            }
         }
         return true;
     }

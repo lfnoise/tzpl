@@ -728,12 +728,17 @@ int main(int argc, const char* argv[]) {
         // that the ModuleCompiler always searches last, so user paths -- even
         // ones added at runtime when the GUI opens a project -- can shadow it.
         for (auto& p : envModulePaths()) includePaths.push_back(std::move(p));
+        // lang/modules (the stdlib proper) goes first: the GUI treats the
+        // first existing system path as THE modules folder (File > Reveal
+        // Modules Folder), and a distribution merges these into one folder
+        // anyway. The order can't affect import resolution -- the stdlib and
+        // bridge module names are disjoint.
         std::vector<std::string> stdlibFallbacks;
-#ifdef MODULES_DIR
-        stdlibFallbacks.push_back(MODULES_DIR);
-#endif
 #ifdef LANG_MODULES_DIR
         stdlibFallbacks.push_back(LANG_MODULES_DIR);
+#endif
+#ifdef MODULES_DIR
+        stdlibFallbacks.push_back(MODULES_DIR);
 #endif
 #ifdef EXAMPLES_DIR
         stdlibFallbacks.push_back(EXAMPLES_DIR);
