@@ -142,6 +142,18 @@ fn _isRootNode(ctx Ctx, n NIdx) Bool {
 
 fn _isInstVar(ctx Ctx, n NIdx) Bool = ctx.cut[n] isInstVarCut;
 
+-- A voice-local materialized value in flat voice mode: stored as a SoA array
+-- [maxVoices * chans], so accesses need a voice base. Mirrors the C++
+-- CppCodeGen::isVoiceLocalStorage.
+fn _isVoiceLocalStorage(ctx Ctx, n NIdx) Bool =
+	`cgVoiceCount > 0 && ctx.graphOf[n] == `cgVoiceGraph
+	&& match (ctx.kind[n]) {
+		constant(_, _): false;
+		inletK(_, _): false;
+		outletK(_, _): false;
+		_: true;
+	};
+
 fn _numInlets(ctx Ctx) Int = ctx.inlets length;
 
 -- genVarName: the C++ identifier (or accessor) for a node's value.
@@ -150,10 +162,14 @@ fn _varName(ctx Ctx, n NIdx) String = match (ctx.kind[n]) {
 	inletK(_, sn):     "((%^**)p->inlets)[%^]" fmt(cppType(ctx.typ[n]), sn);
 	outletK(_, sn):    "p->outlets[%^]" fmt(sn + ctx.inlets length);
 	-- Flat voice mode: a body instance var is per-voice (p->voice_v<serial>); a
-	-- body temp is a local v<serial>[maxVoices] array.
+	-- body temp is a local v<serial>[maxVoices] array. In an AoS per-voice
+	-- block (cgInVoiceLoop) an instance var is a VoiceState member (vs.),
+	-- mirroring the C++ genVarName's inVoiceLoop branch.
 	_:                 (`cgVoiceCount > 0 && ctx.graphOf[n] == `cgVoiceGraph)
 	                       ? ((ctx _isInstVar(n)) ? "p->voice_v%^" fmt(ctx.serial[n]) : "v%^" fmt(ctx.serial[n]))
-	                       : ((ctx _isInstVar(n)) ? "p->v%^" fmt(ctx.serial[n]) : "v%^" fmt(ctx.serial[n]));
+	                       : ((ctx _isInstVar(n))
+	                           ? (`cgInVoiceLoop ? "vs.v%^" fmt(ctx.serial[n]) : "p->v%^" fmt(ctx.serial[n]))
+	                           : "v%^" fmt(ctx.serial[n]));
 };
 
 fn _varDeclName(ctx Ctx, n NIdx) String = match (ctx.kind[n]) {
@@ -373,6 +389,7 @@ fn _rngStateRef(ctx Ctx, n NIdx, cel String) String {
 		let vi = `cgFlatChanShift == 0 ? cel : "%^ >> %^" fmt(cel, `cgFlatChanShift);
 		return "p->voice_rgen%^[%^]" fmt(g, vi);
 	}
+	if (`cgInVoiceLoop && ctx _isVoiceGraphDeep(g)) { return "vs.rgen%^" fmt(g); }
 	"p->rgen%^" fmt(g)
 }
 
@@ -399,9 +416,13 @@ fn _inlineExpr(ctx Ctx, n NIdx, cel String) String {
 			: "((%^*)p->controls[%^])[%^]" fmt(cppType(ctx.typ[n]), sn, cel);
 		-- NoteParam: gather the voice's parameter from the voicer_params matrix.
 		-- cel is the voice index in flat voice mode. SIMD gathers per lane (M5.3).
-		noteParamK(_, _, psn): (`cgSimdW > 0)
-			? _noteParamSimd(ctx.typ[n], ctx.chans[n], psn, cel)
-			: "p->voicer_params[%^][%^]" fmt(cel, psn);
+		-- In an AoS per-voice block the row pointer `vparams` is in scope
+		-- (mirrors the C++ NoteParam visitor's non-flat branch).
+		noteParamK(_, _, psn): `cgInVoiceLoop
+			? ((ctx.chans[n] == 1) ? "vparams[%^]" fmt(psn) : "vparams[%^ + (%^)]" fmt(psn, cel))
+			: ((`cgSimdW > 0)
+				? _noteParamSimd(ctx.typ[n], ctx.chans[n], psn, cel)
+				: "p->voicer_params[%^][%^]" fmt(cel, psn));
 		-- The packed FFT frame buffer the body reads/writes each sample.
 		spectralFrameK(_): "p->spec%^_frame[%^]" fmt(ctx _frameChainSerial(n), cel);
 		-- Inlet's own value: in SIMD this is the inlet VISITOR form (a bare-pointer
@@ -492,6 +513,16 @@ fn _genVec(ctx Ctx, n NIdx, vop VecOp, cel String) String {
 					_: {}
 				}
 			}
+			-- A voice-local materialized vector in flat voice mode is laid
+			-- out [voice * chans + chan]; the dynamic index only picks the
+			-- channel, so the voice base must be added -- without it every
+			-- voice reads voice 0's slots (e.g. a per-note seq table).
+			-- Mirrors the C++ VecAt visitor's flat-voice branch.
+			if (ctx _isVoiceLocalStorage(inp)) {
+				let voice = `cgFlatChanShift == 0 ? cel : "(%^ >> %^)" fmt(cel, `cgFlatChanShift);
+				return "%^[%^ * %^ + synthdef::mod(isize(%^), isize(%^))]"
+				fmt(_varName(ctx, inp), voice, inChans, genExpr(ctx, ctx.ins[n][1], cel), inChans);
+			}
 			return "%^[synthdef::mod(isize(%^), isize(%^))]"
 			fmt(_varName(ctx, inp), genExpr(ctx, ctx.ins[n][1], cel), inChans); }
 		_: {}
@@ -515,6 +546,22 @@ fn _genVec(ctx Ctx, n NIdx, vop VecOp, cel String) String {
 -- (mod-wrapped) index positions. A gets_own_loop block (mirror the C++ VecPut).
 -- The own-loop block forms end WITHOUT a trailing newline; genLoop's `$ "\n"`
 -- supplies it (matching the control-flow convention, so byte-output lines up).
+-- A put/join operand reference inside a flat-voice own-loop block (voice
+-- index `i` in scope): voice-local operands get an `i * chans` base; shared
+-- operands are referenced as usual. Mirrors the C++ voiceArr/voiceElem.
+fn _voiceArr(ctx Ctx, n NIdx) String =
+	ctx _isVoiceLocalStorage(n)
+		? "%^ + i * %^" fmt(_varName(ctx, n), ctx.chans[n])
+		: _varName(ctx, n);
+fn _voiceElem(ctx Ctx, n NIdx) String {
+	if (ctx.chans[n] == 1) {
+		return ctx _isVoiceLocalStorage(n) ? "%^[i]" fmt(_varName(ctx, n)) : _varName(ctx, n);
+	}
+	ctx _isVoiceLocalStorage(n)
+		? "%^[i * %^ + _j]" fmt(_varName(ctx, n), ctx.chans[n])
+		: _varName(ctx, n) $ "[_j]"
+}
+
 fn _genVecPut(ctx Ctx, root NIdx) String {
 	let ins = ctx.ins[root];
 	let ty = cppType(ctx.typ[root]);
@@ -523,6 +570,16 @@ fn _genVecPut(ctx Ctx, root NIdx) String {
 	let aChans = ctx.chans[a];
 	let putCount = min(ctx.chans[i], ctx.chans[v]);
 	let t = _tabs(`cgIndent); let t1 = _tabs(`cgIndent + 1);
+	if (`cgFlatOwnLoop) {
+		-- Per-voice block (voice index `i` in scope): the output row is
+		-- outv + i * chans; voice-local operands get their own voice base.
+		var parts [String] = [];
+		parts push!(t $ "memcpy(%^ + i * %^, %^, %^ * sizeof(%^));" fmt(outv, aChans, ctx _voiceArr(a), aChans, ty));
+		parts push!(t $ "for (usize _j = 0; _j < %^; ++_j) {" fmt(putCount));
+		parts push!(t1 $ "%^[i * %^ + synthdef::mod(isize(%^), isize(%^))] = %^;" fmt(outv, aChans, ctx _voiceElem(i), aChans, ctx _voiceElem(v)));
+		parts push!(t $ "}");
+		return parts join("\n");
+	}
 	-- Scalar index / value inputs (chans == 1) are declared as values, not
 	-- arrays, so they are referenced without the per-put subscript.
 	let iref = ctx.chans[i] == 1 ? _varName(ctx, i) : _varName(ctx, i) $ "[_j]";
@@ -545,6 +602,25 @@ fn _genVecJoin(ctx Ctx, root NIdx) String {
 	let t = _tabs(`cgIndent);
 	var parts [String] = [];
 	var offset = 0;
+	if (`cgFlatOwnLoop) {
+		-- Per-voice block (voice index `i` in scope): the output row is
+		-- outv + i * chans; voice-local inputs get their own voice base.
+		let outChans = ctx.chans[root];
+		for (x : ins) {
+			let xc = ctx.chans[x];
+			if (xc == 1) {
+				let ref = ctx _isVoiceLocalStorage(x) ? "%^[i]" fmt(_varName(ctx, x)) : _varName(ctx, x);
+				parts push!(t $ "%^[i * %^ + %^] = %^;" fmt(outv, outChans, offset, ref));
+			} else {
+				parts push!(t $ "memcpy(%^ + i * %^ + %^, %^, %^ * sizeof(%^));" fmt(outv, outChans, offset, ctx _voiceArr(x), xc, ty));
+			}
+			offset = offset + xc;
+		}
+		if (offset < outChans) {
+			parts push!(t $ "memset(%^ + i * %^ + %^, 0, %^ * sizeof(%^));" fmt(outv, outChans, offset, outChans - offset, ty));
+		}
+		return parts join("\n");
+	}
 	for (x : ins) {
 		let xc = ctx.chans[x];
 		if (xc == 1) {
@@ -587,11 +663,16 @@ fn _inlineSelect(ctx Ctx, n NIdx, cel String) String {
 fn _delayDIndex(ctx Ctx, d Int, n NIdx, cel String) String =
 	ctx.delays[d].chans > 1 ? _indexWrap(ctx.chans[n], `cgLoopChans, cel) : "";
 
+-- Delay state prefix: vs. inside an AoS per-voice block (the delay is a
+-- VoiceState member there), p-> otherwise. Mirrors the C++
+-- `dp = g.inVoiceLoop ? "vs." : "p->"` in the delay visitors.
+fn _dpre() String = `cgInVoiceLoop ? "vs." : "p->";
+
 -- Ring-buffer index mask. A compile-time-sized (fixed) delay uses the constant
 -- allocSize-1; a runtime-sized (maxDelay-bound) delay stores its mask in the
 -- p->d{serial}_mask field. Mirrors the C++ `allocSize > 1 ? allocSize-1 : mask`.
 fn _delayMask(info DelayInfo) String =
-	info.allocSize > 1 ? "%^" fmt(info.allocSize - 1) : "p->d%^_mask" fmt(info.serial);
+	info.allocSize > 1 ? "%^" fmt(info.allocSize - 1) : "%^d%^_mask" fmt(_dpre(), info.serial);
 
 -- The voice index expression for a per-voice ring head/mask subscript
 -- ((cel >> flatChanShift), parenthesized to match the C++); the buffer itself is
@@ -665,32 +746,33 @@ fn _delayFixReadExpr(ctx Ctx, n NIdx, d Int, k Int, cel String) String {
 		let ser = info.serial;
 		let dchans = info.chans;
 		let lc = `cgLoopChans;
+		let dp = _dpre();
 		if (info.allocSize == 1) {
-			if (dchans == 1) { return _simdSplat(t, w, "p->d%^" fmt(ser)); }
-			if (dchans >= w) { return _simdLoad(t, w, "&p->d%^[%^]" fmt(ser, cel)); }
+			if (dchans == 1) { return _simdSplat(t, w, "%^d%^" fmt(dp, ser)); }
+			if (dchans >= w) { return _simdLoad(t, w, "&%^d%^[%^]" fmt(dp, ser, cel)); }
 			var parts [String] = [];
 			var j = 0;
-			while (j < w) { parts push!("p->d%^[%^]" fmt(ser, _simdLaneChanIdx(cel, j, dchans, lc))); j = j + 1; }
+			while (j < w) { parts push!("%^d%^[%^]" fmt(dp, ser, _simdLaneChanIdx(cel, j, dchans, lc))); j = j + 1; }
 			return "%^{%^}" fmt(_simdType(t, w), parts join(", "));
 		}
 		let mask = _delayMask(info);
 		if (dchans == 1) {
-			return _simdSplat(t, w, "p->d%^[(p->d%^_wrpos - u64(%^)) & %^]" fmt(ser, ser, k, mask));
+			return _simdSplat(t, w, "%^d%^[(%^d%^_wrpos - u64(%^)) & %^]" fmt(dp, ser, dp, ser, k, mask));
 		}
 		var parts [String] = [];
 		var j = 0;
 		while (j < w) {
 			let ci = _simdLaneChanIdx(cel, j, dchans, lc);
-			parts push!("p->d%^[%^][(p->d%^_wrpos - u64(%^)) & %^]" fmt(ser, ci, ser, k, mask));
+			parts push!("%^d%^[%^][(%^d%^_wrpos - u64(%^)) & %^]" fmt(dp, ser, ci, dp, ser, k, mask));
 			j = j + 1;
 		}
 		return "%^{%^}" fmt(_simdType(t, w), parts join(", "));
 	}
 	let di = _delayDIndex(ctx, d, n, cel);
 	if (info.allocSize == 1) {
-		"p->d%^%^" fmt(info.serial, di)
+		"%^d%^%^" fmt(_dpre(), info.serial, di)
 	} else {
-		"p->d%^%^[(p->d%^_wrpos - u64(%^)) & %^]" fmt(info.serial, di, info.serial, k, _delayMask(info))
+		"%^d%^%^[(%^d%^_wrpos - u64(%^)) & %^]" fmt(_dpre(), info.serial, di, _dpre(), info.serial, k, _delayMask(info))
 	}
 }
 
@@ -823,11 +905,12 @@ fn _delayVarReadSimd(ctx Ctx, n NIdx, info DelayInfo, ip Interpolation, cel Stri
 	let offNode = ctx.ins[n][0];
 	let scalarOff = ctx.chans[offNode] == 1;
 	let offExpr = scalarOff ? _genDelayOffScalar(ctx, offNode) : genExpr(ctx, offNode, cel);
-	let wrpos = "p->d%^_wrpos" fmt(ser);
-	let mask = "p->d%^_mask" fmt(ser);
+	let dp = _dpre();
+	let wrpos = "%^d%^_wrpos" fmt(dp, ser);
+	let mask = "%^d%^_mask" fmt(dp, ser);
 	-- scalar offset + 1-chan delay: every lane reads the same value, splat it.
 	if (scalarOff && dchans == 1) {
-		return _simdSplat(t, w, _delayVarGenRead(ip, "p->d%^" fmt(ser), wrpos, mask, offExpr));
+		return _simdSplat(t, w, _delayVarGenRead(ip, "%^d%^" fmt(dp, ser), wrpos, mask, offExpr));
 	}
 	match (ip) {
 		none: {}
@@ -836,7 +919,7 @@ fn _delayVarReadSimd(ctx Ctx, n NIdx, info DelayInfo, ip Interpolation, cel Stri
 			var jj = 0;
 			while (jj < w) {
 				let ci = dchans == 1 ? "" : "[%^]" fmt(_simdLaneChanIdx(cel, jj, dchans, lc));
-				bufs push!("p->d%^%^" fmt(ser, ci));
+				bufs push!("%^d%^%^" fmt(dp, ser, ci));
 				wrposs push!(wrpos);
 				masks push!(mask);
 				jj = jj + 1;
@@ -850,7 +933,7 @@ fn _delayVarReadSimd(ctx Ctx, n NIdx, info DelayInfo, ip Interpolation, cel Stri
 	while (j < w) {
 		let ci = dchans == 1 ? "" : "[%^]" fmt(_simdLaneChanIdx(cel, j, dchans, lc));
 		let off = scalarOff ? offExpr : "(%^)[%^]" fmt(offExpr, j);
-		parts push!(_delayVarGenRead(Interpolation.none, "p->d%^%^" fmt(ser, ci), wrpos, mask, off));
+		parts push!(_delayVarGenRead(Interpolation.none, "%^d%^%^" fmt(dp, ser, ci), wrpos, mask, off));
 		j = j + 1;
 	}
 	"%^{%^}" fmt(_simdType(t, w), parts join(", "))
@@ -922,9 +1005,9 @@ fn _delayVarReadExpr(ctx Ctx, n NIdx, d Int, ip Interpolation, cel String) Strin
 	let di = _delayDIndex(ctx, d, n, cel);
 	let mask = _delayMask(info);
 	match (ip) {
-		none: "p->d%^%^[(p->d%^_wrpos - u64(%^)) & %^]" fmt(info.serial, di, info.serial, off, mask);
-		_:    "tzpl_delay_%^(p->d%^%^, p->d%^_wrpos, %^, %^)"
-			fmt(ip toLispString, info.serial, di, info.serial, mask, off);
+		none: "%^d%^%^[(%^d%^_wrpos - u64(%^)) & %^]" fmt(_dpre(), info.serial, di, _dpre(), info.serial, off, mask);
+		_:    "tzpl_delay_%^(%^d%^%^, %^d%^_wrpos, %^, %^)"
+			fmt(ip toLispString, _dpre(), info.serial, di, _dpre(), info.serial, mask, off);
 	}
 }
 
@@ -987,8 +1070,9 @@ fn _delayWriteStmt(ctx Ctx, n NIdx, d Int, cel String, treeSerial Int) String {
 		let ser = info.serial;
 		let dchans = info.chans;
 		let lc = `cgLoopChans;
+		let dp = _dpre();
 		if (info.allocSize == 1 && dchans >= w) {
-			return "*(%^*)(&p->d%^[%^]) = %^; // %^ DelayWrite\n" fmt(_simdType(info.typ, w), ser, cel, value, treeSerial);
+			return "*(%^*)(&%^d%^[%^]) = %^; // %^ DelayWrite\n" fmt(_simdType(info.typ, w), dp, ser, cel, value, treeSerial);
 		}
 		var s = "%^ _dw%^ = %^; // %^ DelayWrite\n" fmt(_simdType(info.typ, w), ser, value, treeSerial);
 		let mask = _delayMask(info);
@@ -996,9 +1080,9 @@ fn _delayWriteStmt(ctx Ctx, n NIdx, d Int, cel String, treeSerial Int) String {
 		while (j < w) {
 			let ci = _simdLaneChanIdx(cel, j, dchans, lc);
 			if (info.allocSize == 1) {
-				s = s $ _tabs(`cgIndent) $ "p->d%^[%^] = _dw%^[%^];\n" fmt(ser, ci, ser, j);
+				s = s $ _tabs(`cgIndent) $ "%^d%^[%^] = _dw%^[%^];\n" fmt(dp, ser, ci, ser, j);
 			} else {
-				s = s $ _tabs(`cgIndent) $ "p->d%^[%^][p->d%^_wrpos & %^] = _dw%^[%^];\n" fmt(ser, ci, ser, mask, ser, j);
+				s = s $ _tabs(`cgIndent) $ "%^d%^[%^][%^d%^_wrpos & %^] = _dw%^[%^];\n" fmt(dp, ser, ci, dp, ser, mask, ser, j);
 			}
 			j = j + 1;
 		}
@@ -1006,9 +1090,9 @@ fn _delayWriteStmt(ctx Ctx, n NIdx, d Int, cel String, treeSerial Int) String {
 	}
 	let di = info.chans > 1 ? "[%^]" fmt(cel) : "";
 	if (info.allocSize == 1) {
-		"p->d%^%^ = %^; // %^\n" fmt(info.serial, di, value, treeSerial)
+		"%^d%^%^ = %^; // %^\n" fmt(_dpre(), info.serial, di, value, treeSerial)
 	} else {
-		"p->d%^%^[p->d%^_wrpos & %^] = %^; // %^\n" fmt(info.serial, di, info.serial, _delayMask(info), value, treeSerial)
+		"%^d%^%^[%^d%^_wrpos & %^] = %^; // %^\n" fmt(_dpre(), info.serial, di, _dpre(), info.serial, _delayMask(info), value, treeSerial)
 	}
 }
 
@@ -1224,6 +1308,19 @@ fn _isVoiceGraph(ctx Ctx, g Int) Bool {
 	false
 }
 
+-- Transitive version: is g the voicer body OR nested inside it (e.g. a pause
+-- branch subgraph of the voice body)? Mirrors the C++ isVoicerSubgraph, which
+-- walks the parent chain. Flat bodies have no nesting (control flow is what
+-- forces AoS mode), so the flat paths keep using the direct check.
+fn _isVoiceGraphDeep(ctx Ctx, g Int) Bool {
+	var cur = g;
+	while (cur != NONE) {
+		if (ctx _isVoiceGraph(cur)) { return true; }
+		cur = ctx.graphs[cur].parent;
+	}
+	false
+}
+
 -- Is delay d a per-voice delay (lives in a voicer body) being emitted in flat
 -- voice mode? Its state is replicated per voice: voice_d<serial>[maxVoices].
 fn _isVoiceDelay(ctx Ctx, d Int) Bool =
@@ -1284,6 +1381,20 @@ fn _numUserParams(ctx Ctx, bg Int) Int {
 -- the first body LOOP's own leading newline then closes the blank line.
 fn _genVoicer(ctx Ctx, root NIdx, mv Int) String {
 	let bg = ctx _voicerBodyGraph(root);
+	if (!`cgFlatVoice) {
+		-- AoS (non-flat): a per-voice loop; the body loops emit plain scalar
+		-- code whose voice state resolves to vs. members. Mirrors the C++
+		-- VoicerExpr visitor's AoS branch.
+		var s = _tabs(`cgIndent) $ "for (int v = 0; v < %^; ++v) {\n" fmt(mv);
+		var `cgIndent Int = `cgIndent + 1;
+		s = s $ _tabs(`cgIndent) $ "f32* vparams = p->voicer.getRow(v);\n";
+		s = s $ _tabs(`cgIndent) $ "auto& vs = p->voice_state[v];\n";
+		var `cgInVoiceLoop Bool = true;
+		var `cgVoiceIdx String = "v";
+		s = s $ genLoops(ctx, ctx.graphs[bg].audioLoops) $ ctx genDelayAdvance(bg);
+		s = s $ _tabs(`cgIndent - 1) $ "}\n";
+		return s;
+	}
 	var `cgVoiceCount Int = mv;
 	var `cgVoiceGraph Int = bg;
 	var `cgVoiceChans Int = ctx.chans[ctx.ins[ctx.subs[root][0]][0]];
@@ -1453,7 +1564,20 @@ fn genTree(ctx Ctx, treeIdx Int, cel String) String {
 		switchK(nc):    { return ctx _genSwitch(root, nc); }
 		voicerK(mv):    { return ctx _genVoicer(root, mv); }
 		spectralChainK(fft, hop): { return ctx _genSpectral(root, fft, hop); }
-		phiK(target):   { return _tabs(`cgIndent) $ "%^ = %^;\n" fmt(_varRef(ctx, target, cel), genExpr(ctx, ctx.ins[root][0], cel)); }
+		phiK(target):   {
+			-- AoS per-voice loop: a phi writing the voicer's output indexes
+			-- it (v * voiceChans + cel) -- without the per-voice offset every
+			-- voice iteration would overwrite the same output slots. Mirrors
+			-- the C++ PhiNodeExpr visitor.
+			let isVoicerTarget = match (ctx.kind[target]) { voicerK(_): true; _: false; };
+			if (`cgInVoiceLoop && isVoicerTarget) {
+				let vChans = ctx.chans[ctx.ins[root][0]];
+				let voiceCel = vChans == 1 ? `cgVoiceIdx
+					: "(%^ * %^ + (%^))" fmt(`cgVoiceIdx, vChans, cel);
+				return _tabs(`cgIndent) $ "%^ = %^;\n" fmt(_varRef(ctx, target, voiceCel), genExpr(ctx, ctx.ins[root][0], cel));
+			}
+			return _tabs(`cgIndent) $ "%^ = %^;\n" fmt(_varRef(ctx, target, cel), genExpr(ctx, ctx.ins[root][0], cel));
+		}
 		-- put/join build their output array in a block (gets_own_loop); at is a
 		-- normal inline gather and falls through.
 		vecK(vop): { match (vop) {
@@ -1738,11 +1862,30 @@ fn genLoop(ctx Ctx, loopIdx Int) String {
 	-- Auto-enter flat voice mode for a voicer-body loop reached outside _genVoicer
 	-- (e.g. the body's init-rate loop emitted from genInitFun).
 	let rootGraph = ctx.graphOf[ctx.trees[loop.trees[0]].root];
-	if (`cgVoiceCount == 0 && ctx _isVoiceGraph(rootGraph)) {
+	if (`cgFlatVoice && `cgVoiceCount == 0 && ctx _isVoiceGraph(rootGraph)) {
 		var `cgVoiceCount Int = ctx _voicerMaxForGraph(rootGraph);
 		var `cgVoiceGraph Int = rootGraph;
 		var `cgVoiceChans Int = ctx _voicerChansForGraph(rootGraph);
 		return genLoop(ctx, loopIdx);
+	}
+	-- The AoS (non-flat) counterpart: wrap a voicer-body loop reached outside
+	-- the voicer in a per-voice block (e.g. an event-rate loop emitted from
+	-- genHandleEventsFun). Cross-loop event values are instance vars (vs.
+	-- members), so per-loop wrapping is safe here; init loops, whose
+	-- cross-loop temps are stack locals, are wrapped as a single block by
+	-- genInitFun instead. Mirrors the C++ AoS auto-enter.
+	if (!`cgFlatVoice && !`cgInVoiceLoop && ctx _voicerNodes length > 0
+			&& ctx _isVoiceGraphDeep(rootGraph)) {
+		let mv = ctx _voicerMaxVoices(ctx _voicerNodes[0]);
+		var s2 = _tabs(`cgIndent) $ "for (int v = 0; v < %^; ++v) {\n" fmt(mv);
+		var `cgIndent Int = `cgIndent + 1;
+		s2 = s2 $ _tabs(`cgIndent) $ "f32* vparams = p->voicer.getRow(v);\n";
+		s2 = s2 $ _tabs(`cgIndent) $ "auto& vs = p->voice_state[v];\n";
+		var `cgInVoiceLoop Bool = true;
+		var `cgVoiceIdx String = "v";
+		s2 = s2 $ genLoop(ctx, loopIdx);
+		s2 = s2 $ _tabs(`cgIndent - 1) $ "}\n";
+		return s2;
 	}
 	-- In flat voice mode every voicer-subgraph loop (including PhiNode output
 	-- loops) iterates voices x channels: loop.chans is the per-voice channel
@@ -1780,7 +1923,24 @@ fn genLoop(ctx Ctx, loopIdx Int) String {
 	}
 
 	var code = "";
-	if (flat) {
+	if (flat && loop.trees length == 1 && getsOwnLoop(ctx.kind[ctx.trees[loop.trees[0]].root])
+			&& ctx.graphOf[ctx.trees[loop.trees[0]].root] == `cgVoiceGraph) {
+		-- put/join with a per-voice output array: run the block once per voice
+		-- with `i` as the voice index (or the single voice `vi` in noteOn
+		-- reset loops); the emitters add `i * chans` bases to voice-local
+		-- operands. Mirrors the C++ flat own-loop wrapper.
+		if (`cgSingleVoice) {
+			code = code $ _tabs(`cgIndent) $ "{ int i = vi;\n";
+		} else {
+			code = code $ _tabs(`cgIndent) $ "for (int i = 0; i < %^; ++i) {\n" fmt(`cgVoiceCount);
+		}
+		var `cgIndent Int = `cgIndent + 1;
+		var `cgFlatOwnLoop Bool = true;
+		-- The own-loop block forms end without a trailing newline; supply it
+		-- before the closing brace (the C++ visitor lines each end in \n).
+		code = code $ genTree(ctx, loop.trees[0], "i") $ "\n";
+		code = code $ _tabs(`cgIndent - 1) $ "}\n";
+	} else if (flat) {
 		-- Flat voice mode: a per-voice (x channel) loop, body indexed by voice/chan.
 		-- The lane count is the flat trip (voices x chans); SIMD strides it (M5.3).
 		let simdW = ctx _flatLoopSimdWidth(loop, trip);
@@ -1874,7 +2034,7 @@ fn genDeclConstVars(ctx Ctx) String {
 fn genDelayDecls(ctx Ctx) String {
 	-- Root-graph delays only; voicer-body delays are per-voice (genVoicerDecls).
 	var root [DelayInfo] = [];
-	for (d : ctx.delays) { if (!(ctx _isVoiceGraph(ctx _delayGraph(d)))) { root push!(d); } }
+	for (d : ctx.delays) { if (!(ctx _isVoiceGraphDeep(ctx _delayGraph(d)))) { root push!(d); } }
 	if (root length == 0) { return ""; }
 	var s = "\t// delays\n";
 	for (d : root) {
@@ -1939,14 +2099,15 @@ fn genDeclInstVars(ctx Ctx) String {
 	-- RNG state (graph serial 0 in M2's single-graph synths), emitted first to
 	-- match the C++ genDeclInstVars ordering. Voicer-body RNG is per-voice and
 	-- emitted in the voicer block below, so skip it here.
-	for (g : ctx _rngGraphs) { if (!(ctx _isVoiceGraph(g))) { s = s $ "\tRandState1 rgen%^;\n" fmt(g); } }
+	for (g : ctx _rngGraphs) { if (!(ctx _isVoiceGraphDeep(g))) { s = s $ "\tRandState1 rgen%^;\n" fmt(g); } }
 	-- inst-var roots, in loop/tree order. Voicer-body inst vars are per-voice and
-	-- emitted in the voicer block below, so skip them here.
+	-- emitted in the voicer block below, so skip them here (deep: nested
+	-- control-flow subgraph state is per-voice too).
 	for (lp : ctx.loops) {
 		for (t : lp.trees) {
 			let root = ctx.trees[t].root;
 			let isInletOutlet = match (ctx.kind[root]) { inletK(_, _): true; outletK(_, _): true; _: false; };
-			let inVoice = ctx _isVoiceGraph(ctx.graphOf[root]);
+			let inVoice = ctx _isVoiceGraphDeep(ctx.graphOf[root]);
 			if (ctx _isInstVar(root) && !isInletOutlet && !inVoice) {
 				s = s $ "\t%^ %^%^;\n" fmt(cppType(ctx.typ[root]), _varDeclName(ctx, root), _shape(ctx.chans[root]));
 			}
@@ -1996,8 +2157,77 @@ fn genSpectralDecls(ctx Ctx) String {
 -- Per-voicer struct fields: the body's per-voice instance vars (in body
 -- loop/tree order), then the RowVoicer and its parameter matrix. Mirrors the
 -- voicer field emission in CppCodeGen::genClass.
+-- AoS voice delay member decls (inside struct VoiceState, indent "\t\t").
+-- Mirrors the C++ genDelayDecls(voiceDelays, "\t\t").
+fn _genVoiceDelayDeclsAoS(ctx Ctx) String {
+	var vd [DelayInfo] = [];
+	for (d : ctx.delays) { if (ctx _isVoiceGraphDeep(ctx _delayGraph(d))) { vd push!(d); } }
+	if (vd length == 0) { return ""; }
+	var s = "\t\t// delays\n";
+	for (d : vd) {
+		let base = "\t\t%^" fmt(cppType(d.typ));
+		if (d.allocSize == 1) {
+			s = s $ base $ " d%^%^;\n" fmt(d.serial, _shape(d.chans));
+		} else if (d.allocSize > 1) {
+			s = s $ base $ " d%^%^[%^];\n" fmt(d.serial, _shape(d.chans), d.allocSize);
+		} else {
+			s = s $ base $ " *d%^%^;\n" fmt(d.serial, _shape(d.chans));
+		}
+	}
+	s = s $ "\n";
+	for (d : vd) {
+		if (d.allocSize != 1) { s = s $ "\t\tu64 d%^_wrpos;\n" fmt(d.serial); }
+		if (d.hasMaxBound) { s = s $ "\t\tu64 d%^_mask;\n" fmt(d.serial); }
+	}
+	s
+}
+
 fn genVoicerDecls(ctx Ctx) String {
 	var s = "";
+	if (!`cgFlatVoice) {
+		-- AoS layout: a VoiceState struct with per-voice rgens, instance
+		-- vars, delays, and bank lookup slots as plain members. The deep
+		-- graph check includes nested control-flow subgraphs (their rgens
+		-- and state are per-voice too). Mirrors the C++ genDeclVoiceState
+		-- AoS branch.
+		for (v : ctx _voicerNodes) {
+			let mv = ctx _voicerMaxVoices(v);
+			s = s $ "\tstruct VoiceState {\n";
+			for (g : ctx _rngGraphs) {
+				if (ctx _isVoiceGraphDeep(g)) { s = s $ "\t\tRandState1 rgen%^;\n" fmt(g); }
+			}
+			for (lp : ctx.loops) {
+				for (t : lp.trees) {
+					let root = ctx.trees[t].root;
+					if (ctx _isVoiceGraphDeep(ctx.graphOf[root]) && ctx _isInstVar(root)) {
+						s = s $ "\t\t%^ v%^%^;\n" fmt(cppType(ctx.typ[root]), ctx.serial[root], _shape(ctx.chans[root]));
+					}
+				}
+			}
+			s = s $ ctx _genVoiceDelayDeclsAoS;
+			for (lu : ctx _bankLookupNodes) {
+				if (ctx _isVoiceGraphDeep(ctx.graphOf[lu])) {
+					let u = ctx.serial[lu];
+					s = s $ "\t\ti32 lu%^_p;\n" fmt(u);
+					s = s $ "\t\ti32 lu%^_v;\n" fmt(u);
+					s = s $ "\t\ttzpl_Buffer* lu%^_buf;\n" fmt(u);
+					s = s $ "\t\tf32 lu%^_rootKey;\n" fmt(u);
+					s = s $ "\t\tf64 lu%^_sr;\n" fmt(u);
+					s = s $ "\t\tf64 lu%^_len;\n" fmt(u);
+					s = s $ "\t\tf64 lu%^_loopStart;\n" fmt(u);
+					s = s $ "\t\tf64 lu%^_loopEnd;\n" fmt(u);
+					s = s $ "\t\ti32 lu%^_hasLoop;\n" fmt(u);
+				}
+			}
+			s = s $ "\t};\n\n";
+			s = s $ "\tVoiceState voice_state[%^];\n" fmt(mv);
+			let nUser = ctx _numUserParams(ctx _voicerBodyGraph(v));
+			s = s $ "\tRowVoicer<%^, %^> voicer;\n" fmt(mv, nUser);
+			s = s $ "\tf32 voicer_params[%^][%^];\n" fmt(mv, 1 + nUser);
+		}
+		if (s length > 0) { s = s $ "\n"; }
+		return s;
+	}
 	for (v : ctx _voicerNodes) {
 		let mv = ctx _voicerMaxVoices(v);
 		let bg = ctx _voicerBodyGraph(v);
@@ -2100,11 +2330,116 @@ fn genInitConstants(ctx Ctx) String {
 	s
 }
 
+-- The init value for one flat element `i` of a per-voice delay (i spans
+-- voices x chans, voice-major). Constants inline (scalar) or index their
+-- channel; shared values broadcast; voice-local materialized values index
+-- their aligned flat slot ([i], or [i / chans] for a per-voice scalar
+-- broadcast into a multichannel delay). Mirrors the C++
+-- genVoicerDelayInitValue; sets the flat-voice dynvars so _varName yields
+-- the voice_ forms.
+fn _genVoicerDelayInitValue(ctx Ctx, in0 NIdx, chans Int) String {
+	let isConst = match (ctx.kind[in0]) { constant(_, _): true; _: false; };
+	if (isConst) {
+		if (ctx.chans[in0] == 1) { return genExpr(ctx, in0, "0"); }
+		return "%^[i %% %^]" fmt(_varName(ctx, in0), chans);
+	}
+	let bg = ctx _voicerBodyGraph(ctx _voicerNodes[0]);
+	var `cgVoiceCount Int = ctx _voicerMaxForGraph(bg);
+	var `cgVoiceGraph Int = bg;
+	if (ctx.cut[in0] isInstVarCut || ctx.cut[in0] isTempVarCut) {
+		let name = _varName(ctx, in0);
+		if (ctx.graphOf[in0] != bg) {
+			if (ctx.chans[in0] == 1) { return name; }
+			return "%^[i %% %^]" fmt(name, chans);
+		}
+		if (ctx.chans[in0] == chans) { return "%^[i]" fmt(name); }
+		if (ctx.chans[in0] == 1 && chans == 1) { return "%^[i]" fmt(name); }
+		if (ctx.chans[in0] == 1) { return "%^[i / %^]" fmt(name, chans); }
+		panic("voicer delay init: unsupported init value shape");
+		return "";
+	}
+	-- Not materialized (the DelayInit is its only consumer): inline the
+	-- expression per element, like the non-voicer path's genExpr
+	-- re-inlining, under a flat-voice context so per-voice leaves (e.g. an
+	-- init-rate rand64 draw) decompose `i` into voice and channel.
+	var `cgFlatChanShift Int = chans > 1 ? _log2(chans) : 0;
+	var `cgFlatChanMask Int = chans > 1 ? chans - 1 : 0;
+	var `cgFlatTrip Int = `cgVoiceCount * chans;
+	genExpr(ctx, in0, "i")
+}
+
+-- AoS (non-flat) per-voice delay init writes. Emitted INSIDE genInitFun's
+-- per-voice init block (`vs` and the voicer init loops' temps in scope,
+-- cgInVoiceLoop set), so genExpr resolves per-voice values to their vs./local
+-- forms. Mirrors the C++ genVoicerDelayInitAoS.
+fn _genVoicerDelayInitAoS(ctx Ctx) String {
+	var s = "";
+	for (d : ctx.delays) {
+		if (!(ctx _isVoiceGraphDeep(ctx _delayGraph(d)))) { continue; }
+		for (n : d.initters) {
+			match (ctx.kind[n]) {
+				delayInitK(_, offset): {
+					let value = genExpr(ctx, ctx.ins[n][0], "0");
+					if (d.chans == 1) {
+						if (d.allocSize == 1) {
+							s = s $ "\t\tvs.d%^ = %^;\n" fmt(d.serial, value);
+						} else if (d.allocSize > 1) {
+							s = s $ "\t\tvs.d%^[(0ull - %^ull) & %^] = %^;\n" fmt(d.serial, offset, d.allocSize - 1, value);
+						} else {
+							s = s $ "\t\tvs.d%^[(0ull - %^ull) & vs.d%^_mask] = %^;\n" fmt(d.serial, offset, d.serial, value);
+						}
+					} else {
+						var j = 0;
+						while (j < d.chans) {
+							-- Re-generate per channel: a multichannel init
+							-- value must index its own channel, not channel 0.
+							let valueJ = genExpr(ctx, ctx.ins[n][0], "%^" fmt(j));
+							if (d.allocSize == 1) {
+								s = s $ "\t\tvs.d%^[%^] = %^;\n" fmt(d.serial, j, valueJ);
+							} else if (d.allocSize > 1) {
+								s = s $ "\t\tvs.d%^[%^][(0ull - %^ull) & %^] = %^;\n" fmt(d.serial, j, offset, d.allocSize - 1, valueJ);
+							} else {
+								s = s $ "\t\tvs.d%^[%^][(0ull - %^ull) & vs.d%^_mask] = %^;\n" fmt(d.serial, j, offset, d.serial, valueJ);
+							}
+							j = j + 1;
+						}
+					}
+				}
+				_: {}
+			}
+		}
+	}
+	s
+}
+
 fn genDelayInit(ctx Ctx) String {
 	var s = "";
 	for (d : ctx.delays) {
-		-- Per-voice delays are zeroed in noteOn, not initialized synth-wide.
-		if (ctx _isVoiceGraph(ctx _delayGraph(d))) { continue; }
+		-- Per-voice delay state: write every voice's initial value (the old
+		-- code skipped these entirely, so e.g. a seq index declared
+		-- init(1, -1) started at 0 in every voice). AoS mode emits these
+		-- inside genInitFun's per-voice block (_genVoicerDelayInitAoS).
+		if (!`cgFlatVoice && ctx _isVoiceGraphDeep(ctx _delayGraph(d))) { continue; }
+		if (ctx _isVoiceGraph(ctx _delayGraph(d))) {
+			if (d.initters length == 0) { continue; }
+			let total = ctx _voicerMaxForGraph(ctx _delayGraph(d)) * d.chans;
+			for (n : d.initters) {
+				match (ctx.kind[n]) {
+					delayInitK(_, offset): {
+						let value = ctx _genVoicerDelayInitValue(ctx.ins[n][0], d.chans);
+						if (d.allocSize == 1) {
+							s = s $ "\tfor (int i = 0; i < %^; ++i) p->voice_d%^[i] = %^;\n" fmt(total, d.serial, value);
+						} else if (d.allocSize > 1) {
+							s = s $ "\tfor (int i = 0; i < %^; ++i) p->voice_d%^[i][(0ull - %^ull) & %^] = %^;\n" fmt(total, d.serial, offset, d.allocSize - 1, value);
+						} else {
+							s = s $ "\tfor (int i = 0; i < %^; ++i) p->voice_d%^[i][(0ull - %^ull) & p->voice_d%^_mask[i / %^]] = %^;\n" fmt(total, d.serial, offset, d.serial, d.chans, value);
+						}
+					}
+					_: {}
+				}
+			}
+			continue;
+		}
 		for (n : d.initters) {
 			match (ctx.kind[n]) {
 				delayInitK(_, offset): {
@@ -2185,6 +2520,43 @@ fn genDelayAlloc(ctx Ctx) String {
 fn genVoiceDelayAlloc(ctx Ctx) String {
 	var s = "";
 	var `cgInInit Bool = true;
+	if (!`cgFlatVoice) {
+		-- AoS: one per-voice block sets up every voice ring's head/mask and
+		-- callocs runtime rings as vs. members. Mirrors the C++
+		-- genDelayAlloc AoS branch (single-slot delays need no setup).
+		var has = false;
+		for (d : ctx.delays) {
+			let g = ctx _delayGraph(d);
+			if (!(ctx _isVoiceGraphDeep(g)) || d.allocSize == 1) { continue; }
+			if (!has) {
+				has = true;
+				let mv = ctx _voicerMaxVoices(ctx _voicerNodes[0]);
+				s = s $ "\tfor (int v = 0; v < %^; ++v) {\n" fmt(mv);
+				s = s $ "\t\tauto& vs = p->voice_state[v];\n";
+			}
+			s = s $ "\t\tvs.d%^_wrpos = 0;\n" fmt(d.serial);
+			if (d.allocSize > 1) {
+				s = s $ "\t\tvs.d%^_mask = %^;\n" fmt(d.serial, d.allocSize - 1);
+			} else if (d.maxDelay != NONE) {
+				let headroom = max(4, d.maxOverread);
+				let maxExpr = genExpr(ctx, ctx.ins[d.maxDelay][0], "0");
+				let ty = cppType(d.typ);
+				s = s $ "\t\tu64 d%^_size = nextPowerOfTwo(%^+u64(ceil(%^)));\n" fmt(d.serial, headroom, maxExpr);
+				s = s $ "\t\tvs.d%^_mask = d%^_size - 1;\n" fmt(d.serial, d.serial);
+				if (d.chans == 1) {
+					s = s $ "\t\tvs.d%^ = (%^*)calloc(d%^_size, sizeof(%^));\n" fmt(d.serial, ty, d.serial, ty);
+				} else {
+					var j = 0;
+					while (j < d.chans) {
+						s = s $ "\t\tvs.d%^[%^] = (%^*)calloc(d%^_size, sizeof(%^));\n" fmt(d.serial, j, ty, d.serial, ty);
+						j = j + 1;
+					}
+				}
+			}
+		}
+		if (has) { s = s $ "\t}\n"; }
+		return s;
+	}
 	for (d : ctx.delays) {
 		let g = ctx _delayGraph(d);
 		if (!(ctx _isVoiceGraph(g)) || d.allocSize == 1) { continue; }
@@ -2218,32 +2590,123 @@ fn genVoiceDelayAlloc(ctx Ctx) String {
 fn genInitFun(ctx Ctx, name String) String {
 	var s = "tzpl_SErr %^_init(%^* p) {\n\tf64 fs = p->fs;\n\tp->sd = 1./fs;\n" fmt(name, name);
 	s = s $ genInitConstants(ctx);
-	-- Synth-wide RNG seeds up front; voicer-body RNG is seeded per voice below.
-	for (g : ctx _rngGraphs) { if (!(ctx _isVoiceGraph(g))) { s = s $ "\tarc4seedrand(p->rgen%^);\n" fmt(g); } }
+	-- Synth-wide RNG seeds up front; per-voice RNGs are seeded next, BEFORE
+	-- the init loops, so per-voice init-rate draws (e.g. a voicer pink's
+	-- dice) come from seeded, per-voice distinct streams instead of the
+	-- calloc'd zero state (which also ignored TZPL_RNG_SEED and gave every
+	-- voice identical draws). Mirrors the C++ genInitFun.
+	for (g : ctx _rngGraphs) { if (!(ctx _isVoiceGraphDeep(g))) { s = s $ "\tarc4seedrand(p->rgen%^);\n" fmt(g); } }
+	if (`cgFlatVoice) {
+		for (v : ctx _voicerNodes) {
+			let mv = ctx _voicerMaxVoices(v);
+			let bg = ctx _voicerBodyGraph(v);
+			for (g : ctx _rngGraphs) {
+				if (g == bg) {
+					s = s $ "\tfor (int v = 0; v < %^; ++v) {\n\t\tarc4seedrand(p->voice_rgen%^[v]);\n\t}\n" fmt(mv, g);
+				}
+			}
+		}
+	} else {
+		-- AoS: bind the voicer matrix, wipe all voice state, and seed the
+		-- per-voice RNGs before the init loops draw from them (the rgen
+		-- lives inside voice_state, so the wipe must come first).
+		for (v : ctx _voicerNodes) {
+			let mv = ctx _voicerMaxVoices(v);
+			s = s $ "\tp->voicer.setParams((f32*)p->voicer_params);\n";
+			s = s $ "\tmemset(p->voicer_params, 0, sizeof(p->voicer_params));\n";
+			s = s $ "\tmemset(p->voice_state, 0, sizeof(p->voice_state));\n";
+			for (g : ctx _rngGraphs) {
+				if (ctx _isVoiceGraphDeep(g)) {
+					s = s $ "\tfor (int v = 0; v < %^; ++v) {\n\t\tarc4seedrand(p->voice_state[v].rgen%^);\n\t}\n" fmt(mv, g);
+				}
+			}
+		}
+	}
 	-- inInitMode is only for genDelayAlloc (runtime delay sizing); init LOOPS
 	-- reference cross-tree roots as variables just like audio loops do.
+	if (!`cgFlatVoice && ctx _voicerNodes length > 0) {
+		-- AoS: shared init loops first, then ONE per-voice block running the
+		-- voicer-subgraph init loops and the per-voice delay init writes
+		-- (cross-loop init temps are per-voice locals, so the loops and the
+		-- writes that read them must share the voice iteration). Delay
+		-- allocation comes before the block so a runtime ring's calloc
+		-- precedes its init write. Mirrors the C++ genInitFun AoS path.
+		for (li : ctx.initLoops) {
+			if (!(ctx _isVoiceGraphDeep(_loopRootGraph(ctx, li)))) { s = s $ genLoop(ctx, li); }
+		}
+		s = s $ genDelayAlloc(ctx);
+		s = s $ genVoiceDelayAlloc(ctx);
+		s = s $ genSpectralAlloc(ctx);
+		var anyVoicerInit = false;
+		for (li : ctx.initLoops) {
+			if (ctx _isVoiceGraphDeep(_loopRootGraph(ctx, li))) { anyVoicerInit = true; }
+		}
+		for (d : ctx.delays) {
+			if (ctx _isVoiceGraphDeep(ctx _delayGraph(d)) && d.initters length > 0) { anyVoicerInit = true; }
+		}
+		if (anyVoicerInit) {
+			let mv = ctx _voicerMaxVoices(ctx _voicerNodes[0]);
+			s = s $ "\tfor (int v = 0; v < %^; ++v) {\n" fmt(mv);
+			var `cgIndent Int = `cgIndent + 1;
+			s = s $ _tabs(`cgIndent) $ "f32* vparams = p->voicer.getRow(v);\n";
+			s = s $ _tabs(`cgIndent) $ "auto& vs = p->voice_state[v];\n";
+			var `cgInVoiceLoop Bool = true;
+			var `cgVoiceIdx String = "v";
+			for (li : ctx.initLoops) {
+				if (ctx _isVoiceGraphDeep(_loopRootGraph(ctx, li))) { s = s $ genLoop(ctx, li); }
+			}
+			s = s $ ctx _genVoicerDelayInitAoS;
+			s = s $ _tabs(`cgIndent - 1) $ "}\n";
+		}
+		s = s $ genDelayInit(ctx);
+		-- Buffer pointers start null; the host swaps real buffers in at runtime.
+		for (ser : ctx.bufSerials) { s = s $ "\tp->buf%^ = nullptr;\n" fmt(ser); }
+		for (ser : ctx.bankSerials) { s = s $ "\tp->bank%^ = nullptr;\n" fmt(ser); }
+		-- Reset-rate loops: shared first, then voicer loops in one per-voice
+		-- block (mirrors the C++ AoS reset wrapper).
+		var `cgInResetMode Bool = true;
+		for (li : ctx.resetLoops) {
+			if (!(ctx _isVoiceGraphDeep(_loopRootGraph(ctx, li)))) { s = s $ genLoop(ctx, li); }
+		}
+		var anyVoicerReset = false;
+		for (li : ctx.resetLoops) {
+			if (ctx _isVoiceGraphDeep(_loopRootGraph(ctx, li))) { anyVoicerReset = true; }
+		}
+		if (anyVoicerReset) {
+			let mv = ctx _voicerMaxVoices(ctx _voicerNodes[0]);
+			s = s $ "\tfor (int v = 0; v < %^; ++v) {\n" fmt(mv);
+			var `cgIndent Int = `cgIndent + 1;
+			s = s $ _tabs(`cgIndent) $ "f32* vparams = p->voicer.getRow(v);\n";
+			s = s $ _tabs(`cgIndent) $ "auto& vs = p->voice_state[v];\n";
+			var `cgInVoiceLoop Bool = true;
+			var `cgVoiceIdx String = "v";
+			for (li : ctx.resetLoops) {
+				if (ctx _isVoiceGraphDeep(_loopRootGraph(ctx, li))) { s = s $ genLoop(ctx, li); }
+			}
+			s = s $ _tabs(`cgIndent - 1) $ "}\n";
+		}
+		s = s $ "\treturn tzpl_errNone;\n}\n\n";
+		return s;
+	}
 	s = s $ genLoops(ctx, ctx.initLoops);
+	-- Alloc order mirrors the C++ genDelayAlloc: shared delays, per-voice
+	-- delays, spectral chains -- then the delay init writes (which for a
+	-- runtime-sized per-voice ring must land AFTER its calloc).
 	s = s $ genDelayAlloc(ctx);
+	s = s $ genVoiceDelayAlloc(ctx);
 	s = s $ genSpectralAlloc(ctx);
 	s = s $ genDelayInit(ctx);
-	s = s $ genVoiceDelayAlloc(ctx);
 	-- Buffer pointers start null; the host swaps real buffers in at runtime.
 	-- (Before the voicer block, matching the C++ genInitFun ordering.)
 	for (ser : ctx.bufSerials) { s = s $ "\tp->buf%^ = nullptr;\n" fmt(ser); }
 	-- Sample bank pointers start null; lookup slots fill in the reset loops.
 	for (ser : ctx.bankSerials) { s = s $ "\tp->bank%^ = nullptr;\n" fmt(ser); }
-	-- Voicer: point the voicer at its parameter matrix, zero it, and seed each
-	-- voice's RNG.
+	-- Voicer: point the voicer at its parameter matrix and zero it (the
+	-- per-voice RNGs were seeded at the top of init, before the init loops
+	-- draw from them).
 	for (v : ctx _voicerNodes) {
 		s = s $ "\tp->voicer.setParams((f32*)p->voicer_params);\n";
 		s = s $ "\tmemset(p->voicer_params, 0, sizeof(p->voicer_params));\n";
-		let mv = ctx _voicerMaxVoices(v);
-		let bg = ctx _voicerBodyGraph(v);
-		for (g : ctx _rngGraphs) {
-			if (g == bg) {
-				s = s $ "\tfor (int v = 0; v < %^; ++v) {\n\t\tarc4seedrand(p->voice_rgen%^[v]);\n\t}\n" fmt(mv, g);
-			}
-		}
 	}
 	-- Reset-rate loops run once at init so every slot holds a defined value
 	-- before the first note-on. Non-voicer graphs latch here permanently
@@ -2291,6 +2754,98 @@ fn genVoicerNoteFuns(ctx Ctx, name String) String {
 		s = s $ "\t\tmemcpy(row + n + 1, defaults + n, (%^ - n) * sizeof(f32));\n" fmt(nUser);
 		s = s $ "\t}\n";
 	}
+	if (!`cgFlatVoice) {
+		-- AoS: per-field reset (p->voice_state[vi]. members), preserving
+		-- init-rate state. Mirrors the C++ genNoteFuns AoS branch.
+		for (lp : ctx.loops) {
+			for (t : lp.trees) {
+				let root = ctx.trees[t].root;
+				if (ctx _isVoiceGraphDeep(ctx.graphOf[root]) && ctx _isInstVar(root) && ctx.nrate[root] != Rate.init) {
+					if (ctx.chans[root] == 1) {
+						s = s $ "\tp->voice_state[vi].v%^ = 0;\n" fmt(ctx.serial[root]);
+					} else {
+						s = s $ "\tfor (int c = 0; c < %^; ++c) p->voice_state[vi].v%^[c] = 0;\n"
+							fmt(ctx.chans[root], ctx.serial[root]);
+					}
+				}
+			}
+		}
+		for (d : ctx.delays) {
+			if (ctx _isVoiceGraphDeep(ctx _delayGraph(d))) {
+				var hasNonConstInit = false;
+				var constInits [(Int, Int)] = [];   -- (in0, offset)
+				for (n : d.initters) {
+					match (ctx.kind[n]) {
+						delayInitK(_, offset): {
+							let in0 = ctx.ins[n][0];
+							match (ctx.kind[in0]) {
+								constant(_, _): { constInits push!((in0, offset)); }
+								_: { hasNonConstInit = true; }
+							}
+						}
+						_: {}
+					}
+				}
+				if (hasNonConstInit) { continue; }
+				if (d.allocSize != 1) {
+					s = s $ "\tp->voice_state[vi].d%^_wrpos = 0;\n" fmt(d.serial);
+				}
+				if (d.allocSize == 1 && constInits length > 0) {
+					for (ci : constInits) {
+						let in0 = ci.0;
+						if (d.chans == 1) {
+							s = s $ "\tp->voice_state[vi].d%^ = %^;\n" fmt(d.serial, genExpr(ctx, in0, "0"));
+						} else if (ctx.chans[in0] == 1) {
+							s = s $ "\tfor (int c = 0; c < %^; ++c) p->voice_state[vi].d%^[c] = %^;\n" fmt(d.chans, d.serial, genExpr(ctx, in0, "0"));
+						} else {
+							s = s $ "\tfor (int c = 0; c < %^; ++c) p->voice_state[vi].d%^[c] = %^[c];\n" fmt(d.chans, d.serial, _varName(ctx, in0));
+						}
+					}
+				} else if (d.allocSize == 1) {
+					if (d.chans == 1) {
+						s = s $ "\tp->voice_state[vi].d%^ = 0;\n" fmt(d.serial);
+					} else {
+						s = s $ "\tfor (int c = 0; c < %^; ++c) p->voice_state[vi].d%^[c] = 0;\n" fmt(d.chans, d.serial);
+					}
+				} else if (d.allocSize > 1) {
+					let ty = cppType(d.typ);
+					if (d.chans == 1) {
+						s = s $ "\tmemset(p->voice_state[vi].d%^, 0, %^ * sizeof(%^));\n" fmt(d.serial, d.allocSize, ty);
+					} else {
+						s = s $ "\tfor (int c = 0; c < %^; ++c) memset(p->voice_state[vi].d%^[c], 0, %^ * sizeof(%^));\n" fmt(d.chans, d.serial, d.allocSize, ty);
+					}
+					for (ci : constInits) {
+						let in0 = ci.0;
+						let slot = "(0ull - %^ull) & %^" fmt(ci.1, d.allocSize - 1);
+						if (d.chans == 1) {
+							s = s $ "\tp->voice_state[vi].d%^[%^] = %^;\n" fmt(d.serial, slot, genExpr(ctx, in0, "0"));
+						} else if (ctx.chans[in0] == 1) {
+							s = s $ "\tfor (int c = 0; c < %^; ++c) p->voice_state[vi].d%^[c][%^] = %^;\n" fmt(d.chans, d.serial, slot, genExpr(ctx, in0, "0"));
+						} else {
+							s = s $ "\tfor (int c = 0; c < %^; ++c) p->voice_state[vi].d%^[c][%^] = %^[c];\n" fmt(d.chans, d.serial, slot, _varName(ctx, in0));
+						}
+					}
+				} else {
+					-- dynamic delays: the ring keeps the reused voice's tail
+					-- (matching flat mode); restore constant init slots only.
+					for (ci : constInits) {
+						let in0 = ci.0;
+						let slot = "(0ull - %^ull) & p->voice_state[vi].d%^_mask" fmt(ci.1, d.serial);
+						if (d.chans == 1) {
+							s = s $ "\tp->voice_state[vi].d%^[%^] = %^;\n" fmt(d.serial, slot, genExpr(ctx, in0, "0"));
+						} else if (ctx.chans[in0] == 1) {
+							s = s $ "\tfor (int c = 0; c < %^; ++c) p->voice_state[vi].d%^[c][%^] = %^;\n" fmt(d.chans, d.serial, slot, genExpr(ctx, in0, "0"));
+						} else {
+							s = s $ "\tfor (int c = 0; c < %^; ++c) p->voice_state[vi].d%^[c][%^] = %^[c];\n" fmt(d.chans, d.serial, slot, _varName(ctx, in0));
+						}
+					}
+				}
+			}
+		}
+		for (g : ctx _rngGraphs) {
+			if (ctx _isVoiceGraphDeep(g)) { s = s $ "\tarc4seedrand(p->voice_state[vi].rgen%^);\n" fmt(g); }
+		}
+	} else {
 	-- zero per-voice audio-rate inst vars (in body loop/tree order); a
 	-- multichannel var (e.g. a ringing-filter bank's per-mode state) clears
 	-- all of its channels, or a reused voice starts with the previous
@@ -2308,25 +2863,82 @@ fn genVoicerNoteFuns(ctx Ctx, name String) String {
 			}
 		}
 	}
-	-- zero per-voice delay state: 1-sample delays clear their single slot; ring
-	-- buffers reset their write head, and a FIXED ring also clears its inline
-	-- buffer (a runtime ring's calloc'd buffer is already clear from init).
+	-- Reset per-voice delay state: 1-sample delays clear their single slot;
+	-- ring buffers reset their write head, and a FIXED ring also clears its
+	-- inline buffer (a runtime ring's calloc'd buffer is already clear from
+	-- init). A delay declared with init values is restored to them, not
+	-- zeroed: constant inits are re-emitted here (e.g. a seq index's
+	-- init(1, -1)); a delay with any NON-constant init (e.g. pink's
+	-- per-voice dice) keeps the reused voice's state. Mirrors the C++
+	-- genNoteFuns delay reset.
 	for (d : ctx.delays) {
 		if (ctx _delayGraph(d) == bg) {
-			if (d.allocSize == 1) {
+			var hasNonConstInit = false;
+			var constInits [(Int, Int)] = [];   -- (in0, offset)
+			for (n : d.initters) {
+				match (ctx.kind[n]) {
+					delayInitK(_, offset): {
+						let in0 = ctx.ins[n][0];
+						match (ctx.kind[in0]) {
+							constant(_, _): { constInits push!((in0, offset)); }
+							_: { hasNonConstInit = true; }
+						}
+					}
+					_: {}
+				}
+			}
+			if (hasNonConstInit) { continue; }
+			if (d.allocSize != 1) {
+				s = s $ "\tp->voice_d%^_wrpos[vi] = 0;\n" fmt(d.serial);
+			}
+			if (d.allocSize == 1 && constInits length > 0) {
+				for (ci : constInits) {
+					let in0 = ci.0;
+					if (d.chans == 1) {
+						s = s $ "\tp->voice_d%^[vi] = %^;\n" fmt(d.serial, genExpr(ctx, in0, "0"));
+					} else if (ctx.chans[in0] == 1) {
+						s = s $ "\tfor (int c = 0; c < %^; ++c) p->voice_d%^[vi * %^ + c] = %^;\n" fmt(d.chans, d.serial, d.chans, genExpr(ctx, in0, "0"));
+					} else {
+						s = s $ "\tfor (int c = 0; c < %^; ++c) p->voice_d%^[vi * %^ + c] = %^[c];\n" fmt(d.chans, d.serial, d.chans, _varName(ctx, in0));
+					}
+				}
+			} else if (d.allocSize == 1) {
 				if (d.chans > 1) {
 					s = s $ "\tfor (int c = 0; c < %^; ++c) p->voice_d%^[vi * %^ + c] = 0;\n" fmt(d.chans, d.serial, d.chans);
 				} else {
 					s = s $ "\tp->voice_d%^[vi] = 0;\n" fmt(d.serial);
 				}
-			} else {
-				s = s $ "\tp->voice_d%^_wrpos[vi] = 0;\n" fmt(d.serial);
-				if (d.allocSize > 1) {
-					let ty = cppType(d.typ);
-					if (d.chans > 1) {
-						s = s $ "\tfor (int c = 0; c < %^; ++c) memset(p->voice_d%^[vi * %^ + c], 0, %^ * sizeof(%^));\n" fmt(d.chans, d.serial, d.chans, d.allocSize, ty);
+			} else if (d.allocSize > 1) {
+				let ty = cppType(d.typ);
+				if (d.chans > 1) {
+					s = s $ "\tfor (int c = 0; c < %^; ++c) memset(p->voice_d%^[vi * %^ + c], 0, %^ * sizeof(%^));\n" fmt(d.chans, d.serial, d.chans, d.allocSize, ty);
+				} else {
+					s = s $ "\tmemset(p->voice_d%^[vi], 0, %^ * sizeof(%^));\n" fmt(d.serial, d.allocSize, ty);
+				}
+				for (ci : constInits) {
+					let in0 = ci.0;
+					let slot = "(0ull - %^ull) & %^" fmt(ci.1, d.allocSize - 1);
+					if (d.chans == 1) {
+						s = s $ "\tp->voice_d%^[vi][%^] = %^;\n" fmt(d.serial, slot, genExpr(ctx, in0, "0"));
+					} else if (ctx.chans[in0] == 1) {
+						s = s $ "\tfor (int c = 0; c < %^; ++c) p->voice_d%^[vi * %^ + c][%^] = %^;\n" fmt(d.chans, d.serial, d.chans, slot, genExpr(ctx, in0, "0"));
 					} else {
-						s = s $ "\tmemset(p->voice_d%^[vi], 0, %^ * sizeof(%^));\n" fmt(d.serial, d.allocSize, ty);
+						s = s $ "\tfor (int c = 0; c < %^; ++c) p->voice_d%^[vi * %^ + c][%^] = %^[c];\n" fmt(d.chans, d.serial, d.chans, slot, _varName(ctx, in0));
+					}
+				}
+			} else {
+				-- dynamic delays: already zeroed by calloc; restore constant
+				-- init slots (the ring itself keeps the reused voice's tail,
+				-- matching the pre-init-fix behavior).
+				for (ci : constInits) {
+					let in0 = ci.0;
+					let slot = "(0ull - %^ull) & p->voice_d%^_mask[vi]" fmt(ci.1, d.serial);
+					if (d.chans == 1) {
+						s = s $ "\tp->voice_d%^[vi][%^] = %^;\n" fmt(d.serial, slot, genExpr(ctx, in0, "0"));
+					} else if (ctx.chans[in0] == 1) {
+						s = s $ "\tfor (int c = 0; c < %^; ++c) p->voice_d%^[vi * %^ + c][%^] = %^;\n" fmt(d.chans, d.serial, d.chans, slot, genExpr(ctx, in0, "0"));
+					} else {
+						s = s $ "\tfor (int c = 0; c < %^; ++c) p->voice_d%^[vi * %^ + c][%^] = %^[c];\n" fmt(d.chans, d.serial, d.chans, slot, _varName(ctx, in0));
 					}
 				}
 			}
@@ -2336,14 +2948,26 @@ fn genVoicerNoteFuns(ctx Ctx, name String) String {
 	for (g : ctx _rngGraphs) {
 		if (g == bg) { s = s $ "\tarc4seedrand(p->voice_rgen%^[vi]);\n" fmt(g); }
 	}
+	}
 	-- Reset-rate loops: per-note setup for the newly allocated voice, run
 	-- after the zeroing above so reset-rate inst vars are recomputed for
 	-- this note (mirrors the C++ genNoteFuns emission).
 	var hasReset = false;
 	for (li : ctx.resetLoops) {
-		if (ctx _isVoiceGraph(_loopRootGraph(ctx, li))) { hasReset = true; }
+		if (ctx _isVoiceGraphDeep(_loopRootGraph(ctx, li))) { hasReset = true; }
 	}
-	if (hasReset) {
+	if (hasReset && !`cgFlatVoice) {
+		-- AoS: bind the new voice's row and state, then run the loops as
+		-- plain per-voice code (mirrors the C++ AoS reset-loop emission).
+		s = s $ "\tf32* vparams = p->voicer.getRow(vi);\n";
+		s = s $ "\tauto& vs = p->voice_state[vi];\n";
+		var `cgInResetMode Bool = true;
+		var `cgInVoiceLoop Bool = true;
+		var `cgVoiceIdx String = "vi";
+		for (li : ctx.resetLoops) {
+			if (ctx _isVoiceGraphDeep(_loopRootGraph(ctx, li))) { s = s $ genLoop(ctx, li); }
+		}
+	} else if (hasReset) {
 		var `cgInResetMode Bool = true;
 		var `cgSingleVoice Bool = true;
 		var `cgVoiceCount Int = ctx _voicerMaxVoices(v);
@@ -2364,9 +2988,22 @@ fn genVoicerNoteFuns(ctx Ctx, name String) String {
 	-- just cleared (mirrors the C++ genNoteFuns emission).
 	var hasEvent = false;
 	for (li : ctx.eventLoops) {
-		if (ctx _isVoiceGraph(_loopRootGraph(ctx, li))) { hasEvent = true; }
+		if (ctx _isVoiceGraphDeep(_loopRootGraph(ctx, li))) { hasEvent = true; }
 	}
-	if (hasEvent) {
+	if (hasEvent && !`cgFlatVoice) {
+		-- AoS: bind the row/state only if the reset section did not already
+		-- (mirrors the C++, which binds once).
+		if (!hasReset) {
+			s = s $ "\tf32* vparams = p->voicer.getRow(vi);\n";
+			s = s $ "\tauto& vs = p->voice_state[vi];\n";
+		}
+		var `cgInResetMode Bool = true;
+		var `cgInVoiceLoop Bool = true;
+		var `cgVoiceIdx String = "vi";
+		for (li : ctx.eventLoops) {
+			if (ctx _isVoiceGraphDeep(_loopRootGraph(ctx, li))) { s = s $ genLoop(ctx, li); }
+		}
+	} else if (hasEvent) {
 		var `cgInResetMode Bool = true;
 		var `cgSingleVoice Bool = true;
 		var `cgVoiceCount Int = ctx _voicerMaxVoices(v);
@@ -2442,6 +3079,8 @@ fn genUninitFun(ctx Ctx, name String) String {
 	s = s $ genSpectralFree(ctx);
 	for (d : ctx.delays) {
 		if (d.allocSize < 1 && d.hasMaxBound) {
+			-- AoS voice rings are freed in one per-voice block below.
+			if (!`cgFlatVoice && ctx _isVoiceGraphDeep(ctx _delayGraph(d))) { continue; }
 			if (ctx _isVoiceGraph(ctx _delayGraph(d))) {
 				-- per-voice runtime ring buffers: free each voice's (chan's) buffer
 				let mv = ctx _voicerMaxForGraph(ctx _delayGraph(d));
@@ -2461,16 +3100,45 @@ fn genUninitFun(ctx Ctx, name String) String {
 			}
 		}
 	}
+	if (!`cgFlatVoice) {
+		-- AoS: free every voice's runtime rings as vs. members in one
+		-- per-voice block. Mirrors the C++ genDelayDealloc AoS branch.
+		var has = false;
+		for (d : ctx.delays) {
+			if (!(d.allocSize < 1 && d.hasMaxBound)) { continue; }
+			if (!(ctx _isVoiceGraphDeep(ctx _delayGraph(d)))) { continue; }
+			if (!has) {
+				has = true;
+				let mv = ctx _voicerMaxVoices(ctx _voicerNodes[0]);
+				s = s $ "\tfor (int v = 0; v < %^; ++v) {\n" fmt(mv);
+				s = s $ "\t\tauto& vs = p->voice_state[v];\n";
+			}
+			if (d.chans == 1) {
+				s = s $ "\t\tfree(vs.d%^); vs.d%^ = nullptr;\n" fmt(d.serial, d.serial);
+			} else {
+				var j = 0;
+				while (j < d.chans) { s = s $ "\t\tfree(vs.d%^[%^]); vs.d%^[%^] = nullptr;\n" fmt(d.serial, j, d.serial, j); j = j + 1; }
+			}
+		}
+		if (has) { s = s $ "\t}\n"; }
+	}
 	s = s $ "\treturn tzpl_errNone;\n}\n\n";
 	s
 }
 
 fn genResetFun(ctx Ctx, name String) String {
-	-- Rate.reset is per-note: reset loops are emitted into _noteOn (for the
-	-- scheduled voice) and _init (initial values), never here. This whole-
-	-- synth entry point is unused by the engine and left empty. (The FIXME
-	-- comment matches the C++ generator verbatim.)
-	var s = "tzpl_SErr %^_reset(%^* p) {\n\t// FIXME genResetFun\n" fmt(name, name);
+	-- Whole-synth reset: the engine calls this when audio stops so delay
+	-- lines, filter memories, and voice state don't replay their tail on the
+	-- next start. Tear down and re-init, preserving the engine-installed
+	-- buffer and sample-bank pointers (init nulls them; the engine only
+	-- installs them once via swapBuffer/swapSampleBank).
+	var s = "tzpl_SErr %^_reset(%^* p) {\n" fmt(name, name);
+	for (ser : ctx.bufSerials) { s = s $ "\ttzpl_Buffer* save_buf%^ = p->buf%^;\n" fmt(ser, ser); }
+	for (ser : ctx.bankSerials) { s = s $ "\ttzpl_SampleBank* save_bank%^ = p->bank%^;\n" fmt(ser, ser); }
+	s = s $ "\t%^_uninit(p);\n" fmt(name);
+	s = s $ "\t%^_init(p);\n" fmt(name);
+	for (ser : ctx.bufSerials) { s = s $ "\tp->buf%^ = save_buf%^;\n" fmt(ser, ser); }
+	for (ser : ctx.bankSerials) { s = s $ "\tp->bank%^ = save_bank%^;\n" fmt(ser, ser); }
 	s = s $ "\treturn tzpl_errNone;\n}\n\n";
 	s
 }
@@ -2576,10 +3244,12 @@ fn genDelayAdvance(ctx Ctx, graph Int) String {
 		if (d.allocSize != 1 && ctx _delayGraph(d) == graph) {
 			let evtRate = d.writer != NONE && ctx.nrate[d.writer] == Rate.event;
 			if (!evtRate) {
-				if (voiceG) {
+				if (voiceG && `cgFlatVoice) {
 					s = s $ _tabs(`cgIndent) $ "for (int v = 0; v < %^; ++v) ++p->voice_d%^_wrpos[v];\n" fmt(mv, d.serial);
 				} else {
-					s = s $ _tabs(`cgIndent) $ "++p->d%^_wrpos;\n" fmt(d.serial);
+					-- AoS voice delays advance inside the per-voice loop as
+					-- vs. members (mirrors the C++ inVoiceLoop dp switch).
+					s = s $ _tabs(`cgIndent) $ "++%^d%^_wrpos;\n" fmt(_dpre(), d.serial);
 				}
 			}
 		}
@@ -2897,6 +3567,22 @@ fn genCpp(ctx Ctx, name String, simdWidth Int = 0) String {
 	-- cgSingleVoice makes flat loops run for just the voice `vi` in scope.
 	var `cgInResetMode Bool = false;
 	var `cgSingleVoice Bool = false;
+	-- True while emitting a gets_own_loop block (put/join) inside the
+	-- per-voice wrapper genLoop adds in flat voice mode; the emitters then
+	-- add `i * chans` bases to voice-local operands.
+	var `cgFlatOwnLoop Bool = false;
+	-- Voice layout mode (mirrors the C++ flatVoiceMode): flat SoA when the
+	-- voice body has no control flow; AoS (VoiceState struct, per-voice
+	-- loops, vs. refs) when it branches. cgInVoiceLoop is true inside an
+	-- AoS per-voice block; cgVoiceIdx names its index ("v", or "vi" in the
+	-- noteOn per-note recompute).
+	var flatV = true;
+	for (n : ctx.sorted) {
+		if (isControlFlowKind(ctx.kind[n]) && ctx _isVoiceGraphDeep(ctx.graphOf[n])) { flatV = false; }
+	}
+	var `cgFlatVoice Bool = flatV;
+	var `cgInVoiceLoop Bool = false;
+	var `cgVoiceIdx String = "v";
 
 	var s = "\n";
 	s = s $ "#include \"tzpl_plugin_abi.h\"\n";

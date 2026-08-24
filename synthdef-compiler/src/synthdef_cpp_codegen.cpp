@@ -407,6 +407,18 @@ struct CppCodeGen {
     // which run per-note for the newly allocated voice only. Scalar only.
     bool singleVoiceMode = false;
 
+    // True while emitting a gets_own_loop block (VecPut/VecJoin) inside the
+    // per-voice wrapper genLoop adds in flat voice mode. The voice index `i`
+    // is in scope; the emitters add `i * chans` bases to voice-local operands.
+    bool flatVoiceOwnLoop = false;
+
+    // A voice-local materialized value in flat voice mode: stored as a SoA
+    // array [maxVoices * chans], so accesses need a voice base.
+    bool isVoiceLocalStorage(S x) {
+        return inFlatVoiceMode && isVoicerSubgraph(x->graph)
+            && (is_inst_var(x->cut) || is_temp_var(x->cut));
+    }
+
     // True while emitting reset-rate loops (in _noteOn and _init). NoteParam
     // and Control roots then emit their live source reads (voicer_params /
     // p->controls) instead of their per-sample materialized copies, which
@@ -498,6 +510,8 @@ struct CppCodeGen {
 //    string genLoopInner(GenLoop const& loop);
     string genTree(ExprTree const& tree, VarIndex cel);
     string genExpr(S expr, VarIndex cel);
+    string genVoicerDelayInitValue(S in0, usize chans);
+    string genVoicerDelayInitAoS();
     string genVarRef(S expr, VarIndex cel);
     string genVarDeclName(S u);
     string genVarName(S u);
@@ -1088,8 +1102,21 @@ struct ExprCodegenVisitor : ExprVisitor {
             return;
         }
         string idx = g.genExpr(p->in1(), cel);
+        // A voice-local materialized vector in flat voice mode is laid out
+        // [voice * chans + chan]; the dynamic index only picks the channel,
+        // so the voice base must be added -- without it every voice reads
+        // voice 0's slots (e.g. a per-note seq table).
+        S a = p->in0();
+        if (g.inFlatVoiceMode && g.isVoicerSubgraph(a->graph)
+            && (is_inst_var(a->cut) || is_temp_var(a->cut))) {
+            string voice = g.flatChanShift == 0 ? vxstr(cel)
+                : FMT("({} >> {})", vxstr(cel), g.flatChanShift);
+            s += FMT("{}[{} * {} + synthdef::mod(isize({}), isize({}))]",
+                g.genVarName(a), voice, a->chans, idx, a->chans);
+            return;
+        }
         s += FMT("{}[synthdef::mod(isize({}), isize({}))]",
-            g.genVarName(p->in0()), idx, p->in0()->chans);
+            g.genVarName(a), idx, a->chans);
     }
     void visit(VecPutExpr* p) override { fixme(p); } // handled in GenLoopExprVisitor
     void visit(VecJoinExpr* p) override { fixme(p); } // handled in GenLoopExprVisitor
@@ -1247,7 +1274,7 @@ struct ExprCodegenVisitor : ExprVisitor {
                 }
             }
         } else if (g.inSimdMode) {
-            string dp = "p->";
+            string dp = g.inVoiceLoop ? "vs." : "p->";
             int ser = p->delayBuf->serial;
             int dchans = p->delayBuf->chans;
             int width = g.currentSimdWidth;
@@ -1481,7 +1508,7 @@ struct ExprCodegenVisitor : ExprVisitor {
                 s += genRead(buf, wrpos, mask, off);
             }
         } else if (g.inSimdMode) {
-            string dp = "p->";
+            string dp = g.inVoiceLoop ? "vs." : "p->";
             int ser = p->delayBuf->serial;
             int dchans = p->delayBuf->chans;
             int width = g.currentSimdWidth;
@@ -2173,7 +2200,7 @@ struct Rank1GenTreeExprVisitor : GenTreeExprVisitor {
                 }
             }
         } else if (g.inSimdMode) {
-            string dp = "p->";
+            string dp = g.inVoiceLoop ? "vs." : "p->";
             int ser = p->delayBuf->serial;
             int dchans = p->delayBuf->chans;
             int width = g.currentSimdWidth;
@@ -2371,17 +2398,49 @@ struct GenLoopExprVisitor : ExprVisitor {
     void visit(VecRotateExpr* p) override {}
     void visit(VecAtExpr* p) override {}
 
+    // A put/join operand reference inside a flat-voice own-loop block (voice
+    // index `i` in scope): voice-local operands get an `i * chans` base;
+    // shared operands are referenced as usual.
+    string voiceArr(S x) {
+        string name = g.genVarName(x);
+        if (g.isVoiceLocalStorage(x)) return FMT("{} + i * {}", name, x->chans);
+        return name;
+    }
+    string voiceElem(S x) {
+        string name = g.genVarName(x);
+        if (x->chans == 1) {
+            if (g.isVoiceLocalStorage(x)) return FMT("{}[i]", name);
+            return name;
+        }
+        if (g.isVoiceLocalStorage(x)) return FMT("{}[i * {} + _j]", name, x->chans);
+        return name + "[_j]";
+    }
+
     void visit(VecPutExpr* p) override {
         handled = true;
         // Copy input array, then overwrite at index positions. Scalar index
         // and value inputs (chans == 1) are declared as values, not arrays,
         // so they are referenced without the per-put subscript.
+        usize putCount = std::min(p->in1()->chans, p->in2()->chans);
+        if (g.flatVoiceOwnLoop) {
+            usize aChans = p->in0()->chans;
+            tabIndent(s, g.indent);
+            s += FMT("memcpy({0} + i * {1}, {2}, {1} * sizeof({3}));\n",
+                g.genVarName(p), aChans, voiceArr(p->in0()), p->type.str());
+            tabIndent(s, g.indent);
+            s += FMT("for (usize _j = 0; _j < {}; ++_j) {{\n", putCount);
+            tabIndent(s, g.indent + 1);
+            s += FMT("{0}[i * {1} + synthdef::mod(isize({2}), isize({1}))] = {3};\n",
+                g.genVarName(p), aChans, voiceElem(p->in1()), voiceElem(p->in2()));
+            tabIndent(s, g.indent);
+            s += "}\n";
+            return;
+        }
         tabIndent(s, g.indent);
         s += FMT("memcpy({0}, {1}, {2} * sizeof({3}));\n",
             g.genVarName(p), g.genVarName(p->in0()),
             p->in0()->chans, p->type.str());
         tabIndent(s, g.indent);
-        usize putCount = std::min(p->in1()->chans, p->in2()->chans);
         string idx = p->in1()->chans == 1
             ? g.genVarName(p->in1()) : g.genVarName(p->in1()) + "[_j]";
         string val = p->in2()->chans == 1
@@ -2399,6 +2458,33 @@ struct GenLoopExprVisitor : ExprVisitor {
         // Concatenate all inputs into the output array. Scalar inputs
         // (chans == 1) are emitted as plain assignments since they are
         // declared as values, not arrays; multi-channel inputs use memcpy.
+        if (g.flatVoiceOwnLoop) {
+            // Per-voice block (voice index `i` in scope): the output row is
+            // {out} + i * chans; voice-local inputs get their own voice base.
+            usize outChans = p->chans;
+            usize offset = 0;
+            for (S in : p->inputs) {
+                tabIndent(s, g.indent);
+                if (in->chans == 1) {
+                    string ref = g.isVoiceLocalStorage(in)
+                        ? FMT("{}[i]", g.genVarName(in)) : g.genVarName(in);
+                    s += FMT("{0}[i * {1} + {2}] = {3};\n",
+                        g.genVarName(p), outChans, offset, ref);
+                } else {
+                    s += FMT("memcpy({0} + i * {1} + {2}, {3}, {4} * sizeof({5}));\n",
+                        g.genVarName(p), outChans, offset, voiceArr(in),
+                        in->chans, p->type.str());
+                }
+                offset += in->chans;
+            }
+            if (offset < p->chans) {
+                tabIndent(s, g.indent);
+                s += FMT("memset({0} + i * {1} + {2}, 0, {3} * sizeof({4}));\n",
+                    g.genVarName(p), outChans, offset, p->chans - offset,
+                    p->type.str());
+            }
+            return;
+        }
         usize offset = 0;
         for (S in : p->inputs) {
             tabIndent(s, g.indent);
@@ -2487,6 +2573,32 @@ string CppCodeGen::genLoop(GenLoop const& loop) {
         return out;
     }
 
+    // The AoS (non-flat) counterpart: wrap a voicer-body loop reached
+    // outside the voicer in a per-voice block (e.g. an event-rate loop
+    // emitted from genHandleEventsFun). Cross-loop event values are
+    // instance vars (vs. members), so per-loop wrapping is safe here;
+    // init loops, whose cross-loop temps are stack locals, are wrapped
+    // as a single block by genInitFun instead.
+    if (!flatVoiceMode && !inVoiceLoop && voicerExpr && !loop.trees.empty()
+        && isVoicerSubgraph(loop.trees[0]->root->graph)) {
+        string out;
+        tabIndent(out, indent);
+        out += FMT("for (int v = 0; v < {}; ++v) {{\n", voicerExpr->maxVoices);
+        ++indent;
+        tabIndent(out, indent);
+        out += "f32* vparams = p->voicer.getRow(v);\n";
+        tabIndent(out, indent);
+        out += "auto& vs = p->voice_state[v];\n";
+        inVoiceLoop = true;
+        voiceLoopIndexName = "v";
+        out += genLoop(loop);
+        inVoiceLoop = false;
+        --indent;
+        tabIndent(out, indent);
+        out += "}\n";
+        return out;
+    }
+
     {
         // DEBUG {
             // loop_antecedents is an unordered_set; sort serials so the comment
@@ -2534,9 +2646,35 @@ string CppCodeGen::genLoop(GenLoop const& loop) {
 
         string code;
         if (loop.trees.size() == 1 && loop.trees[0]->root->gets_own_loop()) {
-            GenLoopExprVisitor v(this, loop, s);
-            loop.trees[0]->root->accept(v);
-            if (v.handled) return s;
+            S root = loop.trees[0]->root;
+            if (inFlatVoiceMode && isVoicerSubgraph(root->graph)) {
+                // Per-voice output array: run the block once per voice with
+                // `i` as the voice index (or the single voice `vi` in noteOn
+                // reset loops); the put/join emitters add `i * chans` bases
+                // to voice-local operands.
+                tabIndent(s, indent);
+                if (singleVoiceMode) {
+                    s += "{ int i = vi;\n";
+                } else {
+                    s += FMT("for (int i = 0; i < {}; ++i) {{\n", flatVoiceCount);
+                }
+                ++indent;
+                flatVoiceOwnLoop = true;
+                GenLoopExprVisitor v(this, loop, s);
+                root->accept(v);
+                flatVoiceOwnLoop = false;
+                --indent;
+                tabIndent(s, indent);
+                s += "}\n";
+                // Match the non-early-return loops' trailing blank line (the
+                // Tzopilotl-hosted compiler appends it via its genLoop tail).
+                s += "\n";
+                if (v.handled) return s;
+            } else {
+                GenLoopExprVisitor v(this, loop, s);
+                root->accept(v);
+                if (v.handled) return s;
+            }
         }
         if (inFlatVoiceMode) {
             // All voicer-subgraph loops (including PhiNode output loops)
@@ -2750,6 +2888,7 @@ string CppCodeGen::genDelayAlloc() {
         bool hasVoiceDelays = false;
         for (auto delay : sortedDelays(synth->delayBufs)) {
             if (!isVoicerSubgraph(delay->graph)) continue;
+            if (delay->allocSize == 1) continue; // single slot: nothing to set up
             if (!hasVoiceDelays) {
                 hasVoiceDelays = true;
                 s += FMT("\tfor (int v = 0; v < {}; ++v) {{\n", voicerExpr->maxVoices);
@@ -2807,6 +2946,100 @@ string CppCodeGen::genDelayAlloc() {
     return s;
 }
 
+// The init value for one flat element `i` of a per-voice delay (i spans
+// voices x chans, voice-major). Constants inline (scalar) or index their
+// channel; shared values broadcast; voice-local materialized values index
+// their aligned flat slot ([i], or [i / chans] for a per-voice scalar
+// broadcast into a multichannel delay).
+string CppCodeGen::genVoicerDelayInitValue(S in0, usize chans) {
+    if (in0->is_constant()) {
+        if (in0->is_scalar()) return genExpr(in0, vx(0));
+        return FMT("{}[i % {}]", genVarName(in0), chans);
+    }
+    if (is_inst_var(in0->cut) || is_temp_var(in0->cut)) {
+        bool prevFlat = inFlatVoiceMode;
+        inFlatVoiceMode = true;
+        string name = genVarName(in0);
+        inFlatVoiceMode = prevFlat;
+        if (!isVoicerSubgraph(in0->graph)) {
+            if (in0->chans == 1) return name;
+            return FMT("{}[i % {}]", name, chans);
+        }
+        if (in0->chans == chans) return FMT("{}[i]", name);
+        if (in0->chans == 1 && chans == 1) return FMT("{}[i]", name);
+        if (in0->chans == 1) return FMT("{}[i / {}]", name, chans);
+        throw std::runtime_error("voicer delay init: unsupported init value shape");
+    }
+    // Not materialized (the DelayInit is its only consumer): inline the
+    // expression per element, like the non-voicer path's genExpr
+    // re-inlining, under a flat-voice context so per-voice leaves (e.g. an
+    // init-rate rand64 draw) decompose `i` into voice and channel.
+    bool prevFlat = inFlatVoiceMode;
+    int prevCount = flatVoiceCount;
+    int prevShift = flatChanShift;
+    int prevMask = flatChanMask;
+    usize prevTotal = flatLoopTotal;
+    inFlatVoiceMode = true;
+    flatVoiceCount = voicerExpr->maxVoices;
+    int shift = 0;
+    { usize c = chans; while (c > 1) { c >>= 1; ++shift; } }
+    flatChanShift = (int)chans > 1 ? shift : 0;
+    flatChanMask = (int)chans > 1 ? (int)chans - 1 : 0;
+    flatLoopTotal = (usize)voicerExpr->maxVoices * chans;
+    string value = genExpr(in0, vx(string("i")));
+    inFlatVoiceMode = prevFlat;
+    flatVoiceCount = prevCount;
+    flatChanShift = prevShift;
+    flatChanMask = prevMask;
+    flatLoopTotal = prevTotal;
+    return value;
+}
+
+// AoS (non-flat) per-voice delay init writes. Emitted INSIDE genInitFun's
+// per-voice init block (`vs` and the voicer init loops' temps in scope,
+// inVoiceLoop set), so genExpr resolves per-voice values to their vs./local
+// forms. Mirrors the shapes of the non-voicer genDelayInit emission.
+string CppCodeGen::genVoicerDelayInitAoS() {
+    string s;
+    current_root = nullptr;
+    for (auto delay : sortedDelays(synth->delayBufs)) {
+        if (!isVoicerSubgraph(delay->graph)) continue;
+        for (S expr : delay->initters) {
+            auto* init = expr.as<DelayInit>();
+            string value = genExpr(init->in0(), vx(0));
+            usize offset = init->offset;
+            int ser = delay->serial;
+            if (delay->chans == 1) {
+                if (delay->allocSize == 1) {
+                    s += FMT("\t\tvs.d{} = {};\n", ser, value);
+                } else if (delay->allocSize > 1) {
+                    s += FMT("\t\tvs.d{}[(0ull - {}ull) & {}] = {};\n",
+                        ser, offset, delay->allocSize - 1, value);
+                } else {
+                    s += FMT("\t\tvs.d{}[(0ull - {}ull) & vs.d{}_mask] = {};\n",
+                        ser, offset, ser, value);
+                }
+            } else {
+                for (int j = 0; j < delay->chans; ++j) {
+                    // Re-generate per channel: a multichannel init value
+                    // must index its own channel, not channel 0.
+                    string valueJ = genExpr(init->in0(), vx(j));
+                    if (delay->allocSize == 1) {
+                        s += FMT("\t\tvs.d{}[{}] = {};\n", ser, j, valueJ);
+                    } else if (delay->allocSize > 1) {
+                        s += FMT("\t\tvs.d{}[{}][(0ull - {}ull) & {}] = {};\n",
+                            ser, j, offset, delay->allocSize - 1, valueJ);
+                    } else {
+                        s += FMT("\t\tvs.d{}[{}][(0ull - {}ull) & vs.d{}_mask] = {};\n",
+                            ser, j, offset, ser, valueJ);
+                    }
+                }
+            }
+        }
+    }
+    return s;
+}
+
 string CppCodeGen::genDelayInit() {
     string s;
     // Init values reference the temps materialized by the init loops; a
@@ -2814,7 +3047,33 @@ string CppCodeGen::genDelayInit() {
     // root reference and re-inline that expression instead.
     current_root = nullptr;
     for (auto delay : sortedDelays(synth->delayBufs)) {
-        if (isVoicerSubgraph(delay->graph)) continue;
+        if (isVoicerSubgraph(delay->graph)) {
+            // Per-voice delay state: write every voice's initial value (the
+            // old code skipped these entirely, so e.g. a seq index declared
+            // init(1, -1) started at 0 in every voice). AoS (non-flat) mode
+            // emits these inside genInitFun's per-voice init block instead
+            // (genVoicerDelayInitAoS) -- the init temps are voice locals.
+            if (delay->initters.empty()) continue;
+            if (!flatVoiceMode) continue;
+            usize total = (usize)voicerExpr->maxVoices * delay->chans;
+            for (S expr : delay->initters) {
+                auto* init = expr.as<DelayInit>();
+                string value = genVoicerDelayInitValue(init->in0(), delay->chans);
+                usize offset = init->offset;
+                int ser = delay->serial;
+                if (delay->allocSize == 1) {
+                    s += FMT("\tfor (int i = 0; i < {}; ++i) p->voice_d{}[i] = {};\n",
+                        total, ser, value);
+                } else if (delay->allocSize > 1) {
+                    s += FMT("\tfor (int i = 0; i < {}; ++i) p->voice_d{}[i][(0ull - {}ull) & {}] = {};\n",
+                        total, ser, offset, delay->allocSize - 1, value);
+                } else {
+                    s += FMT("\tfor (int i = 0; i < {}; ++i) p->voice_d{}[i][(0ull - {}ull) & p->voice_d{}_mask[i / {}]] = {};\n",
+                        total, ser, offset, ser, delay->chans, value);
+                }
+            }
+            continue;
+        }
         for (S expr : delay->initters) {
             auto* init = expr.as<DelayInit>();
             string value = genExpr(init->in0(), vx(0));
@@ -2891,6 +3150,7 @@ string CppCodeGen::genDelayDealloc() {
         bool hasVoiceDelays = false;
         for (auto delay : sortedDelays(synth->delayBufs)) {
             if (!isVoicerSubgraph(delay->graph)) continue;
+            if (delay->allocSize >= 1) continue; // inline storage: nothing to free
             if (!hasVoiceDelays) {
                 hasVoiceDelays = true;
                 s += FMT("\tfor (int v = 0; v < {}; ++v) {{\n", voicerExpr->maxVoices);
@@ -2983,18 +3243,83 @@ string CppCodeGen::genInitFun() {
             s += FMT("\tarc4seedrand(p->rgen{});\n", graph->serial);
         }
     }
-    // If flat voice mode, enable inFlatVoiceMode during init loops so that
-    // voicer-subgraph inst_vars get the correct p->voice_ prefix and per-voice indexing.
-    if (flatVoiceMode && voicerExpr) {
-        inFlatVoiceMode = true;
-        flatVoiceCount = voicerExpr->maxVoices;
+    // Seed per-voice RNGs BEFORE the init loops, so per-voice init-rate
+    // draws (e.g. a voicer pink's dice) come from seeded, per-voice
+    // distinct streams instead of the calloc'd zero state (which also
+    // ignored TZPL_RNG_SEED and gave every voice identical draws). In AoS
+    // (non-flat) mode the rgen lives inside voice_state, so the wipe of
+    // that struct must also happen up here, before the seeding.
+    if (voicerExpr && flatVoiceMode) {
+        for (Graph* graph : synth->graphs) {
+            if (graph->usesRandomNumberGenerator && isVoicerSubgraph(graph)) {
+                s += FMT("\tfor (int v = 0; v < {}; ++v) {{\n", voicerExpr->maxVoices);
+                s += FMT("\t\tarc4seedrand(p->voice_rgen{}[v]);\n", graph->serial);
+                s += "\t}\n";
+            }
+        }
+    } else if (voicerExpr) {
+        s += FMT("\tp->voicer.setParams((f32*)p->voicer_params);\n");
+        s += FMT("\tmemset(p->voicer_params, 0, sizeof(p->voicer_params));\n");
+        s += FMT("\tmemset(p->voice_state, 0, sizeof(p->voice_state));\n");
+        for (Graph* graph : synth->graphs) {
+            if (graph->usesRandomNumberGenerator && isVoicerSubgraph(graph)) {
+                s += FMT("\tfor (int v = 0; v < {}; ++v) {{\n", voicerExpr->maxVoices);
+                s += FMT("\t\tarc4seedrand(p->voice_state[v].rgen{});\n", graph->serial);
+                s += "\t}\n";
+            }
+        }
     }
-    s += genLoops(synth->initLoops);
-    if (flatVoiceMode && voicerExpr) {
-        inFlatVoiceMode = false;
+    // Voicer-subgraph init loops get p->voice_ prefixes and per-voice
+    // indexing via genLoop's per-loop flat-voice auto-enter. Do NOT force
+    // inFlatVoiceMode here: a top-graph init loop (e.g. a delay time
+    // computed from fs) must emit plain scalar code, and the blanket flag
+    // wrapped it in a voice loop with vector lvalue-casts (invalid C++).
+    // Mirrors synthc, which only auto-enters per loop.
+    if (voicerExpr && !flatVoiceMode) {
+        // AoS: shared init loops first, then ONE per-voice block running the
+        // voicer-subgraph init loops and the per-voice delay init writes.
+        // Cross-loop init temps are per-voice locals, so the loops and the
+        // delay writes that read them must share the voice iteration. Delay
+        // allocation comes before the block so a runtime ring's calloc
+        // precedes its init write.
+        for (GenLoop* loop : synth->initLoops) {
+            if (!isVoicerSubgraph(loop->graph)) s += genLoop(*loop);
+        }
+        s += genDelayAlloc();
+        bool anyVoicerInitLoops = false;
+        for (GenLoop* loop : synth->initLoops) {
+            if (isVoicerSubgraph(loop->graph)) anyVoicerInitLoops = true;
+        }
+        bool anyVoicerDelayInits = false;
+        for (D delay : sortedDelays(synth->delayBufs)) {
+            if (isVoicerSubgraph(delay->graph) && !delay->initters.empty())
+                anyVoicerDelayInits = true;
+        }
+        if (anyVoicerInitLoops || anyVoicerDelayInits) {
+            s += FMT("\tfor (int v = 0; v < {}; ++v) {{\n", voicerExpr->maxVoices);
+            ++indent;
+            tabIndent(s, indent);
+            s += "f32* vparams = p->voicer.getRow(v);\n";
+            tabIndent(s, indent);
+            s += "auto& vs = p->voice_state[v];\n";
+            bool prevInVoiceLoop = inVoiceLoop;
+            inVoiceLoop = true;
+            voiceLoopIndexName = "v";
+            for (GenLoop* loop : synth->initLoops) {
+                if (isVoicerSubgraph(loop->graph)) s += genLoop(*loop);
+            }
+            s += genVoicerDelayInitAoS();
+            inVoiceLoop = prevInVoiceLoop;
+            --indent;
+            tabIndent(s, indent);
+            s += "}\n";
+        }
+        s += genDelayInit();
+    } else {
+        s += genLoops(synth->initLoops);
+        s += genDelayAlloc();
+        s += genDelayInit();
     }
-    s += genDelayAlloc();
-    s += genDelayInit();
 
     // Initialize buffer pointers to null
     for (B buf : synth->sampleBufs) {
@@ -3007,34 +3332,12 @@ string CppCodeGen::genInitFun() {
         s += FMT("\tp->bank{} = nullptr;\n", bank->serial);
     }
 
-    if (voicerExpr) {
-        usize numNoteParams = synth->noteParams.size();
+    if (voicerExpr && flatVoiceMode) {
+        // SoA: voice inst vars and delays are already zeroed by calloc; the
+        // per-voice RNGs were seeded at the top of init (before the init
+        // loops draw from them). AoS mode binds/wipes/seeds up there too.
         s += FMT("\tp->voicer.setParams((f32*)p->voicer_params);\n");
         s += FMT("\tmemset(p->voicer_params, 0, sizeof(p->voicer_params));\n");
-
-        if (flatVoiceMode) {
-            // SoA: zero individual voice arrays (struct is calloc'd, but be explicit)
-            // Voice inst vars and delays are already zeroed by calloc
-            // Seed per-voice RNGs (SoA)
-            for (Graph* graph : synth->graphs) {
-                if (graph->usesRandomNumberGenerator && isVoicerSubgraph(graph)) {
-                    s += FMT("\tfor (int v = 0; v < {}; ++v) {{\n", voicerExpr->maxVoices);
-                    s += FMT("\t\tarc4seedrand(p->voice_rgen{}[v]);\n", graph->serial);
-                    s += "\t}\n";
-                }
-            }
-        } else {
-            s += FMT("\tmemset(p->voice_state, 0, sizeof(p->voice_state));\n");
-
-            // Seed per-voice RNGs
-            for (Graph* graph : synth->graphs) {
-                if (graph->usesRandomNumberGenerator && isVoicerSubgraph(graph)) {
-                    s += FMT("\tfor (int v = 0; v < {}; ++v) {{\n", voicerExpr->maxVoices);
-                    s += FMT("\t\tarc4seedrand(p->voice_state[v].rgen{});\n", graph->serial);
-                    s += "\t}\n";
-                }
-            }
-        }
     }
 
     // Reset-rate loops run once at init so every slot holds a defined value
@@ -3089,14 +3392,23 @@ string CppCodeGen::genUninitFun() {
 }
 
 string CppCodeGen::genResetFun() {
-    // Rate.reset is per-note: reset loops are emitted into _noteOn (for the
-    // scheduled voice) and _init (initial values), never here. This
-    // whole-synth entry point is unused by the engine and left empty.
-    // (The FIXME comment is kept verbatim for byte-identical output with
-    // the Tzopilotl-hosted compiler until both are updated together.)
+    // Whole-synth reset: the engine calls this when audio stops so delay
+    // lines, filter memories, and voice state don't replay their tail on the
+    // next start. Tear down and re-init, preserving the engine-installed
+    // buffer and sample-bank pointers (init nulls them; the engine only
+    // installs them once via swapBuffer/swapSampleBank).
     string s;
     s += FMT("tzpl_SErr {0}_reset({0}* p) {{\n", synth->name);
-    s += "\t// FIXME genResetFun\n";
+    for (B buf : synth->sampleBufs)
+        s += FMT("\ttzpl_Buffer* save_buf{0} = p->buf{0};\n", buf->serial);
+    for (Bk bank : sortedBanks(synth->sampleBanks))
+        s += FMT("\ttzpl_SampleBank* save_bank{0} = p->bank{0};\n", bank->serial);
+    s += FMT("\t{0}_uninit(p);\n", synth->name);
+    s += FMT("\t{0}_init(p);\n", synth->name);
+    for (B buf : synth->sampleBufs)
+        s += FMT("\tp->buf{0} = save_buf{0};\n", buf->serial);
+    for (Bk bank : sortedBanks(synth->sampleBanks))
+        s += FMT("\tp->bank{0} = save_bank{0};\n", bank->serial);
     s += "\treturn tzpl_errNone;\n";
     s += "}\n\n";
     return s;
@@ -3785,13 +4097,36 @@ string CppCodeGen::genNoteFuns() {
                 }
             }
         }
-        // Reset per-voice delay state
+        // Reset per-voice delay state. A delay declared with init values is
+        // restored to them, not zeroed: constant inits are re-emitted here
+        // (e.g. a seq index's init(1, -1)); a delay with any NON-constant
+        // init (e.g. pink's per-voice dice) keeps the reused voice's state,
+        // which is as valid a generator seed as a fresh draw.
         for (D delay : sortedDelays(synth->delayBufs)) {
             if (!isVoicerSubgraph(delay->graph)) continue;
+            bool hasNonConstInit = false;
+            for (S expr : delay->initters) {
+                if (!expr.as<DelayInit>()->in0()->is_constant()) hasNonConstInit = true;
+            }
+            if (hasNonConstInit) continue;
             if (delay->allocSize != 1) {
                 s += FMT("\tp->voice_d{}_wrpos[vi] = 0;\n", delay->serial);
             }
-            if (delay->allocSize == 1) {
+            if (delay->allocSize == 1 && !delay->initters.empty()) {
+                for (S expr : delay->initters) {
+                    S in0 = expr.as<DelayInit>()->in0();
+                    if (delay->chans == 1) {
+                        s += FMT("\tp->voice_d{}[vi] = {};\n",
+                            delay->serial, genExpr(in0, vx(0)));
+                    } else if (in0->is_scalar()) {
+                        s += FMT("\tfor (int c = 0; c < {}; ++c) p->voice_d{}[vi * {} + c] = {};\n",
+                            delay->chans, delay->serial, delay->chans, genExpr(in0, vx(0)));
+                    } else {
+                        s += FMT("\tfor (int c = 0; c < {}; ++c) p->voice_d{}[vi * {} + c] = {}[c];\n",
+                            delay->chans, delay->serial, delay->chans, genVarName(in0));
+                    }
+                }
+            } else if (delay->allocSize == 1) {
                 if (delay->chans == 1) {
                     s += FMT("\tp->voice_d{}[vi] = 0;\n", delay->serial);
                 } else {
@@ -3806,8 +4141,42 @@ string CppCodeGen::genNoteFuns() {
                     s += FMT("\tfor (int c = 0; c < {}; ++c) memset(p->voice_d{}[vi * {} + c], 0, {} * sizeof({}));\n",
                         delay->chans, delay->serial, delay->chans, delay->allocSize, delay->type.str());
                 }
+                for (S expr : delay->initters) {
+                    auto* init = expr.as<DelayInit>();
+                    S in0 = init->in0();
+                    string slot = FMT("(0ull - {}ull) & {}", init->offset, delay->allocSize - 1);
+                    if (delay->chans == 1) {
+                        s += FMT("\tp->voice_d{}[vi][{}] = {};\n",
+                            delay->serial, slot, genExpr(in0, vx(0)));
+                    } else if (in0->is_scalar()) {
+                        s += FMT("\tfor (int c = 0; c < {}; ++c) p->voice_d{}[vi * {} + c][{}] = {};\n",
+                            delay->chans, delay->serial, delay->chans, slot, genExpr(in0, vx(0)));
+                    } else {
+                        s += FMT("\tfor (int c = 0; c < {}; ++c) p->voice_d{}[vi * {} + c][{}] = {}[c];\n",
+                            delay->chans, delay->serial, delay->chans, slot, genVarName(in0));
+                    }
+                }
+            } else {
+                // dynamic delays: already zeroed by calloc; restore constant
+                // init slots (the ring itself keeps the reused voice's tail,
+                // matching the pre-init-fix behavior).
+                for (S expr : delay->initters) {
+                    auto* init = expr.as<DelayInit>();
+                    S in0 = init->in0();
+                    string slot = FMT("(0ull - {}ull) & p->voice_d{}_mask[vi]",
+                        init->offset, delay->serial);
+                    if (delay->chans == 1) {
+                        s += FMT("\tp->voice_d{}[vi][{}] = {};\n",
+                            delay->serial, slot, genExpr(in0, vx(0)));
+                    } else if (in0->is_scalar()) {
+                        s += FMT("\tfor (int c = 0; c < {}; ++c) p->voice_d{}[vi * {} + c][{}] = {};\n",
+                            delay->chans, delay->serial, delay->chans, slot, genExpr(in0, vx(0)));
+                    } else {
+                        s += FMT("\tfor (int c = 0; c < {}; ++c) p->voice_d{}[vi * {} + c][{}] = {}[c];\n",
+                            delay->chans, delay->serial, delay->chans, slot, genVarName(in0));
+                    }
+                }
             }
-            // dynamic delays: already zeroed by calloc, wrpos reset is sufficient
         }
         // Re-seed per-voice RNG (SoA)
         for (Graph* graph : synth->graphs) {
@@ -3816,7 +4185,104 @@ string CppCodeGen::genNoteFuns() {
             }
         }
     } else {
-        s += "\tmemset(&p->voice_state[vi], 0, sizeof(p->voice_state[vi]));\n";
+        // AoS: per-field reset instead of a whole-struct memset, so
+        // init-rate state (sample-rate constants, seeded init draws)
+        // survives the note start -- the memset wiped it and nothing
+        // recomputed it. Mirrors the flat-mode zeroing rules.
+        for (GenLoop* loop : synth->loops) {
+            for (ExprTree* tree : loop->trees) {
+                S expr = tree->root;
+                if (is_inst_var(expr->cut) && isVoicerSubgraph(expr->graph)
+                    && expr->rate != initSignalRate) {
+                    string varname = genVarDeclName(expr);
+                    if (expr->chans == 1) {
+                        s += FMT("\tp->voice_state[vi].{} = 0;\n", varname);
+                    } else {
+                        s += FMT("\tfor (int c = 0; c < {}; ++c) p->voice_state[vi].{}[c] = 0;\n",
+                            expr->chans, varname);
+                    }
+                }
+            }
+        }
+        // Delay resets, same rules as flat mode: constant inits are
+        // restored, a delay with any NON-constant init keeps the reused
+        // voice's state.
+        for (D delay : sortedDelays(synth->delayBufs)) {
+            if (!isVoicerSubgraph(delay->graph)) continue;
+            bool hasNonConstInit = false;
+            for (S expr : delay->initters) {
+                if (!expr.as<DelayInit>()->in0()->is_constant()) hasNonConstInit = true;
+            }
+            if (hasNonConstInit) continue;
+            int ser = delay->serial;
+            if (delay->allocSize != 1) {
+                s += FMT("\tp->voice_state[vi].d{}_wrpos = 0;\n", ser);
+            }
+            if (delay->allocSize == 1 && !delay->initters.empty()) {
+                for (S expr : delay->initters) {
+                    S in0 = expr.as<DelayInit>()->in0();
+                    if (delay->chans == 1) {
+                        s += FMT("\tp->voice_state[vi].d{} = {};\n",
+                            ser, genExpr(in0, vx(0)));
+                    } else if (in0->is_scalar()) {
+                        s += FMT("\tfor (int c = 0; c < {}; ++c) p->voice_state[vi].d{}[c] = {};\n",
+                            delay->chans, ser, genExpr(in0, vx(0)));
+                    } else {
+                        s += FMT("\tfor (int c = 0; c < {}; ++c) p->voice_state[vi].d{}[c] = {}[c];\n",
+                            delay->chans, ser, genVarName(in0));
+                    }
+                }
+            } else if (delay->allocSize == 1) {
+                if (delay->chans == 1) {
+                    s += FMT("\tp->voice_state[vi].d{} = 0;\n", ser);
+                } else {
+                    s += FMT("\tfor (int c = 0; c < {}; ++c) p->voice_state[vi].d{}[c] = 0;\n",
+                        delay->chans, ser);
+                }
+            } else if (delay->allocSize > 1) {
+                if (delay->chans == 1) {
+                    s += FMT("\tmemset(p->voice_state[vi].d{}, 0, {} * sizeof({}));\n",
+                        ser, delay->allocSize, delay->type.str());
+                } else {
+                    s += FMT("\tfor (int c = 0; c < {}; ++c) memset(p->voice_state[vi].d{}[c], 0, {} * sizeof({}));\n",
+                        delay->chans, ser, delay->allocSize, delay->type.str());
+                }
+                for (S expr : delay->initters) {
+                    auto* init = expr.as<DelayInit>();
+                    S in0 = init->in0();
+                    string slot = FMT("(0ull - {}ull) & {}", init->offset, delay->allocSize - 1);
+                    if (delay->chans == 1) {
+                        s += FMT("\tp->voice_state[vi].d{}[{}] = {};\n",
+                            ser, slot, genExpr(in0, vx(0)));
+                    } else if (in0->is_scalar()) {
+                        s += FMT("\tfor (int c = 0; c < {}; ++c) p->voice_state[vi].d{}[c][{}] = {};\n",
+                            delay->chans, ser, slot, genExpr(in0, vx(0)));
+                    } else {
+                        s += FMT("\tfor (int c = 0; c < {}; ++c) p->voice_state[vi].d{}[c][{}] = {}[c];\n",
+                            delay->chans, ser, slot, genVarName(in0));
+                    }
+                }
+            } else {
+                // dynamic delays: the ring keeps the reused voice's tail
+                // (matching flat mode); restore constant init slots only.
+                for (S expr : delay->initters) {
+                    auto* init = expr.as<DelayInit>();
+                    S in0 = init->in0();
+                    string slot = FMT("(0ull - {}ull) & p->voice_state[vi].d{}_mask",
+                        init->offset, ser);
+                    if (delay->chans == 1) {
+                        s += FMT("\tp->voice_state[vi].d{}[{}] = {};\n",
+                            ser, slot, genExpr(in0, vx(0)));
+                    } else if (in0->is_scalar()) {
+                        s += FMT("\tfor (int c = 0; c < {}; ++c) p->voice_state[vi].d{}[c][{}] = {};\n",
+                            delay->chans, ser, slot, genExpr(in0, vx(0)));
+                    } else {
+                        s += FMT("\tfor (int c = 0; c < {}; ++c) p->voice_state[vi].d{}[c][{}] = {}[c];\n",
+                            delay->chans, ser, slot, genVarName(in0));
+                    }
+                }
+            }
+        }
 
         // Re-seed per-voice RNG
         for (Graph* graph : synth->graphs) {
