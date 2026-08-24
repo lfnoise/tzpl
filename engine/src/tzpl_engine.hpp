@@ -69,6 +69,16 @@ struct SafetyLimiter
 		prevBuf(samples)
 	{}
 	
+	// Forget the held lookahead block and gain history (used when audio
+	// stops, so a restart doesn't replay the last block or duck the start).
+	void clearState() {
+		nextGain = 1.f;
+		prevMaxPeak = 1.f;
+		prevCombinedGain = 1.f;
+		holdCount = 0;
+		std::fill(prevBuf.begin(), prevBuf.end(), 0.f);
+	}
+
 	f32 maxAbsPeak(f32* buf) {
 		f32 m = 0.f;
 		for (int i = 0; i < samples; ++i) {

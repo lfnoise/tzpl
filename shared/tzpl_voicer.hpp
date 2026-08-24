@@ -107,14 +107,25 @@ class Voicer {
 
     VoiceParamMatrix* params_;
 
+    // Rotating tie-break scan start. Zero-init (generated plugins calloc the
+    // synth struct and never run this constructor) makes a fresh synth scan
+    // from voice 0, matching the old fixed order.
+    int scanStart_ = 0;
+
     int allocVoice() {
         // Find a slot to use for the new note.
         // Find the earliest note off, or if all notes are on, then find the earliest note on.
+        // Scan rotated past the last allocated voice: candidates with EQUAL
+        // times spread round-robin instead of resolving to the lowest index.
+        // Notes struck at the same sample (one bundle / a chord) share their
+        // noteOnTime, and a fixed scan order would steal the SAME voice for
+        // every one of them, so of N same-time steals only the last survived.
         i64 minNoteOffTime = std::numeric_limits<i64>::max();
         i64 minNoteOnTime = std::numeric_limits<i64>::max();
         int minNoteOffIndex = -1;
         int minNoteOnIndex = -1;
-        for (int i = 0; i < MaxVoices; ++i) {
+        for (int k = 0; k < MaxVoices; ++k) {
+            int i = (scanStart_ + k) % MaxVoices;
             if (get(i,0) > 0.) { // if gate is on.
                 if (noteOnTime_[i] < minNoteOnTime) {
                     minNoteOnTime = noteOnTime_[i];
@@ -129,6 +140,7 @@ class Voicer {
         }
         int index = minNoteOffIndex >= 0 ? minNoteOffIndex : minNoteOnIndex;
         assert(index >= 0);
+        scanStart_ = (index + 1) % MaxVoices;
         return index;
     }
 public:

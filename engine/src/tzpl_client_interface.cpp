@@ -456,6 +456,17 @@ void stopAudio(Engine* e) {
     std::this_thread::sleep_for(std::chrono::microseconds(100000));
     e->backend_->stop();
     e->audioState_ = AudioState::initted;
+
+    // Clear captured audio state (delay lines, filter memories, active
+    // voices, the limiter's lookahead block) so a later startAudio begins
+    // from silence instead of replaying the old tail. The backend is
+    // stopped, so node state is safe to touch from this thread.
+    for (Silo& s : e->silos_) {
+        for (Node* head : s.rt_nodeTable_) {
+            for (Node* n = head; n; n = n->rt_list.next) n->reset();
+        }
+    }
+    if (e->safetyLimiter_) e->safetyLimiter_->clearState();
 }
 
 void printDevices(Engine* e)
