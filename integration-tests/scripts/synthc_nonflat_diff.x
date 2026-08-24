@@ -14,6 +14,7 @@
 
 import synthdef.*;
 import common_ugens.*;
+import instruments.*;
 import synthc.ir.*;
 import synthc.importer.*;
 import synthc.passes.*;
@@ -89,12 +90,65 @@ fn nfF() S {
 	}) sum(2) outlet
 }
 
+-- G: sample-bank lookup in a branching voicer (VoiceState lu slots, the
+-- per-voice AoS resolver, and the swap re-resolve loop).
+fn nfBank() S {
+	let bank = sampleBankVar();
+	voicer(4, fn() S {
+		let pitch = notePitch();
+		let vel = noteVel();
+		let g = gate();
+		let h = bank lookup(pitch, vel);
+		g pause(fn() S {
+			let pos = h loopPhasor(bankRate(h, pitch), 0.0);
+			h bankRead(pos) * vel velAmp
+		})
+	}) sum(2) outlet
+}
+
+-- H/I: an event-rate feedback accumulator over control changes reading two
+-- ring slots, flat and AoS. (Today rate splitting promotes these rings to
+-- audio rate; the pair also guards the direct-control SIMD splat and, if
+-- analysis ever keeps such a ring at event rate, the per-voice head advance
+-- in processEvents.)
+fn evRingFlat() S {
+	voicer(4, fn() S {
+		let f = noteParam("freq", ControlSpec { lo: 20.0, hi: 2000.0, init: 440.0, warp: ControlWarp.linear });
+		let c = control("c", ControlSpec { lo: 0.5, hi: 2.0, init: 1.0, warp: ControlWarp.linear });
+		let d = delayVar();
+		d init(1, 0.0);
+		let r1 = d read(1);
+		let r2 = d read(2);
+		let acc = (f * c) * 0.001 + r1 * 0.4 + r2 * 0.2;
+		d write(acc);
+		sinosc(440.0 + acc) * gate() * 0.1
+	}) sum(2) outlet
+}
+
+fn evRingAoS() S {
+	voicer(4, fn() S {
+		let f = noteParam("freq", ControlSpec { lo: 20.0, hi: 2000.0, init: 440.0, warp: ControlWarp.linear });
+		let c = control("c", ControlSpec { lo: 0.5, hi: 2.0, init: 1.0, warp: ControlWarp.linear });
+		let g = gate();
+		let d = delayVar();
+		d init(1, 0.0);
+		let r1 = d read(1);
+		let r2 = d read(2);
+		let acc = (f * c) * 0.001 + r1 * 0.4 + r2 * 0.2;
+		d write(acc);
+		g pause(fn() S { sinosc(440.0 + acc) * 0.1 })
+	}) sum(2) outlet
+}
+
 checkNonFlat("nfA", nfA);
 checkNonFlat("nfB", nfB);
 checkNonFlat("nfC", nfC);
 checkNonFlat("nfD", nfD);
 checkNonFlat("nfE", nfE);
 checkNonFlat("nfF", nfF);
+checkNonFlat("nfBank", nfBank);
+checkNonFlat("evRingFlat", evRingFlat);
+checkNonFlat("evRingAoS", evRingAoS);
 
 if (`failures == 0) { println("NONFLAT DIFF PASS"); }
 else { println("NONFLAT DIFF FAIL (%^)" fmt(`failures)); }

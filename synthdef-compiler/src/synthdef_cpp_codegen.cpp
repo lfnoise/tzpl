@@ -3697,13 +3697,27 @@ string CppCodeGen::genHandleEventsFun() {
                 tabIndent(s, indent);
                 s += FMT("iso{} = true;\n", downstream->serial);
             }
-            // Advance event-rate delay buffers in this iso-group
+            // Advance event-rate delay buffers in this iso-group. A voicer
+            // delay's head is per voice (no current def produces an
+            // event-rate voicer ring -- rate splitting promotes audible
+            // delay chains to audio rate -- but if analysis ever does, the
+            // advance must not touch a nonexistent shared head).
             for (ExprTree* tree : ig->trees) {
                 for (S expr : tree->exprs) {
                     auto dw = expr.as<DelayWrite>();
                     if (dw && dw->delayBuf->allocSize != 1) {
                         tabIndent(s, indent);
-                        s += FMT("++p->d{}_wrpos;\n", dw->delayBuf->serial);
+                        if (isVoicerSubgraph(dw->delayBuf->graph)) {
+                            if (flatVoiceMode) {
+                                s += FMT("for (int v = 0; v < {}; ++v) ++p->voice_d{}_wrpos[v];\n",
+                                    voicerExpr->maxVoices, dw->delayBuf->serial);
+                            } else {
+                                s += FMT("for (int v = 0; v < {}; ++v) ++p->voice_state[v].d{}_wrpos;\n",
+                                    voicerExpr->maxVoices, dw->delayBuf->serial);
+                            }
+                        } else {
+                            s += FMT("++p->d{}_wrpos;\n", dw->delayBuf->serial);
+                        }
                     }
                 }
             }
