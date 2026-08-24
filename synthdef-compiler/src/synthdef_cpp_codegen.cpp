@@ -144,6 +144,14 @@ ptrdiff_t constant_value(VarIndex const& a) { return std::get<ptrdiff_t>(a); }
 bool is_zero(VarIndex const& a) { return is_constant(a) && 0 == constant_value(a); }
 bool is_one(VarIndex const& a) { return is_constant(a) && 1 == constant_value(a); }
 
+// A typed zero literal for guarded ring reads (keeps ternary arms and SIMD
+// lane elements at the read's own type).
+string zeroLiteral(NumType const& t) {
+    if (t.flags == NumTypeFlags::F32) return "0.0f";
+    if (t.flags == NumTypeFlags::F64) return "0.0";
+    return "0";
+}
+
 string vxstr(VarIndex const& a) {
     return std::visit(overloaded {
         //[](ptrdiff_t const& a) { return tos(a) + "uz"; },
@@ -417,6 +425,25 @@ struct CppCodeGen {
     bool isVoiceLocalStorage(S x) {
         return inFlatVoiceMode && isVoicerSubgraph(x->graph)
             && (is_inst_var(x->cut) || is_temp_var(x->cut));
+    }
+
+    // Ring reads on a delay with no declared init values are ZERO-GUARDED:
+    // reading further back than has been written since the write head was
+    // reset returns silence instead of the buffer contents. Note-on (and
+    // engine reset) then only zero the head -- the ring is never cleared,
+    // and a reused voice cannot bleed the previous note's tail. Delays WITH
+    // init values keep unguarded reads (their declared slots must be
+    // readable before the first write) and the note-on clear/restore.
+    bool delayZeroGuarded(D d) const {
+        return d->allocSize != 1 && d->initters.empty();
+    }
+
+    // Kernel pre-extent: the oldest tap each interpolation kernel touches,
+    // relative to the integer delay (matches the _z kernels in
+    // tzpl_delay_interp.hpp).
+    static int interpPreExtent(int interp) {
+        static const int pre[] = { 0, 1, 2, 4, 4 };
+        return pre[interp];
     }
 
     // True while emitting reset-rate loops (in _noteOn and _init). NoteParam
@@ -1244,6 +1271,7 @@ struct ExprCodegenVisitor : ExprVisitor {
                     }
                 } else {
                     // Ring buffer: always gather (per-voice wrpos)
+                    bool zg = g.delayZeroGuarded(p->delayBuf);
                     s += simdTypeName(p->type, width) + "{";
                     for (int j = 0; j < width; ++j) {
                         if (j > 0) s += ", ";
@@ -1252,8 +1280,13 @@ struct ExprCodegenVisitor : ExprVisitor {
                         string mask = p->delayBuf->allocSize > 1
                             ? std::to_string(p->delayBuf->allocSize - 1)
                             : FMT("p->voice_d{}_mask[{}]", ser, vi);
-                        s += FMT("p->voice_d{}[{}][(p->voice_d{}_wrpos[{}] - u64({})) & {}]",
+                        string rd = FMT("p->voice_d{}[{}][(p->voice_d{}_wrpos[{}] - u64({})) & {}]",
                             ser, bi, ser, vi, p->delay_samples, mask);
+                        if (zg) {
+                            rd = FMT("(p->voice_d{}_wrpos[{}] >= u64({}) ? {} : {})",
+                                ser, vi, p->delay_samples, rd, zeroLiteral(p->type));
+                        }
+                        s += rd;
                     }
                     s += "}";
                 }
@@ -1265,12 +1298,20 @@ struct ExprCodegenVisitor : ExprVisitor {
                 auto ser = p->delayBuf->serial;
                 if (p->delayBuf->allocSize == 1) {
                     s += FMT("p->voice_d{}[{}]", ser, bi);
-                } else if (p->delayBuf->allocSize > 1) {
-                    s += FMT("p->voice_d{0}[{1}][(p->voice_d{0}_wrpos[{2}] - u64({3})) & {4}]",
-                        ser, bi, vi, p->delay_samples, p->delayBuf->allocSize-1);
                 } else {
-                    s += FMT("p->voice_d{0}[{1}][(p->voice_d{0}_wrpos[{2}] - u64({3})) & p->voice_d{0}_mask[{2}]]",
-                        ser, bi, vi, p->delay_samples);
+                    string rd;
+                    if (p->delayBuf->allocSize > 1) {
+                        rd = FMT("p->voice_d{0}[{1}][(p->voice_d{0}_wrpos[{2}] - u64({3})) & {4}]",
+                            ser, bi, vi, p->delay_samples, p->delayBuf->allocSize-1);
+                    } else {
+                        rd = FMT("p->voice_d{0}[{1}][(p->voice_d{0}_wrpos[{2}] - u64({3})) & p->voice_d{0}_mask[{2}]]",
+                            ser, bi, vi, p->delay_samples);
+                    }
+                    if (g.delayZeroGuarded(p->delayBuf)) {
+                        rd = FMT("(p->voice_d{}_wrpos[{}] >= u64({}) ? {} : {})",
+                            ser, vi, p->delay_samples, rd, zeroLiteral(p->type));
+                    }
+                    s += rd;
                 }
             }
         } else if (g.inSimdMode) {
@@ -1303,19 +1344,24 @@ struct ExprCodegenVisitor : ExprVisitor {
                     ? std::to_string(p->delayBuf->allocSize - 1)
                     : FMT("{}d{}_mask", dp, ser);
 
+                bool zg = g.delayZeroGuarded(p->delayBuf);
+                string guard = FMT("{}d{}_wrpos >= u64({})", dp, ser, p->delay_samples);
                 if (dchans == 1) {
                     // 1-chan ring: all lanes read same value, splat
-                    s += simdSplat(p->type, width,
-                        FMT("{}d{}[({}d{}_wrpos - u64({})) & {}]",
-                            dp, ser, dp, ser, p->delay_samples, mask));
+                    string rd = FMT("{}d{}[({}d{}_wrpos - u64({})) & {}]",
+                        dp, ser, dp, ser, p->delay_samples, mask);
+                    if (zg) rd = FMT("({} ? {} : {})", guard, rd, zeroLiteral(p->type));
+                    s += simdSplat(p->type, width, rd);
                 } else {
                     // Multi-chan ring: gather from per-channel rings
                     s += simdTypeName(p->type, width) + "{";
                     for (int j = 0; j < width; ++j) {
                         if (j > 0) s += ", ";
                         string ci = simdLaneChanIdx(cel, j, dchans, loopChans);
-                        s += FMT("{}d{}[{}][({}d{}_wrpos - u64({})) & {}]",
+                        string rd = FMT("{}d{}[{}][({}d{}_wrpos - u64({})) & {}]",
                             dp, ser, ci, dp, ser, p->delay_samples, mask);
+                        if (zg) rd = FMT("({} ? {} : {})", guard, rd, zeroLiteral(p->type));
+                        s += rd;
                     }
                     s += "}";
                 }
@@ -1328,12 +1374,20 @@ struct ExprCodegenVisitor : ExprVisitor {
             }
             if (p->delayBuf->allocSize == 1) {
                 s += FMT("{}d{}{}", dp, p->delayBuf->serial, dindex);
-            } else if (p->delayBuf->allocSize > 1) {
-                s += FMT("{0}d{1}{4}[({0}d{1}_wrpos - u64({2})) & {3}]",
-                    dp, p->delayBuf->serial, p->delay_samples, p->delayBuf->allocSize-1, dindex);
             } else {
-                s += FMT("{0}d{1}{3}[({0}d{1}_wrpos - u64({2})) & {0}d{1}_mask]",
-                    dp, p->delayBuf->serial, p->delay_samples, dindex);
+                string rd;
+                if (p->delayBuf->allocSize > 1) {
+                    rd = FMT("{0}d{1}{4}[({0}d{1}_wrpos - u64({2})) & {3}]",
+                        dp, p->delayBuf->serial, p->delay_samples, p->delayBuf->allocSize-1, dindex);
+                } else {
+                    rd = FMT("{0}d{1}{3}[({0}d{1}_wrpos - u64({2})) & {0}d{1}_mask]",
+                        dp, p->delayBuf->serial, p->delay_samples, dindex);
+                }
+                if (g.delayZeroGuarded(p->delayBuf)) {
+                    rd = FMT("({}d{}_wrpos >= u64({}) ? {} : {})",
+                        dp, p->delayBuf->serial, p->delay_samples, rd, zeroLiteral(p->type));
+                }
+                s += rd;
             }
         }
     }
@@ -1341,14 +1395,24 @@ struct ExprCodegenVisitor : ExprVisitor {
         // Scalar read expression: direct buffer access or scalar helper call.
         auto genRead = [&](string const& buf, string const& wrpos,
                            string const& mask, string const& off) -> string {
+            bool zg = g.delayZeroGuarded(p->delayBuf);
             if (p->interp == interpNone) {
+                // Guarded interp-none goes through the _z kernel so the
+                // delay-time expression is evaluated exactly once (it can
+                // contain rand draws).
+                if (zg) return FMT("tzpl_delay_none_z({}, {}, {}, {})", buf, wrpos, mask, off);
                 return FMT("{}[({} - u64({})) & {}]", buf, wrpos, off, mask);
             }
             static const char* funcNames[] = {
                 "tzpl_delay_none", "tzpl_delay_linear", "tzpl_delay_cubic",
                 "tzpl_delay_lagrange", "tzpl_delay_sinc"
             };
-            return FMT("{}({}, {}, {}, {})", funcNames[p->interp], buf, wrpos, mask, off);
+            static const char* funcNamesZ[] = {
+                "tzpl_delay_none_z", "tzpl_delay_linear_z", "tzpl_delay_cubic_z",
+                "tzpl_delay_lagrange_z", "tzpl_delay_sinc_z"
+            };
+            return FMT("{}({}, {}, {}, {})",
+                (zg ? funcNamesZ : funcNames)[p->interp], buf, wrpos, mask, off);
         };
 
         // SIMD interpolation: generates a lambda that gathers per-lane samples
@@ -1382,6 +1446,18 @@ struct ExprCodegenVisitor : ExprVisitor {
                 r += FMT("auto _off = {}; ", offsetExpr);
                 for (int j = 0; j < width; j++)
                     r += FMT("u64 _di{} = u64(_off[{}]); ", j, j);
+            }
+
+            // Zero-history guard (delays with no init values): a uniform
+            // write head takes one early return; per-lane heads/offsets
+            // zero the invalid lanes after the kernel below.
+            bool zg = g.delayZeroGuarded(p->delayBuf);
+            int pre = CppCodeGen::interpPreExtent(p->interp);
+            bool uniform = scalarOff;
+            for (int j = 1; j < width; j++)
+                if (wrposs[j] != wrposs[0]) uniform = false;
+            if (zg && uniform) {
+                r += FMT("if ({} < _di + {}) return ({})(0); ", wrposs[0], pre, type);
             }
 
             // Gather per-lane into SIMD sample vectors
@@ -1425,19 +1501,39 @@ struct ExprCodegenVisitor : ExprVisitor {
                         r += "}; ";
                     }
                 }
-                r += "return tzpl_interp_sinc(_s0, _s1, _s2, _s3, _s4, _s5, _s6, _s7, "
-                     "_c0, _c1, _c2, _c3, _c4, _c5, _c6, _c7); ";
+                string kcall = "tzpl_interp_sinc(_s0, _s1, _s2, _s3, _s4, _s5, _s6, _s7, "
+                               "_c0, _c1, _c2, _c3, _c4, _c5, _c6, _c7)";
+                if (zg && !uniform) {
+                    r += FMT("{} _r = {}; ", type, kcall);
+                    for (int j = 0; j < width; j++) {
+                        string di = scalarOff ? "_di" : FMT("_di{}", j);
+                        r += FMT("if ({} < {} + {}) _r[{}] = 0; ", wrposs[j], di, pre, j);
+                    }
+                    r += "return _r; ";
+                } else {
+                    r += "return " + kcall + "; ";
+                }
             } else {
                 static const char* kernels[] = {
                     nullptr, "tzpl_interp_linear", "tzpl_interp_cubic",
                     "tzpl_interp_lagrange", nullptr
                 };
-                r += FMT("return {}(", kernels[p->interp]);
+                string kcall = FMT("{}(", kernels[p->interp]);
                 for (int t = 0; t < ti.n; t++) {
-                    if (t > 0) r += ", ";
-                    r += FMT("_s{}", t);
+                    if (t > 0) kcall += ", ";
+                    kcall += FMT("_s{}", t);
                 }
-                r += ", _frac); ";
+                kcall += ", _frac)";
+                if (zg && !uniform) {
+                    r += FMT("{} _r = {}; ", type, kcall);
+                    for (int j = 0; j < width; j++) {
+                        string di = scalarOff ? "_di" : FMT("_di{}", j);
+                        r += FMT("if ({} < {} + {}) _r[{}] = 0; ", wrposs[j], di, pre, j);
+                    }
+                    r += "return _r; ";
+                } else {
+                    r += "return " + kcall + "; ";
+                }
             }
 
             r += "}()";
@@ -4148,12 +4244,17 @@ string CppCodeGen::genNoteFuns() {
                         delay->chans, delay->serial, delay->chans);
                 }
             } else if (delay->allocSize > 1) {
-                if (delay->chans == 1) {
-                    s += FMT("\tmemset(p->voice_d{}[vi], 0, {} * sizeof({}));\n",
-                        delay->serial, delay->allocSize, delay->type.str());
-                } else {
-                    s += FMT("\tfor (int c = 0; c < {}; ++c) memset(p->voice_d{}[vi * {} + c], 0, {} * sizeof({}));\n",
-                        delay->chans, delay->serial, delay->chans, delay->allocSize, delay->type.str());
+                // Zero-guarded rings (no init values) need no clearing: the
+                // wrpos reset above plus the read guard silences the old
+                // contents. Init-carrying rings keep the clear + restore.
+                if (!delay->initters.empty()) {
+                    if (delay->chans == 1) {
+                        s += FMT("\tmemset(p->voice_d{}[vi], 0, {} * sizeof({}));\n",
+                            delay->serial, delay->allocSize, delay->type.str());
+                    } else {
+                        s += FMT("\tfor (int c = 0; c < {}; ++c) memset(p->voice_d{}[vi * {} + c], 0, {} * sizeof({}));\n",
+                            delay->chans, delay->serial, delay->chans, delay->allocSize, delay->type.str());
+                    }
                 }
                 for (S expr : delay->initters) {
                     auto* init = expr.as<DelayInit>();
@@ -4254,12 +4355,16 @@ string CppCodeGen::genNoteFuns() {
                         delay->chans, ser);
                 }
             } else if (delay->allocSize > 1) {
-                if (delay->chans == 1) {
-                    s += FMT("\tmemset(p->voice_state[vi].d{}, 0, {} * sizeof({}));\n",
-                        ser, delay->allocSize, delay->type.str());
-                } else {
-                    s += FMT("\tfor (int c = 0; c < {}; ++c) memset(p->voice_state[vi].d{}[c], 0, {} * sizeof({}));\n",
-                        delay->chans, ser, delay->allocSize, delay->type.str());
+                // Zero-guarded rings (no init values) need no clearing (see
+                // the flat-mode branch).
+                if (!delay->initters.empty()) {
+                    if (delay->chans == 1) {
+                        s += FMT("\tmemset(p->voice_state[vi].d{}, 0, {} * sizeof({}));\n",
+                            ser, delay->allocSize, delay->type.str());
+                    } else {
+                        s += FMT("\tfor (int c = 0; c < {}; ++c) memset(p->voice_state[vi].d{}[c], 0, {} * sizeof({}));\n",
+                            delay->chans, ser, delay->allocSize, delay->type.str());
+                    }
                 }
                 for (S expr : delay->initters) {
                     auto* init = expr.as<DelayInit>();

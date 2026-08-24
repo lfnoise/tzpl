@@ -137,6 +137,35 @@ begin(); noteOn(104, 1, [0.01]); sched(0);
 await delayReal(0.3);
 check("seq first step (delay init -1)", tapPeak(t), 0.02);
 
+-- Case F: reused-voice ring bleed. A per-voice feedback echo rings up on
+-- note 1; retriggering the (single) voice at amplitude 0 must be SILENT --
+-- ring reads are zero-guarded against the write head, which noteOn resets,
+-- so the previous note's tail cannot bleed into the reused voice. (Before
+-- the guard, the runtime ring kept circulating the old tail.)
+fn bleedVoice() S {
+	voicer(1, fn() S {
+		let a = noteParam("val", ControlSpec { lo: 0.0, hi: 1.0, init: 0.0, warp: ControlWarp.linear });
+		let g = gate();
+		let d = delayVar(0.5);
+		let tap = d vread(0.2 * fs(), Interpolation.none);
+		d <- (a * g) + tap * 0.9;
+		tap
+	}) outlet
+}
+bleedVoice defSynthX("bleedvoicer") await;
+
+begin(); freeNode(104); sched(0);
+await delayReal(0.2);
+begin(); newNode("bleedvoicer", 105); connect(105, 0, 0, 0); go(0);
+begin(); noteOn(105, 1, [0.2]); sched(0);
+await delayReal(0.5);
+let ringing = tapPeak(t);
+begin(); noteOn(105, 2, [0.0]); sched(0);
+await delayReal(0.5);
+let bled = tapPeak(t);
+if (ringing > 0.05 && bled < 0.001) { "PASS reused-voice ring bleed (ring %^, retrigger %^)" fmt(ringing, bled) println; }
+else { "FAIL reused-voice ring bleed (ring %^, retrigger %^)" fmt(ringing, bled) println; failures = failures + 1; }
+
 if (failures == 0) { "VOICER BUNDLE PARAMS PASS" println; }
 else { "VOICER BUNDLE PARAMS FAIL" println; }
 engineStop();

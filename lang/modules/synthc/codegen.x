@@ -676,6 +676,31 @@ fn _delayDIndex(ctx Ctx, d Int, n NIdx, cel String) String =
 -- `dp = g.inVoiceLoop ? "vs." : "p->"` in the delay visitors.
 fn _dpre() String = `cgInVoiceLoop ? "vs." : "p->";
 
+-- Ring reads on a delay with no declared init values are ZERO-GUARDED:
+-- reading further back than has been written since the write head was reset
+-- returns silence instead of the buffer contents (note-on / engine reset
+-- then only zero the head; the ring is never cleared, and a reused voice
+-- cannot bleed the previous note's tail). Mirrors the C++ delayZeroGuarded.
+fn _delayZeroGuarded(d DelayInfo) Bool = d.allocSize != 1 && d.initters length == 0;
+
+-- A typed zero literal for guarded ring reads (mirrors the C++ zeroLiteral).
+fn _zeroLit(t NumType) String {
+	if (t _isF32) { return "0.0f"; }
+	if (cppType(t) == "f64") { return "0.0"; }
+	"0"
+}
+
+-- Kernel pre-extent: the oldest tap each interpolation kernel touches,
+-- relative to the integer delay (matches the _z kernels and the C++
+-- interpPreExtent).
+fn _interpPreExtent(ip Interpolation) Int = match (ip) {
+	none:     0;
+	linear:   1;
+	cubic:    2;
+	lagrange: 4;
+	sinc:     4;
+};
+
 -- Ring-buffer index mask. A compile-time-sized (fixed) delay uses the constant
 -- allocSize-1; a runtime-sized (maxDelay-bound) delay stores its mask in the
 -- p->d{serial}_mask field. Mirrors the C++ `allocSize > 1 ? allocSize-1 : mask`.
@@ -723,13 +748,18 @@ fn _voiceDelayFixReadSimd(ctx Ctx, n NIdx, info DelayInfo, k Int, cel String) St
 		while (j < w) { parts push!("p->voice_d%^[%^]" fmt(ser, _flatSimdBufIdx(cel, j, shift, dchans))); j = j + 1; }
 		return "%^{%^}" fmt(_simdType(t, w), parts join(", "));
 	}
+	let zg = _delayZeroGuarded(info);
 	var parts [String] = [];
 	var j = 0;
 	while (j < w) {
 		let vi = _flatSimdVoiceIdx(cel, j, shift);
 		let bi = _flatSimdBufIdx(cel, j, shift, dchans);
 		let mask = info.allocSize > 1 ? "%^" fmt(info.allocSize - 1) : "p->voice_d%^_mask[%^]" fmt(ser, vi);
-		parts push!("p->voice_d%^[%^][(p->voice_d%^_wrpos[%^] - u64(%^)) & %^]" fmt(ser, bi, ser, vi, k, mask));
+		var rd = "p->voice_d%^[%^][(p->voice_d%^_wrpos[%^] - u64(%^)) & %^]" fmt(ser, bi, ser, vi, k, mask);
+		if (zg) {
+			rd = "(p->voice_d%^_wrpos[%^] >= u64(%^) ? %^ : %^)" fmt(ser, vi, k, rd, _zeroLit(t));
+		}
+		parts push!(rd);
 		j = j + 1;
 	}
 	"%^{%^}" fmt(_simdType(t, w), parts join(", "))
@@ -742,7 +772,11 @@ fn _delayFixReadExpr(ctx Ctx, n NIdx, d Int, k Int, cel String) String {
 		-- Per-voice 1-sample delay: a single value per voice/chan slot.
 		if (info.allocSize == 1) { return _vDelayBuf(ctx, info, cel); }
 		-- Per-voice ring buffer: index by the voice's write head.
-		return "%^[(%^ - u64(%^)) & %^]" fmt(_vDelayBuf(ctx, info, cel), _vDelayWrpos(info, cel), k, _vDelayMask(info, cel));
+		var rd = "%^[(%^ - u64(%^)) & %^]" fmt(_vDelayBuf(ctx, info, cel), _vDelayWrpos(info, cel), k, _vDelayMask(info, cel));
+		if (_delayZeroGuarded(info)) {
+			rd = "(%^ >= u64(%^) ? %^ : %^)" fmt(_vDelayWrpos(info, cel), k, rd, _zeroLit(ctx.typ[n]));
+		}
+		return rd;
 	}
 	-- SIMD delay read (M5.2). 1-sample (z1): a 1-chan delay splats; a delay at
 	-- least as wide as the vector is a contiguous load; a narrower one gathers with
@@ -764,24 +798,33 @@ fn _delayFixReadExpr(ctx Ctx, n NIdx, d Int, k Int, cel String) String {
 			return "%^{%^}" fmt(_simdType(t, w), parts join(", "));
 		}
 		let mask = _delayMask(info);
+		let zg = _delayZeroGuarded(info);
+		let guard = "%^d%^_wrpos >= u64(%^)" fmt(dp, ser, k);
 		if (dchans == 1) {
-			return _simdSplat(t, w, "%^d%^[(%^d%^_wrpos - u64(%^)) & %^]" fmt(dp, ser, dp, ser, k, mask));
+			var rd = "%^d%^[(%^d%^_wrpos - u64(%^)) & %^]" fmt(dp, ser, dp, ser, k, mask);
+			if (zg) { rd = "(%^ ? %^ : %^)" fmt(guard, rd, _zeroLit(t)); }
+			return _simdSplat(t, w, rd);
 		}
 		var parts [String] = [];
 		var j = 0;
 		while (j < w) {
 			let ci = _simdLaneChanIdx(cel, j, dchans, lc);
-			parts push!("%^d%^[%^][(%^d%^_wrpos - u64(%^)) & %^]" fmt(dp, ser, ci, dp, ser, k, mask));
+			var rd = "%^d%^[%^][(%^d%^_wrpos - u64(%^)) & %^]" fmt(dp, ser, ci, dp, ser, k, mask);
+			if (zg) { rd = "(%^ ? %^ : %^)" fmt(guard, rd, _zeroLit(t)); }
+			parts push!(rd);
 			j = j + 1;
 		}
 		return "%^{%^}" fmt(_simdType(t, w), parts join(", "));
 	}
 	let di = _delayDIndex(ctx, d, n, cel);
 	if (info.allocSize == 1) {
-		"%^d%^%^" fmt(_dpre(), info.serial, di)
-	} else {
-		"%^d%^%^[(%^d%^_wrpos - u64(%^)) & %^]" fmt(_dpre(), info.serial, di, _dpre(), info.serial, k, _delayMask(info))
+		return "%^d%^%^" fmt(_dpre(), info.serial, di);
 	}
+	var rd = "%^d%^%^[(%^d%^_wrpos - u64(%^)) & %^]" fmt(_dpre(), info.serial, di, _dpre(), info.serial, k, _delayMask(info));
+	if (_delayZeroGuarded(info)) {
+		rd = "(%^d%^_wrpos >= u64(%^) ? %^ : %^)" fmt(_dpre(), info.serial, k, rd, _zeroLit(ctx.typ[n]));
+	}
+	rd
 }
 
 -- A scalar (single-channel) delay-time offset is emitted in scalar mode at lane 0;
@@ -793,9 +836,13 @@ fn _genDelayOffScalar(ctx Ctx, e NIdx) String {
 
 -- A single scalar delay read (the C++ genRead lambda): interpNone indexes the ring
 -- directly; an interpolating mode calls the tzpl_delay_<kernel> helper.
-fn _delayVarGenRead(ip Interpolation, buf String, wrpos String, mask String, off String) String = match (ip) {
-	none: "%^[(%^ - u64(%^)) & %^]" fmt(buf, wrpos, off, mask);
-	_:    "tzpl_delay_%^(%^, %^, %^, %^)" fmt(ip toLispString, buf, wrpos, mask, off);
+-- Guarded (zg) reads go through the _z kernels: interp-none must not
+-- open-code a ternary that would evaluate the delay-time expression twice
+-- (it can contain rand draws). Mirrors the C++ genRead.
+fn _delayVarGenRead(ip Interpolation, buf String, wrpos String, mask String, off String, zg Bool) String = match (ip) {
+	none: zg ? "tzpl_delay_none_z(%^, %^, %^, %^)" fmt(buf, wrpos, mask, off)
+	         : "%^[(%^ - u64(%^)) & %^]" fmt(buf, wrpos, off, mask);
+	_:    "tzpl_delay_%^%^(%^, %^, %^, %^)" fmt(ip toLispString, zg ? "_z" : "", buf, wrpos, mask, off);
 };
 
 -- Tap offsets (relative to floor(delay)) per interpolation kernel; mirrors the C++
@@ -838,8 +885,10 @@ fn _genSimdSincCoeffs(w Int, scalarOff Bool, stype String, vtype String) String 
 			k = k + 1;
 		}
 	}
-	r $ "return tzpl_interp_sinc(_s0, _s1, _s2, _s3, _s4, _s5, _s6, _s7, _c0, _c1, _c2, _c3, _c4, _c5, _c6, _c7); "
+	r
 }
+
+let _kSincKernelCall = "tzpl_interp_sinc(_s0, _s1, _s2, _s3, _s4, _s5, _s6, _s7, _c0, _c1, _c2, _c3, _c4, _c5, _c6, _c7)";
 
 -- The SIMD interpolation lambda (mirror genSimdInterp). Gathers per-lane tap vectors
 -- from the ring then calls the vector interp kernel. bufs/wrposs/masks are per-lane
@@ -847,10 +896,11 @@ fn _genSimdSincCoeffs(w Int, scalarOff Bool, stype String, vtype String) String 
 -- scalar offset uses one `_di` and casts frac; a vector offset uses per-lane `_di{j}`.
 fn _genSimdInterp(t NumType, w Int, ip Interpolation,
                   bufs [String], wrposs [String], masks [String],
-                  offExpr String, scalarOff Bool) String {
+                  offExpr String, scalarOff Bool, zg Bool) String {
 	let vtype = _simdType(t, w);
 	let stype = cppType(t);
 	let taps = _interpTaps(ip);
+	let pre = _interpPreExtent(ip);
 	var r = "[&]() -> %^ { " fmt(vtype);
 	-- offset cache + per-lane integer delays
 	if (scalarOff) {
@@ -859,6 +909,15 @@ fn _genSimdInterp(t NumType, w Int, ip Interpolation,
 		r = r $ "auto _off = %^; " fmt(offExpr);
 		var j = 0;
 		while (j < w) { r = r $ "u64 _di%^ = u64(_off[%^]); " fmt(j, j); j = j + 1; }
+	}
+	-- Zero-history guard (delays with no init values): a uniform write head
+	-- takes one early return; per-lane heads/offsets zero the invalid lanes
+	-- after the kernel below. Mirrors the C++ genSimdInterp guard.
+	var uniform = scalarOff;
+	var ju = 1;
+	while (ju < w) { if (wrposs[ju] != wrposs[0]) { uniform = false; } ju = ju + 1; }
+	if (zg && uniform) {
+		r = r $ "if (%^ < _di + %^) return (%^)(0); " fmt(wrposs[0], pre, vtype);
 	}
 	-- per-tap gather vectors
 	var ti = 0;
@@ -885,18 +944,34 @@ fn _genSimdInterp(t NumType, w Int, ip Interpolation,
 		r = r $ "%^ _frac = _off - trunc(_off); " fmt(vtype);
 	}
 	-- kernel call (sinc needs the per-lane coefficient table)
+	var kcall = "";
 	match (ip) {
-		sinc: { r = r $ _genSimdSincCoeffs(w, scalarOff, stype, vtype); }
+		sinc: {
+			r = r $ _genSimdSincCoeffs(w, scalarOff, stype, vtype);
+			kcall = _kSincKernelCall;
+		}
 		_: {
-			r = r $ "return %^(" fmt(_interpKernel(ip));
+			kcall = "%^(" fmt(_interpKernel(ip));
 			var k = 0;
 			while (k < taps length) {
-				if (k > 0) { r = r $ ", "; }
-				r = r $ "_s%^" fmt(k);
+				if (k > 0) { kcall = kcall $ ", "; }
+				kcall = kcall $ "_s%^" fmt(k);
 				k = k + 1;
 			}
-			r = r $ ", _frac); ";
+			kcall = kcall $ ", _frac)";
 		}
+	}
+	if (zg && !uniform) {
+		r = r $ "%^ _r = %^; " fmt(vtype, kcall);
+		var jz = 0;
+		while (jz < w) {
+			let di = scalarOff ? "_di" : "_di%^" fmt(jz);
+			r = r $ "if (%^ < %^ + %^) _r[%^] = 0; " fmt(wrposs[jz], di, pre, jz);
+			jz = jz + 1;
+		}
+		r = r $ "return _r; ";
+	} else {
+		r = r $ "return " $ kcall $ "; ";
 	}
 	r $ "}()"
 }
@@ -918,7 +993,7 @@ fn _delayVarReadSimd(ctx Ctx, n NIdx, info DelayInfo, ip Interpolation, cel Stri
 	let mask = "%^d%^_mask" fmt(dp, ser);
 	-- scalar offset + 1-chan delay: every lane reads the same value, splat it.
 	if (scalarOff && dchans == 1) {
-		return _simdSplat(t, w, _delayVarGenRead(ip, "%^d%^" fmt(dp, ser), wrpos, mask, offExpr));
+		return _simdSplat(t, w, _delayVarGenRead(ip, "%^d%^" fmt(dp, ser), wrpos, mask, offExpr, _delayZeroGuarded(info)));
 	}
 	match (ip) {
 		none: {}
@@ -932,7 +1007,7 @@ fn _delayVarReadSimd(ctx Ctx, n NIdx, info DelayInfo, ip Interpolation, cel Stri
 				masks push!(mask);
 				jj = jj + 1;
 			}
-			return _genSimdInterp(t, w, ip, bufs, wrposs, masks, offExpr, scalarOff);
+			return _genSimdInterp(t, w, ip, bufs, wrposs, masks, offExpr, scalarOff, _delayZeroGuarded(info));
 		}
 	}
 	-- interpNone vector: a per-lane gather (off re-indexed per lane, no caching).
@@ -941,7 +1016,7 @@ fn _delayVarReadSimd(ctx Ctx, n NIdx, info DelayInfo, ip Interpolation, cel Stri
 	while (j < w) {
 		let ci = dchans == 1 ? "" : "[%^]" fmt(_simdLaneChanIdx(cel, j, dchans, lc));
 		let off = scalarOff ? offExpr : "(%^)[%^]" fmt(offExpr, j);
-		parts push!(_delayVarGenRead(Interpolation.none, "%^d%^%^" fmt(dp, ser, ci), wrpos, mask, off));
+		parts push!(_delayVarGenRead(Interpolation.none, "%^d%^%^" fmt(dp, ser, ci), wrpos, mask, off, _delayZeroGuarded(info)));
 		j = j + 1;
 	}
 	"%^{%^}" fmt(_simdType(t, w), parts join(", "))
@@ -975,7 +1050,7 @@ fn _voiceDelayVarReadSimd(ctx Ctx, n NIdx, info DelayInfo, ip Interpolation, cel
 				masks push!(info.allocSize > 1 ? "%^" fmt(info.allocSize - 1) : "p->voice_d%^_mask[%^]" fmt(ser, vi));
 				j = j + 1;
 			}
-			return _genSimdInterp(t, w, ip, bufs, wrposs, masks, offExpr, globalScalar);
+			return _genSimdInterp(t, w, ip, bufs, wrposs, masks, offExpr, globalScalar, _delayZeroGuarded(info));
 		}
 	}
 	-- interpNone vector: a per-lane gather (off re-indexed per lane unless global).
@@ -986,7 +1061,7 @@ fn _voiceDelayVarReadSimd(ctx Ctx, n NIdx, info DelayInfo, ip Interpolation, cel
 		let bi = _flatSimdBufIdx(cel, j, shift, dchans);
 		let mask = info.allocSize > 1 ? "%^" fmt(info.allocSize - 1) : "p->voice_d%^_mask[%^]" fmt(ser, vi);
 		let off = globalScalar ? offExpr : "(%^)[%^]" fmt(offExpr, j);
-		parts push!(_delayVarGenRead(Interpolation.none, "p->voice_d%^[%^]" fmt(ser, bi), "p->voice_d%^_wrpos[%^]" fmt(ser, vi), mask, off));
+		parts push!(_delayVarGenRead(Interpolation.none, "p->voice_d%^[%^]" fmt(ser, bi), "p->voice_d%^_wrpos[%^]" fmt(ser, vi), mask, off, _delayZeroGuarded(info)));
 		j = j + 1;
 	}
 	"%^{%^}" fmt(_simdType(t, w), parts join(", "))
@@ -997,26 +1072,16 @@ fn _voiceDelayVarReadSimd(ctx Ctx, n NIdx, info DelayInfo, ip Interpolation, cel
 -- (declared in tzpl_delay_interp.hpp). off is the delay-time signal expression.
 fn _delayVarReadExpr(ctx Ctx, n NIdx, d Int, ip Interpolation, cel String) String {
 	let info = ctx.delays[d];
+	let zg = _delayZeroGuarded(info);
 	if (ctx _isVoiceDelay(d)) {
 		if (`cgSimdW > 0) { return _voiceDelayVarReadSimd(ctx, n, info, ip, cel); }
 		let off = genExpr(ctx, ctx.ins[n][0], cel);
-		let buf = _vDelayBuf(ctx, info, cel);
-		let wrpos = _vDelayWrpos(info, cel);
-		let vmask = _vDelayMask(info, cel);
-		match (ip) {
-			none: return "%^[(%^ - u64(%^)) & %^]" fmt(buf, wrpos, off, vmask);
-			_:    return "tzpl_delay_%^(%^, %^, %^, %^)" fmt(ip toLispString, buf, wrpos, vmask, off);
-		}
+		return _delayVarGenRead(ip, _vDelayBuf(ctx, info, cel), _vDelayWrpos(info, cel), _vDelayMask(info, cel), off, zg);
 	}
 	if (`cgSimdW > 0) { return _delayVarReadSimd(ctx, n, info, ip, cel); }
 	let off = genExpr(ctx, ctx.ins[n][0], cel);
 	let di = _delayDIndex(ctx, d, n, cel);
-	let mask = _delayMask(info);
-	match (ip) {
-		none: "%^d%^%^[(%^d%^_wrpos - u64(%^)) & %^]" fmt(_dpre(), info.serial, di, _dpre(), info.serial, off, mask);
-		_:    "tzpl_delay_%^(%^d%^%^, %^d%^_wrpos, %^, %^)"
-			fmt(ip toLispString, _dpre(), info.serial, di, _dpre(), info.serial, mask, off);
-	}
+	_delayVarGenRead(ip, "%^d%^%^" fmt(_dpre(), info.serial, di), "%^d%^_wrpos" fmt(_dpre(), info.serial), _delayMask(info), off, zg)
 }
 
 -- Per-voice delay write in flat-voice SIMD (M5.3). Mirrors the flat-voice
@@ -2839,11 +2904,15 @@ fn genVoicerNoteFuns(ctx Ctx, name String) String {
 						s = s $ "\tfor (int c = 0; c < %^; ++c) p->voice_state[vi].d%^[c] = 0;\n" fmt(d.chans, d.serial);
 					}
 				} else if (d.allocSize > 1) {
+					-- Zero-guarded rings (no init values) need no clearing
+					-- (see the flat-mode branch).
 					let ty = cppType(d.typ);
-					if (d.chans == 1) {
-						s = s $ "\tmemset(p->voice_state[vi].d%^, 0, %^ * sizeof(%^));\n" fmt(d.serial, d.allocSize, ty);
-					} else {
-						s = s $ "\tfor (int c = 0; c < %^; ++c) memset(p->voice_state[vi].d%^[c], 0, %^ * sizeof(%^));\n" fmt(d.chans, d.serial, d.allocSize, ty);
+					if (d.initters length > 0) {
+						if (d.chans == 1) {
+							s = s $ "\tmemset(p->voice_state[vi].d%^, 0, %^ * sizeof(%^));\n" fmt(d.serial, d.allocSize, ty);
+						} else {
+							s = s $ "\tfor (int c = 0; c < %^; ++c) memset(p->voice_state[vi].d%^[c], 0, %^ * sizeof(%^));\n" fmt(d.chans, d.serial, d.allocSize, ty);
+						}
 					}
 					for (ci : constInits) {
 						let in0 = ci.0;
@@ -2940,11 +3009,16 @@ fn genVoicerNoteFuns(ctx Ctx, name String) String {
 					s = s $ "\tp->voice_d%^[vi] = 0;\n" fmt(d.serial);
 				}
 			} else if (d.allocSize > 1) {
+				-- Zero-guarded rings (no init values) need no clearing: the
+				-- wrpos reset above plus the read guard silences the old
+				-- contents. Init-carrying rings keep the clear + restore.
 				let ty = cppType(d.typ);
-				if (d.chans > 1) {
-					s = s $ "\tfor (int c = 0; c < %^; ++c) memset(p->voice_d%^[vi * %^ + c], 0, %^ * sizeof(%^));\n" fmt(d.chans, d.serial, d.chans, d.allocSize, ty);
-				} else {
-					s = s $ "\tmemset(p->voice_d%^[vi], 0, %^ * sizeof(%^));\n" fmt(d.serial, d.allocSize, ty);
+				if (d.initters length > 0) {
+					if (d.chans > 1) {
+						s = s $ "\tfor (int c = 0; c < %^; ++c) memset(p->voice_d%^[vi * %^ + c], 0, %^ * sizeof(%^));\n" fmt(d.chans, d.serial, d.chans, d.allocSize, ty);
+					} else {
+						s = s $ "\tmemset(p->voice_d%^[vi], 0, %^ * sizeof(%^));\n" fmt(d.serial, d.allocSize, ty);
+					}
 				}
 				for (ci : constInits) {
 					let in0 = ci.0;

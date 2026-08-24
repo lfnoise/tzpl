@@ -211,6 +211,53 @@ inline T tzpl_delay_sinc(T const* buf, uint64_t wrpos, uint64_t mask, T delay) {
 }
 
 // ===========================================================================
+// Guarded ("zero-history") variants: reading further back than has been
+// written since the ring's write head was reset returns silence instead of
+// whatever the buffer holds. The codegen emits these for delay lines with no
+// declared init values, so a note-on (or engine reset) only has to zero the
+// write head -- the ring contents never need clearing, and a reused voice
+// cannot bleed the previous note's tail. The guard covers the OLDEST tap the
+// kernel touches (delay + kernel pre-extent).
+// ===========================================================================
+
+// Two-type: the interp-none codegen passes the delay-time expression through
+// u64() only, so its type need not match the buffer's element type.
+template<typename T, typename D>
+inline T tzpl_delay_none_z(T const* buf, uint64_t wrpos, uint64_t mask, D delay) {
+    uint64_t di = uint64_t(delay);
+    if (wrpos < di) return T(0);
+    return buf[(wrpos - di) & mask];
+}
+
+template<typename T>
+inline T tzpl_delay_linear_z(T const* buf, uint64_t wrpos, uint64_t mask, T delay) {
+    uint64_t di = uint64_t(delay);
+    if (wrpos < di + 1) return T(0);
+    return tzpl_delay_linear(buf, wrpos, mask, delay);
+}
+
+template<typename T>
+inline T tzpl_delay_cubic_z(T const* buf, uint64_t wrpos, uint64_t mask, T delay) {
+    uint64_t di = uint64_t(delay);
+    if (wrpos < di + 2) return T(0);
+    return tzpl_delay_cubic(buf, wrpos, mask, delay);
+}
+
+template<typename T>
+inline T tzpl_delay_lagrange_z(T const* buf, uint64_t wrpos, uint64_t mask, T delay) {
+    uint64_t di = uint64_t(delay);
+    if (wrpos < di + 4) return T(0);
+    return tzpl_delay_lagrange(buf, wrpos, mask, delay);
+}
+
+template<typename T>
+inline T tzpl_delay_sinc_z(T const* buf, uint64_t wrpos, uint64_t mask, T delay) {
+    uint64_t di = uint64_t(delay);
+    if (wrpos < di + 4) return T(0);
+    return tzpl_delay_sinc(buf, wrpos, mask, delay);
+}
+
+// ===========================================================================
 // Sample buffer read functions -- gather from flat buffer + kernel.
 // Like tzpl_delay_*, but the index goes forward and wraps at the buffer's
 // ACTUAL length: sample buffers, unlike delay ring buffers, are not required
