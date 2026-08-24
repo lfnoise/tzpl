@@ -57,14 +57,18 @@ public:
 
     // Notebook cells size this editor to its content, so internal vertical
     // scrolling only hides lines: pass vertical wheel events through to the
-    // outer viewport instead. Horizontal wheel still pans long lines.
+    // outer viewport instead.
     void setFitToContent(bool fit) { fitToContent_ = fit; }
     void mouseWheelMove(juce::MouseEvent const& e,
                         juce::MouseWheelDetails const& wheel) override {
-        if (fitToContent_ && std::abs(wheel.deltaY) >= std::abs(wheel.deltaX))
-            juce::Component::mouseWheelMove(e, wheel);
+        // Trackpad gestures drift sideways too easily while scrolling
+        // vertically; only the horizontal scroll bar pans left/right.
+        auto vertical = wheel;
+        vertical.deltaX = 0.0f;
+        if (fitToContent_)
+            juce::Component::mouseWheelMove(e, vertical);
         else
-            juce::CodeEditorComponent::mouseWheelMove(e, wheel);
+            juce::CodeEditorComponent::mouseWheelMove(e, vertical);
     }
 
 private:

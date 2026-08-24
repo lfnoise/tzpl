@@ -14,6 +14,7 @@
 #include "TextEditor.h"
 
 #include "imgui.h"
+#include "imgui_internal.h"  // SetKeyOwner: horizontal wheel suppression
 
 // TODO
 // - multiline comments vs single-line: latter is blocking start of a ML
@@ -1363,7 +1364,16 @@ void TextEditor::Render(const char* aTitle, const ImVec2& aSize, bool aBorder)
 	ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::ColorConvertU32ToFloat4(mPalette[(int)PaletteIndex::Background]));
 	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
 	if (!mIgnoreImGuiChild)
+	{
 		ImGui::BeginChild(aTitle, aSize, aBorder, ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_AlwaysHorizontalScrollbar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoNav);
+
+		// Trackpad gestures drift sideways too easily while scrolling
+		// vertically: claim the horizontal wheel axis while hovered so
+		// ImGui's window scrolling skips it. Only the horizontal scroll
+		// bar pans left/right. io.MouseWheelH itself stays readable.
+		if (ImGui::IsWindowHovered())
+			ImGui::SetKeyOwner(ImGuiKey_MouseWheelX, ImGui::GetCurrentWindowRead()->ID);
+	}
 
 	if (mHandleKeyboardInputs)
 	{
