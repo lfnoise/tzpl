@@ -1068,8 +1068,14 @@ struct ExprCodegenVisitor : ExprVisitor {
         s += simdWiden(g.inSimdMode, p->type, p->in0()->type, e);
     }
     void visit(BinaryOpExpr* p) override {
-        auto e = genBinopExprString(p->op, p->type, g.genExpr(p->in0(), cel), g.genExpr(p->in1(), cel), g.inSimdMode);
-        s += simdWiden(g.inSimdMode, p->type, commonNumType(p->in0()->type, p->in1()->type), e);
+        // Operands may compute at different types (e.g. a rewriter-made f32
+        // constant against an f64 signal). Scalar C promotes implicitly; SIMD
+        // vector ops don't, so widen each operand to the common type.
+        NumType ct = commonNumType(p->in0()->type, p->in1()->type);
+        auto a = simdWiden(g.inSimdMode, ct, p->in0()->type, g.genExpr(p->in0(), cel));
+        auto b = simdWiden(g.inSimdMode, ct, p->in1()->type, g.genExpr(p->in1(), cel));
+        auto e = genBinopExprString(p->op, p->type, a, b, g.inSimdMode);
+        s += simdWiden(g.inSimdMode, p->type, ct, e);
     }
     void visit(CompareOpExpr* p) override {
         s += FMT("({} {} {})", g.genExpr(p->in0(), cel), to_string(p->op), g.genExpr(p->in1(), cel));
@@ -2502,7 +2508,17 @@ struct GenLoopExprVisitor : ExprVisitor {
         if (g.isVoiceLocalStorage(x)) return FMT("{} + i * {}", name, x->chans);
         return name;
     }
+    // A scalar (1-chan) put/join operand outside any voice context: scalar
+    // constants are inlined everywhere and have no declared storage (no
+    // p->cN), so reference them by literal; anything else is a declared value.
+    string scalarRef(S x) {
+        if (x->is_scalar_constant()) return x->str();
+        return g.genVarName(x);
+    }
+
     string voiceElem(S x) {
+        // A scalar constant has no declared storage; reference its literal.
+        if (x->is_scalar_constant()) return x->str();
         string name = g.genVarName(x);
         if (x->chans == 1) {
             if (g.isVoiceLocalStorage(x)) return FMT("{}[i]", name);
@@ -2538,9 +2554,9 @@ struct GenLoopExprVisitor : ExprVisitor {
             p->in0()->chans, p->type.str());
         tabIndent(s, g.indent);
         string idx = p->in1()->chans == 1
-            ? g.genVarName(p->in1()) : g.genVarName(p->in1()) + "[_j]";
+            ? scalarRef(p->in1()) : g.genVarName(p->in1()) + "[_j]";
         string val = p->in2()->chans == 1
-            ? g.genVarName(p->in2()) : g.genVarName(p->in2()) + "[_j]";
+            ? scalarRef(p->in2()) : g.genVarName(p->in2()) + "[_j]";
         s += FMT("for (usize _j = 0; _j < {}; ++_j) {{\n", putCount);
         tabIndent(s, g.indent + 1);
         s += FMT("{0}[synthdef::mod(isize({1}), isize({2}))] = {3};\n",
@@ -2562,10 +2578,8 @@ struct GenLoopExprVisitor : ExprVisitor {
             for (S in : p->inputs) {
                 tabIndent(s, g.indent);
                 if (in->chans == 1) {
-                    string ref = g.isVoiceLocalStorage(in)
-                        ? FMT("{}[i]", g.genVarName(in)) : g.genVarName(in);
                     s += FMT("{0}[i * {1} + {2}] = {3};\n",
-                        g.genVarName(p), outChans, offset, ref);
+                        g.genVarName(p), outChans, offset, voiceElem(in));
                 } else {
                     s += FMT("memcpy({0} + i * {1} + {2}, {3}, {4} * sizeof({5}));\n",
                         g.genVarName(p), outChans, offset, voiceArr(in),
@@ -2586,7 +2600,7 @@ struct GenLoopExprVisitor : ExprVisitor {
             tabIndent(s, g.indent);
             if (in->chans == 1) {
                 s += FMT("{0}[{1}] = {2};\n",
-                    g.genVarName(p), offset, g.genVarName(in));
+                    g.genVarName(p), offset, scalarRef(in));
             } else {
                 s += FMT("memcpy({0} + {1}, {2}, {3} * sizeof({4}));\n",
                     g.genVarName(p), offset, g.genVarName(in),

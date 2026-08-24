@@ -446,8 +446,16 @@ fn _inlineExpr(ctx Ctx, n NIdx, cel String) String {
 		}
 		unopK(op):      _simdWiden(ctx.typ[n], ctx.typ[ins[0]],
 		                    genUnopStr(op, ctx.typ[n] _isF32, genExpr(ctx, ins[0], cel), `cgSimdW > 0));
-		binopK(op):     _simdWiden(ctx.typ[n], commonType(ctx.typ[ins[0]], ctx.typ[ins[1]]),
-		                    genBinopStr(op, ctx.typ[n] _isF32, genExpr(ctx, ins[0], cel), genExpr(ctx, ins[1], cel), `cgSimdW > 0));
+		-- Operands may compute at different types (e.g. a rewriter-made f32
+		-- constant against an f64 signal). Scalar C promotes implicitly; SIMD
+		-- vector ops don't, so widen each operand to the common type.
+		binopK(op):     {
+			let ct = commonType(ctx.typ[ins[0]], ctx.typ[ins[1]]);
+			_simdWiden(ctx.typ[n], ct,
+			    genBinopStr(op, ctx.typ[n] _isF32,
+			        _simdWiden(ct, ctx.typ[ins[0]], genExpr(ctx, ins[0], cel)),
+			        _simdWiden(ct, ctx.typ[ins[1]], genExpr(ctx, ins[1], cel)), `cgSimdW > 0))
+		}
 		compareopK(op): genCompareStr(op, genExpr(ctx, ins[0], cel), genExpr(ctx, ins[1], cel));
 		castopK(ct):    (`cgSimdW > 0)
 			? "convert<%^>(%^)" fmt(cppType(ct), genExpr(ctx, ins[0], cel))
@@ -561,7 +569,25 @@ fn _voiceArr(ctx Ctx, n NIdx) String =
 	ctx _isVoiceLocalStorage(n)
 		? "%^ + i * %^" fmt(_varName(ctx, n), ctx.chans[n])
 		: _varName(ctx, n);
+
+-- A scalar constant is inlined everywhere and has no declared storage (no
+-- p->cN); reference it by its literal (mirrors the C++ is_scalar_constant
+-- checks in scalarRef/voiceElem).
+fn _scalarConstLit(ctx Ctx, n NIdx) String = match (ctx.kind[n]) {
+	constant(v, _): (v constSize == 1) ? constStr(v, ctx.typ[n]) : "";
+	_: "";
+};
+
+-- A scalar (1-chan) put/join operand outside any voice context: a scalar
+-- constant emits its literal; anything else is a declared value.
+fn _scalarRef(ctx Ctx, n NIdx) String {
+	let lit = ctx _scalarConstLit(n);
+	lit length > 0 ? lit : _varName(ctx, n)
+}
+
 fn _voiceElem(ctx Ctx, n NIdx) String {
+	let lit = ctx _scalarConstLit(n);
+	if (lit length > 0) { return lit; }
 	if (ctx.chans[n] == 1) {
 		return ctx _isVoiceLocalStorage(n) ? "%^[i]" fmt(_varName(ctx, n)) : _varName(ctx, n);
 	}
@@ -590,8 +616,8 @@ fn _genVecPut(ctx Ctx, root NIdx) String {
 	}
 	-- Scalar index / value inputs (chans == 1) are declared as values, not
 	-- arrays, so they are referenced without the per-put subscript.
-	let iref = ctx.chans[i] == 1 ? _varName(ctx, i) : _varName(ctx, i) $ "[_j]";
-	let vref = ctx.chans[v] == 1 ? _varName(ctx, v) : _varName(ctx, v) $ "[_j]";
+	let iref = ctx.chans[i] == 1 ? ctx _scalarRef(i) : _varName(ctx, i) $ "[_j]";
+	let vref = ctx.chans[v] == 1 ? ctx _scalarRef(v) : _varName(ctx, v) $ "[_j]";
 	var parts [String] = [];
 	parts push!(t $ "memcpy(%^, %^, %^ * sizeof(%^));" fmt(outv, _varName(ctx, a), aChans, ty));
 	parts push!(t $ "for (usize _j = 0; _j < %^; ++_j) {" fmt(putCount));
@@ -617,8 +643,7 @@ fn _genVecJoin(ctx Ctx, root NIdx) String {
 		for (x : ins) {
 			let xc = ctx.chans[x];
 			if (xc == 1) {
-				let ref = ctx _isVoiceLocalStorage(x) ? "%^[i]" fmt(_varName(ctx, x)) : _varName(ctx, x);
-				parts push!(t $ "%^[i * %^ + %^] = %^;" fmt(outv, outChans, offset, ref));
+				parts push!(t $ "%^[i * %^ + %^] = %^;" fmt(outv, outChans, offset, ctx _voiceElem(x)));
 			} else {
 				parts push!(t $ "memcpy(%^ + i * %^ + %^, %^, %^ * sizeof(%^));" fmt(outv, outChans, offset, ctx _voiceArr(x), xc, ty));
 			}
@@ -632,7 +657,7 @@ fn _genVecJoin(ctx Ctx, root NIdx) String {
 	for (x : ins) {
 		let xc = ctx.chans[x];
 		if (xc == 1) {
-			parts push!(t $ "%^[%^] = %^;" fmt(outv, offset, _varName(ctx, x)));
+			parts push!(t $ "%^[%^] = %^;" fmt(outv, offset, ctx _scalarRef(x)));
 		} else {
 			parts push!(t $ "memcpy(%^ + %^, %^, %^ * sizeof(%^));" fmt(outv, offset, _varName(ctx, x), xc, ty));
 		}
