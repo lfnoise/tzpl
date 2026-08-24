@@ -429,9 +429,17 @@ tzpl_SErr Silo::removeNode(Node* node) {
 
     clearTapsForNode(node);
     disconnectNode(node);
-    
-    //sortedListRemove(node);
-    
+
+    // Unlink from the RT sorted list eagerly. The next sortNodes() would drop
+    // it anyway, but when the engine is stopped commands run synchronously and
+    // both stages complete inline -- the node is deleted before any re-sort
+    // could happen, and sortNodes() itself walks the old list to clear links.
+    // Leaving the node linked makes the sorted list dangle for every later
+    // synchronous command (e.g. the panic AllNotesOffAllCmd) and for the
+    // clearing walk on audio restart.
+    sortedListRemove(node);
+
+
     if (node->nodeID >= 0) {
         // remove node from rt_nodeTable_
         int bin = node->nodeID & kHashMask;
@@ -466,6 +474,25 @@ Node* Silo::removeAllNodes() {
     outputNode_->rt_list.prev = nullptr;
     outputNode_->rt_list.next = nullptr;
     return outNodes;
+}
+
+// Unlink a node from the RT sorted list without triggering a full re-sort.
+// The list is singly linked, so this is an O(n) walk -- fine for removal,
+// which is already O(ports) and never happens per-sample. A node that was
+// added but never sorted in simply isn't found; that's a no-op.
+void Silo::sortedListRemove(Node* node) {
+    if (rt_sortedNodeList_ == node) {
+        rt_sortedNodeList_ = node->sorted_next;
+        node->sorted_next = nullptr;
+        return;
+    }
+    for (Node* n = rt_sortedNodeList_; n; n = n->sorted_next) {
+        if (n->sorted_next == node) {
+            n->sorted_next = node->sorted_next;
+            node->sorted_next = nullptr;
+            return;
+        }
+    }
 }
 
 void Silo::sortNodes() {

@@ -186,6 +186,7 @@ struct Silo
     
     void sortVisitNode(Node* node, Node*& lastSorted);
     void sortNodes();
+    void sortedListRemove(Node* node);
     
     void setInput(InPort* dst, int numValues, void* values);
 
