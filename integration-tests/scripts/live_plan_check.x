@@ -152,6 +152,28 @@ assertEq(stopOps(1000013, 1.0) opsToString,
 assertEq(silenceOps(1000007, 1000001, 1.0) opsToString,
     "disconnectSourceX(1000007, 0, 1000001, 0, 1.0)\n", "silence op");
 
+-- reshape: new anchor first, source feeds it, each dependent and the
+-- monitor crossfade over (connect strictly before disconnect throughout)
+let rs = reshapeOps("_pxA4", 1000020, 1000001, 1000007,
+                    [(1000011, 1)], "_pxM4", 1000021, 1000013, 0.8, 1.0);
+assertEq(rs opsToString,
+    "newNode(_pxA4, 1000020)\n" $
+    "connect(1000007, 0, 1000020, 0)\n" $
+    "connectX(1000020, 0, 1000011, 1, 1.0)\n" $
+    "disconnectSourceX(1000001, 0, 1000011, 1, 1.0)\n" $
+    "newNode(_pxM4, 1000021)\n" $
+    "setInput(1000021, 1, 0.8)\n" $
+    "connect(1000020, 0, 1000021, 0)\n" $
+    "connectX(1000021, 0, 0, 0, 1.0)\n" $
+    "disconnectSourceX(1000013, 0, 0, 0, 1.0)\n",
+    "reshape op order");
+
+-- silent, unplayed proxy: only the anchor swap and source rewire
+let rs2 = reshapeOps("_pxA4", 1000020, 1000001, 0,
+                     [(Int, Int)](), "", 0, 0, 1.0, 1.0);
+assertEq(rs2 opsToString, "newNode(_pxA4, 1000020)\n",
+    "reshape of an empty proxy is just the new anchor");
+
 ---------------------------------------------------------------------------
 
 if (testSummary() == 0) { "LIVE PLAN ALL PASS" println; }

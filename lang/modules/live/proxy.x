@@ -59,6 +59,9 @@ struct ProxyState {
     noteNames [Symbol],         -- noteParam names (sans gate), declaration order
     noteDefaults [Float],       -- noteParam spec.init values
     fadeTime Float,             -- per-proxy override; < 0 = use silo default
+    vol Float,                  -- last monitor volume (survives reshape)
+    reads [(Int, Int)],         -- (referenced proxy serial, own inlet port)
+    tap Int,                    -- meter tap id, 0 = no meter
 }
 
 struct Proxy {
@@ -161,6 +164,7 @@ fn ndef(chans Int = 2, silo Int = 0) Proxy {
         playing: false, building: false, pending: [GraphFn](),
         params: params, ctlNames: [String](), noteNames: [Symbol](),
         noteDefaults: [Float](), fadeTime: -1.0,
+        vol: 1.0, reads: [(Int, Int)](), tap: 0,
     };
     let p = Proxy { silo: silo, serial: _takeSerial(), state: st };
     _registry push!(p);
@@ -172,6 +176,43 @@ fn ndef(f GraphFn, chans Int = 2, silo Int = 0) Proxy {
     let p = ndef(chans, silo);
     define(p, f);
     p
+}
+
+---------------------------------------------------------------------------
+-- Symbol-keyed proxies: opt-in idempotent upsert.
+--
+-- ndef('drone, f) looks the name up first: re-running the same cell finds
+-- the existing proxy and crossfades it (JITLib-style) instead of minting a
+-- new one, so whole-cell re-runs are safe. Anonymous ndef() stays available
+-- for throwaway proxies. free()/clearAll() release the name.
+
+var _named [Symbol: Proxy] = [:];
+
+fn ndef(name Symbol, chans Int = 2, silo Int = 0) Proxy {
+    match (_named[name]) {
+        some(p): return p;
+        none: 0;
+    }
+    let p = ndef(chans, silo);
+    _named[name] = p;
+    p
+}
+
+fn ndef(name Symbol, f GraphFn, chans Int = 2, silo Int = 0) Proxy {
+    let p = ndef(name, chans, silo);
+    define(p, f);
+    p
+}
+
+fn _forgetName(p Proxy) Void {
+    var stale = [Symbol]();
+    for (k : _named keys) {
+        match (_named[k]) {
+            some(q): if (q.serial == p.serial) { stale push!(k); }
+            none: 0;
+        }
+    }
+    for (k : stale) { _named remove!(k); }
 }
 
 ---------------------------------------------------------------------------
@@ -208,7 +249,14 @@ fn <-(p Proxy, ps [String: Float]) Void {
 -- ok("queued").
 fn define(p Proxy, f GraphFn) Future<Result<String, String>> = _defineAsync(p, f);
 
+fn _isRegistered(p Proxy) Bool {
+    for (q : _registry) { if (q.serial == p.serial) { return true; } }
+    false
+}
+
 async fn _defineAsync(p Proxy, f GraphFn) Result<String, String> {
+    -- a freed handle being deliberately redefined re-enters the registry
+    if (!(p _isRegistered)) { _registry push!(p); }
     if ((*p.state).building) {
         let s = *p.state;
         while (s.pending length > 0) { s.pending pop!; }
@@ -254,6 +302,12 @@ async fn _buildAndSwap(p Proxy, f GraphFn) Result<String, String> {
         ok(cpp): 0;
     }
 
+    -- the proxy was freed while the compile ran: the def loaded harmlessly,
+    -- but no nodes should be built for it
+    if (!(p _isRegistered)) {
+        return Result<String, String>.ok("abandoned (proxy was freed)");
+    }
+
     -- Anchors: this proxy's own, then every referenced proxy's.
     if (!(_ensureAnchor(p) await)) {
         return Result<String, String>.err("anchor creation failed");
@@ -280,11 +334,14 @@ async fn _buildAndSwap(p Proxy, f GraphFn) Result<String, String> {
         }
     }
 
-    -- Reference wiring: (referenced proxy's anchor, port on the new source).
+    -- Reference wiring: (referenced proxy's anchor, port on the new source),
+    -- plus the durable (serial, port) record reshape uses to find dependents.
     var wires = [(Int, Int)]();
+    var reads = [(Int, Int)]();
     for (rp2 : refPorts) {
         let target = refs[rp2.1];
         wires push!(((*target.state).anchor, rp2.0));
+        reads push!((target.serial, rp2.0));
     }
 
     let old = (*p.state).src;
@@ -297,7 +354,8 @@ async fn _buildAndSwap(p Proxy, f GraphFn) Result<String, String> {
         return Result<String, String>.err("swap bundle rejected, engine error " $ e toString);
     }
     p.state <- ProxyState { ...(*p.state), src: newID, ctlNames: ctls,
-                            noteNames: noteNames, noteDefaults: noteDefaults };
+                            noteNames: noteNames, noteDefaults: noteDefaults,
+                            reads: reads };
     if (old != 0) {
         _freeLater(p.silo, old, fade + 0.25 + _quantDelaySecs(d));
     }
@@ -333,7 +391,8 @@ async fn _playAsync(p Proxy, vol Float) Int {
                      PxOp.opConnectX(mon, 0, 0, 0, _fade(p))], p.silo, d);
     }
     if (e == 0) {
-        p.state <- ProxyState { ...(*p.state), monitor: mon, playing: true };
+        p.state <- ProxyState { ...(*p.state), monitor: mon, playing: true,
+                                vol: vol };
     } else {
         println("live: play failed, engine error " $ e toString);
     }
@@ -353,6 +412,7 @@ fn stop(p Proxy) Void {
 -- Monitor volume, ramped over `fade` seconds.
 fn amp(p Proxy, v Float, fade Float = 0.05) Void {
     let s = *p.state;
+    p.state <- ProxyState { ...s, vol: v };
     if (s.monitor == 0) { return; }
     bundle() setInputX(s.monitor, 1, v, fade, _curve(p)) go(p.silo);
 }
@@ -370,6 +430,120 @@ fn set(p Proxy, name String, value Float) Void {
     if (s.src != 0 && s.ctlNames contains(name)) {
         bundle() setControl(s.src, name, value) go(p.silo);
     }
+}
+
+---------------------------------------------------------------------------
+-- Reshaping
+
+-- Change the proxy's channel count in place. A new anchor at the new width
+-- takes over: the source feeds it, and every dependent wire and the monitor
+-- crossfade from the old anchor to the new one (both carry the same signal
+-- during the fade). Dependents' own definitions keep their old reference
+-- width until their next redefine; the engine adapts the mismatch
+-- (power-of-two wrap/fold) in the meantime.
+fn reshape(p Proxy, chans Int) Future<Int> = _reshapeAsync(p, chans);
+
+async fn _reshapeAsync(p Proxy, chans Int) Int {
+    let newChans = chans asChans;
+    let s = *p.state;
+    if (newChans == s.chans) { return 0; }
+    if (s.anchor == 0) {
+        -- nothing built yet: just adopt the new width
+        p.state <- ProxyState { ...(*p.state), chans: newChans };
+        return 0;
+    }
+    if (!(_ensureAnchorDef(newChans) await)) { return -1; }
+    var monDef = "";
+    var newMon = 0;
+    if (s.playing && s.monitor != 0) {
+        if (!(_ensureMonDef(newChans) await)) { return -1; }
+        monDef = monitorDefName(newChans);
+        newMon = _takeNodeID();
+    }
+
+    -- every live wire currently fed by the old anchor outlet
+    var depWires = [(Int, Int)]();
+    for (q : _registry) {
+        let qs = *q.state;
+        if (q.silo == p.silo && qs.src != 0) {
+            for (r : qs.reads) {
+                if (r.0 == p.serial) { depWires push!((qs.src, r.1)); }
+            }
+        }
+    }
+
+    let cur = *p.state;                 -- re-read after the awaits
+    let newAnchor = _takeNodeID();
+    let fade = _fade(p);
+    let d = *_siloDefaults(p.silo);
+    let e = _runOps(reshapeOps(anchorDefName(newChans), newAnchor, cur.anchor,
+                               cur.src, depWires, monDef, newMon, cur.monitor,
+                               cur.vol, fade), p.silo, d);
+    if (e != 0) {
+        println("live: reshape failed, engine error " $ e toString);
+        return e;
+    }
+    -- a stopped monitor is kept for instant replay; point it at the new
+    -- anchor (it is silent, so this rewire is inaudible)
+    if (!cur.playing && cur.monitor != 0) {
+        bundle() connect(newAnchor, 0, cur.monitor, 0) go(p.silo);
+    }
+    let margin = fade + 0.25 + _quantDelaySecs(d);
+    _freeLater(p.silo, cur.anchor, margin);
+    if (newMon != 0 && cur.monitor != 0) { _freeLater(p.silo, cur.monitor, margin); }
+    p.state <- ProxyState { ...(*p.state), chans: newChans, anchor: newAnchor,
+                            monitor: newMon != 0 ? newMon : cur.monitor };
+    -- move the meter to the new anchor
+    if (cur.tap != 0) {
+        begin(); untap(cur.tap); go(p.silo);
+        let tid = allocTapID();
+        begin(); tapOutlet(newAnchor, 0, tid, TapMode.tapMeter ordinal); go(p.silo);
+        p.state <- ProxyState { ...(*p.state), tap: tid };
+    }
+    0
+}
+
+---------------------------------------------------------------------------
+-- Meters
+--
+-- A meter taps the anchor outlet, so it reads what dependents and the
+-- monitor receive (pre-volume). Peak/rms report signal only while the
+-- proxy is reachable from Audio Out (played, or read by a played proxy) --
+-- an unreachable proxy does not run at all.
+
+fn meter(p Proxy) Future<Int> = _meterAsync(p);
+
+async fn _meterAsync(p Proxy) Int {
+    let s = *p.state;
+    if (s.tap != 0) { return s.tap; }
+    if (!(_ensureAnchor(p) await)) { return 0; }
+    let tid = allocTapID();
+    begin();
+    tapOutlet((*p.state).anchor, 0, tid, TapMode.tapMeter ordinal);
+    let e = go(p.silo);
+    if (e != 0) {
+        println("live: meter failed, engine error " $ e toString);
+        return 0;
+    }
+    p.state <- ProxyState { ...(*p.state), tap: tid };
+    tid
+}
+
+fn peak(p Proxy) Float {
+    let t = (*p.state).tap;
+    t == 0 ? 0.0 : tapPeak(t)
+}
+
+fn rms(p Proxy) Float {
+    let t = (*p.state).tap;
+    t == 0 ? 0.0 : tapRms(t)
+}
+
+fn unmeter(p Proxy) Void {
+    let t = (*p.state).tap;
+    if (t == 0) { return; }
+    begin(); untap(t); go(p.silo);
+    p.state <- ProxyState { ...(*p.state), tap: 0 };
 }
 
 ---------------------------------------------------------------------------
@@ -394,6 +568,9 @@ fn free(p Proxy) Void {
     let s = *p.state;
     let d = *_siloDefaults(p.silo);
     let fade = _fade(p);
+    if (s.tap != 0) {
+        begin(); untap(s.tap); go(p.silo);
+    }
     if (s.playing && s.monitor != 0) {
         _runOps(stopOps(s.monitor, fade), p.silo, d);
     }
@@ -405,8 +582,9 @@ fn free(p Proxy) Void {
     if (s.monitor != 0) { _freeLater(p.silo, s.monitor, margin); }
     if (s.anchor != 0) { _freeLater(p.silo, s.anchor, margin); }
     p.state <- ProxyState { ...(*p.state), src: 0, monitor: 0, anchor: 0,
-                            playing: false };
+                            playing: false, tap: 0 };
     _unregister(p);
+    _forgetName(p);
 }
 
 -- Free every registered proxy in the silo -- the recovery for orphaned

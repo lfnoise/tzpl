@@ -37,7 +37,7 @@ run_stage "live NRT render" live_nrt_compare.x "LIVE NRT PASS"
 # backward -- see EqPowFade in engine/src/tzpl_xfader.cpp -- which turned
 # every proxy crossfade into a pair of clicks).
 if command -v python3 >/dev/null; then
-    "$APP" --nogui --nrt /tmp/live_click.wav --duration 6 "${MODS[@]}" \
+    "$APP" --nogui --nrt /tmp/live_click.wav --duration 8 "${MODS[@]}" \
         "$SCRIPTS/live_click_probe.x" >/dev/null 2>&1
     CLICKS="$(python3 "$ROOT/integration-tests/click_scan.py" /tmp/live_click.wav)"
     echo "$CLICKS" | tail -2

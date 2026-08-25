@@ -240,6 +240,39 @@ fn stopOps(monID Int, fade Float) [PxOp] =
 fn silenceOps(src Int, anchor Int, fade Float) [PxOp] =
     [PxOp.opDisconnectSourceX(src, 0, anchor, 0, fade)];
 
+-- Change a proxy's channel count: stand up a NEW anchor at the new width
+-- and crossfade every consumer over to it. reconnectOutput cannot be used
+-- here (it requires exact channel match), so each dependent wire and the
+-- monitor migrate individually: connect the new path, then fade the old one
+-- out -- both anchors carry the same source during the fade. The caller
+-- frees the old anchor/monitor after the fade.
+--   src:      current source node (0 = silent proxy)
+--   depWires: (dependent source node, its inlet port) currently fed by the
+--             old anchor outlet
+--   monDef/newMon: 0-name/"" skipped when the proxy is not playing
+fn reshapeOps(anchorDef String, newAnchor Int, oldAnchor Int, src Int,
+              depWires [(Int, Int)],
+              monDef String, newMon Int, oldMon Int, vol Float,
+              fade Float) [PxOp] {
+    var ops = [PxOp]();
+    ops push!(PxOp.opNewNode(anchorDef, newAnchor));
+    if (src != 0) {
+        ops push!(PxOp.opConnect(src, 0, newAnchor, 0));
+    }
+    for (w : depWires) {
+        ops push!(PxOp.opConnectX(newAnchor, 0, w.0, w.1, fade));
+        ops push!(PxOp.opDisconnectSourceX(oldAnchor, 0, w.0, w.1, fade));
+    }
+    if (newMon != 0) {
+        ops push!(PxOp.opNewNode(monDef, newMon));
+        ops push!(PxOp.opSetInput(newMon, 1, vol));
+        ops push!(PxOp.opConnect(newAnchor, 0, newMon, 0));
+        ops push!(PxOp.opConnectX(newMon, 0, 0, 0, fade));
+        ops push!(PxOp.opDisconnectSourceX(oldMon, 0, 0, 0, fade));
+    }
+    ops
+}
+
 ---------------------------------------------------------------------------
 -- Printing (for tests and dump())
 

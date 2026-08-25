@@ -405,6 +405,7 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
         <li><a href="#live-params">Parameters</a></li>
         <li><a href="#live-notes">Notes into proxies</a></li>
         <li><a href="#live-housekeeping">Housekeeping</a></li>
+        <li><a href="#live-extras">Meters, reshaping, named proxies</a></li>
       </ol>
     </li>
     <li><a href="#appendix">Appendix</a>
@@ -1798,6 +1799,35 @@ engineStop();</code></pre>
 <p>Proxies work unchanged inside an offline render &mdash; the same session code
 writes a WAV under <code>renderNRT</code> (see
 <a href="#render">chapter 9</a>).</p>
+
+<h3 id="live-extras">12.6 Meters, reshaping, named proxies</h3>
+<p><code>meter(p)</code> installs a level tap on the proxy's output &mdash; what
+dependents and the listener receive, before <code>amp</code> &mdash; and
+<code>peak(p)</code>/<code>rms(p)</code> read it from anywhere;
+<code>unmeter(p)</code> removes it. A proxy that is neither played nor read by a
+played proxy does not run at all, so its meter reads zero.</p>
+<pre><code>drone meter;
+drone peak println;             <span class="cmt">-- pre-volume output level</span>
+drone unmeter;</code></pre>
+<p><code>reshape(p, chans)</code> changes a proxy's channel count in place: the
+source, every dependent, and the monitor crossfade to the new width, so nothing
+has to be rebuilt by hand. Proxies reading it keep working through the change
+(the engine wraps or folds the width difference) and adopt the new width at
+their next redefinition:</p>
+<pre><code>reshape(drone, <span class="num">4</span>);              <span class="cmt">-- stereo -&gt; quad, dependents keep running</span></code></pre>
+<p>Finally, <code>ndef</code> also accepts a symbol name as an opt-in identity:
+<code>ndef('drone, fn() S {&hellip;})</code> finds the existing <code>'drone</code>
+proxy and crossfades it instead of creating a new one, so a whole cell &mdash;
+creation included &mdash; can be edited and re-run safely. <code>free</code>
+releases the name. Anonymous <code>ndef()</code> stays available for throwaway
+proxies:</p>
+<pre><code><span class="cmt">-- re-run this whole cell freely; 'drone keeps its identity</span>
+<span class="kw">let</span> drone = ndef(<span class="str">'drone</span>, <span class="kw">fn</span>() <span class="typ">S</span> {
+    sinosc([<span class="num">220.0</span>, <span class="num">220.7</span>]) * <span class="num">0.2</span>
+});
+drone play;</code></pre>
+<pre><code><span class="cmt">-- stop cell:</span>
+drone free;</code></pre>
 
 <h2 id="appendix">13. Appendix</h2>
 

@@ -8,6 +8,7 @@ import std.test.*;
 import std.result.*;
 import synthdef.*;
 import common_ugens.*;
+import audio_engine.*;
 import live.proxy.*;
 
 fn okOr(r Result<String, String>, label String) Bool {
@@ -97,6 +98,46 @@ assertEq((*drone.state).src, 0, "silenced source cleared");
 assertTrue((*drone.state).anchor != 0, "anchor survives silence");
 okOr(define(drone, fn() S { sinosc(440.0) * 0.05 }) await,
      "define after silence");
+
+-- symbol-keyed ndef: idempotent upsert
+let n1 = ndef('utest, 2);
+let n2 = ndef('utest, 2);
+assertEq(n1.serial, n2.serial, "symbol ndef is idempotent");
+okOr(define(n1, fn() S { sinosc(150.0) * 0.1 }) await, "named proxy defines");
+let n3 = ndef('utest, fn() S { sinosc(151.0) * 0.1 });
+assertEq(n3.serial, n1.serial, "symbol ndef(f) reuses the proxy");
+n1 free;
+let n4 = ndef('utest, 2);
+assertTrue(n4.serial != n1.serial, "freed name creates a fresh proxy");
+n4 free;
+
+-- meters tap the anchor outlet
+let mp = ndef(2);
+okOr(define(mp, fn() S { sinosc(200.0) * 0.1 }) await, "meter proxy defines");
+let tid = meter(mp) await;
+assertTrue(tid > 0, "meter installs a tap");
+assertTrue(tapExists(tid), "tap exists");
+assertEq(meter(mp) await, tid, "meter is idempotent");
+assertTrue(mp peak >= 0.0, "peak readable");
+assertTrue(mp rms >= 0.0, "rms readable");
+mp unmeter;
+assertFalse(tapExists(tid), "unmeter removes the tap");
+mp free;
+
+-- reshape under a live dependent
+let w = ndef(1);
+okOr(define(w, fn() S { sinosc(300.0) * 0.1 }) await, "mono proxy defines");
+let dep2 = ndef(2);
+okOr(define(dep2, fn() S { w() * 0.5 }) await, "dependent of mono defines");
+let oldAnchor = (*w.state).anchor;
+assertEq(reshape(w, 4) await, 0, "reshape succeeds");
+assertEq((*w.state).chans, 4, "chans updated");
+assertTrue((*w.state).anchor != oldAnchor, "reshape made a new anchor");
+okOr(define(w, fn() S { sinosc([301.0, 302.0, 303.0, 304.0]) * 0.05 }) await,
+     "redefine at the new width");
+assertEq(reshape(w, 4) await, 0, "reshape to same width is a no-op");
+w free;
+dep2 free;
 
 -- free + clearAll leave a clean registry
 verb free;
