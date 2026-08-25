@@ -31,4 +31,22 @@ run_stage "live.pattern" live_pattern_check.x "LIVE PATTERN ALL PASS"
     "$SCRIPTS/live_nrt_render.x" >/dev/null 2>&1
 run_stage "live NRT render" live_nrt_compare.x "LIVE NRT PASS"
 
+# Click regression: render a minimal redefine + stop and assert the
+# waveform has no sample-to-sample discontinuities. Guards the fade
+# choreography AND the engine's fade curves (the equal-power curve once ran
+# backward -- see EqPowFade in engine/src/tzpl_xfader.cpp -- which turned
+# every proxy crossfade into a pair of clicks).
+if command -v python3 >/dev/null; then
+    "$APP" --nogui --nrt /tmp/live_click.wav --duration 6 "${MODS[@]}" \
+        "$SCRIPTS/live_click_probe.x" >/dev/null 2>&1
+    CLICKS="$(python3 "$ROOT/integration-tests/click_scan.py" /tmp/live_click.wav)"
+    echo "$CLICKS" | tail -2
+    if ! echo "$CLICKS" | grep -q "CLEAN"; then
+        echo "FAIL: crossfade click probe"
+        exit 1
+    fi
+else
+    echo "SKIP: click probe (no python3)"
+fi
+
 echo "PASS: live proxy system"

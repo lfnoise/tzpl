@@ -72,8 +72,12 @@ struct OutInFade {
 
 template <std::floating_point T>
 struct EqPowFade {
+    // panfun is a fade-out gain (panfun(0) = 1, panfun(1) = 0), so the
+    // outgoing signal takes panfun(x) and the incoming one panfun(1 - x);
+    // with the arguments the other way around the whole fade ran backward
+    // (started at b, ended at a, and both splice points clicked).
     static T fade(T x, T a, T b) {
-        return a * panfun(T(1) - x) + b * panfun(x);
+        return a * panfun(x) + b * panfun(T(1) - x);
     }
 };
 
