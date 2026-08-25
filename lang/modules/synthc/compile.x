@@ -90,6 +90,16 @@ fn defSynthXChecked(synthFun GraphFn, synthName String) Future<Result<String, St
 
 async fn defSynthXChecked(synthFun GraphFn, synthName String, tags [String]) Result<String, String> {
 	let g = makeGraph(synthFun);
+	defSynthGraphChecked(g, synthName, tags) await
+}
+
+-- Graph-level fallible entry: compile and load an already-built SignalGraph.
+-- For callers (like live.proxy) that build the graph themselves in order to
+-- scan it before compiling -- avoids running the graph function twice.
+fn defSynthGraphChecked(g SignalGraph, synthName String) Future<Result<String, String>> =
+	defSynthGraphChecked(g, synthName, [String]());
+
+async fn defSynthGraphChecked(g SignalGraph, synthName String, tags [String]) Result<String, String> {
 	let cpp = compileToCpp(g, synthName, true, 4,
 	                       mergeSynthTags(tags, defaultSynthTags()));
 	if (cpp startsWith("error:")) {

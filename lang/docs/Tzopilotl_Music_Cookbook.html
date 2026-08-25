@@ -398,6 +398,15 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
         <li><a href="#musiclibs-play">Playing &amp; rendering</a></li>
       </ul>
     </li>
+    <li><a href="#liveproxies">Live coding with proxies</a>
+      <ol>
+        <li><a href="#live-basics">Define, listen, redefine</a></li>
+        <li><a href="#live-refs">Proxies reading proxies</a></li>
+        <li><a href="#live-params">Parameters</a></li>
+        <li><a href="#live-notes">Notes into proxies</a></li>
+        <li><a href="#live-housekeeping">Housekeeping</a></li>
+      </ol>
+    </li>
     <li><a href="#appendix">Appendix</a>
       <ol>
         <li><a href="#quickref">Function quick reference</a></li>
@@ -1679,9 +1688,120 @@ run command. The pure layers are golden-tested in <code>lang/tests/music/</code>
 
 
 <!-- ================================================================ -->
-<h2 id="appendix">12. Appendix</h2>
+<h2 id="liveproxies">12. Live coding with proxies</h2>
+<p>The <code>live</code> module (<code>lang/modules/live/</code>) is for changing a
+running patch while it sounds &mdash; in the spirit of SuperCollider's JITLib. A
+<em>proxy</em> is a stable connection point you hold as an ordinary value: you give
+it a signal function, listen to it, hand it to other proxies as an input, and
+replace its definition mid-performance. Every replacement crossfades; all node
+management, wiring, and cleanup happen behind the scenes.</p>
 
-<h3 id="quickref">12.1 Function quick reference</h3>
+<h3 id="live-basics">12.1 Define, listen, redefine</h3>
+<p>Create proxies once, then assign signal functions with <code>&lt;-</code>. The
+first assignment starts silent sound; every later assignment crossfades the old
+sound into the new over <code>fadeTime</code> seconds. Because a re-run of
+<code>ndef()</code> makes a <em>new</em> proxy, keep creation in a cell you run
+once and put the assignments you edit in their own cell:</p>
+<pre><code><span class="kw">import</span> live.*;
+<span class="kw">import</span> synthdef.*;
+<span class="kw">import</span> common_ugens.*;
+<span class="kw">import</span> audio_engine.*;
+
+engineStart();
+
+<span class="cmt">-- run this cell once:</span>
+<span class="kw">let</span> drone = ndef(<span class="num">2</span>);            <span class="cmt">-- a silent 2-channel proxy</span></code></pre>
+<pre><code><span class="cmt">-- edit and re-run this cell freely:</span>
+drone &lt;- <span class="kw">fn</span>() <span class="typ">S</span> {
+    <span class="kw">let</span> f = control(<span class="str">"freq"</span>, espec(<span class="num">40.0</span>, <span class="num">800.0</span>, <span class="num">110.0</span>));
+    sinosc([<span class="num">1.0</span>, <span class="num">1.003</span>] * f) * <span class="num">0.2</span>
+};
+drone play;                      <span class="cmt">-- fade onto the speakers</span></code></pre>
+<pre><code>fadeTime(<span class="num">4.0</span>);                   <span class="cmt">-- slow morphs from here on</span>
+drone &lt;- <span class="kw">fn</span>() <span class="typ">S</span> {
+    (sinosc([<span class="num">1.0</span>, <span class="num">1.5</span>, <span class="num">2.01</span>, <span class="num">3.0</span>] * <span class="num">110.0</span>) sum(<span class="num">2</span>)) * <span class="num">0.12</span>
+};</code></pre>
+<p><code>play</code> and <code>stop</code> only control what you hear:
+<code>drone amp(0.5)</code> ramps the listening level without affecting any proxy
+that reads <code>drone</code> as an input. A definition that fails to compile
+prints its error and leaves the running sound untouched.</p>
+<pre><code><span class="cmt">-- stop cell:</span>
+drone stop;</code></pre>
+
+<h3 id="live-refs">12.2 Proxies reading proxies</h3>
+<p>Inside a signal function, calling a proxy &mdash; <code>drone()</code>, or
+equivalently <code>drone sig</code> &mdash; feeds that proxy's signal in. The
+connection point is stable: redefining <code>drone</code> later never disturbs
+the proxies listening to it.</p>
+<pre><code><span class="kw">import</span> effects.*;
+
+<span class="kw">let</span> verb = ndef(<span class="num">2</span>);
+verb &lt;- <span class="kw">fn</span>() <span class="typ">S</span> { drone() reverb(<span class="num">3.5</span>, <span class="num">0.4</span>, <span class="num">0.5</span>) };
+verb play;
+drone stop;                      <span class="cmt">-- keep only the reverberated path</span></code></pre>
+<p>A proxy may read itself (<code>fb &lt;- fn() S { (fb() * 0.5) + input }</code>)
+&mdash; the loop closes with a one-sample delay, which is the engine's feedback
+primitive. Freeing a proxy that others still read is safe: their input simply
+goes silent until you redefine them. References must appear at the top level of
+the signal function, not inside <code>voicer</code>/<code>if_</code> bodies.</p>
+<pre><code><span class="cmt">-- stop cell:</span>
+verb stop;</code></pre>
+
+<h3 id="live-params">12.3 Parameters</h3>
+<p><code>set</code> targets any <code>control</code> declared in the current
+definition, by name. Values are remembered on the proxy and re-applied after
+every redefinition whose definition still declares that control (a value whose
+control disappeared is kept and simply waits):</p>
+<pre><code>drone set(<span class="str">"freq"</span>, <span class="num">165.0</span>);
+drone &lt;- [<span class="str">"freq"</span>: <span class="num">220.0</span>];        <span class="cmt">-- map form: several at once</span></code></pre>
+
+<h3 id="live-notes">12.4 Notes into proxies</h3>
+<p>A proxy whose definition uses <code>voicer</code> and <code>noteParam</code> is
+a note target. <code>play(proxy, events)</code> derives the parameter list from
+the definition itself (each <code>noteParam</code>'s name and default, in
+declaration order) and schedules the events sample-accurately; redefining the
+proxy mid-pattern retargets the notes to the new sound at the crossfade:</p>
+<pre><code><span class="kw">import</span> music.pat.*;
+
+<span class="kw">let</span> keys = ndef(<span class="num">2</span>);
+keys &lt;- <span class="kw">fn</span>() <span class="typ">S</span> {
+    voicer(<span class="num">16</span>, <span class="kw">fn</span>() <span class="typ">S</span> {
+        <span class="kw">let</span> f = noteParam(<span class="str">"freq"</span>, espec(<span class="num">20.0</span>, <span class="num">2000.0</span>, <span class="num">440.0</span>));
+        <span class="kw">let</span> a = noteParam(<span class="str">"amp"</span>, lspec(<span class="num">0.0</span>, <span class="num">1.0</span>, <span class="num">0.5</span>));
+        sinosc(f) * a * (gate() adsr(<span class="num">0.01</span>, <span class="num">0.1</span>, <span class="num">0.7</span>, <span class="num">0.3</span>))
+    }) sum
+};
+keys play;
+
+<span class="kw">let</span> pl = play(keys, bind(
+    wpicks([<span class="num">0</span>, <span class="num">2</span>, <span class="num">4</span>, <span class="num">7</span>], [<span class="num">3.0</span>, <span class="num">2.0</span>, <span class="num">2.0</span>, <span class="num">1.0</span>]) degree,
+    List(<span class="num">0.25</span>) cyc) takeDur(<span class="num">16.0</span>));</code></pre>
+<p><code>pl replace(events)</code> swaps the sequence, <code>pl enqueue(events)</code>
+appends one, <code>pl stop</code> releases everything it holds.</p>
+<pre><code><span class="cmt">-- stop cell:</span>
+pl stop;
+keys stop;</code></pre>
+
+<h3 id="live-housekeeping">12.5 Housekeeping</h3>
+<p><code>silence(p)</code> fades a proxy's sound out but keeps the proxy (and its
+stored parameters) ready for the next definition. <code>free(p)</code> fades out
+and releases everything the proxy owns. <code>quant(4.0)</code> makes every
+redefinition land on the next 4-beat boundary of the silo's clock;
+<code>quant(0.0)</code> turns that off. <code>dump() println</code> lists the
+live proxies. If handles were lost to a re-run creation cell, the escape hatches
+are <code>clearAll()</code> &mdash; free every proxy now &mdash; and
+<code>endAll(fade)</code>, which fades all listening out over <code>fade</code>
+seconds first:</p>
+<pre><code><span class="cmt">-- stop cell:</span>
+endAll(<span class="num">2.0</span>) await;
+engineStop();</code></pre>
+<p>Proxies work unchanged inside an offline render &mdash; the same session code
+writes a WAV under <code>renderNRT</code> (see
+<a href="#render">chapter 9</a>).</p>
+
+<h2 id="appendix">13. Appendix</h2>
+
+<h3 id="quickref">13.1 Function quick reference</h3>
 <table>
   <tr><th>Function</th><th>Module</th><th>Runs at</th></tr>
   <tr><td><code>engineStart / engineStop / masterGain</code></td><td>audio_engine</td><td>NRT</td></tr>
@@ -1712,7 +1832,7 @@ run command. The pure layers are golden-tested in <code>lang/tests/music/</code>
   <tr><td><code>await delay(beats) / awaitAll</code></td><td>(builtin) / futures</td><td>NRT / silo (on the NRT VM <code>delay</code> is logical time; for the live clock use <code>delayBeats</code>, for wall-clock <code>delayReal</code>)</td></tr>
 </table>
 
-<h3 id="more">12.2 Where to read more</h3>
+<h3 id="more">13.2 Where to read more</h3>
 <table>
   <tr><th>Topic</th><th>Reference</th></tr>
   <tr><td>Language syntax, async/await, pattern matching</td><td><a href="Tzopilotl_by_Example.html">Tzopilotl By Example</a></td></tr>

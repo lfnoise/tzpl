@@ -126,6 +126,14 @@ struct ControlSpec {
 	warp ControlWarp,
 }
 
+-- Shorthand ControlSpec constructors: linear and exponential warps cover
+-- almost every control, and the struct literal is noisy at definition sites.
+fn lspec(lo Float, hi Float, init Float) ControlSpec =
+	ControlSpec { lo: lo, hi: hi, init: init, warp: ControlWarp.linear };
+
+fn espec(lo Float, hi Float, init Float) ControlSpec =
+	ControlSpec { lo: lo, hi: hi, init: init, warp: ControlWarp.exponential };
+
 -- How a control behaves, and which widget UIs derive for it. Matches
 -- tzpl_ControlKind in the plugin ABI. Authored via the control
 -- constructors: control() is continuous; trigger()/toggle()/choice()
