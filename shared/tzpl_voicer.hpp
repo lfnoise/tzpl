@@ -163,11 +163,10 @@ public:
     }
 
     int findVoice(int noteID, ShouldCache shouldCache = ShouldCache::yes) {
+        if (noteID < 0) return -1; // -1 marks replaced voices; never match it
         int cacheIndex = u32(noteID) & kCacheMask;
         int voiceIndex = activeVoiceCache_[cacheIndex];
         if (noteID == noteID_[voiceIndex]) return voiceIndex;
-
-        if (noteID < 0) return -1;
 
         for (voiceIndex = 0; voiceIndex < MaxVoices; ++voiceIndex) {
             if (noteID_[voiceIndex] == noteID) {
@@ -203,6 +202,24 @@ public:
 
     tzpl_SErr noteOn(i64 now, int noteID, int n, f32* params, int& voiceIndex) {
         if (noteID < 0) return tzpl_errNoteNotFound;
+        // A new noteOn takes over its ID: any voice still holding it is being
+        // replaced, whether sustaining or in release. Sustaining ones are
+        // released here (otherwise they would be orphaned and ring until
+        // allOff), and the ID is cleared from every replaced voice so by-ID
+        // lookups (noteOff, setNoteParams) can only reach the new voice. A
+        // released note keeps its ID -- and stays addressable through its
+        // decay -- until it is replaced.
+        for (int i = 0; i < MaxVoices; ++i) {
+            if (noteID_[i] == noteID) {
+                if (get(i, 0) > 0.f) {
+                    --activeVoices_;
+                    ++numNoteOffs_;
+                    noteOffTime_[i] = now;
+                    set(i, 0, 0.f);
+                }
+                noteID_[i] = -1;
+            }
+        }
         voiceIndex = allocVoice();
         noteOnTime_[voiceIndex] = now;
         noteID_[voiceIndex] = noteID;
@@ -217,7 +234,9 @@ public:
 
     tzpl_SErr noteOff(i64 now, int noteID) {
         int voiceIndex = findVoice(noteID, ShouldCache::no);
-        if (voiceIndex < 0) return tzpl_errNoteNotFound;
+        // A voice whose gate is already off was already released; matching it
+        // again would decrement activeVoices_ a second time.
+        if (voiceIndex < 0 || get(voiceIndex, 0) <= 0.f) return tzpl_errNoteNotFound;
         --activeVoices_;
         ++numNoteOffs_;
         noteOffTime_[voiceIndex] = now;
