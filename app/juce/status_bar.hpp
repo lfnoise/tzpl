@@ -86,6 +86,12 @@ private:
     bool expanded_ = false;
     bool draggingGain_ = false;
 
+    // Panic-button press tracking: which button went down (-1 none), and
+    // whether the cursor is still inside it. Fires on mouse-up inside, like
+    // a normal button; dragging off cancels.
+    int panicPressed_ = -1;
+    bool panicOver_ = false;
+
     // Dropout latch: once tripped it stays lit until the user clicks to
     // reset. A dropout must never quietly disappear.
     bool dropoutLatched_ = false;

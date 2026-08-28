@@ -229,21 +229,13 @@ void StatusBar::mouseDown(juce::MouseEvent const& e) {
     if (expanded_ && appCtx_.engine) {
         juce::Rectangle<int> btns[4];
         panicButtonRects(btns);
-        if (btns[0].contains(e.getPosition())) {           // all notes off
-            forEachSiloBundle([] { engine::allNotesOffAll(); });
-            return;
-        }
-        if (btns[1].contains(e.getPosition())) {           // clear schedulers
-            bridge::panicClearSchedulers(appCtx_);
-            return;
-        }
-        if (btns[2].contains(e.getPosition())) {           // disconnect output
-            forEachSiloBundle([] { engine::disconnectNode(0); });
-            return;
-        }
-        if (btns[3].contains(e.getPosition())) {           // free all nodes
-            forEachSiloBundle([] { engine::freeAllNodes(); });
-            return;
+        for (int i = 0; i < 4; ++i) {
+            if (btns[i].contains(e.getPosition())) {
+                panicPressed_ = i;
+                panicOver_ = true;
+                repaint();
+                return;
+            }
         }
     }
     // The clip latch clears on its own click, without disturbing the dropout
@@ -277,10 +269,37 @@ void StatusBar::mouseDown(juce::MouseEvent const& e) {
 
 void StatusBar::mouseDrag(juce::MouseEvent const& e) {
     if (draggingGain_) setGainFromX(e.getPosition().x);
+    if (panicPressed_ >= 0) {
+        juce::Rectangle<int> btns[4];
+        panicButtonRects(btns);
+        bool over = btns[panicPressed_].contains(e.getPosition());
+        if (over != panicOver_) {
+            panicOver_ = over;
+            repaint();
+        }
+    }
 }
 
-void StatusBar::mouseUp(juce::MouseEvent const&) {
+void StatusBar::mouseUp(juce::MouseEvent const& e) {
     draggingGain_ = false;
+    if (panicPressed_ >= 0) {
+        juce::Rectangle<int> btns[4];
+        panicButtonRects(btns);
+        bool fire = expanded_ && appCtx_.engine
+                 && btns[panicPressed_].contains(e.getPosition());
+        int which = panicPressed_;
+        panicPressed_ = -1;
+        panicOver_ = false;
+        repaint();
+        if (fire) {
+            switch (which) {
+            case 0: forEachSiloBundle([] { engine::allNotesOffAll(); }); break;
+            case 1: bridge::panicClearSchedulers(appCtx_); break;
+            case 2: forEachSiloBundle([] { engine::disconnectNode(0); }); break;
+            case 3: forEachSiloBundle([] { engine::freeAllNodes(); }); break;
+            }
+        }
+    }
 }
 
 void StatusBar::paint(juce::Graphics& g) {
@@ -405,9 +424,14 @@ void StatusBar::paint(juce::Graphics& g) {
         char const* labels[4] = { "all notes off", "clear schedulers",
                                   "disconnect output", "free all nodes" };
         for (int i = 0; i < 4; ++i) {
-            g.setColour(text.withAlpha(0.5f));
+            bool pressed = (i == panicPressed_ && panicOver_);
+            if (pressed) {
+                g.setColour(text.withAlpha(0.25f));
+                g.fillRoundedRectangle(btns[i].toFloat(), 3.0f);
+            }
+            g.setColour(text.withAlpha(pressed ? 0.9f : 0.5f));
             g.drawRoundedRectangle(btns[i].toFloat(), 3.0f, 1.0f);
-            g.setColour(text.withAlpha(0.85f));
+            g.setColour(text.withAlpha(pressed ? 1.0f : 0.85f));
             g.drawText(labels[i], btns[i], juce::Justification::centred, true);
         }
     }
