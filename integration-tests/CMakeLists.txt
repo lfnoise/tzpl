@@ -41,6 +41,15 @@ target_link_libraries(test_metering
     PRIVATE audio_engine_lib
 )
 
+# Header-only voice-allocator invariants; no audio, links nothing.
+add_executable(test_voicer
+    src/test_voicer.cpp
+)
+
+target_include_directories(test_voicer PRIVATE
+    ${CMAKE_SOURCE_DIR}/shared
+)
+
 add_executable(test_stopped_engine
     src/test_stopped_engine.cpp
 )
