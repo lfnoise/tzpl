@@ -514,6 +514,19 @@ fn susrel(gate S, s, r) S {
 	y <- select2(gate > 0, s asSignal, coef * y(1))
 }
 
+-- Csound-style linen, gated: linear (not exponential) segments, so times
+-- are true segment lengths. Rises from 0 toward 1 over `rise` seconds while
+-- the gate is high, holds at 1, then decays to 0 over `dec` seconds at
+-- gate-off. `dec` is the full-scale (1 -> 0) time; the slopes are constant,
+-- so releasing mid-rise decays immediately from the current amplitude and
+-- reaches 0 proportionally sooner.
+fn linen(gate S, rise, dec) S {
+	let up = 1 / (fs() * max(rise, 1e-6));
+	let dn = 1 / (fs() * max(dec, 1e-6));
+	let y = delayVar();
+	y <- select2(gate > 0, min(1, y(1) + up), max(0, y(1) - dn))
+}
+
 fn asr(gate S, a, s, r) S {
 	let a = decay40dB(a * fs());
 	let r = decay40dB(r * fs());
