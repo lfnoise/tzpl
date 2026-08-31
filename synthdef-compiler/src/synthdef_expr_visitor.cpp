@@ -37,6 +37,7 @@ void UnaryOpExpr::accept(ExprVisitor& visitor) { visitor.visit(this); }
 void BinaryOpExpr::accept(ExprVisitor& visitor) { visitor.visit(this); }
 void CompareOpExpr::accept(ExprVisitor& visitor) { visitor.visit(this); }
 void CastOpExpr::accept(ExprVisitor& visitor) { visitor.visit(this); }
+void EventToAudioExpr::accept(ExprVisitor& visitor) { visitor.visit(this); }
 //void MatMulExpr::accept(ExprVisitor& visitor) { visitor.visit(this); }
 void ReduceExpr::accept(ExprVisitor& visitor) { visitor.visit(this); }
 //void ScanExpr::accept(ExprVisitor& visitor) { visitor.visit(this); }

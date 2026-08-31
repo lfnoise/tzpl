@@ -452,11 +452,37 @@ beep defSynthX(<span class="hl-str">"beep"</span>) await;      <span class="cmt"
                     <td><code>fs()</code>, <code>T()</code>, random values with <code>rate: Rate.init</code>, delay allocation</td></tr>
                 <tr><td><code>Rate.reset</code></td><td>Once per note-on (inside a voicer; once at init otherwise)</td>
                     <td>Per-note setup: sample bank lookups (<a href="#samplebanks">&sect;10</a>), per-note random values with <code>rate: Rate.reset</code></td></tr>
-                <tr><td><code>Rate.event</code></td><td>When a parameter change arrives</td>
-                    <td><code>control(...)</code> values and math derived only from them</td></tr>
+                <tr><td><code>Rate.event</code></td><td>When a parameter or note parameter change arrives</td>
+                    <td><code>control(...)</code> and <code>noteParam(...)</code> values and math derived only from them</td></tr>
                 <tr><td><code>Rate.audio</code></td><td>Every sample</td>
-                    <td>Oscillators, filters, anything downstream of an audio signal</td></tr>
+                    <td>Oscillators, filters, the <code>gate()</code> note parameter, anything downstream of an audio signal</td></tr>
             </table>
+
+            <p><strong>Note parameters are event rate.</strong> A voice's
+            <code>noteParam(...)</code> values change only at note events &mdash; note-on,
+            and <code>noteSetParams</code> during the note &mdash; so math derived purely
+            from note parameters (a frequency-dependent filter coefficient, a velocity
+            curve) recomputes per voice when a note event arrives, not every sample. The
+            one exception is <code>gate()</code>: the gate stays <em>audio</em> rate
+            because it drives per-sample envelope and trigger idioms
+            (<code>adsr</code>, <code>tr</code>) whose edge detection needs sample
+            granularity &mdash; an event-rate trigger would be a held value rather than a
+            one-sample impulse. A consequence worth knowing: feedforward
+            <code>z1</code>-style state over a note parameter advances once per note
+            event (the same behaviour such state has over controls), while recursions
+            through a delay reader &mdash; <code>lag</code>, <code>onepole</code> &mdash;
+            stay audio rate and smooth per sample as always.</p>
+
+            <p><strong><code>eventToAudio(a)</code></strong> promotes an event-rate signal to
+            audio rate: a stepped audio signal that re-reads the latched event value every
+            sample. Use it when you want per-sample semantics over a control or note
+            parameter &mdash; most usefully for triggers:
+            <code>eventToAudio(c) tr</code> fires a genuine <em>one-sample</em> impulse on
+            the sample a change of <code>c</code> lands, whereas <code>c tr</code> (all at
+            event rate) is a <em>held</em> trigger &mdash; 1 from a zero-to-positive change
+            until the next event over <code>c</code> clears it. It has no effect on signals
+            of any other rate: constants, init-, reset-, and audio-rate inputs pass through
+            unchanged.</p>
 
             <p><strong>Rate propagation.</strong> The rate of a derived expression is the
             <em>maximum</em> of its inputs' rates. Multiplying an audio-rate oscillator by an event-rate

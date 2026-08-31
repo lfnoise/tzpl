@@ -146,6 +146,7 @@ fn _kindKey(kind NodeKind) String = match (kind) {
 	binopK(op):           "B|" $ op ordinal toString;
 	compareopK(op):       "C|" $ op ordinal toString;
 	castopK(t):           "X|" $ t.0 toString;
+	eventToAudioK:        "E2A";
 	reduceK(op, cols):    "R|" $ op ordinal toString $ "|" $ cols toString;
 	vecK(vop):            "V|" $ vop _vecOpKey;
 	selectK:              "SEL";
@@ -346,6 +347,11 @@ fn _maxRateOf(ins [Int]) Rate {
 	}
 	r
 }
+
+-- Control flow at event rate is not supported (mirrors controlFlowRate in
+-- synthdef_expr.hpp): the iso-group machinery would split branch subgraphs
+-- into wrongly-activated sibling loops. Clamp event up to audio.
+fn _cfRate(r Rate) Rate = match (r) { Rate.event: Rate.audio; _: r; };
 
 fn _broadcastChans(ins [Int]) Int {
 	var ctx Ctx = `scCtx;
@@ -642,13 +648,19 @@ fn _importExpr(e SignalExpr) Void {
 				Rate.event, FLOAT32, chans));
 		}
 		noteParam(spec, chans, name): {
+			-- User noteParams are event-rate sources; the GATE stays audio
+			-- rate so per-sample envelope/trigger edge detection keeps its
+			-- semantics (mirrors the C++ NoteParam ctor).
 			var sn = 0;
+			var r = Rate.event;
 			if (name != "gate") {
 				sn = `scNoteParamSerials;
 				`scNoteParamSerials = sn + 1;
+			} else {
+				r = Rate.audio;
 			}
 			_mapId(e.id, _addExprNode(NodeKind.noteParamK(spec, name, sn), [Int](),
-				Rate.audio, FLOAT32, chans));
+				r, FLOAT32, chans));
 		}
 		inlet(typ, chans, name): {
 			let sn Int = `scInletSerials;
@@ -691,6 +703,18 @@ fn _importExpr(e SignalExpr) Void {
 			}
 			_mapId(e.id, _addExprNode(NodeKind.castopK(castType), ins,
 				ctx.nrate[ins[0]], castType, ctx.chans[ins[0]]));
+		}
+		eventToAudio: {
+			-- Rate promotion passthrough: only an event-rate input gets a
+			-- node (forced audio); any other rate passes through unchanged
+			-- (mirrors the C++ eventToAudio builder).
+			let ins = e _resolveIns;
+			if (ctx.nrate[ins[0]] != Rate.event) {
+				_mapId(e.id, ins[0]);
+				return;
+			}
+			_mapId(e.id, _addExprNode(NodeKind.eventToAudioK, ins,
+				Rate.audio, ANY_NUM, ctx.chans[ins[0]]));
 		}
 		select: {
 			let ins = e _resolveIns;
@@ -856,9 +880,10 @@ fn _importExpr(e SignalExpr) Void {
 			let thenPhi = _importSubgraph(thenSg);
 			let elsePhi = _importSubgraph(elseSg);
 			var ctx Ctx = `scCtx;
-			-- IfElseExpr rate = maxRate({test, then_phi, else_phi}); type any;
-			-- chans = broadcast(then, else) (refined by calcShape in M3.3).
-			let r = max(_maxRateOf(ins), max(ctx.nrate[thenPhi], ctx.nrate[elsePhi]));
+			-- IfElseExpr rate = controlFlowRate(maxRate({test, then_phi,
+			-- else_phi})); type any; chans = broadcast(then, else) (refined
+			-- by calcShape in M3.3).
+			let r = _cfRate(max(_maxRateOf(ins), max(ctx.nrate[thenPhi], ctx.nrate[elsePhi])));
 			let ch = max(ctx.chans[thenPhi], ctx.chans[elsePhi]);
 			let ifNode = _addCFNode(NodeKind.ifK, ins, [thenPhi, elsePhi], r, ANY_NUM, ch);
 			_linkPhi(thenPhi, ifNode, r);
@@ -870,7 +895,7 @@ fn _importExpr(e SignalExpr) Void {
 			let ins = e _resolveIns;
 			let bodyPhi = _importSubgraph(bodySg);
 			var ctx Ctx = `scCtx;
-			let r = max(_maxRateOf(ins), ctx.nrate[bodyPhi]);
+			let r = _cfRate(max(_maxRateOf(ins), ctx.nrate[bodyPhi]));
 			let forNode = _addCFNode(NodeKind.forK, ins, [bodyPhi], r, ANY_NUM, ctx.chans[bodyPhi]);
 			_linkPhi(bodyPhi, forNode, r);
 			_mapId(e.id, forNode);
@@ -883,6 +908,7 @@ fn _importExpr(e SignalExpr) Void {
 			var r = _maxRateOf(ins);
 			var ch = 0;
 			for (s : subs) { r = max(r, ctx.nrate[s]); ch = max(ch, ctx.chans[s]); }
+			r = _cfRate(r);
 			let swNode = _addCFNode(NodeKind.switchK(cases length), ins, subs, r, ANY_NUM, ch);
 			for (s : subs) { _linkPhi(s, swNode, r); }
 			_mapId(e.id, swNode);
@@ -902,7 +928,10 @@ fn _importExpr(e SignalExpr) Void {
 			let bodyPhi = _importSubgraph(bodySg);
 			var ctx Ctx = `scCtx;
 			let bodyRoot = ctx.ins[bodyPhi][0];
-			let r = ctx.nrate[bodyPhi];
+			-- Rate is FORCED to audio (mirrors VoicerExpr in
+			-- synthdef_expr.hpp): the voicer sums its voices every sample,
+			-- even when the body is pure noteParam (event-rate) math.
+			let r = Rate.audio;
 			let ch = maxVoices * ctx.chans[bodyRoot];
 			let vNode = _addCFNode(NodeKind.voicerK(maxVoices), [Int](), [bodyPhi], r, ANY_NUM, ch);
 			_linkPhi(bodyPhi, vNode, r);

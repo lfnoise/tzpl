@@ -166,6 +166,7 @@ enum NodeKind {
 	binopK(BinaryOp),
 	compareopK(CompareOp),
 	castopK(NumType),                    -- cast_type
+	eventToAudioK,                       -- event->audio rate promotion passthrough
 	reduceK(BinaryOp, Int),              -- op, cols
 	vecK(VecOp),                         -- take/drop/stride/stutter/ncyc/rotate/reverse/transpose
 	selectK,
@@ -411,7 +412,10 @@ struct GraphInfo {
 struct IsoGroup {
 	trees [Int],
 	loops [Int],
-	controls [NIdx],
+	-- Activation sources: control and noteParamK node indices, sorted. A
+	-- group runs when any of its sources changes (control message or note
+	-- event). Mirrors IsoGroup::sources in synthdef_synth.hpp.
+	sources [NIdx],
 	activates [Int],
 	serial Int,
 }
@@ -665,6 +669,7 @@ fn nodeStr(ctx Ctx, n NIdx) String {
 		binopK(op):          op binopStr;
 		compareopK(op):      op compareopStr;
 		castopK(t):          "cast_" $ t numTypeStr;
+		eventToAudioK:       "eventToAudio";
 		reduceK(op, cols):   "reduce(%^, %^)" fmt(op binopStr, cols);
 		vecK(vop):           _vecStr(vop);
 		selectK:             "select";

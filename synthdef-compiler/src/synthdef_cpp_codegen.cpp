@@ -1074,6 +1074,19 @@ struct ExprCodegenVisitor : ExprVisitor {
         NumType ct = commonNumType(p->in0()->type, p->in1()->type);
         auto a = simdWiden(g.inSimdMode, ct, p->in0()->type, g.genExpr(p->in0(), cel));
         auto b = simdWiden(g.inSimdMode, ct, p->in1()->type, g.genExpr(p->in1(), cel));
+        if (!g.inSimdMode && op_syntax(p->op) == OpSyntax::Function) {
+            // An inline comparison emits as C++ bool; function-syntax ops
+            // (std::min/std::max/...) are templates and refuse mixed
+            // bool/float deduction, so cast such an operand to the promotion
+            // type. A materialized compare root reads its typed slot and
+            // needs no cast.
+            auto inlineCompare = [&](S u) {
+                return u.as<CompareOpExpr>()
+                    && !(!g.inInitMode && u->is_root() && !u.identical(g.current_root));
+            };
+            if (inlineCompare(p->in0())) a = FMT("{}({})", ct.str(), a);
+            if (inlineCompare(p->in1())) b = FMT("{}({})", ct.str(), b);
+        }
         auto e = genBinopExprString(p->op, p->type, a, b, g.inSimdMode);
         s += simdWiden(g.inSimdMode, p->type, ct, e);
     }
@@ -1086,6 +1099,10 @@ struct ExprCodegenVisitor : ExprVisitor {
         } else {
             s += FMT("{}({})", p->cast_type.str(), g.genExpr(p->in0(), cel));
         }
+    }
+    void visit(EventToAudioExpr* p) override {
+        // Pure rate boundary: emit the input (a materialized event value).
+        s += g.genExpr(p->in0(), cel);
     }
 //    void visit(MatMulExpr* p) override { fixme(p); }
     void visit(ReduceExpr* p) override {
@@ -1891,6 +1908,7 @@ struct GenTreeExprVisitor : ExprVisitor {
     void visit(BinaryOpExpr* p) override {}
     void visit(CompareOpExpr* p) override {}
     void visit(CastOpExpr* p) override {}
+    void visit(EventToAudioExpr* p) override {}
 //    void visit(MatMulExpr* p) override {}
     void visit(ReduceExpr* p) override {}
 //    void visit(ScanExpr* p) override {}
@@ -2477,6 +2495,7 @@ struct GenLoopExprVisitor : ExprVisitor {
     void visit(BinaryOpExpr* p) override {}
     void visit(CompareOpExpr* p) override {}
     void visit(CastOpExpr* p) override {}
+    void visit(EventToAudioExpr* p) override {}
 //    void visit(MatMulExpr* p) override {}
     void visit(ReduceExpr* p) override {}
 //    void visit(ScanExpr* p) override {}
@@ -3788,11 +3807,27 @@ string CppCodeGen::genHandleEventsFun() {
             auto ctrl = u.as<Control>();
             s += FMT("\tif (p->ctrl{}_active) {{\n", ctrl->serial);
             for (IsoGroup* ig : synth->isoGroups) {
-                if (ig->controls.contains(u)) {
+                if (ig->sources.contains(u)) {
                     s += FMT("\t\tiso{} = true;\n", ig->serial);
                 }
             }
             s += FMT("\t\tp->ctrl{}_active = false;\n", ctrl->serial);
+            s += "\t}\n";
+        }
+        // 2b. NoteParam activation -> iso-group activation. Flags are set by
+        // the generated noteSetParams/noteSetParamRange, indexed by serial;
+        // noteOn covers its voice via the reset-mode repair instead, so it
+        // sets no flags. The gate is audio-rate (never a source) -- skip it.
+        for (S u : synth->noteParams) {
+            auto np = u.as<NoteParam>();
+            if (np->rate != eventSignalRate) continue;
+            s += FMT("\tif (p->np_active[{}]) {{\n", np->serial);
+            for (IsoGroup* ig : synth->isoGroups) {
+                if (ig->sources.contains(u)) {
+                    s += FMT("\t\tiso{} = true;\n", ig->serial);
+                }
+            }
+            s += FMT("\t\tp->np_active[{}] = false;\n", np->serial);
             s += "\t}\n";
         }
         s += "\n";
@@ -4105,6 +4140,11 @@ string CppCodeGen::genDeclInstVars() {
     for (S u : synth->controls) {
         auto control = u.as<Control>();
         s += FMT("\tbool ctrl{}_active;\n", control->serial);
+    }
+    // noteParam activation flags, indexed by serial (gate = 0). Set by the
+    // generated note functions, consumed and cleared by processEvents.
+    if (!synth->noteParams.empty()) {
+        s += FMT("\tbool np_active[{}];\n", synth->noteParams.size());
     }
     if (!s.empty()) {
         s = "\t// instance variables\n" + s + "\n";
@@ -4494,6 +4534,12 @@ string CppCodeGen::genNoteFuns() {
     s += "\treturn tzpl_errNone;\n";
     s += "}\n\n";
 
+    // User noteParams are event-rate sources: noteSetParams/noteSetParamRange
+    // mark the serials they wrote in np_active so the next processEvents (the
+    // engine flags the node) re-runs the iso-groups depending on them. noteOn
+    // is covered by the reset-mode repair above; noteOff/allNotesOff only
+    // touch the gate, which is audio-rate and never a source.
+
     // noteOff
     s += FMT("tzpl_SErr {0}_noteOff({0}* p, i64 now, int noteID) {{\n", name);
     s += "\treturn p->voicer.noteOff(now, noteID);\n";
@@ -4510,6 +4556,10 @@ string CppCodeGen::genNoteFuns() {
     s += "\tint vi = p->voicer.findVoice(noteID);\n";
     s += "\tif (vi < 0) return tzpl_errNoteNotFound;\n";
     s += "\tp->voicer.setNoteParams(vi, n, params);\n";
+    s += "\tfor (int i = 0; i < n; ++i) {\n";
+    s += "\t\tint ix = params[i].index;\n";
+    s += FMT("\t\tif (ix >= 0 && ix < {}) p->np_active[ix + 1] = true;\n", numUserParams);
+    s += "\t}\n";
     s += "\treturn tzpl_errNone;\n";
     s += "}\n\n";
 
@@ -4518,6 +4568,8 @@ string CppCodeGen::genNoteFuns() {
     s += "\tint vi = p->voicer.findVoice(noteID);\n";
     s += "\tif (vi < 0) return tzpl_errNoteNotFound;\n";
     s += "\tp->voicer.setNoteParamRange(vi, first, len, vals);\n";
+    s += FMT("\tint last = first + len; if (last > {}) last = {};\n", numUserParams, numUserParams);
+    s += "\tfor (int i = first < 0 ? 0 : first; i < last; ++i) p->np_active[i + 1] = true;\n";
     s += "\treturn tzpl_errNone;\n";
     s += "}\n\n";
 

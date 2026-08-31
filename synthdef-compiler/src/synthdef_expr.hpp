@@ -440,7 +440,7 @@ namespace synthdef {
             return NumType::any;
         }
         void update_type(ExprWorkList& worklist) override {
-//            std::println("CastOpExpr::update_type {} type {} cast_type {} in {}", 
+//            std::println("CastOpExpr::update_type {} type {} cast_type {} in {}",
 //                (void*)this, type.str(), cast_type.str(), in0()->type.str());
 
         }
@@ -448,7 +448,31 @@ namespace synthdef {
 
         void accept(ExprVisitor& visitor) override;
     };
-    
+
+    // Rate-promotion passthrough: forces its event-rate input up to audio
+    // rate, so downstream math runs per sample re-reading the materialized
+    // event value (a stepped audio signal, like a control feeding audio
+    // math). The eventToAudio() builder constructs this ONLY for event-rate
+    // inputs -- constant/init/reset/audio inputs pass through unchanged --
+    // so the forced rate here is always a promotion. Being its own node
+    // kind, no rewrite rule looks across the boundary.
+    struct EventToAudioExpr : Expr {
+        EventToAudioExpr(S a) : Expr(audioSignalRate, {a}) {}
+
+        string typeName() const override { return "EventToAudioExpr"; }
+        string str() const override { return "eventToAudio"; }
+
+        u64 hash() const override {
+            return hash_combine(Expr::hash(), 0x7E2A9C51D4B6F083ull);
+        }
+
+        NumType initial_type() const override { return NumType::any; }
+        void update_type(ExprWorkList& worklist) override;
+        void calcShape() override { chans = in0()->chans; }
+
+        void accept(ExprVisitor& visitor) override;
+    };
+
 #if 0
     struct MatMulExpr : Expr {
         MatMulExpr(S a, S b) : Expr(std::max(a->rate, b->rate), {a, b}) {}
@@ -579,6 +603,15 @@ namespace synthdef {
         }
         return rate;
     }
+
+    // Control flow at event rate is not supported: the iso-group machinery
+    // would split branch subgraphs into wrongly-activated sibling loops
+    // (empty ifs, unconditional branch bodies). Clamp event up to audio so
+    // the branches run per-sample reading materialized event values;
+    // init/reset-rate control flow is unaffected.
+    inline SignalRate controlFlowRate(SignalRate rate) {
+        return rate == eventSignalRate ? audioSignalRate : rate;
+    }
     
     struct VarExpr : Expr {
         string varName;
@@ -658,7 +691,7 @@ namespace synthdef {
         S else_expr;
 
         IfElseExpr(S test, S then_expr, S else_expr)
-            : ControlFlowExpr(maxRate({test, then_expr, else_expr}), {test}), 
+            : ControlFlowExpr(controlFlowRate(maxRate({test, then_expr, else_expr})), {test}),
             then_expr(then_expr),
             else_expr(else_expr)
         {
@@ -702,7 +735,7 @@ namespace synthdef {
         vector<S> cases;
                 
         SwitchExpr(S test, vector<S> cases) 
-            : ControlFlowExpr(test->rate.max(maxRate(cases)), {test}), cases(cases) 
+            : ControlFlowExpr(controlFlowRate(test->rate.max(maxRate(cases))), {test}), cases(cases)
         {
              for (S c : cases) {
                 auto phi = c.as<PhiNodeExpr>();
@@ -745,7 +778,7 @@ namespace synthdef {
         S loop_body;
 
         ForLoopExpr(S count, S loop_body) 
-            : ControlFlowExpr(maxRate({count, loop_body}), {count}), loop_body(loop_body) 
+            : ControlFlowExpr(controlFlowRate(maxRate({count, loop_body})), {count}), loop_body(loop_body)
         {
             {
                 auto phi = loop_body.as<PhiNodeExpr>();
@@ -782,8 +815,11 @@ namespace synthdef {
         S voice_body;      // PhiNode wrapping the per-voice subgraph result
         int maxVoices;     // must be power of 2
 
+        // Rate is FORCED to audio regardless of the body's rate: the voicer
+        // sums its voices every sample, and its output stays a connectable
+        // audio port even when the body is pure noteParam (event-rate) math.
         VoicerExpr(int maxVoices, S voice_body)
-            : ControlFlowExpr(voice_body->rate, {}),
+            : ControlFlowExpr(audioSignalRate, {}),
             voice_body(voice_body),
             maxVoices(maxVoices)
         {

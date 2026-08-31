@@ -583,7 +583,7 @@ void test_iso_groups_single_control() {
     // Should have exactly one iso-group containing the control's downstream tree
     assert(gSynth->isoGroups.size() == 1);
     IsoGroup* g = gSynth->isoGroups[0];
-    assert(g->controls.size() == 1);
+    assert(g->sources.size() == 1);
     assert(g->activates.empty());
 }
 
@@ -608,7 +608,7 @@ void test_iso_groups_two_controls() {
     // The iso-group containing the multiply should have both controls
     bool found_merged = false;
     for (IsoGroup* g : gSynth->isoGroups) {
-        if (g->controls.size() == 2) {
+        if (g->sources.size() == 2) {
             found_merged = true;
         }
     }
@@ -810,7 +810,11 @@ void test_branching_voice_stays_looped() {
     // loop, so only the last voice survived. The correct AoS emission
     // writes exactly `<output>[v] = <voice-local value>;` inside the
     // per-voice loop (no inner channel loop for a 1-chan voice body).
-    auto loopStart = code.find("for (int v = 0; v < 8; ++v)");
+    // Anchor at processAudio: processEvents also contains per-voice loops
+    // (noteParam-sourced iso-groups), but the phi write is in the audio tick.
+    auto audioStart = code.find("_processAudio(");
+    TEST_ASSERT(audioStart != string::npos);
+    auto loopStart = code.find("for (int v = 0; v < 8; ++v)", audioStart);
     TEST_ASSERT(loopStart != string::npos);
     auto loopEnd = code.find("\n\t}\n", loopStart); // closes per-voice loop
     TEST_ASSERT(loopEnd != string::npos);

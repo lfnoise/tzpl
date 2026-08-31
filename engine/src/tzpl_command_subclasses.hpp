@@ -465,6 +465,10 @@ struct NoteOnCmd : Command
             i64 now = s->sampleTime_;
             int len = int(values_.size());
             node->funs.noteOn(node->synth, now, noteID_, len, &values_[0]);
+            // Note events are event-rate seeds: flag the node so the next
+            // runNodes() -- later this same sample, before the voice's audio --
+            // runs processEvents and recomputes noteParam-derived iso-groups.
+            node->triggered = true;
         }
     }
 };
@@ -489,6 +493,7 @@ struct NoteOffCmd : Command
         } else {
             i64 now = s->sampleTime_;
             node->funs.noteOff(node->synth, now, noteID_);
+            node->triggered = true;
         }
     }
 };
@@ -507,6 +512,7 @@ struct AllNotesOffCmd : Command {
         } else {
             i64 now = s->sampleTime_;
             node->funs.allNotesOff(node->synth, now);
+            node->triggered = true;
         }
     }
 };
@@ -517,7 +523,10 @@ struct AllNotesOffAllCmd : Command {
     void doRT(Silo* s) override {
         i64 now = s->sampleTime_;
         for (Node* n = s->rt_sortedNodeList_; n; n = n->sorted_next) {
-            if (n->funs.allNotesOff) n->funs.allNotesOff(n->synth, now);
+            if (n->funs.allNotesOff) {
+                n->funs.allNotesOff(n->synth, now);
+                n->triggered = true;
+            }
         }
     }
 };
@@ -558,6 +567,7 @@ struct NoteSetParamRangeCmd : Command {
         if (node) {
             int len = int(values_.size());
             node->funs.noteSetParamRange(node->synth, noteID_, first_, len, &values_[0]);
+            node->triggered = true;
         }
     }
 };
@@ -578,9 +588,10 @@ struct NoteSetParamsCmd : Command {
         if (node) {
             int len = int(values_.size());
             node->funs.noteSetParams(node->synth, noteID_, len, &values_[0]);
+            node->triggered = true;
         } else {
             err_ = tzpl_errNodeNotFound;
-        }      
+        }
     }
 };
 

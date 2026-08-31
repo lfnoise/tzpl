@@ -287,7 +287,7 @@ Establishes ordering constraints between trees:
 Topologically sorts trees by their antecedent relationships, ensuring correct evaluation order.
 
 ### 14. Compute Event Iso-Groups
-Computes `IsoGroup`s for event-rate trees. Each event-rate tree is labeled with the transitive set of `Control` expressions that can activate it. Trees with identical control dependency sets share an iso-group. The compiler then builds activation edges between iso-groups from tree antecedents and topologically sorts those groups so upstream event work runs before downstream work.
+Computes `IsoGroup`s for event-rate trees. Each event-rate tree is labeled with the transitive set of activation-source expressions -- `Control` and `NoteParam` -- that can activate it. Trees with identical source dependency sets share an iso-group. The compiler then builds activation edges between iso-groups from tree antecedents and topologically sorts those groups so upstream event work runs before downstream work. (User noteParams are event-rate sources; the gate noteParam stays audio rate so per-sample envelope/trigger edge detection keeps its semantics.)
 
 ### 15. Trees to Loops
 Groups trees into `GenLoop`s based on three criteria:
@@ -418,7 +418,7 @@ Voicer codegen has a flat voice mode for voice graphs without control-flow expre
 
 ### Event-Rate Code Generation
 
-Event-rate codegen is driven by the iso-groups computed during graph analysis. Each generated control event copies the payload for a control into `p->controls[serial]` and sets `p->ctrlN_active = true`. `processEvents()` maps active controls to the iso-groups whose transitive control set contains that control, then clears the active flags.
+Event-rate codegen is driven by the iso-groups computed during graph analysis. Each generated control event copies the payload for a control into `p->controls[serial]` and sets `p->ctrlN_active = true`. Note events are the other activation source: the generated `noteSetParams`/`noteSetParamRange` set per-serial `np_active[]` flags for the noteParams they wrote (noteOn instead re-runs the voicer's event loops for the new voice in reset mode), and the engine flags the node so `processEvents()` runs. `processEvents()` maps active controls and noteParams to the iso-groups whose transitive source set contains them, then clears the active flags. NoteParam-sourced loops iterate all voices; noteParam leaves read the live voicer params matrix.
 
 Iso-groups run in topological order. When a group runs, codegen emits only that group's event loops, marks downstream groups active according to the iso-group activation graph, and advances any non-scalar event-rate delay buffers written by expressions in the group. If no iso-groups exist, `processEvents()` falls back to running all event loops directly for compatibility.
 

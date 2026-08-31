@@ -44,6 +44,7 @@ struct ExprVisitor {
     virtual void visit(BinaryOpExpr* e) = 0;
     virtual void visit(CompareOpExpr* e) = 0;
     virtual void visit(CastOpExpr* e) = 0;
+    virtual void visit(EventToAudioExpr* e) = 0;
 //    virtual void visit(MatMulExpr* e) = 0;
     virtual void visit(ReduceExpr* e) = 0;
 //    virtual void visit(ScanExpr* e) = 0;

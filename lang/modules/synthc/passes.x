@@ -913,12 +913,17 @@ fn _intListHas(lst [Int], x Int) Bool {
 ---------------------------------------------------------------------------
 -- computeIsoGroups (synthdef_synth.cpp:674)
 --
--- Group event-rate trees by their transitive control-dependency set, build the
--- activation graph between groups, and topologically sort it. Each group then
--- becomes its own set of event loops; processEvents runs only the groups whose
--- controls changed. Runs after sortTrees, before treesToLoops.
+-- Group event-rate trees by their transitive source-dependency set (controls
+-- and noteParams), build the activation graph between groups, and
+-- topologically sort it. Each group then becomes its own set of event loops;
+-- processEvents runs only the groups whose sources changed. Runs after
+-- sortTrees, before treesToLoops.
 
-fn _isControlNode(ctx Ctx, n NIdx) Bool = match (ctx.kind[n]) { control(_, _, _, _): true; _: false; };
+fn _isSourceNode(ctx Ctx, n NIdx) Bool = match (ctx.kind[n]) {
+	control(_, _, _, _): true;
+	noteParamK(_, _, _): true;
+	_: false;
+};
 
 -- Insert control node index x into a sorted-unique list (set semantics).
 fn _ctrlInsert(lst [Int], x Int) Void {
@@ -944,28 +949,52 @@ fn _ctrlListEq(a [Int], b [Int]) Bool {
 	true
 }
 
--- Transitive control set of a tree, memoized in `transCtrl / `transDone.
-fn _computeTransitiveControls(ctx Ctx, treeIdx Int) Void {
+-- Transitive source set of a tree, memoized in `transCtrl / `transDone.
+fn _computeTransitiveSources(ctx Ctx, treeIdx Int) Void {
 	var done [Bool] = `transDone;
 	if (done[treeIdx]) { return; }
 	done[treeIdx] = true;
 	var result [Int] = [];
 	let tree = ctx.trees[treeIdx];
-	-- A tree whose own root is a control reads that control directly, so it
-	-- must re-run (re-loading the control into its instance var) when that
-	-- control changes. Without this the control-reading iso-group has an empty
-	-- activation set and never fires, leaving the synth silent.
-	if (ctx _isControlNode(tree.root)) {
+	-- A tree whose own root is a source (control or noteParam) reads it
+	-- directly, so it must re-run (re-loading the value into its instance
+	-- var) when that source changes. Without this the source-reading
+	-- iso-group has an empty activation set and never fires, leaving the
+	-- synth silent.
+	if (ctx _isSourceNode(tree.root)) {
 		_ctrlInsert(result, tree.root);
 	}
 	for (ante : tree.antecedents) {
 		let anteRoot = ctx.trees[ante].root;
-		if (ctx _isControlNode(anteRoot)) {
+		if (ctx _isSourceNode(anteRoot)) {
 			_ctrlInsert(result, anteRoot);
 		} else if (ctx.nrate[anteRoot] == Rate.event) {
-			_computeTransitiveControls(ctx, ante);
+			_computeTransitiveSources(ctx, ante);
 			let ac [[Int]] = `transCtrl;
 			for (c : ac[ante]) { _ctrlInsert(result, c); }
+		}
+	}
+	-- A materialized read of an event-rate delay has no tree antecedent on
+	-- its writer (delay ordering edges point write-after-read so the reader
+	-- sees the previous event's value), which left its iso-group with an
+	-- empty activation set: the read never re-ran and z1-over-event state
+	-- stayed stale forever. Inherit the writer tree's sources so the read
+	-- re-runs (before the write, by tree order) whenever the writer does.
+	-- Mirrors the C++ computeTransitiveSources.
+	let rdDelay = match (ctx.kind[tree.root]) {
+		delayFixReadK(d, _): d;
+		delayVarReadK(d, _): d;
+		_: NONE;
+	};
+	if (rdDelay != NONE) {
+		let w = ctx.delays[rdDelay].writer;
+		if (w != NONE && ctx.nrate[w] == Rate.event) {
+			let wtree = ctx.treeOf[w];
+			if (wtree != NONE && wtree != treeIdx) {
+				_computeTransitiveSources(ctx, wtree);
+				let ws [[Int]] = `transCtrl;
+				for (c : ws[wtree]) { _ctrlInsert(result, c); }
+			}
 		}
 	}
 	let tc [[Int]] = `transCtrl;
@@ -973,7 +1002,7 @@ fn _computeTransitiveControls(ctx Ctx, treeIdx Int) Void {
 }
 
 fn computeIsoGroups(ctx Ctx) Void {
-	-- Collect event-rate trees (in sortedTrees order) and their control sets.
+	-- Collect event-rate trees (in sortedTrees order) and their source sets.
 	var `transCtrl [[Int]] = [];
 	var `transDone [Bool] = false repeat(ctx.trees length);
 	var ti = 0;
@@ -983,25 +1012,25 @@ fn computeIsoGroups(ctx Ctx) Void {
 	for (treeIdx : ctx.sortedTrees) {
 		if (ctx.nrate[ctx.trees[treeIdx].root] == Rate.event) {
 			eventTrees push!(treeIdx);
-			_computeTransitiveControls(ctx, treeIdx);
+			_computeTransitiveSources(ctx, treeIdx);
 		}
 	}
 	if (eventTrees length == 0) { return; }
 
-	-- Group by identical control set (first-appearance order).
+	-- Group by identical source set (first-appearance order).
 	var tcAll [[Int]] = `transCtrl;
 	for (treeIdx : eventTrees) {
 		let cs [Int] = tcAll[treeIdx];
 		var found = NONE;
 		var gi = 0;
 		while (gi < ctx.isoGroups length && found == NONE) {
-			if (_ctrlListEq(ctx.isoGroups[gi].controls, cs)) { found = gi; }
+			if (_ctrlListEq(ctx.isoGroups[gi].sources, cs)) { found = gi; }
 			gi = gi + 1;
 		}
 		if (found == NONE) {
 			found = ctx.isoGroups length;
 			ctx.isoGroups push!(IsoGroup {
-				trees: [Int](), loops: [Int](), controls: cs,
+				trees: [Int](), loops: [Int](), sources: cs,
 				activates: [Int](), serial: found,
 			});
 		}

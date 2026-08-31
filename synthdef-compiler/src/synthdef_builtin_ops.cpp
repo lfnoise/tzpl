@@ -166,6 +166,16 @@ namespace synthdef {
         return addExpr(new SharedInExpr{slot, rate});
     }
 
+    // Promote an event-rate signal to audio rate (a stepped audio signal
+    // re-read every sample). No effect on constant/init/reset-rate signals
+    // -- and on audio-rate ones -- which pass through unchanged.
+    S eventToAudio(S a) {
+        if (a->rate != eventSignalRate) {
+            return a;
+        }
+        return addExpr(new EventToAudioExpr{a});
+    }
+
     // Expr math functions.
     S abs(S a) { return a.abs(); }
     S neg(S a) { return a.neg(); }

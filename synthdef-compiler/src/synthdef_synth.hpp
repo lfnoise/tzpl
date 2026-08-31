@@ -54,7 +54,9 @@ namespace synthdef {
     struct IsoGroup : ArenaObj {
         vector<ExprTree*> trees;
         vector<GenLoop*> loops;
-        unordered_set<S, ExprIdentityHasher, ExprIdentical> controls;
+        // Activation sources: Control and NoteParam exprs. A group runs when
+        // any of its sources changes (control message or note event).
+        unordered_set<S, ExprIdentityHasher, ExprIdentical> sources;
         vector<IsoGroup*> activates;
         usize serial = 0;
     };

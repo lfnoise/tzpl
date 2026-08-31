@@ -74,6 +74,18 @@ fn echo() S {
 checkProd("arith", arith);
 checkProd("echo", echo);
 
+-- eventToAudio: the promoted trigger (audio-rate one-sample impulse via an
+-- audio z1) beside the pure event-rate trigger (held; its materialized z1
+-- read inherits the writer's sources -- the delay-read activation fix), plus
+-- the constant passthrough (eventToAudio(1.0) folds to the constant).
+fn e2aTrig() S {
+	let c = control("trig", ControlSpec { lo: 0.0, hi: 10.0, init: 0.0, warp: ControlWarp.linear });
+	let imp = (c eventToAudio) tr * eventToAudio(1.0);
+	let held = (c tr) * (1.0 + 1.0e-30 * white());
+	[imp, held] join outlet
+}
+checkProd("e2a_trig", e2aTrig);
+
 -- category tags: the loadTags emission must byte-match between the two
 -- compilers (tags flow to C++ via the (Tags ...) sexpr clause, to synthc via
 -- the importGraph tags argument).

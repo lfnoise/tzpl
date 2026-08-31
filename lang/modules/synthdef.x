@@ -479,6 +479,7 @@ enum SignalExprKind {
 	binop BinaryOp,
 	compareop CompareOp,
 	castop CastOp,
+	eventToAudio,
 	random (RandOp, Rate, Chans),
 	vecop VecOp,
 
@@ -528,6 +529,16 @@ fn T() S {
 -- sample-accurately scheduled -- use a control for scheduled changes.
 fn sharedIn(slot Int, rate Rate = Rate.audio) S {
     SignalExprKind.sharedIn(slot, rate) _newSignalExpr
+}
+
+-- Promote an event-rate signal to audio rate: a stepped audio signal that
+-- re-reads the latched event value every sample. Restores one-sample trigger
+-- semantics over event sources -- e.g. `eventToAudio(c) tr` fires a single-
+-- sample impulse on the sample after a control or noteParam change. No
+-- effect on signals of any other rate (constant/init/reset/audio pass
+-- through unchanged).
+fn eventToAudio(a AsSignal) S {
+    SignalExprKind.eventToAudio _newSignalExpr([a asSignal])
 }
 
 fn inlet(typ NumType, chans Chans = 1, name String = "in") S {
@@ -1210,6 +1221,7 @@ fn toLisp(o S, indentLevel Int) String {
         binop(op) : "(%^ BinaryOp %^ %^)" fmt(o.id, op tag toString, o inputsToLisp);
         compareop(op) : "(%^ CompareOp %^ %^)" fmt(o.id, op tag toString, o inputsToLisp);
         castop(op) : "(%^ CastOp %^ %^)" fmt(o.id, op numTypeInt, o inputsToLisp);
+        eventToAudio : "(%^ EventToAudio %^)" fmt(o.id, o inputsToLisp);
         random(op, rate, chans) : match (op) {
             frand(lo, hi) : "(%^ FRand %^ %^ %^ %^)" fmt(o.id, rate ordinal, chans asChans, lo, hi);
             irand(lo, hi) : "(%^ IRand %^ %^ %^ %^)" fmt(o.id, rate ordinal, chans asChans, lo, hi);

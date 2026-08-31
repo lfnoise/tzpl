@@ -78,14 +78,23 @@ namespace synthdef {
     
     S addExpr(S expr) {
         assert(gGraph && gSynth);
-                
+
         if (gApplyRewrites) {
             expr = rewrite(expr);
         }
-                
+
+        // Already added (graph is set in the registration below): return it
+        // unchanged. Rewrite replacements can hand back an existing expr --
+        // for hash-consed kinds the set lookup catches that, but
+        // non-hash-consed kinds (NoteParam, Inlet, Outlet, PhiNode) would
+        // re-register and duplicate their synth declaration-list entries.
+        if (expr->graph) {
+            return expr;
+        }
+
         if (expr->should_hash_cons() && gGraph->hashConsSet.contains(expr)) {
             return *gGraph->hashConsSet.find(expr);
-        } 
+        }
 
         gGraph->hashConsSet.insert(expr);
         expr->graph = gGraph;
@@ -719,48 +728,74 @@ namespace synthdef {
     }
     
     
-    using ControlSet = unordered_set<S, ExprIdentityHasher, ExprIdentical>;
+    using SourceSet = unordered_set<S, ExprIdentityHasher, ExprIdentical>;
 
-    void computeTransitiveControls(ExprTree* tree,
-        unordered_map<ExprTree*, ControlSet>& cache)
+    static bool isActivationSource(S expr) {
+        return expr.as<Control>() || expr.as<NoteParam>();
+    }
+
+    void computeTransitiveSources(ExprTree* tree,
+        unordered_map<ExprTree*, SourceSet>& cache)
     {
         if (cache.contains(tree)) return;
-        ControlSet& result = cache[tree];
-        // A tree whose own root is a control reads that control directly, so
-        // it must re-run (and re-load the control into its instance var) when
-        // that control changes. Without this, the control-reading iso-group
-        // has an empty activation set and never fires, so the control value
-        // never reaches the audio loop and the synth is silent.
-        if (tree->root.as<Control>()) {
+        SourceSet& result = cache[tree];
+        // A tree whose own root is a source (control or noteParam) reads it
+        // directly, so it must re-run (and re-load the value into its
+        // instance var) when that source changes. Without this, the
+        // source-reading iso-group has an empty activation set and never
+        // fires, so the value never reaches the audio loop and the synth is
+        // silent.
+        if (isActivationSource(tree->root)) {
             result.insert(tree->root);
         }
         for (auto [ant, sepLoop] : tree->antecedents) {
-            if (ant->root.as<Control>()) {
+            if (isActivationSource(ant->root)) {
                 result.insert(ant->root);
             } else if (ant->root->rate == eventSignalRate) {
-                computeTransitiveControls(ant, cache);
-                auto& antControls = cache[ant];
-                result.insert(antControls.begin(), antControls.end());
+                computeTransitiveSources(ant, cache);
+                auto& antSources = cache[ant];
+                result.insert(antSources.begin(), antSources.end());
             }
         }
+        // A materialized read of an event-rate delay has no tree antecedent
+        // on its writer (delay ordering edges point write-after-read so the
+        // reader sees the previous event's value), which left its iso-group
+        // with an empty activation set: the read never re-ran and
+        // z1-over-event state stayed stale forever. Inherit the writer
+        // tree's sources so the read re-runs (before the write, by tree
+        // order) whenever the writer does. Safe recursion order: readers
+        // sort before their writer, so the writer's set is computed fresh
+        // here, never observed half-built.
+        auto inheritWriterSources = [&](auto* rd) {
+            auto& buf = rd->delayBuf;
+            if (buf->writer.notNull() && buf->writer->rate == eventSignalRate
+                && buf->writer->tree && buf->writer->tree != tree) {
+                computeTransitiveSources(buf->writer->tree, cache);
+                auto& ws = cache[buf->writer->tree];
+                result.insert(ws.begin(), ws.end());
+            }
+        };
+        if (auto fr = tree->root.as<DelayFixRead>(); fr) inheritWriterSources(fr);
+        else if (auto vr = tree->root.as<DelayVarRead>(); vr) inheritWriterSources(vr);
     }
 
     void Synth::computeIsoGroups() {
-        // Collect event-rate trees and compute each tree's transitive control dependencies.
-        unordered_map<ExprTree*, ControlSet> transitiveControls;
+        // Collect event-rate trees and compute each tree's transitive source
+        // (control and noteParam) dependencies.
+        unordered_map<ExprTree*, SourceSet> transitiveSources;
 
         vector<ExprTree*> eventTrees;
         for (ExprTree* tree : sortedTrees) {
             if (tree->root->rate == eventSignalRate) {
                 eventTrees.push_back(tree);
-                computeTransitiveControls(tree, transitiveControls);
+                computeTransitiveSources(tree, transitiveSources);
             }
         }
         if (eventTrees.empty()) return;
 
-        // Group event-rate trees by identical transitive control dependency sets.
-        // Trees that depend on exactly the same set of controls form one IsoGroup.
-        auto controlSetsEqual = [](ControlSet const& a, ControlSet const& b) {
+        // Group event-rate trees by identical transitive source dependency sets.
+        // Trees that depend on exactly the same set of sources form one IsoGroup.
+        auto sourceSetsEqual = [](SourceSet const& a, SourceSet const& b) {
             if (a.size() != b.size()) return false;
             for (auto& s : a) { if (b.find(s) == b.end()) return false; }
             return true;
@@ -769,15 +804,15 @@ namespace synthdef {
         vector<IsoGroup*> groups;
 
         for (ExprTree* tree : eventTrees) {
-            ControlSet& cs = transitiveControls[tree];
+            SourceSet& cs = transitiveSources[tree];
             IsoGroup* found = nullptr;
             for (IsoGroup* g : groups) {
-                if (controlSetsEqual(g->controls, cs)) { found = g; break; }
+                if (sourceSetsEqual(g->sources, cs)) { found = g; break; }
             }
             if (!found) {
                 found = new IsoGroup();
                 found->serial = groups.size();
-                found->controls = cs;
+                found->sources = cs;
                 groups.push_back(found);
             }
             found->trees.push_back(tree);

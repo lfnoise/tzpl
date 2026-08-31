@@ -80,6 +80,7 @@ fn calcShapeOf(ctx Ctx, n NIdx) Int {
 		binopK(_):           _broadcastC(ctx.chans[ins[0]], ctx.chans[ins[1]]);
 		compareopK(_):       _broadcastC(ctx.chans[ins[0]], ctx.chans[ins[1]]);
 		castopK(_):          ctx.chans[ins[0]];
+		eventToAudioK:       ctx.chans[ins[0]];
 		reduceK(_, cols):    cols;
 		vecK(vop):           _vecShapeOf(ctx, vop, ins);
 		selectK:             _selectChans(ctx, n);
@@ -236,6 +237,7 @@ fn updateTypeOf(ctx Ctx, n NIdx, wl WorkList) Void {
 		binopK(_):           { _narrow(ctx, n, ctx.typ[n] & ctx.typ[ins[0]] & ctx.typ[ins[1]], wl); }
 		compareopK(_):       { _updateCompare(ctx, n, wl); }
 		castopK(_):          {}                  -- output is cast_type; input unconstrained
+		eventToAudioK:       { _narrow(ctx, n, ctx.typ[n] & ctx.typ[ins[0]], wl); }
 		reduceK(_, _):       { _narrow(ctx, n, ctx.typ[n] & ctx.typ[ins[0]], wl); }
 		-- put narrows by its array + value (skip the integer index); join by all
 		-- inputs; at + the reorders narrow by the data input.

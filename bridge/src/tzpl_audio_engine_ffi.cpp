@@ -1494,6 +1494,7 @@ static void ffi_playNote(ts::VM& vm, u16 dst, u16, u16 argBase) {
     engine::Node* node = s->rt_getNode(nodeID);
     if (!node) { vm.reg(dst).i = (i64)tzpl_errNodeNotFound; return; }
     node->funs.noteOn(node->synth, s->sampleTime_, noteID, len, params);
+    node->triggered = true;
     vm.reg(dst).i = (i64)tzpl_errNone;
 }
 
@@ -1506,6 +1507,7 @@ static void ffi_releaseNote(ts::VM& vm, u16 dst, u16, u16 argBase) {
     engine::Node* node = s->rt_getNode(nodeID);
     if (!node) { vm.reg(dst).i = (i64)tzpl_errNodeNotFound; return; }
     node->funs.noteOff(node->synth, s->sampleTime_, noteID);
+    node->triggered = true;
     vm.reg(dst).i = (i64)tzpl_errNone;
 }
 

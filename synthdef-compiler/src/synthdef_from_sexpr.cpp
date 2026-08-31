@@ -485,6 +485,27 @@ std::expected<S, std::string> SExprGraphBuilder::parseCastOp(sexpr::ItemVec cons
     return expr;
 }
 
+std::expected<S, std::string> SExprGraphBuilder::parseEventToAudio(sexpr::ItemVec const& list) {
+    // Format: (id EventToAudio (input_ids))
+    if (list.size() < 3) {
+        return std::unexpected("EventToAudio requires 3 elements");
+    }
+
+    if (!list[0].is<int64_t>()) return std::unexpected("ID must be integer");
+    int64_t id = list[0].get<int64_t>();
+
+    if (!list[2].is<sexpr::ItemVec>()) return std::unexpected("Inputs must be a list");
+    auto inputsResult = resolveInputs(list[2].get<sexpr::ItemVec>());
+    if (!inputsResult) return std::unexpected(inputsResult.error());
+    if (inputsResult->size() != 1) return std::unexpected("EventToAudio requires exactly 1 input");
+
+    // The builder passes non-event-rate inputs through unchanged, so the id
+    // maps directly to the input expr in that case.
+    S expr = eventToAudio((*inputsResult)[0]);
+    exprMap[id] = expr;
+    return expr;
+}
+
 std::expected<S, std::string> SExprGraphBuilder::parseVecReduce(sexpr::ItemVec const& list) {
     // Format: (id VecReduce op cols (input_ids))
     if (list.size() < 5) {
@@ -1322,6 +1343,7 @@ std::expected<S, std::string> SExprGraphBuilder::parseExpr(sexpr::Item const& it
     else if (type == "BinaryOp") return parseBinaryOp(list);
     else if (type == "CompareOp") return parseCompareOp(list);
     else if (type == "CastOp") return parseCastOp(list);
+    else if (type == "EventToAudio") return parseEventToAudio(list);
     else if (type == "VecReduce") return parseVecReduce(list);
     else if (type == "VecTake" || type == "VecDrop" || type == "VecStride"
           || type == "VecStutter" || type == "VecNCyc" || type == "VecTranspose"

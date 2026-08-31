@@ -381,6 +381,16 @@ fn _constLiteral(ctx Ctx, n NIdx) String = match (ctx.kind[n]) {
 	_:              "0";
 };
 
+-- Whether an operand will emit as an inline C++ comparison (bool): it is a
+-- compareop that genExpr will NOT read from a materialized root slot.
+-- Mirrors the inlineCompare lambda in the C++ BinaryOpExpr visitor.
+fn _inlineCompare(ctx Ctx, n NIdx) Bool {
+	let isCmp = match (ctx.kind[n]) { compareopK(_): true; _: false; };
+	if (!isCmp) { return false; }
+	let inInit Bool = `cgInInit;
+	!(!inInit && ctx _isRootNode(n) && n != `cgRoot)
+}
+
 -- The RNG state reference for a random node. In flat voice mode a voicer-body
 -- RNG is per-voice: p->voice_rgen<g>[voice], voice = cel >> flatChanShift.
 fn _rngStateRef(ctx Ctx, n NIdx, cel String) String {
@@ -423,14 +433,15 @@ fn _inlineExpr(ctx Ctx, n NIdx, cel String) String {
 				? "(*(%^*)p->controls[%^])" fmt(cppType(ctx.typ[n]), sn)
 				: "((%^*)p->controls[%^])[%^]" fmt(cppType(ctx.typ[n]), sn, cel));
 		-- NoteParam: gather the voice's parameter from the voicer_params matrix.
-		-- cel is the voice index in flat voice mode. SIMD gathers per lane (M5.3).
-		-- In an AoS per-voice block the row pointer `vparams` is in scope
-		-- (mirrors the C++ NoteParam visitor's non-flat branch).
+		-- In flat voice mode the voice index is extracted from cel via the
+		-- channel shift. SIMD gathers per lane (M5.3). In an AoS per-voice
+		-- block the row pointer `vparams` is in scope (mirrors the C++
+		-- NoteParam visitor's non-flat branch).
 		noteParamK(_, _, psn): `cgInVoiceLoop
 			? ((ctx.chans[n] == 1) ? "vparams[%^]" fmt(psn) : "vparams[%^ + (%^)]" fmt(psn, cel))
 			: ((`cgSimdW > 0)
 				? _noteParamSimd(ctx.typ[n], ctx.chans[n], psn, cel)
-				: "p->voicer_params[%^][%^]" fmt(cel, psn));
+				: _noteParamFlatScalar(ctx, n, psn, cel));
 		-- The packed FFT frame buffer the body reads/writes each sample.
 		spectralFrameK(_): "p->spec%^_frame[%^]" fmt(ctx _frameChainSerial(n), cel);
 		-- Inlet's own value: in SIMD this is the inlet VISITOR form (a bare-pointer
@@ -451,15 +462,27 @@ fn _inlineExpr(ctx Ctx, n NIdx, cel String) String {
 		-- vector ops don't, so widen each operand to the common type.
 		binopK(op):     {
 			let ct = commonType(ctx.typ[ins[0]], ctx.typ[ins[1]]);
+			var a = _simdWiden(ct, ctx.typ[ins[0]], genExpr(ctx, ins[0], cel));
+			var b = _simdWiden(ct, ctx.typ[ins[1]], genExpr(ctx, ins[1], cel));
+			-- An inline comparison emits as C++ bool; function-syntax ops
+			-- (std::min/std::max/...) are templates and refuse mixed
+			-- bool/float deduction, so cast such an operand to the promotion
+			-- type. A materialized compare root reads its typed slot and
+			-- needs no cast. Mirrors the C++ BinaryOpExpr visitor.
+			let fnSyntax = match (op binopSyntax) { OpSyntax.function: true; _: false; };
+			if (`cgSimdW == 0 && fnSyntax) {
+				if (_inlineCompare(ctx, ins[0])) { a = "%^(%^)" fmt(cppType(ct), a); }
+				if (_inlineCompare(ctx, ins[1])) { b = "%^(%^)" fmt(cppType(ct), b); }
+			}
 			_simdWiden(ctx.typ[n], ct,
-			    genBinopStr(op, ctx.typ[n] _isF32,
-			        _simdWiden(ct, ctx.typ[ins[0]], genExpr(ctx, ins[0], cel)),
-			        _simdWiden(ct, ctx.typ[ins[1]], genExpr(ctx, ins[1], cel)), `cgSimdW > 0))
+			    genBinopStr(op, ctx.typ[n] _isF32, a, b, `cgSimdW > 0))
 		}
 		compareopK(op): genCompareStr(op, genExpr(ctx, ins[0], cel), genExpr(ctx, ins[1], cel));
 		castopK(ct):    (`cgSimdW > 0)
 			? "convert<%^>(%^)" fmt(cppType(ct), genExpr(ctx, ins[0], cel))
 			: "%^(%^)" fmt(cppType(ct), genExpr(ctx, ins[0], cel));
+		-- Pure rate boundary: emit the input (a materialized event value).
+		eventToAudioK:  genExpr(ctx, ins[0], cel);
 		selectK:        _inlineSelect(ctx, n, cel);
 		reduceK(op, cols): _genReduce(ctx, n, op, cols, cel);
 		vecK(vop):      _genVec(ctx, n, vop, cel);
@@ -1821,6 +1844,16 @@ fn _noteParamSimd(t NumType, chans Int, psn Int, cel String) String {
 	"%^{%^}" fmt(_simdType(t, w), parts join(", "))
 }
 
+-- NoteParam in flat-voice scalar mode: voice = cel >> flatChanShift; a
+-- multichannel param adds the wrapped channel to the column. Mirrors the C++
+-- NoteParam visitor's flat scalar branch.
+fn _noteParamFlatScalar(ctx Ctx, n NIdx, psn Int, cel String) String {
+	let shift = `cgFlatChanShift;
+	let vi = shift == 0 ? cel : "%^ >> %^" fmt(cel, shift);
+	if (ctx.chans[n] == 1) { return "p->voicer_params[%^][%^]" fmt(vi, psn); }
+	"p->voicer_params[%^][%^ + (%^ & %^)]" fmt(vi, psn, cel, ctx.chans[n] - 1)
+}
+
 -- A loop's tree contains an expression that can't be vectorized (Apple simd has
 -- no ternary/reduce; vec-reorder ops need per-element indices). Mirrors the
 -- disqualifying-expr scan in simdWidth(). VecTake/VecDrop are NOT disqualified.
@@ -2223,6 +2256,11 @@ fn genDeclInstVars(ctx Ctx) String {
 	-- control activation flags
 	for (cn : ctx.controls) {
 		match (ctx.kind[cn]) { control(_, _, sn, _): { s = s $ "\tbool ctrl%^_active;\n" fmt(sn); } _: {} }
+	}
+	-- noteParam activation flags, indexed by serial (gate = 0). Set by the
+	-- generated note functions, consumed and cleared by processEvents.
+	if (ctx.noteParams length > 0) {
+		s = s $ "\tbool np_active[%^];\n" fmt(ctx.noteParams length);
 	}
 	if (s length > 0) { s = "\t// instance variables\n" $ s $ "\n"; }
 	s = s $ genVoicerDecls(ctx);
@@ -3144,16 +3182,27 @@ fn genVoicerNoteFuns(ctx Ctx, name String) String {
 		}
 	}
 	s = s $ "\treturn tzpl_errNone;\n}\n\n";
+	-- User noteParams are event-rate sources: noteSetParams/noteSetParamRange
+	-- mark the serials they wrote in np_active so the next processEvents
+	-- re-runs the iso-groups depending on them. noteOn is covered by the
+	-- reset-mode repair above; noteOff/allNotesOff only touch the gate,
+	-- which is audio-rate and never a source. Mirrors the C++.
 	-- noteOff / allNotesOff
 	s = s $ "tzpl_SErr %^_noteOff(%^* p, i64 now, int noteID) {\n\treturn p->voicer.noteOff(now, noteID);\n}\n\n" fmt(name, name);
 	s = s $ "tzpl_SErr %^_allNotesOff(%^* p, i64 now) {\n\tp->voicer.allOff(now);\n\treturn tzpl_errNone;\n}\n\n" fmt(name, name);
 	-- noteSetParams / noteSetParamRange
 	s = s $ "tzpl_SErr %^_noteSetParams(%^* p, int noteID, int n, tzpl_ParamPair* params) {\n" fmt(name, name);
 	s = s $ "\tint vi = p->voicer.findVoice(noteID);\n\tif (vi < 0) return tzpl_errNoteNotFound;\n";
-	s = s $ "\tp->voicer.setNoteParams(vi, n, params);\n\treturn tzpl_errNone;\n}\n\n";
+	s = s $ "\tp->voicer.setNoteParams(vi, n, params);\n";
+	s = s $ "\tfor (int i = 0; i < n; ++i) {\n\t\tint ix = params[i].index;\n";
+	s = s $ "\t\tif (ix >= 0 && ix < %^) p->np_active[ix + 1] = true;\n\t}\n" fmt(nUser);
+	s = s $ "\treturn tzpl_errNone;\n}\n\n";
 	s = s $ "tzpl_SErr %^_noteSetParamRange(%^* p, int noteID, int first, int len, f32* vals) {\n" fmt(name, name);
 	s = s $ "\tint vi = p->voicer.findVoice(noteID);\n\tif (vi < 0) return tzpl_errNoteNotFound;\n";
-	s = s $ "\tp->voicer.setNoteParamRange(vi, first, len, vals);\n\treturn tzpl_errNone;\n}\n\n";
+	s = s $ "\tp->voicer.setNoteParamRange(vi, first, len, vals);\n";
+	s = s $ "\tint last = first + len; if (last > %^) last = %^;\n" fmt(nUser, nUser);
+	s = s $ "\tfor (int i = first < 0 ? 0 : first; i < last; ++i) p->np_active[i + 1] = true;\n";
+	s = s $ "\treturn tzpl_errNone;\n}\n\n";
 	s
 }
 
@@ -3296,8 +3345,10 @@ fn genEventFun(ctx Ctx, name String) String {
 
 fn _ctrlSerialOf(ctx Ctx, n NIdx) Int = match (ctx.kind[n]) { control(_, _, sn, _): sn; _: NONE; };
 
-fn _isoHasControl(ctx Ctx, groupIdx Int, ctrlNode NIdx) Bool {
-	for (c : ctx.isoGroups[groupIdx].controls) { if (c == ctrlNode) { return true; } }
+fn _npSerialOf(ctx Ctx, n NIdx) Int = match (ctx.kind[n]) { noteParamK(_, _, sn): sn; _: NONE; };
+
+fn _isoHasSource(ctx Ctx, groupIdx Int, srcNode NIdx) Bool {
+	for (c : ctx.isoGroups[groupIdx].sources) { if (c == srcNode) { return true; } }
 	false
 }
 
@@ -3320,9 +3371,24 @@ fn genHandleEventsFun(ctx Ctx, name String) String {
 		let csn = _ctrlSerialOf(ctx, cn);
 		s = s $ "\tif (p->ctrl%^_active) {\n" fmt(csn);
 		for (g : ctx.isoOrder) {
-			if (_isoHasControl(ctx, g, cn)) { s = s $ "\t\tiso%^ = true;\n" fmt(ctx.isoGroups[g].serial); }
+			if (_isoHasSource(ctx, g, cn)) { s = s $ "\t\tiso%^ = true;\n" fmt(ctx.isoGroups[g].serial); }
 		}
 		s = s $ "\t\tp->ctrl%^_active = false;\n" fmt(csn);
+		s = s $ "\t}\n";
+	}
+	-- 2b. NoteParam activation -> iso-group activation. Flags are set by the
+	-- generated noteSetParams/noteSetParamRange, indexed by serial; noteOn
+	-- covers its voice via the reset-mode repair instead, so it sets no
+	-- flags. The gate is audio-rate (never a source) -- skip it. Mirrors
+	-- the C++.
+	for (np : ctx.noteParams) {
+		if (ctx.nrate[np] != Rate.event) { continue; }
+		let nsn = _npSerialOf(ctx, np);
+		s = s $ "\tif (p->np_active[%^]) {\n" fmt(nsn);
+		for (g : ctx.isoOrder) {
+			if (_isoHasSource(ctx, g, np)) { s = s $ "\t\tiso%^ = true;\n" fmt(ctx.isoGroups[g].serial); }
+		}
+		s = s $ "\t\tp->np_active[%^] = false;\n" fmt(nsn);
 		s = s $ "\t}\n";
 	}
 	s = s $ "\n";

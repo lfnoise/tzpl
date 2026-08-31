@@ -93,6 +93,10 @@ namespace synthdef {
     // slots -- see tzpl_SharedInput in tzpl_plugin_abi.h). Init or audio rate.
     S sharedIn(usize slot, SignalRate rate = audioSignalRate);
 
+    // Promote an event-rate signal to audio rate (a stepped audio signal
+    // re-read every sample); no effect on signals of any other rate.
+    S eventToAudio(S a);
+
     // Expr math functions.
     S abs(S a);
     S neg(S a);

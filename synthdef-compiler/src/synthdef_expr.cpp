@@ -46,8 +46,14 @@ namespace synthdef {
         chans = ichans;
     }
 
+    // User noteParams are event-rate sources: their values change only at
+    // note events, and derived math recomputes in processEvents. The GATE
+    // stays audio-rate -- it drives per-sample envelope and trigger idioms
+    // (adsr, tr) whose edge detection needs sample granularity; an
+    // event-rate trigger would be held (not a one-sample impulse) until the
+    // next note event.
     NoteParam::NoteParam(ControlSpec spec, NumType itype, usize ichans, string name)
-        : Expr(audioSignalRate, {}),
+        : Expr(name == "gate" ? audioSignalRate : eventSignalRate, {}),
         spec(spec), serial(name == "gate" ? 0 : nextNoteParamSerialNo()), name(name)
     {
         type = itype;
@@ -383,7 +389,16 @@ namespace synthdef {
             type = new_type;
             propagate_types(worklist);
         }
-        
+
+    }
+
+    void EventToAudioExpr::update_type(ExprWorkList& worklist) {
+        auto new_type = type & in0()->type;
+        checkType(new_type);
+        if (type != new_type) {
+            type = new_type;
+            propagate_types(worklist);
+        }
     }
 
     void BinaryOpExpr::update_type(ExprWorkList& worklist) {

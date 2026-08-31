@@ -61,6 +61,7 @@ struct SExprGraphBuilder {
     std::expected<S, std::string> parseBinaryOp(sexpr::ItemVec const& list);
     std::expected<S, std::string> parseCompareOp(sexpr::ItemVec const& list);
     std::expected<S, std::string> parseCastOp(sexpr::ItemVec const& list);
+    std::expected<S, std::string> parseEventToAudio(sexpr::ItemVec const& list);
     std::expected<S, std::string> parseVecReduce(sexpr::ItemVec const& list);
     std::expected<S, std::string> parseVecIntParam(sexpr::ItemVec const& list);
     std::expected<S, std::string> parseVecNoParam(sexpr::ItemVec const& list);
