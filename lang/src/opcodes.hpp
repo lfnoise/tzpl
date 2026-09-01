@@ -387,6 +387,7 @@ void op_set_list_print_limit(VM& vm, Code* pc);   // SET_LIST_PRINT_LIMIT Rd, Ra
 
 // --- Range ---
 void op_make_range(VM& vm, Code* pc);     // MAKE_RANGE Rd, Rstart, Rend, Rstep (4 words: op, regs, RangeType*, flags)
+void op_range_get(VM& vm, Code* pc);      // RANGE_GET Rd, Ra(range), Rb(idx) (3 words: op, regs, RangeType*)
 
 // --- Lambda ---
 void op_make_lambda(VM& vm, Code* pc);        // MAKE_LAMBDA Rd, captureBase, numFreeVars (4 words: op, regs, CodeBlock*, LambdaType*)

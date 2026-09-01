@@ -9071,6 +9071,15 @@ u16 CodeGen::genIndexExpr(IndexExpr_* expr) {
         emitPtr(optType);
         return dst;
     }
+    if (auto* rangeType = dynamic_cast<RangeType*>(expr->object->resolvedType)) {
+        // Range subscript: range[index] -> elem. Finite ranges index
+        // cyclically; infinite ranges use the absolute index value.
+        u16 dst = allocSlot(rangeType->elemType_);
+        emitOp(op_range_get);
+        emitRegs(dst, objReg, idxReg);
+        emitPtr(rangeType);
+        return dst;
+    }
     if (expr->object->resolvedType == compiler_.stringType()) {
         // String subscript: string[index] -> byte as Int
         u16 dst = allocReg();
@@ -9151,6 +9160,11 @@ u16 CodeGen::emitIndexLookup(u16 srcReg, Type* srcType, u16 idxReg, Type* idxTyp
             valReg = allocReg();
             emitOp(op_string_get_byte);
             emitRegs(valReg, srcReg, idxValReg);
+        } else if (auto* rangeType = dynamic_cast<RangeType*>(srcType)) {
+            valReg = allocSlot(elemResT);
+            emitOp(op_range_get);
+            emitRegs(valReg, srcReg, idxValReg);
+            emitPtr(rangeType);
         } else {
             auto* arrType = dynamic_cast<ArrayType*>(srcType);
             valReg = allocSlot(elemResT);
@@ -9206,6 +9220,10 @@ u16 CodeGen::emitIndexLookup(u16 srcReg, Type* srcType, u16 idxReg, Type* idxTyp
         } else if (srcType == compiler_.stringType()) {
             emitOp(op_string_get_byte);
             emitRegs(valReg, srcReg, idxValReg);
+        } else if (auto* rangeType = dynamic_cast<RangeType*>(srcType)) {
+            emitOp(op_range_get);
+            emitRegs(valReg, srcReg, idxValReg);
+            emitPtr(rangeType);
         } else {
             auto* arrType = dynamic_cast<ArrayType*>(srcType);
             emitOp(opArrayGetDynFor(arrType->elemType_));
@@ -9263,6 +9281,11 @@ u16 CodeGen::emitIndexLookup(u16 srcReg, Type* srcType, u16 idxReg, Type* idxTyp
         dst = allocReg();
         emitOp(op_string_get_byte);
         emitRegs(dst, srcReg, idxReg);
+    } else if (auto* rangeType = dynamic_cast<RangeType*>(srcType)) {
+        dst = allocSlot(rangeType->elemType_);
+        emitOp(op_range_get);
+        emitRegs(dst, srcReg, idxReg);
+        emitPtr(rangeType);
     } else {
         auto* arrType = dynamic_cast<ArrayType*>(srcType);
         dst = allocReg();

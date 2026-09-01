@@ -4331,6 +4331,62 @@ void op_make_range(VM& vm, Code* pc) {
     DISPATCH(4);
 }
 
+// RANGE_GET Rd, Ra(range), Rb(idx) (3 words: op, regs, RangeType*)
+//
+// Element at logical position k is start + step * k. Finite ranges index
+// cyclically like arrays; infinite ranges use the absolute value of the
+// index (finiteness is a runtime property of the RangeObj, not the type).
+void op_range_get(VM& vm, Code* pc) {
+    u16 dst = pc[1].regs[0], rReg = pc[1].regs[1], idxReg = pc[1].regs[2];
+    auto* range = static_cast<RangeObj*>(vm.reg(rReg).o);
+    i64 raw = vm.reg(idxReg).i;
+
+    if (range->elemSizeWords_ == 1) {
+        // Range[Int]
+        i64 start = range->startData()[0].i;
+        i64 step  = range->stepData()[0].i;
+        i64 k;
+        if (range->isInfinite_) {
+            k = raw < 0 ? -raw : raw;
+        } else {
+            i64 end = range->endData()[0].i;
+            i64 len = 0;
+            if (step != 0) {
+                i64 diff = end - start;
+                if (!((step > 0 && diff < 0) || (step < 0 && diff > 0)))
+                    len = diff / step + 1;
+            }
+            if (len == 0) throw std::runtime_error("Cannot index an empty range");
+            k = (i64)cyclicIndex(raw, (size_t)len);
+        }
+        vm.reg(dst).i = start + step * k;
+    } else {
+        // Range[Fraction] -- 2-word native endpoints, 2-word result.
+        r64 start(range->startData()[0].i, range->startData()[1].i, true);
+        r64 step (range->stepData()[0].i,  range->stepData()[1].i,  true);
+        i64 k;
+        if (range->isInfinite_) {
+            k = raw < 0 ? -raw : raw;
+        } else {
+            r64 end(range->endData()[0].i, range->endData()[1].i, true);
+            i64 len = 0;
+            if (step != r64(0)) {
+                r64 diff = end - start;
+                if (!((step > r64(0) && diff < r64(0)) || (step < r64(0) && diff > r64(0)))) {
+                    r64 q = diff / step;
+                    len = q.numer() / q.denom() + 1;
+                }
+            }
+            if (len == 0) throw std::runtime_error("Cannot index an empty range");
+            k = (i64)cyclicIndex(raw, (size_t)len);
+        }
+        r64 v = start + step * r64(k);
+        vm.reg(dst).i = v.numer();
+        vm.reg((u16)(dst + 1)).i = v.denom();
+    }
+    DISPATCH(3);
+}
+
 // --- List Print Limit ---
 
 // GET_LIST_PRINT_LIMIT Rd (2 words: op, regs)

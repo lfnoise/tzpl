@@ -1315,6 +1315,12 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                         }
                         ie->indexAutoMap = AutoMapArg{1, 0, false};
                         elemResult = static_cast<Type*>(compiler_.arrayType(compiler_.intType()));
+                    } else if (auto* rangeType = dynamic_cast<RangeType*>(innerType)) {
+                        if (idxArrType->elemType_ != compiler_.intType()) {
+                            error(ie->index->loc, "Range index array must contain Int");
+                        }
+                        ie->indexAutoMap = AutoMapArg{1, 0, false};
+                        elemResult = static_cast<Type*>(compiler_.arrayType(rangeType->elemType_));
                     }
                 }
                 // Check if index is List of indices
@@ -1339,6 +1345,12 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                         }
                         ie->indexAutoMap = AutoMapArg{1, 0, true};
                         elemResult = static_cast<Type*>(compiler_.listType(compiler_.intType()));
+                    } else if (auto* rangeType = dynamic_cast<RangeType*>(innerType)) {
+                        if (idxListType->elemType_ != compiler_.intType()) {
+                            error(ie->index->loc, "Range index list must contain Int");
+                        }
+                        ie->indexAutoMap = AutoMapArg{1, 0, true};
+                        elemResult = static_cast<Type*>(compiler_.listType(rangeType->elemType_));
                     }
                 }
                 // Scalar indexing
@@ -1360,6 +1372,11 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                             error(ie->index->loc, "String index must be Int");
                         }
                         elemResult = compiler_.intType();
+                    } else if (auto* rangeType = dynamic_cast<RangeType*>(innerType)) {
+                        if (idxType && idxType != compiler_.intType()) {
+                            error(ie->index->loc, "Range index must be Int");
+                        }
+                        elemResult = rangeType->elemType_;
                     } else {
                         error(expr->loc, "Explicit '@' on index access requires Array/List of indexable types");
                         result = compiler_.intType();
@@ -1400,8 +1417,14 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                     }
                     ie->indexAutoMap = AutoMapArg{1, 0, false};
                     result = compiler_.arrayType(compiler_.intType());
+                } else if (auto* rangeType = dynamic_cast<RangeType*>(objType)) {
+                    if (idxArrType->elemType_ != compiler_.intType()) {
+                        error(ie->index->loc, "Range index array must contain Int");
+                    }
+                    ie->indexAutoMap = AutoMapArg{1, 0, false};
+                    result = compiler_.arrayType(rangeType->elemType_);
                 } else {
-                    error(expr->loc, "Indexing requires an Array, Map, or String type");
+                    error(expr->loc, "Indexing requires an Array, Map, String, or Range type");
                     result = compiler_.intType();
                 }
                 break;
@@ -1428,8 +1451,14 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                     }
                     ie->indexAutoMap = AutoMapArg{1, 0, true};
                     result = compiler_.listType(compiler_.intType());
+                } else if (auto* rangeType = dynamic_cast<RangeType*>(objType)) {
+                    if (idxListType->elemType_ != compiler_.intType()) {
+                        error(ie->index->loc, "Range index list must contain Int");
+                    }
+                    ie->indexAutoMap = AutoMapArg{1, 0, true};
+                    result = compiler_.listType(rangeType->elemType_);
                 } else {
-                    error(expr->loc, "Indexing requires an Array, Map, or String type");
+                    error(expr->loc, "Indexing requires an Array, Map, String, or Range type");
                     result = compiler_.intType();
                 }
                 break;
@@ -1464,13 +1493,18 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                     }
                 }
                 result = compiler_.optionType(pmType->valueType_);
+            } else if (auto* rangeType = dynamic_cast<RangeType*>(objType)) {
+                if (idxType && idxType != compiler_.intType()) {
+                    error(ie->index->loc, "Range index must be Int");
+                }
+                result = rangeType->elemType_;
             } else if (objType == compiler_.stringType()) {
                 if (idxType && idxType != compiler_.intType()) {
                     error(ie->index->loc, "String index must be Int");
                 }
                 result = compiler_.intType();
             } else {
-                error(expr->loc, "Indexing requires an Array, Map, or String type");
+                error(expr->loc, "Indexing requires an Array, Map, String, or Range type");
                 result = compiler_.intType();
             }
             break;

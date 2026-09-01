@@ -380,6 +380,9 @@ static const std::unordered_map<Operation, OpInfo>& opInfoMap() {
         { op_map_get_option,    { "MAP_GET_OPTION",    3, OpFmt::Regs_Ptr, 3 } },
         { op_map_set,           { "MAP_SET",           3, OpFmt::Regs_Ptr, 3 } },
 
+        // --- Range ---
+        { op_range_get,         { "RANGE_GET",         3, OpFmt::Regs_Ptr, 3 } },
+
         // --- Persistent vector / map ---
         { op_make_pvec,         { "MAKE_PVEC",         3, OpFmt::Regs_Ptr, 3 } },
         { op_pvec_get,          { "PVEC_GET",          3, OpFmt::Regs_Ptr, 3 } },

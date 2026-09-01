@@ -389,6 +389,7 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
         <li><a href="#for-loops-arrays-lists">For Loops over Arrays/Lists</a></li>
         <li><a href="#range-builtins">Range Built-in Functions</a></li>
         <li><a href="#fraction-ranges">Fraction Ranges</a></li>
+        <li><a href="#range-indexing">Indexing Ranges</a></li>
       </ol>
     </li>
     <li><a href="#data-structures">Data Structures</a>
@@ -1399,6 +1400,32 @@ fr toList println;      <span class="cmt">-- List(1/4, 3/4, 5/4, 7/4, 9/4, 11/4)
 <span class="cmt">-- Infinite fraction range</span>
 <span class="kw">let</span> flinf = (<span class="num">1/2</span>..) toList;
 flinf println;          <span class="cmt">-- List(1/2, 3/2, 5/2, 7/2, 9/2, ...)</span></code></pre>
+
+<h3 id="range-indexing">6.6 Indexing Ranges</h3>
+<p>Ranges are indexable with <code>[]</code>, without materializing an array. Finite ranges index cyclically, just like arrays: the index wraps modulo the range's length, so negative indices count from the end. Infinite ranges have no length to wrap by; they use the absolute value of the index instead.</p>
+<pre><code><span class="cmt">-- Finite ranges: cyclic indexing, like arrays</span>
+<span class="kw">let</span> r = (<span class="num">0</span>..<span class="num">9</span>);
+r[<span class="num">3</span>] println;           <span class="cmt">-- 3</span>
+r[-<span class="num">1</span>] println;          <span class="cmt">-- 9 (last element)</span>
+r[<span class="num">13</span>] println;          <span class="cmt">-- 3 (wraps around)</span>
+
+<span class="cmt">-- Works with stepped and descending ranges</span>
+(<span class="num">0</span>,<span class="num">2</span>..<span class="num">10</span>)[<span class="num">3</span>] println;  <span class="cmt">-- 6</span>
+(<span class="num">5</span>..<span class="num">1</span>)[<span class="num">1</span>] println;     <span class="cmt">-- 4</span>
+
+<span class="cmt">-- Infinite ranges: the absolute value of the index</span>
+<span class="kw">let</span> nat = (<span class="num">0</span>..);
+nat[<span class="num">5</span>] println;         <span class="cmt">-- 5</span>
+nat[-<span class="num">3</span>] println;        <span class="cmt">-- 3</span>
+
+<span class="cmt">-- Fraction ranges index the same way</span>
+(<span class="num">1/2</span>..<span class="num">5/2</span>)[<span class="num">1</span>] println; <span class="cmt">-- 3/2</span>
+
+<span class="cmt">-- Indexing by a collection of indices, like arrays</span>
+(<span class="num">0</span>..<span class="num">9</span>)[[<span class="num">3</span>, <span class="num">1</span>, <span class="num">2</span>]] println;   <span class="cmt">-- [3, 1, 2]</span>
+
+<span class="cmt">-- Explicit @ auto-map over containers of ranges</span>
+[(<span class="num">0</span>..<span class="num">9</span>), (<span class="num">10</span>..<span class="num">19</span>)] @ [<span class="num">2</span>] println;  <span class="cmt">-- [2, 12]</span></code></pre>
 
 <h2 id="data-structures">7. Data Structures</h2>
 
