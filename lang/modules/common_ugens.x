@@ -520,6 +520,11 @@ fn susrel(gate S, s, r) S {
 -- gate-off. `dec` is the full-scale (1 -> 0) time; the slopes are constant,
 -- so releasing mid-rise decays immediately from the current amplitude and
 -- reaches 0 proportionally sooner.
+-- Common idioms: 
+--    ease in/out: linen(..) smoothStep; 
+--    equal power: linen(..) rpanfun;
+--    cubed:       linen(..) cb;
+
 fn linen(gate S, rise, dec) S {
 	let up = 1 / (fs() * max(rise, 1e-6));
 	let dn = 1 / (fs() * max(dec, 1e-6));
@@ -675,8 +680,16 @@ fn maxfollow(x S, r S) S {
 fn panfun(x AsSignal) {
     let a = 0.337403011047526069;
     let b = -1.334338069017510398;
-    let c = -a-b-1;
+    let c = -1-a-b;
     1 + x * (c + x * (b + x * a))
+}
+
+-- equivalent to panfun(1-x). Can be used to transform a unipolar ramp to an equal power crossfade curve.
+fn rpanfun(x AsSignal) {
+    let a = -0.337403011047526069;
+    let b = -0.322129035874932191;
+    let c = 1-a-b;
+    x * (c + x * (b + x * a))
 }
 
 fn panfuns(x AsSignal) = [x, 1 - x] panfun;
