@@ -369,6 +369,17 @@ let add5 = Adder { 5 };
 add5(10) println;                        -- 15
 ```
 
+## Indexable Objects
+Defining `at` makes a type indexable: `obj[idx]` rewrites to `at(obj, idx)`.
+Reads only — `obj[idx] = v` stays reserved for built-in mutable containers.
+```
+struct Cycle { items [Int] }
+fn at(c Cycle, i Int) Int = c.items[i % c.items length];
+let cyc = Cycle { [10, 20, 30] };
+cyc[4] println;                          -- 20
+cyc[[0, 1, 2, 3]] println;               -- [10, 20, 30, 10] (auto-maps)
+```
+
 ## Constraints (Type Classes)
 ```
 constraint Numeric = Int | Float;

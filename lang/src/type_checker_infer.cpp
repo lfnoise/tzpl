@@ -1278,11 +1278,37 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
         case ASTNode::IndexExpr: {
             auto* ie = static_cast<IndexExpr_*>(expr);
 
+            // Already rewritten to at(obj, idx) by an earlier visit: object/
+            // index have been moved into the call, so only re-infer that.
+            if (ie->atRewrite) {
+                result = inferExpr(static_cast<Expr*>(ie->atRewrite.get()), expectedType);
+                if (!result) result = compiler_.intType();
+                break;
+            }
+
             // Check for explicit @ on the object
             AutoMapArg objAutoMap = extractAutoMapAnnotation(static_cast<Expr*>(ie->object.get()));
 
             Type* objType = inferExpr(static_cast<Expr*>(ie->object.get()));
             Type* idxType = inferExpr(static_cast<Expr*>(ie->index.get()));
+
+            // User-defined indexing: mirror of the callable-object `call`
+            // rewrite. When the object type has no built-in indexing but a
+            // user `at` function exists, rewrite obj[idx] -> at(obj, idx)
+            // (read side only; index assignment is a separate AST node and
+            // keeps its own rules). An Array/List-of-indices index maps over
+            // a scalar `at` via normal argument auto-mapping. Returns nullptr
+            // (touching nothing) when no user `at` is defined.
+            auto tryAtRewrite = [&]() -> Type* {
+                if (functions_.find("at") == functions_.end()) return nullptr;
+                ExprList atArgs;
+                atArgs.push_back(std::move(ie->object));
+                atArgs.push_back(std::move(ie->index));
+                ie->atRewrite = std::make_unique<CallExpr_>(expr->loc,
+                    std::make_unique<IdentifierExpr>(expr->loc, "at"), std::move(atArgs));
+                Type* t = inferExpr(static_cast<Expr*>(ie->atRewrite.get()), expectedType);
+                return t ? t : compiler_.intType();
+            };
 
             // A. Explicit @ on object: arr @ [i] or arr @ [[i1,i2,...]]
             if (objAutoMap) {
@@ -1423,6 +1449,8 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                     }
                     ie->indexAutoMap = AutoMapArg{1, 0, false};
                     result = compiler_.arrayType(rangeType->elemType_);
+                } else if (Type* atType = tryAtRewrite()) {
+                    result = atType;
                 } else {
                     error(expr->loc, "Indexing requires an Array, Map, String, or Range type");
                     result = compiler_.intType();
@@ -1457,6 +1485,8 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                     }
                     ie->indexAutoMap = AutoMapArg{1, 0, true};
                     result = compiler_.listType(rangeType->elemType_);
+                } else if (Type* atType = tryAtRewrite()) {
+                    result = atType;
                 } else {
                     error(expr->loc, "Indexing requires an Array, Map, String, or Range type");
                     result = compiler_.intType();
@@ -1503,6 +1533,8 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                     error(ie->index->loc, "String index must be Int");
                 }
                 result = compiler_.intType();
+            } else if (Type* atType = tryAtRewrite()) {
+                result = atType;
             } else {
                 error(expr->loc, "Indexing requires an Array, Map, String, or Range type");
                 result = compiler_.intType();

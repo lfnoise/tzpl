@@ -371,6 +371,7 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
         <li><a href="#variadic-arguments">Variadic Arguments</a></li>
         <li><a href="#string-formatting">String Formatting</a></li>
         <li><a href="#callable-objects">Callable Objects</a></li>
+        <li><a href="#indexable-objects">Indexable Objects</a></li>
       </ol>
     </li>
     <li><a href="#control-flow">Control Flow</a>
@@ -990,8 +991,8 @@ The compiler tries built-in rules first; if none match, it looks up a user-defin
 </table>
 
 <h4>Not Overloadable</h4>
-<p><code>&&</code>, <code>||</code> (short-circuit logic), <code>//</code> (integer division), <code>|&gt;</code> (pipeline), and <code>[]</code> (indexing) cannot be overloaded.
-Use <code>call</code> (<a href="#callable-objects">4.11</a>) to make a type callable with <code>()</code>.</p>
+<p><code>&&</code>, <code>||</code> (short-circuit logic), <code>//</code> (integer division), and <code>|&gt;</code> (pipeline) cannot be overloaded.
+Use <code>call</code> (<a href="#callable-objects">4.11</a>) to make a type callable with <code>()</code>, and <code>at</code> (<a href="#indexable-objects">4.12</a>) to make it readable with <code>[]</code>.</p>
 
 <h4>Example</h4>
 <pre><code><span class="kw">struct</span> Point { x <span class="kw">Float</span>, y <span class="kw">Float</span> }
@@ -1183,6 +1184,50 @@ counter(<span class="num">5</span>)(<span class="num">3</span>) println;  <span 
 <p>Auto-mapping works via pipeline syntax.</p>
 <pre><code><span class="kw">let</span> nums = [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>, <span class="num">4</span>, <span class="num">5</span>];
 nums @ add5 println;  <span class="cmt">-- [6, 7, 8, 9, 10]</span></code></pre>
+
+<h3 id="indexable-objects">4.12 Indexable Objects</h3>
+<p>Any type can be made indexable by defining a function named <code>at</code> whose first parameter is that type. When a value with no built-in indexing appears in subscript position, the compiler rewrites <code>obj[idx]</code> to <code>at(obj, idx)</code>. This is the subscript counterpart of <code>call</code> (<a href="#callable-objects">4.11</a>).</p>
+<pre><code><span class="cmt">-- Define an indexable struct</span>
+<span class="kw">struct</span> Cycle { items [<span class="kw">Int</span>] }
+<span class="kw">fn</span> at(c Cycle, i <span class="kw">Int</span>) <span class="kw">Int</span> = c.items[i % c.items length];
+
+<span class="kw">let</span> cyc = Cycle { [<span class="num">10</span>, <span class="num">20</span>, <span class="num">30</span>] };
+cyc[<span class="num">0</span>] println;   <span class="cmt">-- 10</span>
+cyc[<span class="num">4</span>] println;   <span class="cmt">-- 20</span></code></pre>
+
+<p>The rewrite applies only to reads. Index assignment (<code>obj[idx] = v</code>) remains reserved for the built-in mutable containers, and the built-in indexable types (Array, Map, String, and the persistent variants) keep their built-in behavior &mdash; a user <code>at</code> never shadows them.</p>
+
+<p>Because the rewrite produces an ordinary call, <code>at</code> supports everything regular functions do: overloading by index type, templates, and auto-mapping. In particular, indexing with an Array or List of indices maps over a scalar <code>at</code> automatically.</p>
+<pre><code>cyc[[<span class="num">0</span>, <span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>]] println;   <span class="cmt">-- [10, 20, 30, 10]</span>
+cyc[List(<span class="num">5</span>, <span class="num">3</span>, <span class="num">1</span>)] println;  <span class="cmt">-- List(30, 10, 20)</span>
+
+<span class="cmt">-- Any index type works, not just Int</span>
+<span class="kw">struct</span> Env { pairs [<span class="kw">String</span>: <span class="kw">Int</span>] }
+<span class="kw">fn</span> at(e Env, key <span class="kw">String</span>) <span class="kw">Int</span> = get(e.pairs, key, -<span class="num">1</span>);
+
+<span class="kw">let</span> env = Env { [<span class="str">"a"</span>: <span class="num">1</span>, <span class="str">"b"</span>: <span class="num">2</span>] };
+env[<span class="str">"a"</span>] println;         <span class="cmt">-- 1</span>
+env[<span class="str">"missing"</span>] println;   <span class="cmt">-- -1</span></code></pre>
+
+<p>A template <code>at</code> makes lazy, computed collections cheap to build &mdash; here a virtual array backed by a closure, with derived views that index their source:</p>
+<pre><code><span class="kw">struct</span> VA&lt;T&gt; { at (<span class="kw">Int</span>) T, len <span class="kw">Int</span> }
+<span class="kw">fn</span> at&lt;T&gt;(a VA&lt;T&gt;, i <span class="kw">Int</span>) T = a.at(i);
+
+<span class="kw">let</span> squares = VA { at: <span class="kw">fn</span>(i <span class="kw">Int</span>) = i * i, len: <span class="num">10</span> };
+squares[<span class="num">7</span>] println;              <span class="cmt">-- 49</span>
+
+<span class="cmt">-- Each element of the view is looked up n times</span>
+<span class="kw">fn</span> stutter&lt;T&gt;(a VA&lt;T&gt;, n <span class="kw">Int</span>) = VA&lt;T&gt; { at: <span class="kw">fn</span>(i <span class="kw">Int</span>) T = a[i // n], len: a.len * n };
+
+<span class="kw">let</span> st = squares stutter(<span class="num">2</span>);
+st[[<span class="num">0</span>, <span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>, <span class="num">4</span>, <span class="num">5</span>]] println;  <span class="cmt">-- [0, 0, 1, 1, 4, 4]</span></code></pre>
+
+<p>Chained subscripts work naturally &mdash; if <code>at</code> returns another indexable value, it can be indexed immediately.</p>
+<pre><code><span class="kw">struct</span> Grid { rows [[<span class="kw">Int</span>]] }
+<span class="kw">fn</span> at(g Grid, r <span class="kw">Int</span>) [<span class="kw">Int</span>] = g.rows[r];
+
+<span class="kw">let</span> grid = Grid { [[<span class="num">1</span>, <span class="num">2</span>], [<span class="num">3</span>, <span class="num">4</span>]] };
+grid[<span class="num">1</span>][<span class="num">0</span>] println;  <span class="cmt">-- 3</span></code></pre>
 
 <h2 id="control-flow">5. Control Flow</h2>
 

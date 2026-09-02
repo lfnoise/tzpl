@@ -9021,6 +9021,10 @@ u16 CodeGen::genCartesianTupleStruct(CallExpr_* expr) {
 }
 
 u16 CodeGen::genIndexExpr(IndexExpr_* expr) {
+    // User-defined indexing: type checker rewrote obj[idx] into at(obj, idx)
+    if (expr->atRewrite)
+        return genExpr(expr->atRewrite.get());
+
     // Auto-mapped indexing dispatch
     if (expr->autoMap) {
         if (expr->autoMap.depth > 1)

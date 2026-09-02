@@ -307,6 +307,7 @@ struct IndexExpr_ : Expr {
     ExprPtr index;
     AutoMapArg autoMap;      // Set by type checker: explicit @ on object (arr @ [i])
     AutoMapArg indexAutoMap;  // Set by type checker: index is Array/List of indices
+    ExprPtr atRewrite;       // Set by type checker: obj[idx] rewritten to at(obj, idx) for user-defined indexing (object/index are moved into the call)
 
     IndexExpr_(SourceRange l, ExprPtr obj, ExprPtr idx)
         : Expr(IndexExpr, l), object(std::move(obj)), index(std::move(idx)) {}
