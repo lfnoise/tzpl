@@ -35,7 +35,7 @@ jobs:
   # Audio is never committed to the repository. If this job fails, the
   # deploy still proceeds -- the gallery just omits the players.
   render-audio:
-    runs-on: macos-14
+    runs-on: macos-15
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
