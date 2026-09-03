@@ -5,7 +5,7 @@ in [git](https://github.com/lfnoise/tzpl/commits/main); this file records
 the changes worth knowing about as a user of the platform. Rendered on the
 documentation site as the Changelog page.
 
-## Unreleased (August 2026)
+## v0.1.0 (3 September 2026)
 
 **Language & VM**
 
