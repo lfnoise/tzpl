@@ -1316,12 +1316,32 @@ static bool resolve_put(Compiler& compiler, const std::vector<Type*>& args,
 
 static bool resolve_put_bang(Compiler& compiler, const std::vector<Type*>& args,
     std::vector<Type*>& pt, Type*& rt, CFun& cf) {
-    (void)compiler;
     if (args.size() != 3) return false;
+    if (auto* at = dynamic_cast<ArrayType*>(args[0])) {
+        // put!: [T], Int, T -> [T]  -- same semantics as a[i] = v (cyclic
+        // index); returns the same array for chaining
+        if (args[1] != compiler.intType() || args[2] != at->elemType_) return false;
+        pt = {at, compiler.intType(), at->elemType_}; rt = at; cf = builtin_put_bang_array; return true;
+    }
     auto* mt = dynamic_cast<MapType*>(args[0]);
     if (!mt) return false;
     if (args[1] != mt->keyType_ || args[2] != mt->valueType_) return false;
     pt = {mt, mt->keyType_, mt->valueType_}; rt = mt; cf = builtin_put_bang_map; return true;
+}
+
+static bool resolve_at(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (args.size() != 2) return false;
+    auto* at = dynamic_cast<ArrayType*>(args[0]);
+    if (!at) return false;
+    // at: [T], [Int] -> [T]  -- gather form, mirroring a[[i1,i2,...]]
+    if (auto* idxAt = dynamic_cast<ArrayType*>(args[1])) {
+        if (idxAt->elemType_ != compiler.intType()) return false;
+        pt = {at, idxAt}; rt = at; cf = builtin_at_multi_array; return true;
+    }
+    // at: [T], Int -> T  -- same semantics as a[i] (cyclic index)
+    if (args[1] != compiler.intType()) return false;
+    pt = {at, compiler.intType()}; rt = at->elemType_; cf = builtin_at_array; return true;
 }
 
 static bool resolve_remove(Compiler& compiler, const std::vector<Type*>& args,
@@ -4107,7 +4127,10 @@ void registerBuiltinFunctions(Compiler& compiler,
     registerTemplate(compiler, functions, "getOrDefault", resolve_get_or_default, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "getOrElse",    resolve_get_or_else,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "put",          resolve_put,        /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    // put! also covers arrays; at is the array read counterpart, so at/put!
+    // work uniformly over arrays and user indexable types (4.12).
     registerTemplate(compiler, functions, "put!",         resolve_put_bang,   /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "at",           resolve_at,         /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "remove",       resolve_remove,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "remove!",      resolve_remove_bang, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "contains",     resolve_contains,   /*rtSafe=*/true, /*acceptsInlineArgs=*/true);

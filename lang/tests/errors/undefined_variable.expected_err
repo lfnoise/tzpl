@@ -3,4 +3,3 @@ Type error [tests/errors/undefined_variable.x:2:9]
 2 | println(x);
   |         ^
   Undeclared identifier 'x'
-  Did you mean 'gc'?

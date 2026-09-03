@@ -105,8 +105,10 @@ int editDistance(std::string_view a, std::string_view b) {
 std::string findClosestMatch(std::string_view name,
                              const std::vector<std::string>& candidates,
                              int maxDistance) {
-    // Adaptive threshold: max(2, name.length()/3), capped by maxDistance
-    int threshold = std::max(2, (int)name.size() / 3);
+    // Adaptive threshold: max(2, name.length()/3), capped by maxDistance.
+    // Names of 1-2 chars only accept distance 1 -- at distance 2 every short
+    // candidate matches (e.g. suggesting 'at' for 'x'), which is noise.
+    int threshold = name.size() <= 2 ? 1 : std::max(2, (int)name.size() / 3);
     if (threshold > maxDistance) threshold = maxDistance;
 
     std::string best;

@@ -554,6 +554,13 @@ void TypeChecker::checkAssignStmt(AssignStmtNode* stmt) {
 }
 
 void TypeChecker::checkIndexAssignStmt(IndexAssignStmtNode* stmt) {
+    // Already rewritten to put!(obj, idx, v) by an earlier visit: object/
+    // index/value have been moved into the call, so only re-infer that.
+    if (stmt->putRewrite) {
+        inferExpr(static_cast<Expr*>(stmt->putRewrite.get()));
+        return;
+    }
+
     Type* objType = inferExpr(static_cast<Expr*>(stmt->object.get()));
     if (!objType) return;
 
@@ -597,6 +604,20 @@ void TypeChecker::checkIndexAssignStmt(IndexAssignStmtNode* stmt) {
         error(stmt->loc, "Cannot assign into an immutable persistent collection (" +
               std::string(objType->str().data(), objType->str().size()) +
               "); use put/push to produce a new collection");
+        return;
+    }
+
+    // User-defined index assignment: mirror of the read-side `at` rewrite.
+    // When the object type has no built-in index assignment but a user `put!`
+    // function exists, rewrite obj[idx] = v into put!(obj, idx, v).
+    if (hasUserFunction("put!")) {
+        ExprList putArgs;
+        putArgs.push_back(std::move(stmt->object));
+        putArgs.push_back(std::move(stmt->index));
+        putArgs.push_back(std::move(stmt->value));
+        stmt->putRewrite = std::make_unique<CallExpr_>(stmt->loc,
+            std::make_unique<IdentifierExpr>(stmt->loc, "put!"), std::move(putArgs));
+        inferExpr(static_cast<Expr*>(stmt->putRewrite.get()));
         return;
     }
 

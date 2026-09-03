@@ -992,7 +992,7 @@ The compiler tries built-in rules first; if none match, it looks up a user-defin
 
 <h4>Not Overloadable</h4>
 <p><code>&&</code>, <code>||</code> (short-circuit logic), <code>//</code> (integer division), and <code>|&gt;</code> (pipeline) cannot be overloaded.
-Use <code>call</code> (<a href="#callable-objects">4.11</a>) to make a type callable with <code>()</code>, and <code>at</code> (<a href="#indexable-objects">4.12</a>) to make it readable with <code>[]</code>.</p>
+Use <code>call</code> (<a href="#callable-objects">4.11</a>) to make a type callable with <code>()</code>, and <code>at</code> / <code>put!</code> (<a href="#indexable-objects">4.12</a>) to make it indexable with <code>[]</code>.</p>
 
 <h4>Example</h4>
 <pre><code><span class="kw">struct</span> Point { x <span class="kw">Float</span>, y <span class="kw">Float</span> }
@@ -1186,7 +1186,7 @@ counter(<span class="num">5</span>)(<span class="num">3</span>) println;  <span 
 nums @ add5 println;  <span class="cmt">-- [6, 7, 8, 9, 10]</span></code></pre>
 
 <h3 id="indexable-objects">4.12 Indexable Objects</h3>
-<p>Any type can be made indexable by defining a function named <code>at</code> whose first parameter is that type. When a value with no built-in indexing appears in subscript position, the compiler rewrites <code>obj[idx]</code> to <code>at(obj, idx)</code>. This is the subscript counterpart of <code>call</code> (<a href="#callable-objects">4.11</a>).</p>
+<p>Any type can be made indexable by defining a function named <code>at</code> whose first parameter is that type. When a value with no built-in indexing appears in subscript position, the compiler rewrites <code>obj[idx]</code> to <code>at(obj, idx)</code>. Likewise, defining <code>put!</code> enables index assignment: <code>obj[idx] = v</code> rewrites to <code>put!(obj, idx, v)</code>. These are the subscript counterparts of <code>call</code> (<a href="#callable-objects">4.11</a>).</p>
 <pre><code><span class="cmt">-- Define an indexable struct</span>
 <span class="kw">struct</span> Cycle { items [<span class="kw">Int</span>] }
 <span class="kw">fn</span> at(c Cycle, i <span class="kw">Int</span>) <span class="kw">Int</span> = c.items[i % c.items length];
@@ -1195,7 +1195,7 @@ nums @ add5 println;  <span class="cmt">-- [6, 7, 8, 9, 10]</span></code></pre>
 cyc[<span class="num">0</span>] println;   <span class="cmt">-- 10</span>
 cyc[<span class="num">4</span>] println;   <span class="cmt">-- 20</span></code></pre>
 
-<p>The rewrite applies only to reads. Index assignment (<code>obj[idx] = v</code>) remains reserved for the built-in mutable containers, and the built-in indexable types (Array, Map, String, and the persistent variants) keep their built-in behavior &mdash; a user <code>at</code> never shadows them.</p>
+<p>The built-in indexable types (Array, Map, String, Range, and the persistent variants) keep their built-in behavior &mdash; a user <code>at</code> or <code>put!</code> never shadows them, and only non-builtin definitions enable the rewrites (the builtin <code>at</code>/<code>put!</code> for arrays and maps do not count). In the other direction, arrays provide <code>at</code> and <code>put!</code> as builtins with exactly the semantics of <code>a[i]</code> and <code>a[i] = v</code> (cyclic index included), so generic code can call the protocol functions uniformly over arrays and user indexable types.</p>
 
 <p>Because the rewrite produces an ordinary call, <code>at</code> supports everything regular functions do: overloading by index type, templates, and auto-mapping. In particular, indexing with an Array or List of indices maps over a scalar <code>at</code> automatically.</p>
 <pre><code>cyc[[<span class="num">0</span>, <span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>]] println;   <span class="cmt">-- [10, 20, 30, 10]</span>
@@ -1228,6 +1228,14 @@ st[[<span class="num">0</span>, <span class="num">1</span>, <span class="num">2<
 
 <span class="kw">let</span> grid = Grid { [[<span class="num">1</span>, <span class="num">2</span>], [<span class="num">3</span>, <span class="num">4</span>]] };
 grid[<span class="num">1</span>][<span class="num">0</span>] println;  <span class="cmt">-- 3</span></code></pre>
+
+<p>On the write side, <code>put!</code> gives the type full control over what an index assignment means &mdash; here, writes wrap cyclically like the reads do.</p>
+<pre><code><span class="kw">fn</span> put!(c Cycle, i <span class="kw">Int</span>, v <span class="kw">Int</span>) <span class="kw">Void</span> { c.items[i % c.items length] = v; }
+
+<span class="kw">let</span> ring = Cycle { [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>] };
+ring[<span class="num">1</span>] = <span class="num">20</span>;
+ring[<span class="num">3</span>] = <span class="num">10</span>;                <span class="cmt">-- wraps to slot 0</span>
+ring[[<span class="num">0</span>, <span class="num">1</span>, <span class="num">2</span>]] println;    <span class="cmt">-- [10, 20, 3]</span></code></pre>
 
 <h2 id="control-flow">5. Control Flow</h2>
 

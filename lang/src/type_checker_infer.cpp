@@ -1300,7 +1300,7 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
             // a scalar `at` via normal argument auto-mapping. Returns nullptr
             // (touching nothing) when no user `at` is defined.
             auto tryAtRewrite = [&]() -> Type* {
-                if (functions_.find("at") == functions_.end()) return nullptr;
+                if (!hasUserFunction("at")) return nullptr;
                 ExprList atArgs;
                 atArgs.push_back(std::move(ie->object));
                 atArgs.push_back(std::move(ie->index));

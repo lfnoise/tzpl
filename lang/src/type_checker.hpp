@@ -170,6 +170,17 @@ public:
 
     // Access function table (for codegen to look up globals)
     const std::unordered_map<std::string, std::deque<FuncInfo>>& functions() const { return functions_; }
+
+    // True if at least one non-builtin overload of `name` exists. Gates the
+    // user-defined indexing rewrites (at/put!) so a builtin of the same name
+    // (e.g. map put!) doesn't enable them on its own.
+    bool hasUserFunction(std::string const& name) const {
+        auto it = functions_.find(name);
+        if (it == functions_.end()) return false;
+        for (auto const& fi : it->second)
+            if (!fi.isBuiltin) return true;
+        return false;
+    }
     const std::unordered_map<std::string, VarInfo>& globalVars() const { return globalVars_; }
 
     // Access dynamic variable registry (delegated to Compiler)

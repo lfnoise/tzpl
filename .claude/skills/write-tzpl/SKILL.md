@@ -371,13 +371,18 @@ add5(10) println;                        -- 15
 
 ## Indexable Objects
 Defining `at` makes a type indexable: `obj[idx]` rewrites to `at(obj, idx)`.
-Reads only — `obj[idx] = v` stays reserved for built-in mutable containers.
+Defining `put!` makes it index-assignable: `obj[idx] = v` rewrites to
+`put!(obj, idx, v)`. Built-in indexable types keep their built-in behavior.
+Arrays also provide `at`/`put!` as builtins (`a at(i)` == `a[i]`,
+`a put!(i, v)` == `a[i] = v`), so the protocol is uniform in generic code.
 ```
 struct Cycle { items [Int] }
 fn at(c Cycle, i Int) Int = c.items[i % c.items length];
+fn put!(c Cycle, i Int, v Int) Void { c.items[i % c.items length] = v; }
 let cyc = Cycle { [10, 20, 30] };
 cyc[4] println;                          -- 20
 cyc[[0, 1, 2, 3]] println;               -- [10, 20, 30, 10] (auto-maps)
+cyc[4] = 99;                             -- put!(cyc, 4, 99); wraps to slot 1
 ```
 
 ## Constraints (Type Classes)

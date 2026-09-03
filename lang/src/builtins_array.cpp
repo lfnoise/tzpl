@@ -221,6 +221,77 @@ void builtin_pop_bang_array(VM& vm, u16 dst, u16, u16 ab) {
     }
 }
 
+// --- at / put!: subscript protocol as ordinary functions ---
+//
+// Same semantics as a[i] and a[i] = v (cyclic index, negative wraps), so
+// generic code can call at/put! uniformly over arrays and user indexable
+// types (see 4.12 Indexable Objects in Tzopilotl_by_Example).
+
+// Cyclic index matching op_array_get/op_array_set in opcodes.cpp.
+static size_t cyclicElemIndex(i64 idx, size_t size) {
+    if (size == 0) {
+        throw std::runtime_error("Cannot index an empty array");
+    }
+    idx = idx % static_cast<i64>(size);
+    if (idx < 0) idx += static_cast<i64>(size);
+    return static_cast<size_t>(idx);
+}
+
+// at: [T], Int -> T
+void builtin_at_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto* arr = vm.reg(ab).o;
+    auto* at = static_cast<ArrayType*>(arr->type_);
+    Type* et = at->elemType_;
+    ArrayBackend b = arrayBackendFor(et);
+    size_t i = cyclicElemIndex(vm.reg((u16)(ab + 1)).i, getArraySize(arr, b));
+    Word tmp[2];
+    Word const* slot = arrayElemSlot(arr, et, i, tmp);
+    u32 sw = strideForType(et);
+    for (u32 w = 0; w < sw; ++w) vm.reg((u16)(dst + w)) = slot[w];
+}
+
+// at: [T], [Int] -> [T]  -- gather form, mirroring a[[i1,i2,...]]
+void builtin_at_multi_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto* arr = vm.reg(ab).o;
+    auto& idxs = static_cast<PodArray<i64>*>(vm.reg((u16)(ab + 1)).o)->v;
+    auto* at = static_cast<ArrayType*>(arr->type_);
+    Type* et = at->elemType_;
+    size_t n = getArraySize(arr, arrayBackendFor(et));
+    auto* result = makeEmptyArray(at);
+    Word tmp[2];
+    for (i64 idx : idxs) {
+        Word const* slot = arrayElemSlot(arr, et, cyclicElemIndex(idx, n), tmp);
+        arrayPushFromSlot(vm, result, et, slot);
+    }
+    vm.reg(dst).o = result;
+}
+
+// put!: [T], Int, T -> [T]  -- mutating; returns the same array for chaining
+void builtin_put_bang_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto* arr = vm.reg(ab).o;
+    auto* at = static_cast<ArrayType*>(arr->type_);
+    Type* et = at->elemType_;
+    ArrayBackend b = arrayBackendFor(et);
+    size_t i = cyclicElemIndex(vm.reg((u16)(ab + 1)).i, getArraySize(arr, b));
+    Word const* src = &vm.reg((u16)(ab + 2));
+    switch (b) {
+        case ArrayBackend::Int:
+            static_cast<PodArray<i64>*>(arr)->v[i] = src[0].i; break;
+        case ArrayBackend::Float:
+            static_cast<PodArray<f64>*>(arr)->v[i] = src[0].f; break;
+        case ArrayBackend::Complex:
+            static_cast<PodArray<x64>*>(arr)->v[i] = x64(src[0].f, src[1].f); break;
+        case ArrayBackend::Fraction:
+            static_cast<PodArray<r64>*>(arr)->v[i] = r64(src[0].i, src[1].i, true); break;
+        case ArrayBackend::Inline:
+            static_cast<InlineArray*>(arr)->setSlot(i, src); break;
+        case ArrayBackend::Obj:
+            // ObjArray::set applies the SATB write barrier.
+            static_cast<ObjArray*>(arr)->set(i, src[0].o); break;
+    }
+    vm.reg(dst).o = arr;
+}
+
 // --- copy: shallow copy of an Array, preserving backend & element types ---
 void builtin_copy_array(VM& vm, u16 dst, u16, u16 ab) {
     auto* src = vm.reg(ab).o;

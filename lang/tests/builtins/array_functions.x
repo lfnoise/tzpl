@@ -82,3 +82,28 @@ println([1, 2, 3] $ [4, 5, 6]);
 
 -- Empty-ish
 a take(0) println;
+
+-- at (cyclic element read, same semantics as a[i])
+let ar = [10, 20, 30];
+ar at(1) println;
+ar at(4) println;
+ar at(-1) println;
+
+-- at with an array of indices (gather, mirroring a[[...]])
+ar at([2, 0, 0, 1]) println;
+
+-- put! (mutating cyclic element write, same semantics as a[i] = v;
+-- returns the array for chaining)
+var aw = [1, 2, 3];
+aw put!(1, 99);
+aw println;
+aw put!(3, 10) println;
+
+-- at/put! on Float and String backends
+var fw = [1.5, 2.5];
+fw put!(0, fw at(1));
+fw println;
+
+var sw = ["x", "y"];
+sw put!(-1, "z");
+sw at(1) println;

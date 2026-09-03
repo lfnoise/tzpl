@@ -665,14 +665,16 @@ struct AssignStmtNode : Stmt {
         : Stmt(AssignStmt, l), target(std::move(t)), value(std::move(v)) {}
 };
 
-// `obj[index] = value` -- in-place write to an Array or Map. Sets are not
-// indexable; set mutation goes through `s insert!(elem)` etc.
+// `obj[index] = value` -- in-place write to an Array or Map, or to a user
+// type via the put! rewrite below. Sets are not indexable; set mutation goes
+// through `s insert!(elem)` etc.
 struct IndexAssignStmtNode : Stmt {
     ExprPtr object;
     ExprPtr index;
     ExprPtr value;
     // Resolved by type checker: ArrayType* or MapType*
     Type* containerType = nullptr;
+    ExprPtr putRewrite;  // Set by type checker: obj[idx] = v rewritten to put!(obj, idx, v) for user-defined index assignment (object/index/value are moved into the call)
 
     IndexAssignStmtNode(SourceRange l, ExprPtr o, ExprPtr i, ExprPtr v)
         : Stmt(IndexAssignStmt, l), object(std::move(o)), index(std::move(i)), value(std::move(v)) {}

@@ -349,7 +349,7 @@
                 <li><a href="#formatting">String Formatting</a> &mdash; fmt</li>
                 <li><a href="#range">Range Functions</a> &mdash; length, toArray, toList</li>
                 <li><a href="#collections">Collection Functions (Arrays &amp; Lists)</a> &mdash; length, map, filter, fold, scan, fold1, scan1, find, zip, enumerate, take, drop, takeWhile, dropWhile, stride, stutter, repeat, cat, join, flatten, sum, product, mean, min, max, sums, products, mins, maxs, any, all, contains, clump, toSet, fromCodePoints</li>
-                <li><a href="#array-only">Array-only Functions</a> &mdash; reverse, push, pop, push!, pop!, sort, muss, copy</li>
+                <li><a href="#array-only">Array-only Functions</a> &mdash; reverse, push, pop, push!, pop!, at, put!, sort, muss, copy</li>
                 <li><a href="#list-only">List-only Functions</a> &mdash; head, tail, cons, isNil, notNil, cyc, ncyc, hang, iter</li>
                 <li><a href="#map-functions">Map Functions</a> &mdash; get, getOrDefault, getOrElse, put, put!, remove, remove!, contains, keys, values, pairs, merge, mergeIfAbsent, mergeIfPresent, length, copy, <code>m[k] = v</code></li>
                 <li><a href="#option-functions">Option Functions</a> &mdash; unwrap, unwrapOr, isSome, isNone</li>
@@ -1467,6 +1467,28 @@ List((1, 2), (3, 4)) contains((3, 4))    <span class="cmt">-- true</span></code>
 a[0] = 100;
 a[-1] = 999;
 a println;                       <span class="cmt">-- [100, 2, 3, 4, 999]</span></code></pre>
+
+            <h3><code>at(array, index)</code></h3>
+            <p>Element read as an ordinary function &mdash; <code>a at(i)</code> is exactly <code>a[i]</code>, cyclic index included. With an array of indices it gathers, mirroring <code>a[[i1, i2, &hellip;]]</code>. Together with <code>put!</code> below, this lets generic code use one protocol over arrays and user indexable types (see <em>Indexable Objects</em> in Tzopilotl by Example).</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>at([T], Int) &rarr; T</code></td><td>Element at cyclic index (negative wraps from the end).</td></tr>
+                <tr><td><code>at([T], [Int]) &rarr; [T]</code></td><td>Gather: new array of the elements at each index.</td></tr>
+            </table>
+            <pre><code>let a = [10, 20, 30];
+a at(1) println;                 <span class="cmt">-- 20</span>
+a at(-1) println;                <span class="cmt">-- 30</span>
+a at([2, 0, 0]) println;         <span class="cmt">-- [30, 10, 10]</span></code></pre>
+
+            <h3><code>put!(array, index, value)</code></h3>
+            <p>Element write as an ordinary function &mdash; <code>a put!(i, v)</code> is exactly <code>a[i] = v</code>, cyclic index included. Returns the same array for chaining.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>put!([T], Int, T) &rarr; [T]</code></td><td>Write element at cyclic index in place. Returns the same array.</td></tr>
+            </table>
+            <pre><code>var a = [1, 2, 3];
+a put!(1, 99);
+a put!(-1, 30) println;          <span class="cmt">-- [1, 99, 30]</span></code></pre>
 
             <h3><code>push!(array, element)</code></h3>
             <p>Mutating append. Adds the element to the end of <em>this</em> array in place and returns the array itself, allowing chained calls.</p>

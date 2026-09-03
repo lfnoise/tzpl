@@ -2825,6 +2825,15 @@ void CodeGen::genAssignStmt(AssignStmtNode* stmt) {
 }
 
 void CodeGen::genIndexAssignStmt(IndexAssignStmtNode* stmt) {
+    // User-defined index assignment: type checker rewrote obj[idx] = v into
+    // put!(obj, idx, v); emit the call and discard its result.
+    if (stmt->putRewrite) {
+        u16 savedReg = nextReg_;
+        genExpr(static_cast<Expr*>(stmt->putRewrite.get()));
+        if (enableRegReclaim) freeRegsTo(savedReg);
+        return;
+    }
+
     // Evaluate object first, then index, then value.
     u16 objReg = genExpr(static_cast<Expr*>(stmt->object.get()));
     u16 idxReg = genExpr(static_cast<Expr*>(stmt->index.get()));

@@ -1,5 +1,6 @@
 -- Indexable objects: defining `at` makes a type indexable via subscript syntax
--- (read side only; obj[idx] rewrites to at(obj, idx))
+-- (obj[idx] rewrites to at(obj, idx)); defining `put!` makes it index-assignable
+-- (obj[idx] = v rewrites to put!(obj, idx, v))
 
 -- Basic indexable struct
 struct Cycle { items [Int] }
@@ -45,3 +46,31 @@ fn at(g Grid, r Int) [Int] = g.rows[r];
 
 let grid = Grid { [[1, 2], [3, 4]] };
 grid[1][0] println;
+
+-- Write side: put! enables index assignment, with cyclic wrapping here
+fn put!(c Cycle, i Int, v Int) Void { c.items[i % c.items length] = v; }
+
+let ring = Cycle { [1, 2, 3] };
+ring[1] = 20;
+ring[3] = 10;                -- wraps to slot 0
+ring[[0, 1, 2]] println;
+
+-- Write with a non-Int key
+fn put!(e Env, key String, v Int) Void { e.pairs[key] = v; }
+
+let env2 = Env { ["a": 1] };
+env2["b"] = 2;
+env2["a"] = 100;
+env2[["a", "b"]] println;
+
+-- Write through the rewrite inside a lambda
+fn fill(e Env, keys [String], v Int) Void {
+    keys map(fn(k String) Int { e[k] = v; 0 });
+}
+fill(env2, ["x", "y"], 7);
+env2[["x", "y"]] println;
+
+-- Built-in containers keep built-in index assignment with user put! defined
+var arr = [1, 2, 3];
+arr[0] = 5;
+arr println;
