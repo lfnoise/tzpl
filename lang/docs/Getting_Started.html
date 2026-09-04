@@ -339,7 +339,7 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
         <li><a href="#install-gatekeeper">First launch &amp; Gatekeeper</a></li>
         <li><a href="#install-requirements">Requirements</a></li>
         <li><a href="#install-updating">Updating</a></li>
-        <li><a href="#install-linux">Linux</a></li>
+        <li><a href="#install-linux">Linux: building from source</a></li>
       </ol>
     </li>
     <li><a href="#first-run">First Sounds</a></li>
@@ -376,7 +376,19 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
 <!-- ================================================================ -->
 <h2 id="install">1. Installing</h2>
 
-<p>Tzopilotl ships as a disk image, <code>Tzopilotl-&lt;version&gt;.dmg</code>. Open it and drag the <strong>Tzopilotl</strong> folder anywhere you like &mdash; <code>/Applications</code>, your home directory, a projects drive. There is no installer and nothing is written outside the folder.</p>
+<p>Two paths, depending on your platform:</p>
+
+<ul>
+  <li><strong>macOS</strong> &mdash; install the packaged release: sections
+  <a href="#install-layout">1.1</a>&ndash;<a href="#install-updating">1.4</a> below.</li>
+  <li><strong>Linux</strong> &mdash; there is no packaged release yet, so
+  building from source is the installation: skip ahead to
+  <a href="#install-linux">&sect;1.5</a>, then rejoin at
+  <a href="#first-run">&sect;2</a>. Everything from there on applies to both
+  platforms.</li>
+</ul>
+
+<p>On macOS, Tzopilotl ships as a disk image, <code>Tzopilotl-&lt;version&gt;.dmg</code>. Open it and drag the <strong>Tzopilotl</strong> folder anywhere you like &mdash; <code>/Applications</code>, your home directory, a projects drive. There is no installer and nothing is written outside the folder.</p>
 
 <p>The folder is <strong>self-contained and relocatable</strong>: the app and the command-line tool find the standard library and examples relative to their own location. The one rule is to keep the folder together &mdash; don't move <code>Tzopilotl.app</code> out on its own, or it will no longer find its sibling <code>modules/</code> directory.</p>
 
@@ -413,7 +425,7 @@ Tzopilotl/
 
 <div class="warning"><strong>Don't edit the stdlib in place.</strong> Anything you change inside the distribution's <code>modules/</code> is lost on the next update. To customize a standard module, copy it into your project's <code>modules/</code> (or a <code>$TZPL_PATH</code> directory) &mdash; those are searched first and <em>shadow</em> the stdlib version (<a href="#env-search">&sect;4.1</a>).</div>
 
-<h3 id="install-linux">1.5 Linux</h3>
+<h3 id="install-linux">1.5 Linux: building from source</h3>
 
 <p>TZPL runs natively on Linux. There is no packaged Linux release yet, so
 building from source <em>is</em> the installation; everything after this
