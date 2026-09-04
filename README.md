@@ -1,6 +1,6 @@
 # TZPL — Audio Coding Platform
 
-An audio coding platform for composing, experimenting with, and performing music, combining a statically typed programming language, an audio signal graph compiler, and a real-time audio engine. Currently macOS-only; cross-platform support is planned.
+An audio coding platform for composing, experimenting with, and performing music, combining a statically typed programming language, an audio signal graph compiler, and a real-time audio engine. Runs on macOS (CoreAudio) and Linux (ALSA/JACK/PulseAudio).
 
 ## Sub-Projects
 
@@ -102,11 +102,16 @@ tzpl/
 
 ## Prerequisites
 
-- **Compiler**: Clang or GCC 15+ (required for `[[clang::musttail]]`)
+- **Compiler**: Clang (AppleClang on macOS; Clang 19+ on Linux). GCC is not
+  supported: the engine uses Clang-only `ext_vector_type` swizzles, and the
+  VM uses `[[clang::musttail]]`
 - **CMake**: 3.21+
 - **C++ Standard**: C++23
-- **Platform**: macOS (CoreAudio). Linux support planned.
+- **Platform**: macOS (CoreAudio) and Linux (ALSA/JACK/PulseAudio; see `docs/LINUX.md`).
 - **Frameworks** (macOS): CoreAudio, CoreFoundation, AudioToolbox (found automatically)
+- **Packages** (Linux): `libasound2-dev` and `libsndfile1-dev` required; JACK,
+  PulseAudio, and the JUCE GUI need more — see `docs/LINUX.md` for the full
+  list, a ready-made Docker dev environment, and real-time setup
 
 ## Building
 
@@ -122,7 +127,7 @@ This configures a Release build and compiles with all available cores.
 
 ```sh
 cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j$(sysctl -n hw.ncpu)
+cmake --build build -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
 ```
 
 ### CMake Options

@@ -11,7 +11,7 @@ Built as part of the top-level CMake project. From the project root:
 
 ```sh
 cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j$(sysctl -n hw.ncpu)
+cmake --build build -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
 ```
 
 Targets: `tzpl` (CLI executable), `tzpl_lib` (static library).

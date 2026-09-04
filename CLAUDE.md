@@ -16,16 +16,16 @@ Build from the project root (NOT from sub-project directories):
     ./build.sh
 
     cmake -B build -DCMAKE_BUILD_TYPE=Release -DTZPL_BUILD_APP=ON
-    cmake --build build -j$(sysctl -n hw.ncpu)
+    cmake --build build -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
 
 AddressSanitizer build:
 
     cmake -B build-asan -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="-fsanitize=address"
-    cmake --build build-asan -j$(sysctl -n hw.ncpu)
+    cmake --build build-asan -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
 
 The build directory is `build/` at the project root. Key targets: `tzpl`, `tzpl_lib`, `engine`, `audio_engine_lib`, `synthdef-compiler`, `synthdef_compiler_lib`, `tzpl_app`.
 
-**Requirements**: Clang or GCC 15+ (for `[[clang::musttail]]`), CMake 3.21+, C++23, macOS (CoreAudio).
+**Requirements**: Clang 19+ (Clang required: `ext_vector_type` swizzles and `[[clang::musttail]]`), CMake 3.21+, C++23. macOS (CoreAudio) or Linux (ALSA/JACK/Pulse; see `docs/LINUX.md`).
 
 ## Testing
 

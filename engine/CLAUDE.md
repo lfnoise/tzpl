@@ -34,7 +34,7 @@ The shared plugin ABI header lives in `../shared/tzpl_plugin_abi.h`.
 
 - Currently uses Xcode. A CMakeLists.txt also exists.
 - Requires C++23 or later.
-- macOS only (CoreAudio). Uses `<simd/simd.h>` for SIMD types.
+- macOS (CoreAudio) or Linux (ALSA/JACK/Pulse). SIMD via `<simd/simd.h>` on macOS, Clang `ext_vector_type` + Sleef elsewhere (`shared/tzpl_simd.hpp`).
 - Links CoreAudio and CoreFoundation frameworks.
 
 ## C++ Coding Style

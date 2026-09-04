@@ -5,9 +5,11 @@ test, and submit changes.
 
 ## Building
 
-Requirements: Clang or GCC 15+ (for `[[clang::musttail]]`), CMake 3.21+,
-C++23, macOS (CoreAudio). Build from the project root, not from sub-project
-directories:
+Requirements: Clang (AppleClang on macOS, Clang 19+ on Linux; GCC is not
+supported), CMake 3.21+, C++23. Works on macOS (CoreAudio) and Linux
+(ALSA/JACK/PulseAudio; Linux specifics, packages, and a Docker dev
+environment are covered in `docs/LINUX.md`). Build from the project root,
+not from sub-project directories:
 
 ```sh
 ./build.sh
@@ -17,7 +19,7 @@ or manually:
 
 ```sh
 cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j$(sysctl -n hw.ncpu)
+cmake --build build -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
 ```
 
 See the README for the full list of CMake options and build targets.
