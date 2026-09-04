@@ -223,7 +223,7 @@ private:
 
 // ---------------------------------------------------------------------------
 // Launch splash: the artwork drawn scaled into a fixed-size window (the
-// source image is 1024px; drawing it down through the graphics context
+// source image is 1536x1024; drawing it down through the graphics context
 // keeps it sharp on retina displays). Deletes itself after a short delay
 // or on a mouse click.
 // ---------------------------------------------------------------------------
@@ -231,7 +231,7 @@ private:
 class TzplSplash : public juce::SplashScreen {
 public:
     TzplSplash()
-        : juce::SplashScreen("Tzopilotl", 420, 420, /*useDropShadow=*/true),
+        : juce::SplashScreen("Tzopilotl", 630, 420, /*useDropShadow=*/true),
           image_(juce::ImageCache::getFromMemory(
               BinaryData::TzopilotlSplash_png,
               BinaryData::TzopilotlSplash_pngSize)) {}

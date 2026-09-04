@@ -866,7 +866,7 @@ void MainComponent::openNewNotebook() {
 }
 
 // ---------------------------------------------------------------------------
-// About box: the splash artwork over black with version + license text
+// About box: the portrait artwork over black with version + license text
 // beneath it. Click anywhere (or Escape / the close button) dismisses it.
 // ---------------------------------------------------------------------------
 
@@ -876,15 +876,15 @@ class AboutBox : public juce::Component {
 public:
     AboutBox() {
         image_ = juce::ImageCache::getFromMemory(
-            BinaryData::TzopilotlSplash_png,
-            BinaryData::TzopilotlSplash_pngSize);
-        setSize(440, 520);
+            BinaryData::TzopilotlAbout_png,
+            BinaryData::TzopilotlAbout_pngSize);
+        setSize(420, 710);  // 2:3 artwork + three text lines
     }
 
     void paint(juce::Graphics& g) override {
         g.fillAll(juce::Colours::black);
         auto area = getLocalBounds();
-        auto imageArea = area.removeFromTop(getWidth());
+        auto imageArea = area.removeFromTop(getWidth() * 3 / 2);
         g.drawImage(image_, imageArea.toFloat(),
                     juce::RectanglePlacement::centred);
 

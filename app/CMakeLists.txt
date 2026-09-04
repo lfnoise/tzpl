@@ -342,7 +342,7 @@ if(TZPL_BUILD_APP_JUCE)
 
     # Embedded assets (splash / about-box artwork) -> BinaryData.h
     juce_add_binary_data(tzpl_app_juce_assets
-        SOURCES Tzopilotl-Splash.png
+        SOURCES Tzopilotl-Splash.png Tzopilotl-About.png
     )
 
     target_sources(tzpl_app_juce PRIVATE
