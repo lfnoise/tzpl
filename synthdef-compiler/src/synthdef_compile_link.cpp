@@ -171,7 +171,12 @@ static int compile(string const& filepath_c, string const& filepath_o, string co
 #endif
     cmd += " -o " + filepath_o;
     cmd += " -O3";
-    cmd += " -ffast-math";
+    // fast-math minus the finite-math assumption: generated event loops can
+    // legitimately compute transient Inf (e.g. 1/(freq*decay) with pre-note
+    // zeros at control priming), which is UB under -ffinite-math-only -- and
+    // x86-64 clang exploits it into a silent render. IEEE Inf handling makes
+    // it well-defined (pow(x, inf) = 0, overwritten at noteOn).
+    cmd += " -ffast-math -fno-finite-math-only";
     cmd += " -I " + includeDir;
     cmd += " -c " + filepath_c;
 
