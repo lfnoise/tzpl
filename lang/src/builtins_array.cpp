@@ -221,6 +221,109 @@ void builtin_pop_bang_array(VM& vm, u16 dst, u16, u16 ab) {
     }
 }
 
+// clear!: [T] -> [T]  -- mutating; removes every element, returns the same
+// array. InlineArray/ObjArray resize(0) shades dropped elements for the
+// SATB GC.
+void builtin_clear_bang_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto* arr = vm.reg(ab).o;
+    auto* at = static_cast<ArrayType*>(arr->type_);
+    switch (arrayBackendFor(at->elemType_)) {
+        case ArrayBackend::Complex:  static_cast<PodArray<x64>*>(arr)->v.clear(); break;
+        case ArrayBackend::Fraction: static_cast<PodArray<r64>*>(arr)->v.clear(); break;
+        case ArrayBackend::Float:    static_cast<PodArray<f64>*>(arr)->v.clear(); break;
+        case ArrayBackend::Int:      static_cast<PodArray<i64>*>(arr)->v.clear(); break;
+        case ArrayBackend::Inline:   static_cast<InlineArray*>(arr)->resize(0); break;
+        case ArrayBackend::Obj:      static_cast<ObjArray*>(arr)->resize(0); break;
+    }
+    vm.reg(dst).o = arr;
+}
+
+// isEmpty: [T] -> Bool
+void builtin_isEmpty_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto* src = vm.reg(ab).o;
+    auto* at = static_cast<ArrayType*>(src->type_);
+    vm.reg(dst).i = (getArraySize(vm, src, at->elemType_) == 0) ? 1 : 0;
+}
+
+// POD half of append!. Reserve-then-push so self-append (a append!(a)) stays
+// valid: the source length is snapshotted and no reallocation happens while
+// the source is being read.
+template <typename T>
+static void appendPodArray(Obj* dstO, Obj* srcO) {
+    auto& d = static_cast<PodArray<T>*>(dstO)->v;
+    auto const& s = static_cast<PodArray<T>*>(srcO)->v;
+    size_t n = s.size();
+    d.reserve(d.size() + n);
+    for (size_t i = 0; i < n; ++i) d.push_back(s[i]);
+}
+
+// append!: [T], [T] -> [T]  -- mutating; appends every element of the source
+// array in place. The mutating analogue of `$` concatenation. Returns the
+// same array for chaining.
+void builtin_append_bang_array(VM& vm, u16 dst, u16, u16 ab) {
+    auto* arr = vm.reg(ab).o;
+    auto* src = vm.reg(ab + 1).o;
+    auto* at = static_cast<ArrayType*>(arr->type_);
+    switch (arrayBackendFor(at->elemType_)) {
+        case ArrayBackend::Complex:  appendPodArray<x64>(arr, src); break;
+        case ArrayBackend::Fraction: appendPodArray<r64>(arr, src); break;
+        case ArrayBackend::Float:    appendPodArray<f64>(arr, src); break;
+        case ArrayBackend::Int:      appendPodArray<i64>(arr, src); break;
+        case ArrayBackend::Inline: {
+            auto* d = static_cast<InlineArray*>(arr);
+            auto* s = static_cast<InlineArray*>(src);
+            size_t n = s->size();
+            d->reserve(d->size() + n);
+            for (size_t i = 0; i < n; ++i) d->pushSlot(s->slot(i));
+            break;
+        }
+        case ArrayBackend::Obj: {
+            auto& d = static_cast<ObjArray*>(arr)->rawVec();
+            auto const& s = static_cast<ObjArray*>(src)->rawVec();
+            size_t n = s.size();
+            d.reserve(d.size() + n);
+            for (size_t i = 0; i < n; ++i) d.push_back(s[i]);
+            break;
+        }
+    }
+    vm.reg(dst).o = arr;
+}
+
+// append!: [T], List<T> -> [T]  -- mutating; appends every list element in
+// place, forcing the list as it walks (an infinite list will not terminate).
+void builtin_append_bang_array_list(VM& vm, u16 dst, u16, u16 ab) {
+    auto* arr = vm.reg(ab).o;
+    auto* node = static_cast<ListNode*>(vm.reg(ab + 1).o);
+    auto* at = static_cast<ArrayType*>(arr->type_);
+    ArrayBackend b = arrayBackendFor(at->elemType_);
+    while (node) {
+        node->force(vm);
+        Word const* h = node->headData();
+        switch (b) {
+            case ArrayBackend::Complex:
+                static_cast<PodArray<x64>*>(arr)->v.push_back(x64(h[0].f, h[1].f));
+                break;
+            case ArrayBackend::Fraction:
+                static_cast<PodArray<r64>*>(arr)->v.push_back(r64(h[0].i, h[1].i));
+                break;
+            case ArrayBackend::Float:
+                static_cast<PodArray<f64>*>(arr)->v.push_back(h[0].f);
+                break;
+            case ArrayBackend::Int:
+                static_cast<PodArray<i64>*>(arr)->v.push_back(h[0].i);
+                break;
+            case ArrayBackend::Inline:
+                static_cast<InlineArray*>(arr)->pushSlot(h);
+                break;
+            case ArrayBackend::Obj:
+                static_cast<ObjArray*>(arr)->push(h[0].o);
+                break;
+        }
+        node = node->tail_;
+    }
+    vm.reg(dst).o = arr;
+}
+
 // --- at / put!: subscript protocol as ordinary functions ---
 //
 // Same semantics as a[i] and a[i] = v (cyclic index, negative wraps), so

@@ -78,12 +78,9 @@ coro fn _playerCo(st Ref<PlayerState>, silo Int, clock Int) Float {
             at = 0.0;
         }
         if (s.cur isNil) {
-            if (s.queue length == 0) { break; }
-            let q0 = s.queue[0];
-            var rest = [List<(Float, NoteCmd)>]();
-            var i = 1;
-            while (i < s.queue length) { rest push!(s.queue[i]); i = i + 1; }
-            st <- PlayerState { cur: q0, queue: rest, origin: getBeats(), stopped: false };
+            if (s.queue isEmpty) { break; }
+            st <- PlayerState { cur: s.queue[0], queue: s.queue drop(1),
+                                origin: getBeats(), stopped: false };
         } else {
             let t0 = (s.cur head).0;
             if (t0 > at + kGroupEps) {
@@ -127,10 +124,8 @@ fn _takeIdBase(poly Int) Int {
 }
 
 fn _prunePlayers() Void {
-    var live = [Player]();
-    for (q : _players) { if (!(*q.state).stopped) { live push!(q); } }
-    while (_players length > 0) { _players pop!; }
-    for (q : live) { _players push!(q); }
+    let live = _players filter(fn(q Player) Bool = !(*q.state).stopped);
+    _players clear! append!(live);
 }
 
 -- Compile events through the tuning and start playing on `silo`/`clock`.
@@ -153,15 +148,15 @@ fn play(events List<Event>, v Voice, t Tuning = et12, s Scale = major,
 -- Stop every player play() has started and not yet stopped, releasing what
 -- their voices hold. Safe to run any number of times.
 fn stopAll() Void {
-    for (q : _players) { q stop; }
-    while (_players length > 0) { _players pop!; }
+    _players stop;      -- auto-maps stop(Player) over the array
+    _players clear!;
 }
 
 -- Stop the OLDEST still-running player (FIFO -- peel off from the start).
 -- Returns true if a player was stopped, false if none were running.
 fn stopFirst() Bool {
     _prunePlayers();
-    if (_players length == 0) { return false; }
+    if (_players isEmpty) { return false; }
     _players[0] stop;
     _prunePlayers();
     true
@@ -171,7 +166,7 @@ fn stopFirst() Bool {
 -- Returns true if a player was stopped, false if none were running.
 fn stopLast() Bool {
     _prunePlayers();
-    if (_players length == 0) { return false; }
+    if (_players isEmpty) { return false; }
     let q = _players pop!;
     q stop;
     true

@@ -37,9 +37,9 @@ fn _topoKids(ctx Ctx, n NIdx) [Int] = ctx.ins[n] $ ctx.subs[n];
 -- visitDelay traversal order: initters, fixReaders, varReaders, maxDelay.
 fn _delayMembers(ctx Ctx, d Int) [Int] {
 	var out [Int] = [];
-	for (n : ctx.delays[d].initters) { out push!(n); }
-	for (n : ctx.delays[d].fixReaders) { out push!(n); }
-	for (n : ctx.delays[d].varReaders) { out push!(n); }
+	out append!(ctx.delays[d].initters)
+	    append!(ctx.delays[d].fixReaders)
+	    append!(ctx.delays[d].varReaders);
 	if (ctx.delays[d].maxDelay != NONE) { out push!(ctx.delays[d].maxDelay); }
 	out
 }
@@ -147,9 +147,8 @@ fn _findReaderWithSig(ctx Ctx, lst [NIdx], sig String) Int {
 -- collapsed by redirecting its consumers to the primary's existing reader.
 fn _mergeReaders(ctx Ctx, primary Int, other Int, isVar Bool) Void {
 	let plist = isVar ? ctx.delays[primary].varReaders : ctx.delays[primary].fixReaders;
-	var readers [Int] = [];
 	let olist = isVar ? ctx.delays[other].varReaders : ctx.delays[other].fixReaders;
-	for (r : olist) { readers push!(r); }
+	let readers = olist copy;
 	for (r : readers) {
 		let dup = ctx _findReaderWithSig(plist, ctx _readerSig(r));
 		if (dup == NONE) {
@@ -202,8 +201,7 @@ fn _compactDelays(ctx Ctx, removed [Bool]) Void {
 		if (!removed[d]) { remap[d] = ni; newDelays push!(ctx.delays[d]); ni = ni + 1; }
 		d = d + 1;
 	}
-	while (ctx.delays length > 0) { ctx.delays pop!; }
-	for (x : newDelays) { ctx.delays push!(x); }
+	ctx.delays clear! append!(newDelays);
 	var i = 0;
 	while (i < ctx numNodes) {
 		ctx.kind[i] = _remapDelayKind(ctx.kind[i], remap);
@@ -737,7 +735,7 @@ fn _inplaceForWrite(ctx Ctx, n NIdx, d Int) Void {
 	}
 	if (allAts) {
 		ctx.suppressed[r] = true;
-		for (a : ats) { info.fixReaders push!(a); }
+		info.fixReaders append!(ats);
 	}
 }
 
@@ -893,8 +891,7 @@ fn _removeFromList(lst [Int], x Int) Void {
 
 fn _replaceIntArray(dst [Int], src [Int]) Void {
 	-- overwrite dst's contents with src (dst is a shared reference)
-	while (dst length > 0) { dst pop!; }
-	for (x : src) { dst push!(x); }
+	dst clear! append!(src);
 }
 
 ---------------------------------------------------------------------------

@@ -78,11 +78,7 @@ fn stripSuffix(s String, suffix String) String {
 fn equalsIgnoreCase(a String, b String) Bool = a toLower == b toLower;
 
 -- Materialize a lazy List<Int> (e.g. codePoints) as an indexable array.
-fn _toIntArray(xs List<Int>) [Int] {
-    var out = [Int]();
-    for (x : xs) { out push!(x); }
-    out
-}
+fn _toIntArray(xs List<Int>) [Int] = [Int]() append!(xs);
 
 -- Match one pattern element at p[pi] against codepoint c.
 -- Returns (matched, index just past the element). Elements are a literal

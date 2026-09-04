@@ -259,7 +259,7 @@ async fn _defineAsync(p Proxy, f GraphFn) Result<String, String> {
     if (!(p _isRegistered)) { _registry push!(p); }
     if ((*p.state).building) {
         let s = *p.state;
-        while (s.pending length > 0) { s.pending pop!; }
+        s.pending clear!;
         s.pending push!(f);
         return Result<String, String>.ok("queued");
     }
@@ -590,9 +590,8 @@ fn free(p Proxy) Void {
 -- Free every registered proxy in the silo -- the recovery for orphaned
 -- proxies whose handles were rebound. Never touches non-proxy nodes.
 fn clearAll(silo Int = 0) Void {
-    var mine = [Proxy]();
-    for (q : _registry) { if (q.silo == silo) { mine push!(q); } }
-    for (q : mine) { q free; }
+    -- filter first: free() unregisters, so don't iterate _registry itself
+    _registry filter(fn(q Proxy) Bool = q.silo == silo) free;
 }
 
 -- Fade every playing proxy out over `fade` seconds, then free everything.
@@ -613,10 +612,8 @@ async fn _endAllAsync(fade Float, silo Int) Void {
 }
 
 fn _unregister(p Proxy) Void {
-    var keep = [Proxy]();
-    for (q : _registry) { if (q.serial != p.serial) { keep push!(q); } }
-    while (_registry length > 0) { _registry pop!; }
-    for (q : keep) { _registry push!(q); }
+    let keep = _registry filter(fn(q Proxy) Bool = q.serial != p.serial);
+    _registry clear! append!(keep);
 }
 
 ---------------------------------------------------------------------------

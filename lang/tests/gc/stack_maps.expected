@@ -5,7 +5,7 @@
 -- obj_param  (3 regs, 1 args, type fn(String) Int)
      0  SAFEPOINT                 ; refs: [r0]
      1  MOV                     r1, r0
-     3  CALL_PRIM               r2, r1, r1  ;  103
+     3  CALL_PRIM               r2, r1, r1  ;  105
      6  RETURN                  r2, r1  ; refs: [r0]
 -- loop_with_obj  (7 regs, 1 args, type fn(Int) Int)
      0  SAFEPOINT                 ; refs: []
@@ -20,5 +20,5 @@
     19  SAFEPOINT                 ; refs: [r1]
     20  JUMP                    -> 6
     22  MOV                     r3, r1
-    24  CALL_PRIM               r4, r1, r3  ;  103
+    24  CALL_PRIM               r4, r1, r3  ;  105
     27  RETURN                  r4, r1  ; refs: [r1]

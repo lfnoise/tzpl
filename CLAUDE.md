@@ -78,6 +78,9 @@ Syntax essentials for reading and writing `.x` files:
     var s = Set(1, 2);
     s insert!(3);
     let popped = s pop!;           -- mutating; returns one element
+    a clear!;                      -- empty any Array/Map/Set in place
+    a append!(b);                  -- bulk-append an array/list in place ($ analogue)
+    a isEmpty;                     -- true when any collection has no elements
 
     -- Auto-mapping: functions automatically apply over arrays/lists
     let xs = [1, 2, 3];

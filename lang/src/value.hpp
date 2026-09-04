@@ -1426,6 +1426,10 @@ public:
     // if erased.
     bool eraseEntry(Word const* key);
 
+    // Erase every entry, keeping the table's capacity. Shades dropped Obj*
+    // fields for the SATB GC (see ObjArray::resize).
+    void clear();
+
     // Internal: grow to a new capacity (must be power of 2, >= size_*2).
     void rehash(u32 newCapacity);
 
@@ -1474,6 +1478,10 @@ public:
 
     // Erase, releasing the slot's Obj* fields. Returns true if erased.
     bool eraseElem(Word const* elem);
+
+    // Erase every element, keeping the table's capacity. Shades dropped Obj*
+    // fields for the SATB GC (see ObjArray::resize).
+    void clear();
 
     void rehash(u32 newCapacity);
 

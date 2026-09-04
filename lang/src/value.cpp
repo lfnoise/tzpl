@@ -1019,6 +1019,23 @@ bool MapObj::eraseEntry(Word const* key) {
     return true;
 }
 
+void MapObj::clear() {
+    if (size_ > 0) {
+        auto& gc = gCurrentVM->tracingGC();
+        Type* kt = keyType();
+        Type* vt = valueType();
+        u32 cap = capacity();
+        for (u32 i = 0; i < cap; ++i) {
+            if (meta_[i] != SlotOccupied) continue;
+            gcBarrierInlinePointers(slotKey(i), kt, gc);
+            gcBarrierInlinePointers(slotVal(i), vt, gc);
+        }
+    }
+    meta_.assign(meta_.size(), SlotEmpty);
+    size_ = 0;
+    tombstones_ = 0;
+}
+
 void MapObj::copyFrom(MapObj const& src) {
     keyStride_   = src.keyStride_;
     valueStride_ = src.valueStride_;
@@ -1205,6 +1222,21 @@ bool SetObj::eraseElem(Word const* elem) {
     --size_;
     ++tombstones_;
     return true;
+}
+
+void SetObj::clear() {
+    if (size_ > 0) {
+        auto& gc = gCurrentVM->tracingGC();
+        Type* et = elemType();
+        u32 cap = capacity();
+        for (u32 i = 0; i < cap; ++i) {
+            if (meta_[i] != SlotOccupied) continue;
+            gcBarrierInlinePointers(slotElem(i), et, gc);
+        }
+    }
+    meta_.assign(meta_.size(), SlotEmpty);
+    size_ = 0;
+    tombstones_ = 0;
 }
 
 void SetObj::copyFrom(SetObj const& src) {

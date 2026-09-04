@@ -55,3 +55,7 @@ let s = "hello";
 s[0] println;
 s[1] println;
 s[4] println;
+
+-- isEmpty
+println("" isEmpty);
+println("hi" isEmpty);

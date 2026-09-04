@@ -19,3 +19,10 @@ m5 values println;
 let a = ["x": 1, "y": 2];
 let b = ["y": 99, "z": 3];
 merge(a, b) println;
+
+-- isEmpty / clear!
+var mEmptyTest = ["a": 1];
+println(mEmptyTest isEmpty);
+mEmptyTest clear!;
+println(mEmptyTest isEmpty);
+println(mEmptyTest length);

@@ -180,9 +180,7 @@ fn stack<T>(ps [Pattern<T>]) Pattern<T> {
     Pattern<T> {
         query: fn(s Span) [Hap<T>] {
             var out = [Hap<T>]();
-            for (p : ps) {
-                for (h : p call(s)) { out push!(h); }
-            }
+            for (p : ps) { out append!(p call(s)); }
             out
         },
     }
@@ -200,7 +198,7 @@ fn every<T>(p Pattern<T>, n Int, f (Pattern<T>) Pattern<T>) Pattern<T> {
                 if (cs.b - cs.a > kEps) {
                     var ci = c toInt % n;
                     if (ci < 0) { ci = ci + n; }
-                    for (h : ci == 0 ? fp call(cs) : p call(cs)) { out push!(h); }
+                    out append!(ci == 0 ? fp call(cs) : p call(cs));
                 }
                 c = c + 1.0;
             }
@@ -221,7 +219,7 @@ fn iterp<T>(p Pattern<T>, n Int) Pattern<T> {
                     var ci = c toInt % n;
                     if (ci < 0) { ci = ci + n; }
                     let off = ci toFloat / n toFloat;
-                    for (h : early(p, off) call(cs)) { out push!(h); }
+                    out append!(early(p, off) call(cs));
                 }
                 c = c + 1.0;
             }

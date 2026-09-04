@@ -583,6 +583,12 @@ static void builtin_length_string(VM& vm, u16 dst, u16, u16 argBase) {
     vm.reg(dst).i = (i64)s->s.size();
 }
 
+// isEmpty(String) -> Bool
+static void builtin_isEmpty_string(VM& vm, u16 dst, u16, u16 argBase) {
+    auto* s = static_cast<StringObj*>(vm.reg(argBase).o);
+    vm.reg(dst).i = s->s.empty() ? 1 : 0;
+}
+
 // min(String, String) -> String
 static void builtin_min_string(VM& vm, u16 dst, u16, u16 argBase) {
     auto* a = static_cast<StringObj*>(vm.reg(argBase).o);
@@ -907,9 +913,34 @@ static void builtin_length_range_int(VM& vm, u16 dst, u16, u16 argBase) {
     }
 }
 
+// isEmpty(Range[Int]) -> Bool  (an infinite range is never empty)
+static void builtin_isEmpty_range_int(VM& vm, u16 dst, u16, u16 argBase) {
+    auto* range = static_cast<RangeObj*>(vm.reg(argBase).o);
+    if (range->isInfinite_) { vm.reg(dst).i = 0; return; }
+    i64 start = range->startData()[0].i;
+    i64 step  = range->stepData()[0].i;
+    i64 end   = range->endData()[0].i;
+    i64 diff  = end - start;
+    bool empty = step == 0 || (step > 0 && diff < 0) || (step < 0 && diff > 0);
+    vm.reg(dst).i = empty ? 1 : 0;
+}
+
 // Helper: decode an r64 endpoint from a 2-word native Fraction slot.
 static inline r64 rangeFractionAt(Word const* data) {
     return r64(data[0].i, data[1].i);
+}
+
+// isEmpty(Range[Fraction]) -> Bool  (an infinite range is never empty)
+static void builtin_isEmpty_range_fraction(VM& vm, u16 dst, u16, u16 argBase) {
+    auto* range = static_cast<RangeObj*>(vm.reg(argBase).o);
+    if (range->isInfinite_) { vm.reg(dst).i = 0; return; }
+    r64 start = rangeFractionAt(range->startData());
+    r64 step  = rangeFractionAt(range->stepData());
+    r64 end   = rangeFractionAt(range->endData());
+    r64 diff  = end - start;
+    bool empty = step == r64(0) || (step > r64(0) && diff < r64(0))
+                                || (step < r64(0) && diff > r64(0));
+    vm.reg(dst).i = empty ? 1 : 0;
 }
 
 // toArray(Range<Fraction>) -> [Fraction]
@@ -1159,6 +1190,7 @@ void registerMathBuiltins(Compiler& compiler, FuncMap& functions)
     ListType* ListInt = compiler.listType(Int);
     registerOne(compiler, functions, "toList",  ListInt,  {RangeInt}, builtin_toList_range_int);
     registerOne(compiler, functions, "length",  Int,      {RangeInt}, builtin_length_range_int);
+    registerOne(compiler, functions, "isEmpty", Bool,     {RangeInt}, builtin_isEmpty_range_int);
 
     Type* RangeFrac = compiler.rangeType(Frac);
     ArrayType* ArrayFrac = compiler.arrayType(Frac);
@@ -1166,9 +1198,11 @@ void registerMathBuiltins(Compiler& compiler, FuncMap& functions)
     ListType* ListFrac = compiler.listType(Frac);
     registerOne(compiler, functions, "toList",  ListFrac,  {RangeFrac}, builtin_toList_range_fraction);
     registerOne(compiler, functions, "length",  Int,       {RangeFrac}, builtin_length_range_fraction);
+    registerOne(compiler, functions, "isEmpty", Bool,      {RangeFrac}, builtin_isEmpty_range_fraction);
 
     // --- String functions ---
     registerOne(compiler, functions, "length",     Int,      {Str},           builtin_length_string);
+    registerOne(compiler, functions, "isEmpty",    Bool,     {Str},           builtin_isEmpty_string);
     registerOne(compiler, functions, "substring",  Str,      {Str, Int, Int}, builtin_substring_string);
     registerOne(compiler, functions, "contains",   Bool,     {Str, Str},      builtin_contains_string);
     registerOne(compiler, functions, "startsWith", Bool,     {Str, Str},      builtin_startsWith_string);

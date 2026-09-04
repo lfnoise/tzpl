@@ -36,6 +36,8 @@ namespace ts {
 // argument is a persistent vector (#[T]) or persistent map (#[K:V]).
 static void builtin_length_pvec(VM& vm, u16 dst, u16, u16 ab);
 static void builtin_length_pmap(VM& vm, u16 dst, u16, u16 ab);
+static void builtin_isEmpty_pvec(VM& vm, u16 dst, u16, u16 ab);
+static void builtin_isEmpty_pmap(VM& vm, u16 dst, u16, u16 ab);
 static void builtin_push_pvec(VM& vm, u16 dst, u16, u16 ab);
 static void builtin_put_at_pvec(VM& vm, u16 dst, u16, u16 ab);
 static void builtin_get_pmap(VM& vm, u16 dst, u16, u16 ab);
@@ -168,6 +170,23 @@ static bool resolve_pop_bang(Compiler& compiler, const std::vector<Type*>& args,
     auto* at = dynamic_cast<ArrayType*>(args[0]);
     if (!at) return false;
     pt = {at}; rt = at->elemType_; cf = builtin_pop_bang_array; return true;
+}
+
+// append!: [T], [T] | List<T> -> [T]  -- mutating; appends every element of
+// the source to the destination array (the mutating analogue of `$`)
+static bool resolve_append_bang(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    (void)compiler;
+    if (args.size() != 2) return false;
+    auto* at = dynamic_cast<ArrayType*>(args[0]);
+    if (!at) return false;
+    if (auto* st = dynamic_cast<ArrayType*>(args[1]); st && st->elemType_ == at->elemType_) {
+        pt = {at, st}; rt = at; cf = builtin_append_bang_array; return true;
+    }
+    if (auto* lt = dynamic_cast<ListType*>(args[1]); lt && lt->elemType_ == at->elemType_) {
+        pt = {at, lt}; rt = at; cf = builtin_append_bang_array_list; return true;
+    }
+    return false;
 }
 
 // insert!: Set<T>, T -> Set<T>  -- mutating; returns same set
@@ -903,6 +922,12 @@ static void builtin_length_map(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).i = (i64)map->size();
 }
 
+// isEmpty: [K:V] -> Bool
+static void builtin_isEmpty_map(VM& vm, u16 dst, u16, u16 ab) {
+    auto* map = static_cast<MapObj*>(vm.reg(ab).o);
+    vm.reg(dst).i = map->empty() ? 1 : 0;
+}
+
 // get: [K:V], K -> Option<V>
 //
 // Phase 4g.11: with acceptsInlineArgs=true, the Option<V> return slot is
@@ -1033,6 +1058,13 @@ static void builtin_remove_bang_map(VM& vm, u16 dst, u16, u16 ab) {
     auto* map = static_cast<MapObj*>(vm.reg(ab).o);
     Word const* key = &vm.reg((u16)(ab + 1));
     map->eraseEntry(key);
+    vm.reg(dst).o = map;
+}
+
+// clear!: [K:V] -> [K:V]  -- mutating; removes every entry, returns the same map
+static void builtin_clear_bang_map(VM& vm, u16 dst, u16, u16 ab) {
+    auto* map = static_cast<MapObj*>(vm.reg(ab).o);
+    map->clear();
     vm.reg(dst).o = map;
 }
 
@@ -2000,6 +2032,12 @@ static void builtin_length_set(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).i = (i64)set->size();
 }
 
+// isEmpty: Set<T> -> Bool
+static void builtin_isEmpty_set(VM& vm, u16 dst, u16, u16 ab) {
+    auto* set = static_cast<SetObj*>(vm.reg(ab).o);
+    vm.reg(dst).i = set->empty() ? 1 : 0;
+}
+
 // insert!: Set<T>, T -> Set<T>  -- mutating; returns the same set for chaining
 static void builtin_insert_bang_set(VM& vm, u16 dst, u16, u16 ab) {
     auto* set = static_cast<SetObj*>(vm.reg(ab).o);
@@ -2071,6 +2109,13 @@ static void builtin_remove_bang_set(VM& vm, u16 dst, u16, u16 ab) {
     auto* set = static_cast<SetObj*>(vm.reg(ab).o);
     Word const* elem = &vm.reg((u16)(ab + 1));
     set->eraseElem(elem);
+    vm.reg(dst).o = set;
+}
+
+// clear!: Set<T> -> Set<T>  -- mutating; removes every element, returns the same set
+static void builtin_clear_bang_set(VM& vm, u16 dst, u16, u16 ab) {
+    auto* set = static_cast<SetObj*>(vm.reg(ab).o);
+    set->clear();
     vm.reg(dst).o = set;
 }
 
@@ -2307,6 +2352,49 @@ static bool resolve_length(Compiler& compiler, const std::vector<Type*>& args,
     }
     if (auto* pm = dynamic_cast<PersistentMapType*>(args[0])) {
         pt = {pm}; rt = compiler.intType(); cf = builtin_length_pmap; return true;
+    }
+    return false;
+}
+
+// isEmpty resolver: length == 0 for every collection length covers; lists
+// answer in O(1) (same as isNil) instead of forcing the whole list.
+static bool resolve_isEmpty(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    if (args.size() != 1) return false;
+    if (auto* at = dynamic_cast<ArrayType*>(args[0])) {
+        pt = {at}; rt = compiler.boolType(); cf = builtin_isEmpty_array; return true;
+    }
+    if (auto* lt = dynamic_cast<ListType*>(args[0])) {
+        pt = {lt}; rt = compiler.boolType(); cf = builtin_isNil_list; return true;
+    }
+    if (auto* mt = dynamic_cast<MapType*>(args[0])) {
+        pt = {mt}; rt = compiler.boolType(); cf = builtin_isEmpty_map; return true;
+    }
+    if (auto* st = dynamic_cast<SetType*>(args[0])) {
+        pt = {st}; rt = compiler.boolType(); cf = builtin_isEmpty_set; return true;
+    }
+    if (auto* pv = dynamic_cast<PersistentVectorType*>(args[0])) {
+        pt = {pv}; rt = compiler.boolType(); cf = builtin_isEmpty_pvec; return true;
+    }
+    if (auto* pm = dynamic_cast<PersistentMapType*>(args[0])) {
+        pt = {pm}; rt = compiler.boolType(); cf = builtin_isEmpty_pmap; return true;
+    }
+    return false;
+}
+
+// clear!: Array | Map | Set -> same container  -- mutating; removes every element
+static bool resolve_clear_bang(Compiler& compiler, const std::vector<Type*>& args,
+    std::vector<Type*>& pt, Type*& rt, CFun& cf) {
+    (void)compiler;
+    if (args.size() != 1) return false;
+    if (auto* at = dynamic_cast<ArrayType*>(args[0])) {
+        pt = {at}; rt = at; cf = builtin_clear_bang_array; return true;
+    }
+    if (auto* mt = dynamic_cast<MapType*>(args[0])) {
+        pt = {mt}; rt = mt; cf = builtin_clear_bang_map; return true;
+    }
+    if (auto* st = dynamic_cast<SetType*>(args[0])) {
+        pt = {st}; rt = st; cf = builtin_clear_bang_set; return true;
     }
     return false;
 }
@@ -3275,6 +3363,14 @@ static void builtin_length_pmap(VM& vm, u16 dst, u16, u16 ab) {
     vm.reg(dst).i = (i64)static_cast<PMap*>(vm.reg(ab).o)->count_;
 }
 
+static void builtin_isEmpty_pvec(VM& vm, u16 dst, u16, u16 ab) {
+    vm.reg(dst).i = (static_cast<PVec*>(vm.reg(ab).o)->count_ == 0) ? 1 : 0;
+}
+
+static void builtin_isEmpty_pmap(VM& vm, u16 dst, u16, u16 ab) {
+    vm.reg(dst).i = (static_cast<PMap*>(vm.reg(ab).o)->count_ == 0) ? 1 : 0;
+}
+
 // push: #[T], T -> #[T]  (returns a NEW persistent vector)
 static void builtin_push_pvec(VM& vm, u16 dst, u16, u16 ab) {
     auto* v = static_cast<PVec*>(vm.reg(ab).o);
@@ -4105,9 +4201,13 @@ void registerBuiltinFunctions(Compiler& compiler,
     // Mutating array variants (replace `push`/`pop` with `push!`/`pop!`).
     registerTemplate(compiler, functions, "push!",     resolve_push_bang, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "pop!",      resolve_pop_bang,  /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "append!",   resolve_append_bang, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "isNil",     resolve_isNil,     /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "notNil",    resolve_notNil,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     registerTemplate(compiler, functions, "length",    resolve_length,    /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    registerTemplate(compiler, functions, "isEmpty",   resolve_isEmpty,   /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
+    // Mutating: empties an Array/Map/Set in place.
+    registerTemplate(compiler, functions, "clear!",    resolve_clear_bang, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);
     // Phase 4g.6: ordinal/tag only read the discriminant (word 0); for
     // Inline enums that lets us skip the per-call box-then-read.
     registerTemplate(compiler, functions, "ordinal",   resolve_ordinal, /*rtSafe=*/true, /*acceptsInlineArgs=*/true);

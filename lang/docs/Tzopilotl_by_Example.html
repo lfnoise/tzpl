@@ -864,11 +864,13 @@ b[<span class="num">0</span>] = <span class="num">100</span>;
 b[-<span class="num">1</span>] = <span class="num">999</span>;
 b println;               <span class="cmt">-- [100, 20, 999]</span>
 
-<span class="cmt">-- Mutating builtins: push! / pop! modify the array in place</span>
+<span class="cmt">-- Mutating builtins: push! / pop! / clear! modify the array in place</span>
 b push!(<span class="num">42</span>);
 b println;               <span class="cmt">-- [100, 20, 999, 42]</span>
 <span class="kw">let</span> last = b pop!;
 last println;            <span class="cmt">-- 42</span>
+b clear!;
+b isEmpty println;       <span class="cmt">-- true (isEmpty works on every collection)</span>
 
 <span class="cmt">-- Non-mutating push / pop return a new array (input unchanged)</span>
 <span class="kw">let</span> orig = [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>];

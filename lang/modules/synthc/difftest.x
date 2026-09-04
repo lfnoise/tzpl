@@ -209,7 +209,7 @@ fn _normVoiceAdvance(src String) [String] {
 		if (lines[i] _isVoiceAdvanceLine) {
 			var run [String] = [];
 			while (i < lines length && lines[i] _isVoiceAdvanceLine) { run push!(lines[i]); i = i + 1; }
-			for (l : run sort) { out push!(l); }
+			out append!(run sort);
 		} else {
 			out push!(lines[i]); i = i + 1;
 		}

@@ -170,7 +170,7 @@ Tzopilotl. When in doubt, write `.x` first and promote with a benchmark.
 ## Language Design Principles
 
 - **Immutable by default**: `let` bindings are immutable. Use `var` for mutable locals, `Ref<T>` for mutable scalar/struct slots.
-- **Mutable containers**: `Array`, `Map`, and `Set` are heap objects passed by reference. They support in-place writes via `a[i] = x`, `m[k] = v`, and the bang-suffixed builtins `push!` / `pop!` (arrays), `put!` / `remove!` (maps), and `insert!` / `remove!` / `pop!` (sets). The plain `push` / `pop` / `add` / `put` / `remove` etc. remain non-mutating and return new containers. Use `copy` for an independent shallow copy.
+- **Mutable containers**: `Array`, `Map`, and `Set` are heap objects passed by reference. They support in-place writes via `a[i] = x`, `m[k] = v`, and the bang-suffixed builtins `push!` / `pop!` / `append!` (arrays), `put!` / `remove!` (maps), `insert!` / `remove!` / `pop!` (sets), and `clear!` (all three). The plain `push` / `pop` / `add` / `put` / `remove` etc. remain non-mutating and return new containers. Use `copy` for an independent shallow copy, and `isEmpty` (any collection) instead of `length == 0`.
 - **Trailing `!` on identifiers**: the `!` is part of the identifier &mdash; `foo` and `foo!` resolve to different functions. Idiomatically the `!` marks a mutating function, but the convention is not enforced.
 - **Source-to-sink inference**: Types propagate forward, not bidirectionally.
 - **Untagged values**: 64-bit `Word` union; types are statically known at compile time.

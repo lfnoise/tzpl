@@ -308,6 +308,14 @@ get(m, "key", default) println;          -- get with default
 let s = Set(1, 2, 3);
 s contains(2) println;
 
+-- Emptiness, in-place clearing, bulk append
+xs isEmpty                               -- any collection; prefer over length == 0
+var b = [1, 2, 3];
+b clear!;                                -- empty an Array/Map/Set in place
+b append!([4, 5]);                       -- bulk-append array/list ($ analogue);
+                                         -- prefer over for-push! copy loops
+b clear! append!(src);                   -- replace contents in place
+
 -- Ranges
 (1..5)                                   -- 1 to 5 inclusive
 (0,2..10)                                -- 0, 2, 4, 6, 8, 10

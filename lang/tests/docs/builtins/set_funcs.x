@@ -11,3 +11,9 @@ intersection(a, b) println;
 difference(a, b) println;
 
 s toArray println;
+
+-- isEmpty / clear!
+var sEmptyTest = Set(1, 2);
+println(sEmptyTest isEmpty);
+sEmptyTest clear!;
+println(sEmptyTest isEmpty);

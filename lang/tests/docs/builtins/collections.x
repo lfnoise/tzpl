@@ -73,3 +73,9 @@ println(List(List(1, 2), List(3, 4)) join);
 -- flatten
 println([[1, 2], [3, 4]] flatten);
 println([[[1, 2], [3]], [[4, 5, 6]]] flatten);
+
+-- isEmpty
+println([1, 2] isEmpty);
+println([Int]() isEmpty);
+println(List(1) isEmpty);
+println(nil isEmpty);

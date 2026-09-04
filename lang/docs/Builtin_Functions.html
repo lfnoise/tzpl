@@ -345,19 +345,19 @@
                 <li><a href="#bitwise">Bit Manipulation</a> &mdash; clz, clo, ctz, cto, popCount, rotl, rotr, bitCeil, bitFloor, bitWidth, hasSingleBit</li>
                 <li><a href="#complex">Complex Number Functions</a> &mdash; Complex, real, imag, arg, norm, conj, polar</li>
                 <li><a href="#fraction">Fraction Functions</a> &mdash; numer, denom</li>
-                <li><a href="#string">String Functions</a> &mdash; length, substring, contains, startsWith, endsWith, split, trim, toUpper, toLower, replace, indexOf, lastIndexOf, parseInt, parseFloat, codePoints, indexing, toSymbol, min, max, cmp</li>
+                <li><a href="#string">String Functions</a> &mdash; length, isEmpty, substring, contains, startsWith, endsWith, split, trim, toUpper, toLower, replace, indexOf, lastIndexOf, parseInt, parseFloat, codePoints, indexing, toSymbol, min, max, cmp</li>
                 <li><a href="#formatting">String Formatting</a> &mdash; fmt</li>
-                <li><a href="#range">Range Functions</a> &mdash; length, toArray, toList</li>
-                <li><a href="#collections">Collection Functions (Arrays &amp; Lists)</a> &mdash; length, map, filter, fold, scan, fold1, scan1, find, zip, enumerate, take, drop, takeWhile, dropWhile, stride, stutter, repeat, cat, join, flatten, sum, product, mean, min, max, sums, products, mins, maxs, any, all, contains, clump, toSet, fromCodePoints</li>
-                <li><a href="#array-only">Array-only Functions</a> &mdash; reverse, push, pop, push!, pop!, at, put!, sort, muss, copy</li>
+                <li><a href="#range">Range Functions</a> &mdash; length, isEmpty, toArray, toList</li>
+                <li><a href="#collections">Collection Functions (Arrays &amp; Lists)</a> &mdash; length, isEmpty, map, filter, fold, scan, fold1, scan1, find, zip, enumerate, take, drop, takeWhile, dropWhile, stride, stutter, repeat, cat, join, flatten, sum, product, mean, min, max, sums, products, mins, maxs, any, all, contains, clump, toSet, fromCodePoints</li>
+                <li><a href="#array-only">Array-only Functions</a> &mdash; reverse, push, pop, push!, pop!, clear!, append!, at, put!, sort, muss, copy</li>
                 <li><a href="#list-only">List-only Functions</a> &mdash; head, tail, cons, isNil, notNil, cyc, ncyc, hang, iter</li>
-                <li><a href="#map-functions">Map Functions</a> &mdash; get, getOrDefault, getOrElse, put, put!, remove, remove!, contains, keys, values, pairs, merge, mergeIfAbsent, mergeIfPresent, length, copy, <code>m[k] = v</code></li>
+                <li><a href="#map-functions">Map Functions</a> &mdash; get, getOrDefault, getOrElse, put, put!, remove, remove!, clear!, contains, keys, values, pairs, merge, mergeIfAbsent, mergeIfPresent, length, isEmpty, copy, <code>m[k] = v</code></li>
                 <li><a href="#option-functions">Option Functions</a> &mdash; unwrap, unwrapOr, isSome, isNone</li>
                 <li><a href="#ref-functions">Reference Functions</a> &mdash; ref, deref, setref</li>
                 <li><a href="#any-functions">Any Functions</a> &mdash; any, toAnyArray, as(Type)</li>
                 <li><a href="#coroutine-functions">Coroutine Functions</a> &mdash; next, yield, yieldAll, toList</li>
-                <li><a href="#set-functions">Set Functions</a> &mdash; add, remove, remove!, insert!, pop!, contains, union, intersection, difference, toArray, length, copy</li>
-                <li><a href="#persistent-functions">Persistent Collection Functions</a> &mdash; <code>#[&hellip;]</code> vectors &amp; maps: length, push, put, get, remove, contains, keys, values, merge, toPersistentVector, toArray, toPersistentMap, toMap</li>
+                <li><a href="#set-functions">Set Functions</a> &mdash; add, remove, remove!, insert!, pop!, clear!, contains, union, intersection, difference, toArray, length, isEmpty, copy</li>
+                <li><a href="#persistent-functions">Persistent Collection Functions</a> &mdash; <code>#[&hellip;]</code> vectors &amp; maps: length, isEmpty, push, put, get, remove, contains, keys, values, merge, toPersistentVector, toArray, toPersistentMap, toMap</li>
                 <li><a href="#hashing">Hashing &amp; Equality</a> &mdash; hash, ==, != (cycle-safe)</li>
                 <li><a href="#serialization">Serialization</a> &mdash; serialize, deserialize&lt;T&gt;</li>
                 <li><a href="#enum-functions">Enum Functions</a> &mdash; ordinal, tag</li>
@@ -879,6 +879,7 @@ denom(<span class="hl-num">10</span>/<span class="hl-num">5</span>) println;    
             <table>
                 <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>length(s)</code></td><td><code>String &rarr; Int</code></td><td>Number of bytes in the string.</td></tr>
+                <tr><td><code>isEmpty(s)</code></td><td><code>String &rarr; Bool</code></td><td>True when the string has no bytes.</td></tr>
                 <tr><td><code>min(a, b)</code></td><td><code>(String, String) &rarr; String</code></td><td>Lexicographically smaller string.</td></tr>
                 <tr><td><code>max(a, b)</code></td><td><code>(String, String) &rarr; String</code></td><td>Lexicographically larger string.</td></tr>
                 <tr><td><code>cmp(a, b)</code></td><td><code>(String, String) &rarr; Int</code></td><td>Returns &minus;1, 0, or 1.</td></tr>
@@ -1096,6 +1097,7 @@ toSymbol(<span class="hl-str">"note_"</span> $ toString(<span class="hl-num">3</
             <table>
                 <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>length(r)</code></td><td><code>Range&lt;Int&gt; &rarr; Int</code></td><td>Number of elements in the range. Returns <code>-1</code> for infinite ranges.</td></tr>
+                <tr><td><code>isEmpty(r)</code></td><td><code>Range&lt;Int&gt; &rarr; Bool</code></td><td>True when the range has no elements. Infinite ranges are never empty.</td></tr>
                 <tr><td><code>toArray(r)</code></td><td><code>Range&lt;Int&gt; &rarr; [Int]</code></td><td>Materialize the range into an array.</td></tr>
                 <tr><td><code>toList(r)</code></td><td><code>Range&lt;Int&gt; &rarr; List&lt;Int&gt;</code></td><td>Create a lazy list from the range. Elements are generated on demand.</td></tr>
             </table>
@@ -1132,6 +1134,18 @@ r toList     <span class="cmt">-- List(1, 2, 3, 4, 5) (lazy)</span></code></pre>
             <pre><code>[1, 2, 3, 4, 5] length             <span class="cmt">-- 5</span>
 List(1, 2, 3) length               <span class="cmt">-- 3</span>
 [10, 20, 30] length                <span class="cmt">-- 3</span></code></pre>
+
+            <h3><code>isEmpty(collection)</code></h3>
+            <p>Returns <code>true</code> when the collection has no elements. Defined for every collection <code>length</code> covers &mdash; arrays, lists, maps, sets, strings, ranges, and persistent vectors/maps. Unlike <code>length</code>, <code>isEmpty</code> on a <code>List</code> answers in O(1) without forcing any elements (equivalent to <code>isNil</code>), so it is safe on infinite lists. An infinite range is never empty.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>isEmpty([T]) &rarr; Bool</code></td><td>True when the array has no elements.</td></tr>
+                <tr><td><code>isEmpty(List&lt;T&gt;) &rarr; Bool</code></td><td>True when the list is nil. O(1); does not force.</td></tr>
+            </table>
+            <pre><code>[Int]() isEmpty                    <span class="cmt">-- true</span>
+[1, 2, 3] isEmpty                  <span class="cmt">-- false</span>
+nil isEmpty                        <span class="cmt">-- true</span>
+(1..) isEmpty                      <span class="cmt">-- false (infinite, does not hang)</span></code></pre>
 
             <h3>Slicing &amp; Selection</h3>
 
@@ -1512,6 +1526,31 @@ let last = a pop!;
 last println;                    <span class="cmt">-- 4</span>
 a println;                       <span class="cmt">-- [1, 2, 3]</span></code></pre>
 
+            <h3><code>clear!(array)</code></h3>
+            <p>Mutating clear. Removes every element in place. Returns the same array for chaining. Also defined for maps and sets (see the Map and Set sections).</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>clear!([T]) &rarr; [T]</code></td><td>Remove every element (mutates the array). Returns the same array.</td></tr>
+            </table>
+            <pre><code>var a = [1, 2, 3];
+a clear!;
+a println;                       <span class="cmt">-- []</span></code></pre>
+
+            <h3><code>append!(array, source)</code></h3>
+            <p>Mutating bulk append &mdash; the in-place analogue of <code>$</code> concatenation. Appends every element of the source (an array or a list of the same element type) to the array. Returns the same array for chaining. A list source is forced as it is walked, so an infinite list will not terminate. Self-append (<code>a append!(a)</code>) is safe and doubles the array.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>append!([T], [T]) &rarr; [T]</code></td><td>Append every element of the source array (mutates the first array). Returns the same array.</td></tr>
+                <tr><td><code>append!([T], List&lt;T&gt;) &rarr; [T]</code></td><td>Append every element of the list, forcing it.</td></tr>
+            </table>
+            <pre><code>var a = [1, 2];
+a append!([3, 4]);
+a println;                       <span class="cmt">-- [1, 2, 3, 4]</span>
+a append!(List(5, 6));
+a println;                       <span class="cmt">-- [1, 2, 3, 4, 5, 6]</span>
+a clear! append!([9]);           <span class="cmt">-- replace contents in place</span>
+a println;                       <span class="cmt">-- [9]</span></code></pre>
+
             <h3><code>sort(array)</code></h3>
             <p>Returns a new array sorted in ascending order.</p>
             <table>
@@ -1789,11 +1828,19 @@ mergeIfAbsent(a, b) println;     <span class="cmt">-- [x: 1, y: 2, z: 3]</span><
 let b = ["y": 99, "z": 3];
 mergeIfPresent(a, b) println;    <span class="cmt">-- [x: 1, y: 99]</span></code></pre>
 
-            <h3><code>length(map)</code></h3>
-            <p>Returns the number of key-value pairs in the map.</p>
+            <h3><code>length(map)</code> / <code>isEmpty(map)</code></h3>
+            <p>Returns the number of key-value pairs in the map, or whether there are none.</p>
             <table>
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>length([K: V]) &rarr; Int</code></td><td>Number of entries in the map.</td></tr>
+                <tr><td><code>isEmpty([K: V]) &rarr; Bool</code></td><td>True when the map has no entries.</td></tr>
+            </table>
+
+            <h3><code>clear!(map)</code></h3>
+            <p>Mutating clear. Removes every entry in place. Returns the same map for chaining.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>clear!([K: V]) &rarr; [K: V]</code></td><td>Remove every entry (mutates the map). Returns the same map.</td></tr>
             </table>
 
             <h3><code>copy(map)</code></h3>
@@ -2140,11 +2187,19 @@ difference(a, b) println;        <span class="cmt">-- Set(1, 2)</span></code></p
             <pre><code>let s = Set(1, 2, 3);
 s toArray println;               <span class="cmt">-- [1, 2, 3]</span></code></pre>
 
-            <h3><code>length(set)</code></h3>
-            <p>Returns the number of elements in the set.</p>
+            <h3><code>length(set)</code> / <code>isEmpty(set)</code></h3>
+            <p>Returns the number of elements in the set, or whether there are none.</p>
             <table>
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>length(Set&lt;T&gt;) &rarr; Int</code></td><td>Number of elements in the set.</td></tr>
+                <tr><td><code>isEmpty(Set&lt;T&gt;) &rarr; Bool</code></td><td>True when the set has no elements.</td></tr>
+            </table>
+
+            <h3><code>clear!(set)</code></h3>
+            <p>Mutating clear. Removes every element in place. Returns the same set for chaining.</p>
+            <table>
+                <tr><th>Signature</th><th>Description</th></tr>
+                <tr><td><code>clear!(Set&lt;T&gt;) &rarr; Set&lt;T&gt;</code></td><td>Remove every element (mutates the set). Returns the same set.</td></tr>
             </table>
 
             <h3><code>copy(set)</code></h3>
@@ -2166,11 +2221,12 @@ s toArray println;               <span class="cmt">-- [1, 2, 3]</span></code></p
             <h3>Persistent Vector</h3>
             <p>An immutable indexed sequence. Indexing is <em>cyclic</em> like arrays: negative and out-of-range indices wrap. In addition to the functions below, persistent vectors support structural <code>==</code> / <code>!=</code>, concatenation with <code>$</code>, and use as a for-loop iterable (<code>for (x : v) { &hellip; }</code> yields elements).</p>
 
-            <h3><code>length(pvec)</code></h3>
-            <p>Returns the number of elements in the persistent vector.</p>
+            <h3><code>length(pvec)</code> / <code>isEmpty(pvec)</code></h3>
+            <p>Returns the number of elements in the persistent vector, or whether there are none.</p>
             <table>
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>length(#[T]) &rarr; Int</code></td><td>Number of elements.</td></tr>
+                <tr><td><code>isEmpty(#[T]) &rarr; Bool</code></td><td>True when there are no elements.</td></tr>
             </table>
 
             <h3>Subscript <code>v[i]</code></h3>
@@ -2243,11 +2299,12 @@ m get("w", 0) println;           <span class="cmt">-- 0  (absent, returns defaul
             <pre><code>let m = #["x": 1, "y": 2];
 m contains("x") println;         <span class="cmt">-- true</span></code></pre>
 
-            <h3><code>length(pmap)</code></h3>
-            <p>Returns the number of key-value pairs in the persistent map.</p>
+            <h3><code>length(pmap)</code> / <code>isEmpty(pmap)</code></h3>
+            <p>Returns the number of key-value pairs in the persistent map, or whether there are none.</p>
             <table>
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>length(#[K: V]) &rarr; Int</code></td><td>Number of entries.</td></tr>
+                <tr><td><code>isEmpty(#[K: V]) &rarr; Bool</code></td><td>True when there are no entries.</td></tr>
             </table>
 
             <h3><code>put(pmap, key, value)</code></h3>

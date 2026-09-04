@@ -7,7 +7,16 @@ documentation site as the Changelog page.
 
 ## Unreleased
 
-Nothing yet.
+**Language & VM**
+
+- `clear!` builtin empties an Array, Map, or Set in place; `append!`
+  bulk-appends an array or list to an array in place (the mutating analogue
+  of `$`); `isEmpty` answers emptiness for every collection `length` covers
+  (arrays, lists, maps, sets, strings, ranges, persistent vectors/maps).
+  `isEmpty` on a `List` is O(1) and safe on infinite lists.
+- Stdlib modules (`music.play`, `music.spans`, `live.proxy`, `std.strings`,
+  `synthc`) rewritten to use `filter`, auto-mapping, `drop`, `clear!`,
+  `append!`, and `isEmpty` in place of manual loops.
 
 ## v0.1.0 (3 September 2026)
 
