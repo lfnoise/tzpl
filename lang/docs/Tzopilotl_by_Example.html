@@ -3775,12 +3775,10 @@ println(serialize(m1) == serialize(m2));   <span class="cmt">-- true</span></cod
     <span class="kw">if</span> (n <= <span class="num">1</span>) { <span class="kw">return</span> n; }
     <span class="kw">var</span> a = <span class="num">0</span>;
     <span class="kw">var</span> b = <span class="num">1</span>;
-    <span class="kw">var</span> k = <span class="num">2</span>;
-    <span class="kw">while</span> (k <= n) {
+    <span class="kw">for</span> (k : (<span class="num">2</span>..n)) {
         <span class="kw">let</span> next = a + b;
         a = b;
         b = next;
-        k = k + <span class="num">1</span>;
     }
     b
 }</code></pre>
@@ -3793,29 +3791,23 @@ println(serialize(m1) == serialize(m2));   <span class="cmt">-- true</span></cod
     <span class="str">""</span>
 }
 
-<span class="kw">var</span> i = <span class="num">1</span>;
-<span class="kw">while</span> (i <= <span class="num">20</span>) {
+<span class="kw">for</span> (i : (<span class="num">1</span>..<span class="num">20</span>)) {
     <span class="kw">let</span> fb = fizzbuzz(i);
     <span class="kw">if</span> (fb == <span class="str">""</span>) { i println; } <span class="kw">else</span> { fb println; }
-    i = i + <span class="num">1</span>;
 }</code></pre>
 
 <h3 id="euler9">27.3 Euler Problem 9: Pythagorean Triplet</h3>
 <pre><code><span class="cmt">-- Find a*b*c where a+b+c=1000, a^2+b^2=c^2</span>
 <span class="kw">fn</span> euler9() <span class="kw">Int</span> {
-    <span class="kw">var</span> a = <span class="num">1</span>;
-    <span class="kw">while</span> (a < <span class="num">333</span>) {
-        <span class="kw">var</span> b = a + <span class="num">1</span>;
-        <span class="kw">while</span> (b < <span class="num">500</span>) {
+    <span class="kw">for</span> (a : (<span class="num">1</span>..<span class="num">332</span>)) {
+        <span class="kw">for</span> (b : ((a + <span class="num">1</span>)..<span class="num">499</span>)) {
             <span class="kw">let</span> c = <span class="num">1000</span> - a - b;
             <span class="kw">if</span> (c > b) {
                 <span class="kw">if</span> (a * a + b * b == c * c) {
                     <span class="kw">return</span> a * b * c;
                 }
             }
-            b = b + <span class="num">1</span>;
         }
-        a = a + <span class="num">1</span>;
     }
     <span class="num">0</span>
 }</code></pre>
