@@ -14,6 +14,7 @@
 //
 
 #include "tzpl_mixer.hpp"
+#include <cstring>
 #include "tzpl_chanadapt.hpp"
 #include "tzpl_engine.hpp"
 

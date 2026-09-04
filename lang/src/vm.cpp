@@ -22,6 +22,7 @@
 //
 
 #include "vm.hpp"
+#include <cstring>
 #include "compiler.hpp"
 #include "type_system.hpp"
 #include "tracing_gc.hpp"

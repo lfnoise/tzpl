@@ -22,6 +22,7 @@
 //
 
 #include "synthdef_hash.hpp"
+#include <cstring>
 
 namespace synthdef {
 

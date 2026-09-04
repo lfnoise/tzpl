@@ -66,12 +66,23 @@ inline f64 qurt(f64 x) { return std::pow(x,.25); }
 inline f64 evenpow(f64 x, f64 p) { return std::pow(std::abs(x), p); }
 inline f64 oddpow(f64 x, f64 p) { return sgn(x) * evenpow(x, p); }
 
+#ifdef __APPLE__
 inline f64 sinpi(f64 x) { return __sinpi(x); }
 inline f64 cospi(f64 x) { return __cospi(x); }
 inline f64 tanpi(f64 x) { return __tanpi(x); }
 inline f64 sin2pi(f64 x) { return __sinpi(2.*x); }
 inline f64 cos2pi(f64 x) { return __cospi(2.*x); }
 inline f64 tan2pi(f64 x) { return __tanpi(2.*x); }
+#else
+// Portable fallbacks (same formulas as builtins_math.cpp): not exact at
+// integer/half-integer arguments the way __sinpi and friends are.
+inline f64 sinpi(f64 x) { return std::sin(x * M_PI); }
+inline f64 cospi(f64 x) { return std::cos(x * M_PI); }
+inline f64 tanpi(f64 x) { return std::tan(x * M_PI); }
+inline f64 sin2pi(f64 x) { return std::sin(x * kTwoPi); }
+inline f64 cos2pi(f64 x) { return std::cos(x * kTwoPi); }
+inline f64 tan2pi(f64 x) { return std::tan(x * kTwoPi); }
+#endif
 
 inline f64 sinc(f64 a) { return a == 0. ? 1. : std::sin(a) / a; }
 

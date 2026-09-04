@@ -6,7 +6,7 @@
 # bookkeeping over the header -- no audio runs.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN="$ROOT/build/integration-tests/test_voicer"
+BIN="${TZPL_BUILD_DIR:-$ROOT/build}/integration-tests/test_voicer"
 
 [ -x "$BIN" ] || { echo "test_voicer not built at $BIN"; exit 1; }
 

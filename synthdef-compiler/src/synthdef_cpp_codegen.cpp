@@ -22,6 +22,7 @@
 //
 
 #include "synthdef_cpp_codegen.hpp"
+#include <utility>  // std::unreachable
 #include "synthdef_expr_visitor.hpp"
 #include <format>
 #include <algorithm>
@@ -4883,9 +4884,11 @@ string to_cpp_scalar_compile_string(UnaryOp op, bool isF32) {
         case UnaryOp::Exp2: return "std::exp2";
         case UnaryOp::Exp10: return "std::exp10";
         case UnaryOp::Expm1: return "std::expm1";
-        case UnaryOp::SinPi: return isF32 ? "__sinpif" : "__sinpi";
-        case UnaryOp::CosPi: return isF32 ? "__cospif" : "__cospi";
-        case UnaryOp::TanPi: return isF32 ? "__tanpif" : "__tanpi";
+        // Overloaded platform-neutral helpers in tzpl_matrix_transform.hpp;
+        // the underlying sinpi family is an Apple libm extension.
+        case UnaryOp::SinPi: return "tzpl_sinpi";
+        case UnaryOp::CosPi: return "tzpl_cospi";
+        case UnaryOp::TanPi: return "tzpl_tanpi";
         case UnaryOp::Sin: return "std::sin";
         case UnaryOp::Cos: return "std::cos";
         case UnaryOp::Tan: return "std::tan";

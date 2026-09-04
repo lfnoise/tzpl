@@ -26,6 +26,7 @@
 //
 
 #include "juce_audio_backend.hpp"
+#include <cstring>
 #include "tzpl_engine.hpp"
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_events/juce_events.h>

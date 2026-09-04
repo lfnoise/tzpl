@@ -15,10 +15,13 @@ fn cppUnop(op UnaryOp, isF32 Bool) String = match (op) {
 	floor: "std::floor";  ceil: "std::ceil";  round: "std::round";  trunc: "std::trunc";
 	sqrt: "std::sqrt";  cbrt: "std::cbrt";
 	log: "std::log";  log2: "std::log2";  log10: "std::log10";  log1p: "std::log1p";
-	exp: "std::exp";  exp2: "std::exp2";  exp10: "std::exp10";  expm1: "std::expm1";
-	sinpi: isF32 ? "__sinpif" : "__sinpi";
-	cospi: isF32 ? "__cospif" : "__cospi";
-	tanpi: isF32 ? "__tanpif" : "__tanpi";
+	-- sinpi/cospi/tanpi/exp10 are Apple libm extensions (and std::exp10 does
+	-- not exist); tzpl_matrix_transform.hpp defines overloaded tzpl_* wrappers
+	-- for every platform, so no isF32 suffix is needed.
+	exp: "std::exp";  exp2: "std::exp2";  exp10: "tzpl_exp10";  expm1: "std::expm1";
+	sinpi: "tzpl_sinpi";
+	cospi: "tzpl_cospi";
+	tanpi: "tzpl_tanpi";
 	sin: "std::sin";  cos: "std::cos";  tan: "std::tan";
 	asin: "std::asin";  acos: "std::acos";  atan: "std::atan";
 	sinh: "std::sinh";  cosh: "std::cosh";  tanh: "std::tanh";

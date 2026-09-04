@@ -57,6 +57,20 @@ struct AudioBackend {
     virtual bool hasTelemetry() const { return false; }
 };
 
+// Deviceless backend: accepts the requested stream parameters unchanged and
+// never opens or probes an audio device. Used for --no-audio sessions and
+// environments with no sound hardware (CI, containers): the engine comes up
+// normally, offline/NRT rendering works, and engineStart() simply has no
+// device to drive.
+struct NullAudioBackend : AudioBackend {
+    void init(Engine*) override {}
+    void uninit() override {}
+    void start() override {}
+    void stop() override {}
+    f64 streamTime() override { return 0.0; }
+    void printDevices() override;
+};
+
 // Process one block of audio through the silos: signals worker silos, runs
 // silo 0 on the calling thread, applies the safety limiter, and advances
 // anchorSampleTime_. `in` may be null when there is no input. Called from a

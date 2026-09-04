@@ -45,7 +45,12 @@
 #include <format>
 #include <charconv>
 #include <cstdlib>
-#include <xlocale.h>
+#ifdef __APPLE__
+#include <xlocale.h>  // locale_t / newlocale / strtod_l
+#else
+#include <locale.h>   // glibc: locale_t / newlocale here; strtod_l via
+                      // <stdlib.h> under _GNU_SOURCE (implied by clang++)
+#endif
 
 #pragma mark BASE TYPES
 

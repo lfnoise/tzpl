@@ -22,6 +22,7 @@
 //
 
 #include "tzpl_xfader.hpp"
+#include <cstring>
 #include "tzpl_engine.hpp"
 
 namespace engine {

@@ -23,6 +23,7 @@
 //
 
 #include "tzpl_audio_engine_ffi.hpp"
+#include <cstring>
 #include "tzpl_app_context.hpp"
 #include "tzpl_ui_state.hpp"
 #include "tzpl_nrt_render.hpp"

@@ -22,6 +22,7 @@
 //
 
 #include "synthdef_audio_io.hpp"
+#include <cstring>
 #include <mutex>
 
 namespace synthdef {

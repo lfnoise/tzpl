@@ -20,6 +20,7 @@
 //
 
 #include "markdown_view.hpp"
+#include <cstring>
 #include "../tzpl_fonts.hpp"
 #include "../../vendor/md4c/md4c.h"
 

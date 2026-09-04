@@ -16,6 +16,7 @@
 
 #pragma once
 #include "synthdef_types.hpp"
+#include <concepts>
 
 namespace synthdef {
 
@@ -50,8 +51,20 @@ namespace synthdef {
     inline u64 hash_combine(u64 seed, u64 value, Args... args) {
         return hash_combine(hash64(value, seed), args...);
     }
+    // On LP64 glibc both uint64_t and size_t are unsigned long, which would
+    // make this a redefinition of the u64 overload; the constraint removes it
+    // there (u64 arguments then match the overload above exactly).
     template<typename... Args>
+        requires (!std::same_as<u64, usize>)
     inline u64 hash_combine(u64 seed, usize value, Args... args) {
+        return hash_combine(hash64(value, seed), args...);
+    }
+    // The mirror-image problem: on macOS uint64_t IS unsigned long long, but
+    // where it isn't, a ull literal argument is ambiguous between the u64 and
+    // f64 overloads. Exact-match overload, removed where u64 covers it.
+    template<typename... Args>
+        requires (!std::same_as<u64, unsigned long long>)
+    inline u64 hash_combine(u64 seed, unsigned long long value, Args... args) {
         return hash_combine(hash64(value, seed), args...);
     }
     template<typename... Args>

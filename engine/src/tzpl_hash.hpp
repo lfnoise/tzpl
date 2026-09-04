@@ -25,6 +25,7 @@
 #define tzpl_hash_h
 
 #include "tzpl_common.hpp"
+#include <cstring>
 
 namespace engine {
 

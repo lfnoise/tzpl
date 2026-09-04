@@ -91,15 +91,30 @@ VectorT<f64> unary_op_float(VectorT<f64> const& a, UnaryOp op) {
         case UnaryOp::Exp2:
             return unary_op_loop(a, [](f64 x) { return std::exp2(x); });
         case UnaryOp::Exp10:
+#ifdef __APPLE__
             return unary_op_loop(a, [](f64 x) { return __exp10(x); });
+#else
+            return unary_op_loop(a, [](f64 x) { return std::pow(10., x); });
+#endif
         case UnaryOp::Expm1:    
             return unary_op_loop(a, [](f64 x) { return std::expm1(x); });
+#ifdef __APPLE__
         case UnaryOp::SinPi:
             return unary_op_loop(a, [](f64 x) { return __sinpi(x); });
         case UnaryOp::CosPi:
             return unary_op_loop(a, [](f64 x) { return __cospi(x); });
         case UnaryOp::TanPi:
             return unary_op_loop(a, [](f64 x) { return __tanpi(x); });
+#else
+        // Same formulas the generated code's tzpl_sinpi helpers use, so
+        // constant folding matches runtime evaluation.
+        case UnaryOp::SinPi:
+            return unary_op_loop(a, [](f64 x) { return std::sin(x * M_PI); });
+        case UnaryOp::CosPi:
+            return unary_op_loop(a, [](f64 x) { return std::cos(x * M_PI); });
+        case UnaryOp::TanPi:
+            return unary_op_loop(a, [](f64 x) { return std::tan(x * M_PI); });
+#endif
         case UnaryOp::Sin:
             return unary_op_loop(a, [](f64 x) { return std::sin(x); });
         case UnaryOp::Cos:

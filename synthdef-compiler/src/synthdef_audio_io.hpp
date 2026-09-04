@@ -25,6 +25,7 @@
 #define synthdef_audio_io_hpp
 
 #include "synthdef_types2.hpp"
+#include <memory>  // std::unique_ptr
 #include "RtAudio.h"
 
 namespace synthdef {

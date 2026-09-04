@@ -23,6 +23,7 @@
 //
 
 #include "disassemble.hpp"
+#include <cstring>
 #include "opcodes.hpp"
 #include "value.hpp"
 #include "type_system.hpp"

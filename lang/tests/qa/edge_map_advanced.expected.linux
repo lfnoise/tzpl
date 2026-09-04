@@ -1,0 +1,23 @@
+[a: 1, b: 2, c: 3]
+Option<Int>.some(1)
+Option<Int>.none
+1
+99
+Option<Int>.some(4)
+Option<Int>.none
+2
+[a, b, c]
+[1, 2, 3]
+3
+[a: 1, b: 20, c: 30]
+true
+false
+Option<String>.some(one)
+Option<String>.some(two)
+3
+Option<Int>.some(10)
+Option<Int>.some(20)
+0
+Option<Int>.none
+3
+Option<Int>.some(2)

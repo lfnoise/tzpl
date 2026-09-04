@@ -15,6 +15,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "tzpl_plugin_abi.h"
+#include <cstring>
 #include "synthdef_synth.hpp"
 #include "synthdef_cpp_codegen.hpp"
 #include "synthdef_audio_io.hpp"

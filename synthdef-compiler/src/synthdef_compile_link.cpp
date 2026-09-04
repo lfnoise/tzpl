@@ -46,6 +46,29 @@ static std::unordered_map<string, u64>& revisionCounters() {
 
 static string synthNameSuffix = "_synth";
 
+// Plugin extension. Must agree with the engine's plugin scanner
+// (kPluginExt in tzpl_client_interface.cpp).
+#ifdef __APPLE__
+static constexpr char const kDylibExt[] = ".dylib";
+#else
+static constexpr char const kDylibExt[] = ".so";
+#endif
+
+// The compiler used for generated plugins: $TZPL_CC overrides everything;
+// otherwise macOS keeps the historical bare "clang", and elsewhere we use
+// the compiler this binary was configured with (baked in by CMake) so the
+// runtime shell-out never depends on what PATH happens to hold.
+static string toolchainCommand() {
+    if (char const* cc = getenv("TZPL_CC"); cc && cc[0]) return cc;
+#ifdef __APPLE__
+    return "clang";
+#elif defined(TZPL_PLUGIN_CXX)
+    return TZPL_PLUGIN_CXX;
+#else
+    return "clang++";
+#endif
+}
+
 // Every {name}_synth_rN.dylib in {buildDir}/dylib, as (revision, path).
 // Unrevisioned {name}_synth.dylib files are ignored: compileAndLink has never
 // produced one, so any that exist are foreign artifacts and not ours to touch.
@@ -56,7 +79,7 @@ scanRevisions(string const& buildDir, string const& synthName) {
     std::error_code ec;
     // On error the iterator compares equal to end(), so this loop just skips.
     for (auto const& entry : fs::directory_iterator(buildDir + "dylib", ec)) {
-        if (!entry.is_regular_file() || entry.path().extension() != ".dylib")
+        if (!entry.is_regular_file() || entry.path().extension() != kDylibExt)
             continue;
         string stem = entry.path().stem().string();
         if (!stem.starts_with(prefix)) continue;
@@ -140,8 +163,12 @@ static int compile(string const& filepath_c, string const& filepath_o, string co
 {
     printf("\nbegin C compile plugin =====================================================\n");
 
-    string cmd = "clang";
+    string cmd = toolchainCommand();
+#ifdef __APPLE__
     cmd += " -x c++ -arch arm64 -std=c++23 -stdlib=libc++";
+#else
+    cmd += " -x c++ -std=c++23 -fPIC";
+#endif
     cmd += " -o " + filepath_o;
     cmd += " -O3";
     cmd += " -ffast-math";
@@ -166,15 +193,26 @@ static int compile(string const& filepath_c, string const& filepath_o, string co
     return 0;
 }
 
-static int link(string const& filepath_o, string const& filepath_dylib) {
+static int link(string const& filepath_o, string const& filepath_dylib,
+                string const& buildDir) {
     printf("\nbegin call linker =====================================================\n");
-    string cmd = "clang";
+    string cmd = toolchainCommand();
+#ifdef __APPLE__
+    (void)buildDir;
     cmd += " -arch arm64";
     cmd += " -dynamiclib";
     cmd += " -undefined dynamic_lookup";
     cmd += " -compatibility_version 1 -current_version 1";
-#ifdef __APPLE__
     cmd += " -framework Accelerate";
+#else
+    // ELF shared objects leave undefined symbols to be resolved from the
+    // host at dlopen time by default, which is the -undefined dynamic_lookup
+    // behavior the plugin ABI relies on. Sleef is staged into the build dir
+    // by ensureBuildDirs(); the rpath keeps the plugin loadable after the
+    // CMake build tree is gone.
+    cmd += " -shared -fPIC";
+    cmd += " -L" + buildDir + "lib -lsleef";
+    cmd += " -Wl,-rpath," + buildDir + "lib";
 #endif
     cmd += " -o " + filepath_dylib;
     cmd += " " + filepath_o;
@@ -232,6 +270,27 @@ void ensureBuildDirs(string const& buildDir) {
         }
     }
 #endif
+
+#if !defined(__APPLE__) && defined(TZPL_SLEEF_INCLUDE_DIR) && defined(TZPL_SLEEF_LIB)
+    // Stage Sleef next to the shared headers: generated code includes
+    // <sleef.h> via tzpl_simd.hpp, and link() resolves -lsleef against
+    // {buildDir}/lib. Copying every libsleef.so* name (real file, SONAME,
+    // linker name) keeps both the link step and the recorded rpath working
+    // even after the CMake build tree is deleted.
+    fs::create_directories(buildDir + "lib");
+    std::error_code ec;
+    fs::copy_file(string(TZPL_SLEEF_INCLUDE_DIR) + "/sleef.h",
+                  buildDir + "include/sleef.h",
+                  fs::copy_options::update_existing, ec);
+    fs::path const sleefLib = TZPL_SLEEF_LIB;
+    for (auto const& entry : fs::directory_iterator(sleefLib.parent_path(), ec)) {
+        auto name = entry.path().filename().string();
+        if (name.starts_with("libsleef.so")) {
+            fs::copy_file(entry.path(), buildDir + "lib/" + name,
+                          fs::copy_options::update_existing, ec);
+        }
+    }
+#endif
 }
 
 void writeCodeToFile(string const& buildDir, string const& synthName, string const& ccode) {
@@ -259,8 +318,8 @@ string dylibPath(string const& buildDir, string const& synthName) {
     auto it = counters.find(synthName);
     u64 rev = it == counters.end() ? 0 : it->second;
     if (rev == 0)
-        return buildDir + "dylib/" + synthName + synthNameSuffix + ".dylib";
-    return buildDir + "dylib/" + synthName + synthNameSuffix + "_r" + std::to_string(rev) + ".dylib";
+        return buildDir + "dylib/" + synthName + synthNameSuffix + kDylibExt;
+    return buildDir + "dylib/" + synthName + synthNameSuffix + "_r" + std::to_string(rev) + kDylibExt;
 }
 
 int compileAndLink(string const& buildDir, string const& synthName) {
@@ -285,7 +344,7 @@ int compileAndLink(string const& buildDir, string const& synthName) {
     int err = compile(filepath_c, filepath_o, includeDir);
     if (err) return err;
 
-    err = link(filepath_o, filepath_dylib);
+    err = link(filepath_o, filepath_dylib, buildDir);
     if (err) return err;
 
     // Bound the cache here rather than at shutdown: this runs whatever way the

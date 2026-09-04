@@ -11,18 +11,6 @@ if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang")
     message(WARNING "This project requires Clang. Current compiler: ${CMAKE_CXX_COMPILER_ID}")
 endif()
 
-# Platform-specific: Sleef on Linux
-if(UNIX AND NOT APPLE)
-    include(FetchContent)
-    FetchContent_Declare(sleef
-        GIT_REPOSITORY https://github.com/shibatch/sleef.git
-        GIT_TAG 3.7
-    )
-    set(SLEEF_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-    set(SLEEF_BUILD_BENCH OFF CACHE BOOL "" FORCE)
-    FetchContent_MakeAvailable(sleef)
-endif()
-
 # --- audio_engine_lib static library (everything except main.cpp) ---
 
 set(LIB_SOURCES
@@ -51,7 +39,11 @@ if(APPLE)
     find_library(AUDIOTOOLBOX_FRAMEWORK AudioToolbox REQUIRED)
     target_link_libraries(audio_engine_lib PUBLIC ${AUDIOTOOLBOX_FRAMEWORK})
 elseif(UNIX)
-    target_link_libraries(audio_engine_lib PUBLIC sleef)
+    # libsndfile backs the audio-file reader (tzpl_audio_file.hpp) that
+    # AudioToolbox provides on macOS. Sleef comes in via the shared target.
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(SNDFILE REQUIRED IMPORTED_TARGET sndfile)
+    target_link_libraries(audio_engine_lib PUBLIC PkgConfig::SNDFILE)
 endif()
 
 # --- engine executable ---

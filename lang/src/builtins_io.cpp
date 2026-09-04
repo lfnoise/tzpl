@@ -308,7 +308,11 @@ static void builtin_file_mod_time(VM& vm, u16 dst, u16, u16 ab) {
     bool ok = ::stat(argString(vm, ab).c_str(), &st) == 0;
     f64 t = 0.0;
     if (ok) {
+#ifdef __APPLE__
         t = (f64)st.st_mtimespec.tv_sec + (f64)st.st_mtimespec.tv_nsec * 1e-9;
+#else
+        t = (f64)st.st_mtim.tv_sec + (f64)st.st_mtim.tv_nsec * 1e-9;
+#endif
     }
     writeOptionFloatResult(vm, dst, ok, t);
 }

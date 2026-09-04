@@ -22,6 +22,7 @@
 //
 
 #include "synthdef_compile.hpp"
+#include <utility>  // std::unreachable
 #include "synthdef_compile_link.hpp"
 #include "synthdef_synth.hpp"
 #include "synthdef_cpp_codegen.hpp"
@@ -227,6 +228,10 @@ void test(string synthName, int seconds, std::function<void()> f)
 #if GENERATE_CODE
 #if COMPILE_CODE
     string dir = getBuildDir();
+    // Create the build-dir tree before the first write: on a fresh machine
+    // nothing else has made ~/tzpl-build/cpp yet (compileAndLink ensures the
+    // dirs too, but that's after writeCodeToFile needs them).
+    ensureBuildDirs(dir);
     writeCodeToFile(dir, synthName, ccode);
     compileAndLink(dir, synthName);
 

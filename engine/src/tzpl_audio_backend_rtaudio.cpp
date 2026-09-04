@@ -209,18 +209,26 @@ static int findDeviceByName(RtAudio* rta, const char* name) {
     return -1;
 }
 
-RtAudioBackend::RtAudioBackend()
+static std::unique_ptr<RtAudio> makeRtAudio() {
 #ifdef __APPLE__
-    : rtaudio_(std::make_unique<RtAudio>(RtAudio::MACOSX_CORE))
-#elif defined(__linux__)
-    : rtaudio_(std::make_unique<RtAudio>(RtAudio::LINUX_ALSA))
+    return std::make_unique<RtAudio>(RtAudio::MACOSX_CORE);
+#else
+    // Auto-select among the compiled-in APIs -- on Linux: JACK, then Pulse,
+    // then ALSA, whichever is available and reports devices.
+    return std::make_unique<RtAudio>(RtAudio::UNSPECIFIED);
 #endif
-{}
+}
+
+// Constructed lazily in init(): creating RtAudio probes the machine's audio
+// APIs, which a --no-audio / never-started engine must not do (on a system
+// with no sound server the probe is noisy, and needless in any case).
+RtAudioBackend::RtAudioBackend() {}
 
 RtAudioBackend::~RtAudioBackend() = default;
 
 void RtAudioBackend::init(Engine* e) {
     engine_ = e;
+    if (!rtaudio_) rtaudio_ = makeRtAudio();
     auto& rta = rtaudio_;
 
     int numDevices = rta->getDeviceCount();
@@ -296,8 +304,8 @@ void RtAudioBackend::init(Engine* e) {
 
 #ifdef __APPLE__
             inputRtaudio_ = std::make_unique<RtAudio>(RtAudio::MACOSX_CORE);
-#elif defined(__linux__)
-            inputRtaudio_ = std::make_unique<RtAudio>(RtAudio::LINUX_ALSA);
+#else
+            inputRtaudio_ = std::make_unique<RtAudio>(RtAudio::UNSPECIFIED);
 #endif
             inputRtaudio_->setErrorCallback(errorCallback);
 
@@ -349,28 +357,29 @@ void RtAudioBackend::uninit() {
     free(inputStagingBuf_);
     inputStagingBuf_ = nullptr;
 
-    rtaudio_->closeStream();
+    if (rtaudio_) rtaudio_->closeStream();
 }
 
 void RtAudioBackend::start() {
     if (inputRtaudio_) {
         inputRtaudio_->startStream();
     }
-    rtaudio_->startStream();
+    if (rtaudio_) rtaudio_->startStream();
 }
 
 void RtAudioBackend::stop() {
-    rtaudio_->stopStream();
+    if (rtaudio_) rtaudio_->stopStream();
     if (inputRtaudio_) {
         inputRtaudio_->stopStream();
     }
 }
 
 f64 RtAudioBackend::streamTime() {
-    return rtaudio_->getStreamTime();
+    return rtaudio_ ? rtaudio_->getStreamTime() : 0.0;
 }
 
 void RtAudioBackend::printDevices() {
+    if (!rtaudio_) rtaudio_ = makeRtAudio();
     auto& rta = rtaudio_;
     int n = rta->getDeviceCount();
     for (int i = 0; i < n; ++i) {

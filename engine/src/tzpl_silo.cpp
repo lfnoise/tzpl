@@ -22,10 +22,15 @@
 //
 
 #include "tzpl_silo.hpp"
+#include <cstring>
 #include "tzpl_engine.hpp"
 #include "tzpl_chanadapt.hpp"
 #include <chrono>
 #include <cmath>
+#ifndef __APPLE__
+#include <mutex>
+#include <sys/mman.h>
+#endif
 
 namespace engine {
 
@@ -283,6 +288,18 @@ void make_this_thread_realtime() {
     param.sched_priority = 63;
 #else
     param.sched_priority = sched_get_priority_max(SCHED_RR);
+
+    // Pin the process's pages so the RT threads never take a major page
+    // fault mid-callback. Once per process; needs RLIMIT_MEMLOCK headroom
+    // (see docs/LINUX.md), so failure is expected in unprivileged setups
+    // and only costs the guarantee, not correctness.
+    static std::once_flag mlockOnce;
+    std::call_once(mlockOnce, [] {
+        if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
+            printf("mlockall failed; audio memory is not pinned "
+                   "(raise memlock limits for the guarantee).\n");
+        }
+    });
 #endif
 
     if (pthread_setschedparam(thread, SCHED_RR, &param) != 0) {
@@ -469,10 +486,16 @@ Node* Silo::removeAllNodes() {
             node = next;
         }
     }
-    inputNode_->rt_list.prev = nullptr;
-    inputNode_->rt_list.next = nullptr;
-    outputNode_->rt_list.prev = nullptr;
-    outputNode_->rt_list.next = nullptr;
+    // Null when Engine construction failed before postInit() created them
+    // (e.g. no audio device) and the silos are being torn down mid-unwind.
+    if (inputNode_) {
+        inputNode_->rt_list.prev = nullptr;
+        inputNode_->rt_list.next = nullptr;
+    }
+    if (outputNode_) {
+        outputNode_->rt_list.prev = nullptr;
+        outputNode_->rt_list.next = nullptr;
+    }
     return outNodes;
 }
 

@@ -22,6 +22,7 @@
 //
 
 #include "tzpl_test_plugins.hpp"
+#include <cstring>
 
 using namespace engine;
 

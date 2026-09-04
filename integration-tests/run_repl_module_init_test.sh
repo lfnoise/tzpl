@@ -7,7 +7,7 @@
 # REPLSession now runs pending module inits even when the eval fails.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP="$ROOT/build/app/tzpl_app"
+APP="${TZPL_BUILD_DIR:-$ROOT/build}/app/tzpl_app"
 SCRIPTS="$ROOT/integration-tests/scripts"
 
 [ -x "$APP" ] || { echo "tzpl_app not built at $APP"; exit 1; }

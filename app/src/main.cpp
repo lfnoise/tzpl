@@ -464,7 +464,8 @@ private:
     std::thread thread_;
 };
 
-static engine::Engine* createEngine(const Config& config, bool nrt = false) {
+static engine::Engine* createEngine(const Config& config, bool nrt = false,
+                                    bool noAudio = false) {
     engine::AudioStreamParameters params{};
     params.channels = config.channels;
     params.bufferFrames = config.bufferFrames;
@@ -480,14 +481,34 @@ static engine::Engine* createEngine(const Config& config, bool nrt = false) {
     engineConfig.numSilos = config.numSilos;
     engineConfig.numTempoClocks = config.numTempoClocks;
 
+    // --no-audio: never open or probe an audio device -- the session is
+    // deviceless (offline rendering still works via the NRT path). Matters
+    // on machines with no sound hardware (CI, containers), where a device
+    // probe can fail noisily or fatally.
+    engine::Engine* e;
+    if (nrt) {
+        e = engine::newEngineNRT(engineConfig, params);
+    } else if (noAudio) {
+        e = engine::newEngine(engineConfig, params,
+                              std::make_unique<engine::NullAudioBackend>());
+    } else {
+        try {
 #if TZPL_GUI_JUCE
-    engine::Engine* e = nrt ? engine::newEngineNRT(engineConfig, params)
-                            : engine::newEngine(engineConfig, params,
-                                                tzplapp::makeJuceAudioBackend());
+            e = engine::newEngine(engineConfig, params,
+                                  tzplapp::makeJuceAudioBackend());
 #else
-    engine::Engine* e = nrt ? engine::newEngineNRT(engineConfig, params)
-                            : engine::newEngine(engineConfig, params);
+            e = engine::newEngine(engineConfig, params);
 #endif
+        } catch (...) {
+            // No usable device (or the named device wasn't found). Come up
+            // deviceless rather than dying: editing, evaluation, and NRT
+            // rendering all still work.
+            fprintf(stderr, "audio device unavailable; "
+                            "continuing without audio output\n");
+            e = engine::newEngine(engineConfig, params,
+                                  std::make_unique<engine::NullAudioBackend>());
+        }
+    }
 
     registerBuiltinDefs(e);
 
@@ -764,7 +785,8 @@ int main(int argc, const char* argv[]) {
         }
 
         // --- Create engine and AppContext ---
-        engine::Engine* eng = createEngine(config, /*nrt=*/nrtMode);
+        engine::Engine* eng = createEngine(config, /*nrt=*/nrtMode,
+                                           /*noAudio=*/!startAudio);
 
         // Auto-load plugins from project directory
         if (!config.projectDir.empty()) {

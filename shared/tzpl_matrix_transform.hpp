@@ -24,6 +24,7 @@
 #pragma once
 
 #include "synthdef_types.hpp"
+#include <cstring>
 #include "tzpl_simd.hpp"
 #include <bit>
 
@@ -696,6 +697,33 @@ void lace_rows(T* result, const Matrices&... matrices) {
 
 
 
+
+// Platform-neutral scalar sinpi/cospi/tanpi/exp10 for generated plugin code.
+// The underlying entry points are Apple libm extensions (and std::exp10 does
+// not exist in any standard library), so both codegens -- the C++ one
+// (to_cpp_scalar_compile_string in synthdef_cpp_codegen.cpp) and the
+// Tzopilotl-hosted one (synthc/opnames.x) -- emit these overloaded wrappers.
+// The non-Apple formulas match the interpreter's fallbacks; they are not
+// exact at integer/half-integer arguments the way __sinpi and friends are.
+#ifdef __APPLE__
+inline float  tzpl_sinpi(float x)  { return __sinpif(x); }
+inline float  tzpl_cospi(float x)  { return __cospif(x); }
+inline float  tzpl_tanpi(float x)  { return __tanpif(x); }
+inline float  tzpl_exp10(float x)  { return __exp10f(x); }
+inline double tzpl_sinpi(double x) { return __sinpi(x); }
+inline double tzpl_cospi(double x) { return __cospi(x); }
+inline double tzpl_tanpi(double x) { return __tanpi(x); }
+inline double tzpl_exp10(double x) { return __exp10(x); }
+#else
+inline float  tzpl_sinpi(float x)  { return std::sin(x * (float)M_PI); }
+inline float  tzpl_cospi(float x)  { return std::cos(x * (float)M_PI); }
+inline float  tzpl_tanpi(float x)  { return std::tan(x * (float)M_PI); }
+inline float  tzpl_exp10(float x)  { return std::pow(10.f, x); }
+inline double tzpl_sinpi(double x) { return std::sin(x * M_PI); }
+inline double tzpl_cospi(double x) { return std::cos(x * M_PI); }
+inline double tzpl_tanpi(double x) { return std::tan(x * M_PI); }
+inline double tzpl_exp10(double x) { return std::pow(10., x); }
+#endif
 
 } // namespace synthdef
 

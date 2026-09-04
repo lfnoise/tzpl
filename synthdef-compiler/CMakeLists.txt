@@ -39,6 +39,12 @@ target_link_libraries(synthdef_compiler_lib PUBLIC shared)
 
 target_compile_options(synthdef_compiler_lib PRIVATE -ffast-math)
 
+# The runtime plugin compiler shells out to a C++ compiler; bake in the one
+# this build was configured with so the PATH lookup is only a fallback
+# ($TZPL_CC still overrides at runtime).
+target_compile_definitions(synthdef_compiler_lib PRIVATE
+    TZPL_PLUGIN_CXX="${CMAKE_CXX_COMPILER}")
+
 # --- synthdef-compiler executable (tests, examples, audio playback) ---
 
 set(EXE_SOURCES

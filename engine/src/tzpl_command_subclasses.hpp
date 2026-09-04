@@ -25,6 +25,7 @@
 #define tzpl_command_subclasses_h
 
 #include "tzpl_silo.hpp"
+#include <cstring>
 #include "tzpl_engine.hpp"
 #include "tzpl_xfader.hpp"
 #include "tzpl_mixer.hpp"

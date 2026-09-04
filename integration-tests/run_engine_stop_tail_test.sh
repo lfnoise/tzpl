@@ -6,7 +6,7 @@
 # buffer/bank pointers preserved). Runs LIVE audio briefly (quiet 440 Hz).
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP="$ROOT/build/app/tzpl_app"
+APP="${TZPL_BUILD_DIR:-$ROOT/build}/app/tzpl_app"
 SCRIPTS="$ROOT/integration-tests/scripts"
 MODS=(-I "$ROOT/lang/modules" -I "$ROOT/bridge/modules")
 

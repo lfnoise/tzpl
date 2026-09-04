@@ -7,7 +7,7 @@
 #    adjacent-table crossfade; the render must be non-silent and bounded.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP="$ROOT/build/app/tzpl_app"
+APP="${TZPL_BUILD_DIR:-$ROOT/build}/app/tzpl_app"
 SCRIPTS="$ROOT/integration-tests/scripts"
 MODS=(-I "$ROOT/lang/modules" -I "$ROOT/bridge/modules")
 DUR=0.1

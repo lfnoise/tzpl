@@ -14,6 +14,7 @@
 //
 
 #include "tzpl_chanadapt.hpp"
+#include <cstring>
 #include "tzpl_engine.hpp"
 
 namespace engine {

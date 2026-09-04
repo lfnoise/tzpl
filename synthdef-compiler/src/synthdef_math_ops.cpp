@@ -22,6 +22,7 @@
 //
 
 #include "synthdef_math_ops.hpp"
+#include <utility>  // std::unreachable
 
 namespace synthdef {
     

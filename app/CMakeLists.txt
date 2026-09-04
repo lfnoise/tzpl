@@ -25,16 +25,13 @@ if(TZPL_BUILD_APP AND TZPL_BUILD_GUI)
     )
     FetchContent_MakeAvailable(glfw)
 
-    # --- Dear ImGui (no CMakeLists.txt -- populate and build manually) ------
+    # --- Dear ImGui (no CMakeLists.txt -- populated only, built manually) ---
     FetchContent_Declare(imgui
         GIT_REPOSITORY https://github.com/ocornut/imgui.git
         GIT_TAG v1.91.0
         GIT_SHALLOW TRUE
     )
-    FetchContent_GetProperties(imgui)
-    if(NOT imgui_POPULATED)
-        FetchContent_Populate(imgui)
-    endif()
+    FetchContent_MakeAvailable(imgui)
 
     # --- ImGuiColorTextEdit (vendored, with undo-chunking patch) ------------
     set(IMGUI_TEXTEDIT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/vendor/ImGuiColorTextEdit)
@@ -442,8 +439,17 @@ if(TZPL_BUILD_APP_JUCE)
 
     # The bundle goes at the root of the distribution folder, next to
     # modules/ (found at runtime via the executable-relative walk-up).
-    install(TARGETS tzpl_app_juce
-        BUNDLE DESTINATION .
-        COMPONENT dist
-    )
+    # On Linux the artefact is a plain executable, so install it into bin/
+    # (still adjacent to modules/ via the same walk-up).
+    if(APPLE)
+        install(TARGETS tzpl_app_juce
+            BUNDLE DESTINATION .
+            COMPONENT dist
+        )
+    else()
+        install(TARGETS tzpl_app_juce
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+            COMPONENT dist
+        )
+    endif()
 endif() # TZPL_BUILD_APP_JUCE

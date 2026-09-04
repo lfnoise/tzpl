@@ -5,7 +5,7 @@
 # tzpl_app --nogui --no-audio.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP="$ROOT/build/app/tzpl_app"
+APP="${TZPL_BUILD_DIR:-$ROOT/build}/app/tzpl_app"
 SCRIPTS="$ROOT/integration-tests/scripts"
 MODS=(-I "$ROOT/lang/modules" -I "$ROOT/bridge/modules")
 

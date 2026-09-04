@@ -23,6 +23,7 @@
 //
 
 #include "app_gui.hpp"
+#include <cstring>
 #include "tzpl_app_context.hpp"
 #include "tzpl_ui_state.hpp"
 #include "gui_state.hpp"

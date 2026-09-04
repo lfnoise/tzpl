@@ -22,6 +22,7 @@
 //
 
 #include "tzpl_engine.hpp"
+#include <cstring>
 #include <algorithm>
 #include <chrono>
 #include <thread>
@@ -189,7 +190,18 @@ Engine::Engine(EngineConfig const& config, AudioStreamParameters& asp,
         ++i;
     }}
 
-    initAudio(this);
+    try {
+        initAudio(this);
+    } catch (...) {
+        // The NRT/dead-node threads are members already running by the time
+        // the body executes; unwinding past their joinable destructors would
+        // std::terminate, turning "no audio device" into an abort. Join them
+        // so the error propagates as an exception the caller can handle.
+        runBackgroundThreads_ = false;
+        nrt_cmd_thread_.join();
+        dead_node_thread_.join();
+        throw;
+    }
     postInit();
 }
 

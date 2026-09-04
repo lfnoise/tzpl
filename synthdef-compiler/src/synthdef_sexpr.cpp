@@ -22,6 +22,8 @@
 //
 
 #include "synthdef_sexpr.hpp"
+#include <chrono>
+#include <cstring>
 #include <iostream>
 
 namespace sexpr {

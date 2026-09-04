@@ -26,6 +26,17 @@ documentation site as the Changelog page.
   and handing a huge form to `play` costs tree depth up front, not the
   whole form.
 
+**Platform**
+
+- Linux support: the interpreter, synthdef compiler (including runtime
+  plugin compilation to `.so`), audio engine (ALSA/JACK/PulseAudio via
+  RtAudio auto-selection), bridges, headless `tzpl_app`, and the JUCE app
+  now build and run on Linux with Clang 19+. `docs/LINUX.md` covers
+  requirements, the Docker dev environment (`dev/linux/Dockerfile`), and
+  real-time configuration. The Dear ImGui GUI remains macOS-only; on Linux
+  the JUCE app is the GUI, and it now also feeds the `mouseX` / `mouseY` /
+  `mouseButton` ugens there.
+
 ## v0.1.0 (3 September 2026)
 
 **Language & VM**

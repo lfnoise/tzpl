@@ -11,7 +11,7 @@
 #    buffer's true length (the old pow2-mask wrap read zero padding instead).
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP="$ROOT/build/app/tzpl_app"
+APP="${TZPL_BUILD_DIR:-$ROOT/build}/app/tzpl_app"
 SCRIPTS="$ROOT/integration-tests/scripts"
 MODS=(-I "$ROOT/lang/modules" -I "$ROOT/bridge/modules")
 DUR=0.1

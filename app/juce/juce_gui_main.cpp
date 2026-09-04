@@ -35,6 +35,10 @@
 #include "tzpl_look_and_feel.hpp"
 #include "BinaryData.h"
 #include <juce_gui_extra/juce_gui_extra.h>
+#if ! JUCE_MAC
+#include "tzpl_client_interface.hpp"  // setSharedInput for the mouse ugens
+#include "tzpl_plugin_abi.h"
+#endif
 
 namespace tzplapp {
 
@@ -242,6 +246,41 @@ private:
     juce::Image image_;
 };
 
+#if ! JUCE_MAC
+// ---------------------------------------------------------------------------
+// Mouse poller (non-Mac)
+// ---------------------------------------------------------------------------
+// Feeds the mouseX / mouseY / mouseButton ugens. On macOS the CGEvent-based
+// poller in main.cpp covers this for both GUIs and --nogui; elsewhere that
+// poller compiles to a stub, so the JUCE app polls the primary display's
+// normalized mouse state at ~60 Hz into the engine's shared-input table.
+class MousePollerTimer : public juce::Timer {
+public:
+    MousePollerTimer() { startTimer(16); }
+    ~MousePollerTimer() override { stopTimer(); }
+
+    void timerCallback() override {
+        auto& desktop = juce::Desktop::getInstance();
+        auto* display = desktop.getDisplays().getPrimaryDisplay();
+        if (!display) return;
+        auto area = display->totalArea.toFloat();
+        if (area.isEmpty()) return;
+        auto pos = desktop.getMainMouseSource().getScreenPosition();
+        auto clamp01 = [](float v) {
+            return v < 0.f ? 0.f : v > 1.f ? 1.f : v;
+        };
+        float x = clamp01((pos.x - area.getX()) / area.getWidth());
+        // Mouse slots are bottom-up (up = larger); screen y grows downward.
+        float y = clamp01(1.f - (pos.y - area.getY()) / area.getHeight());
+        bool down = juce::ModifierKeys::getCurrentModifiersRealtime()
+                        .isLeftButtonDown();
+        engine::setSharedInput(tzpl_sharedMouseX, x);
+        engine::setSharedInput(tzpl_sharedMouseY, y);
+        engine::setSharedInput(tzpl_sharedMouseButton, down ? 1.f : 0.f);
+    }
+};
+#endif
+
 // ---------------------------------------------------------------------------
 // Application
 // ---------------------------------------------------------------------------
@@ -279,6 +318,7 @@ public:
         juce::MenuBarModel::setMacMainMenu(menuModel_.get(), &appleExtras);
 #else
         window_->setMenuBar(menuModel_.get());
+        mousePoller_ = std::make_unique<MousePollerTimer>();
 #endif
 
         // The engine/VM come up before the window (runGui is called partway
@@ -352,6 +392,7 @@ public:
 #if JUCE_MAC
         juce::MenuBarModel::setMacMainMenu(nullptr);
 #else
+        mousePoller_.reset();
         if (window_) window_->setMenuBar(nullptr);
 #endif
         window_.reset();
@@ -643,6 +684,9 @@ private:
     std::unique_ptr<TzplLookAndFeel> lookAndFeel_;
     std::unique_ptr<AppMenuModel> menuModel_;
     std::unique_ptr<MainWindow> window_;
+#if ! JUCE_MAC
+    std::unique_ptr<MousePollerTimer> mousePoller_;
+#endif
 };
 
 }

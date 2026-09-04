@@ -45,6 +45,10 @@ namespace engine {
 
 void uninitAudio(Engine* e);
 
+void NullAudioBackend::printDevices() {
+    printf("no audio device (deviceless session)\n");
+}
+
 Engine* newEngine(EngineConfig const& config, AudioStreamParameters& asp,
                   std::unique_ptr<AudioBackend> backend) {
 #if DEBUG_NODES

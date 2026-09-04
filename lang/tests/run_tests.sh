@@ -8,7 +8,7 @@ set -euo pipefail
 # --- Configuration ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-TZPL="$(cd "$ROOT_DIR/.." && pwd)/build/lang/tzpl"
+TZPL="${TZPL_BIN:-$(cd "$ROOT_DIR/.." && pwd)/build/lang/tzpl}"
 TIMEOUT_SEC=10
 
 # --- Colors ---
@@ -100,6 +100,14 @@ for test_file in "${TEST_FILES[@]}"; do
         expected_file="${base}.expected"
     fi
 
+    # Platform-specific golden override: on Linux a .expected.linux (or
+    # .expected_err.linux) file wins when present. Used for the handful of
+    # tests whose output differs because macOS-only libm entry points
+    # (__sinpi, __exp10, ...) fall back to portable formulas elsewhere.
+    if [[ "$(uname)" == "Linux" && -f "${expected_file}.linux" ]]; then
+        expected_file="${expected_file}.linux"
+    fi
+
     # Build -I flags: always include test_dir, plus a _lib subdirectory if it
     # exists, plus the real lang/modules so tests resolve shared modules (message,
     # message, strings, ...) from the actual files users get -- not a copy. A
@@ -161,11 +169,24 @@ for test_file in "${TEST_FILES[@]}"; do
     # --- Update mode ---
     if $UPDATE; then
         if $is_error_test; then
-            cp "$stderr_file" "$expected_file"
+            actual_file="$stderr_file"
         else
-            cp "$stdout_file" "$expected_file"
+            actual_file="$stdout_file"
         fi
-        echo -e "${CYAN}UPDATED${RESET} $rel_path"
+        if [[ "$(uname)" == "Linux" && "$expected_file" != *.linux ]]; then
+            # Never overwrite the shared golden file from Linux -- it is the
+            # macOS-authored source of truth. Write a .linux override, and
+            # only when the output actually differs.
+            if [[ -f "$expected_file" ]] && diff -q "$expected_file" "$actual_file" >/dev/null 2>&1; then
+                echo -e "${CYAN}UNCHANGED${RESET} $rel_path"
+            else
+                cp "$actual_file" "${expected_file}.linux"
+                echo -e "${CYAN}UPDATED${RESET} $rel_path (.linux override)"
+            fi
+        else
+            cp "$actual_file" "$expected_file"
+            echo -e "${CYAN}UPDATED${RESET} $rel_path"
+        fi
         rm -f "$stdout_file" "$stderr_file"
         continue
     fi

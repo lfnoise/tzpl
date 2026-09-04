@@ -5,6 +5,17 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# The whole tree requires Clang on every platform: the engine and generated
+# plugins use Clang's ext_vector_type swizzle syntax, and the lang VM relies
+# on [[clang::musttail]]. Fail at configure time rather than mid-build.
+if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    message(FATAL_ERROR
+        "tzpl requires Clang (found ${CMAKE_CXX_COMPILER_ID}). "
+        "Configure with CC=clang CXX=clang++.")
+endif()
+
+find_package(Threads REQUIRED)
+
 # --- Options ----------------------------------------------------------------
 
 option(TZPL_BUILD_AUDIO_ENGINE      "Build the engine library and executable"             ON)
@@ -18,6 +29,14 @@ option(TZPL_BUILD_OSC               "Build OSC (Open Sound Control) support"    
 option(TZPL_BUILD_NATS              "Build NATS messaging support"                       OFF)
 option(TZPL_BUILD_GUI               "Build with GUI support (Dear ImGui + GLFW)"         ON)
 option(TZPL_BUILD_APP_JUCE          "Build the JUCE GUI application (tzpl_app_juce)"     OFF)
+
+# The Dear ImGui GUI backend (app/src/app_gui.mm) is Metal/Cocoa-only. On
+# other platforms the headless tzpl_app still builds; the JUCE app is the GUI.
+if(NOT APPLE AND TZPL_BUILD_GUI)
+    message(STATUS "The Dear ImGui GUI is macOS-only; forcing TZPL_BUILD_GUI=OFF "
+                   "(use -DTZPL_BUILD_APP_JUCE=ON for the GUI on this platform)")
+    set(TZPL_BUILD_GUI OFF)
+endif()
 
 # --- Core dependencies (always needed) --------------------------------------
 
