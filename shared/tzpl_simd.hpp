@@ -226,10 +226,11 @@ inline f32x4 min(f32x4 a, f32x4 b) { return f32x4{std::min(a.s0, b.s0), std::min
 inline f32x4 max(f32x4 a, f32x4 b) { return f32x4{std::max(a.s0, b.s0), std::max(a.s1, b.s1), std::max(a.s2, b.s2), std::max(a.s3, b.s3)}; }
 
 // --- f64x4 math ---
-#if defined(__aarch64__)
-// NEON has no 4-wide double, so Sleef exposes only 2-wide double kernels on
-// AArch64 (same unsuffixed dispatch names, d2 instead of d4). Apply the
-// 2-wide kernel to each half of the 256-bit vector.
+// Sleef's unsuffixed dispatch names only cover the native 128-bit vector
+// types: NEON has no 4-wide double at all, and on x86-64 the d4 names are
+// declared only when compiling with AVX enabled. So on every platform here,
+// apply the always-available 2-wide double kernel to each half of the
+// 256-bit vector.
 namespace d4_detail {
     inline f64x2 lo(f64x4 v) { return f64x2{v.s0, v.s1}; }
     inline f64x2 hi(f64x4 v) { return f64x2{v.s2, v.s3}; }
@@ -277,40 +278,6 @@ TZPL_D4_VIA_D2_1(cospi,  Sleef_cospid2_u05)
 #undef TZPL_D4_VIA_D2_1
 #undef TZPL_D4_VIA_D2_2
 inline f64x4 tanpi(f64x4 x)      { return sinpi(x) / cospi(x); }
-#else
-inline f64x4 sin(f64x4 x)        { return Sleef_sind4_u10(x); }
-inline f64x4 cos(f64x4 x)        { return Sleef_cosd4_u10(x); }
-inline f64x4 exp(f64x4 x)        { return Sleef_expd4_u10(x); }
-inline f64x4 exp2(f64x4 x)       { return Sleef_exp2d4_u10(x); }
-inline f64x4 exp10(f64x4 x)      { return Sleef_exp10d4_u10(x); }
-inline f64x4 log(f64x4 x)        { return Sleef_logd4_u10(x); }
-inline f64x4 sqrt(f64x4 x)       { return Sleef_sqrtd4_u05(x); }
-inline f64x4 cbrt(f64x4 x)       { return Sleef_cbrtd4_u10(x); }
-inline f64x4 hypot(f64x4 x, f64x4 y) { return Sleef_hypotd4_u05(x, y); }
-inline f64x4 atan2(f64x4 y, f64x4 x) { return Sleef_atan2d4_u10(y, x); }
-inline f64x4 sinh(f64x4 x)       { return Sleef_sinhd4_u10(x); }
-inline f64x4 cosh(f64x4 x)       { return Sleef_coshd4_u10(x); }
-inline f64x4 copysign(f64x4 x, f64x4 y) { return Sleef_copysignd4(x, y); }
-inline f64x4 abs(f64x4 x)        { return Sleef_fabsd4(x); }
-inline f64x4 floor(f64x4 x)      { return Sleef_floord4(x); }
-inline f64x4 tan(f64x4 x)        { return Sleef_tand4_u10(x); }
-inline f64x4 asin(f64x4 x)       { return Sleef_asind4_u10(x); }
-inline f64x4 acos(f64x4 x)       { return Sleef_acosd4_u10(x); }
-inline f64x4 atan(f64x4 x)       { return Sleef_atand4_u10(x); }
-inline f64x4 tanh(f64x4 x)       { return Sleef_tanhd4_u10(x); }
-inline f64x4 asinh(f64x4 x)      { return Sleef_asinhd4_u10(x); }
-inline f64x4 acosh(f64x4 x)      { return Sleef_acoshd4_u10(x); }
-inline f64x4 atanh(f64x4 x)      { return Sleef_atanhd4_u10(x); }
-inline f64x4 pow(f64x4 x, f64x4 y) { return Sleef_powd4_u10(x, y); }
-inline f64x4 log2(f64x4 x)       { return Sleef_log2d4_u10(x); }
-inline f64x4 log10(f64x4 x)      { return Sleef_log10d4_u10(x); }
-inline f64x4 log1p(f64x4 x)      { return Sleef_log1pd4_u10(x); }
-inline f64x4 expm1(f64x4 x)      { return Sleef_expm1d4_u10(x); }
-inline f64x4 fmod(f64x4 x, f64x4 y) { return Sleef_fmodd4(x, y); }
-inline f64x4 sinpi(f64x4 x)      { return Sleef_sinpid4_u05(x); }
-inline f64x4 cospi(f64x4 x)      { return Sleef_cospid4_u05(x); }
-inline f64x4 tanpi(f64x4 x)      { return sinpi(x) / cospi(x); }
-#endif
 inline f64x4 ceil(f64x4 x)       { return f64x4{std::ceil(x.s0), std::ceil(x.s1), std::ceil(x.s2), std::ceil(x.s3)}; }
 inline f64x4 round(f64x4 x)      { return f64x4{std::round(x.s0), std::round(x.s1), std::round(x.s2), std::round(x.s3)}; }
 inline f64x4 trunc(f64x4 x)      { return f64x4{std::trunc(x.s0), std::trunc(x.s1), std::trunc(x.s2), std::trunc(x.s3)}; }
