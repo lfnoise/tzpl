@@ -18,6 +18,14 @@ documentation site as the Changelog page.
   `synthc`) rewritten to use `filter`, auto-mapping, `drop`, `clear!`,
   `append!`, and `isEmpty` in place of manual loops.
 
+**Libraries & Examples**
+
+- `music.job` gains `realizeCo`, an incremental realize in the HMSL-player
+  style: the hierarchy is walked lazily as the player pulls events, so
+  selection decisions are made just-in-time (one event ahead of playback)
+  and handing a huge form to `play` costs tree depth up front, not the
+  whole form.
+
 ## v0.1.0 (3 September 2026)
 
 **Language & VM**

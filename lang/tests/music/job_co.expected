@@ -1,0 +1,37 @@
+-- deterministic form (lazy)
+(t: 0.0, dur: 1.0, sus: 0.9, amp: 0.5, degree(0))
+(t: 1.0, dur: 0.5, sus: 0.45, amp: 0.5, degree(4))
+(t: 1.0, dur: 2.0, sus: 1.8, amp: 0.5, degree(7))
+(t: 1.5, dur: 0.5, sus: 0.45, amp: 0.5, degree(5))
+(t: 3.0, dur: 0.5, sus: 0.45, amp: 0.5, degree(4))
+(t: 3.5, dur: 0.5, sus: 0.45, amp: 0.5, degree(5))
+(t: 4.0, dur: 0.5, sus: 0.45, amp: 0.5, degree(4))
+(t: 4.5, dur: 0.5, sus: 0.45, amp: 0.5, degree(5))
+PASS co matches realize: count
+PASS co matches realize: onset 0
+PASS co matches realize: dur 0
+PASS co matches realize: onset 1
+PASS co matches realize: dur 1
+PASS co matches realize: onset 2
+PASS co matches realize: dur 2
+PASS co matches realize: onset 3
+PASS co matches realize: dur 3
+PASS co matches realize: onset 4
+PASS co matches realize: dur 4
+PASS co matches realize: onset 5
+PASS co matches realize: dur 5
+PASS co matches realize: onset 6
+PASS co matches realize: dur 6
+PASS co matches realize: onset 7
+PASS co matches realize: dur 7
+PASS co t0 offset
+PASS co inOrder count
+PASS co inOrder first pick
+PASS co inOrder second pick
+PASS co inOrder onsets chain 1+2+1
+PASS co seeded shuffle: count
+PASS co seeded shuffle: same picks as realize
+PASS co huge form: first onset
+PASS co huge form: fourth onset
+PASS co takeDur bounds the stream
+27 passed, 0 failed

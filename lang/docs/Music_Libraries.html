@@ -510,7 +510,7 @@ canon perform play(v);           <span class="cmt">-- or straight to the player<
         <!-- ============================================================ -->
         <div class="section" id="music-shape">
             <h2>music.shape / music.job</h2>
-            <p>Shapes, morphological operators, and hierarchical forms, inspired by HMSL (the Hierarchical Music Specification Language). A <code>Shape</code> is a sequence of frames over named dimensions &mdash; by default <code>[dur, degree, amp]</code>, but any dimension you add (<code>'cutoff</code>, <code>'pan</code>, &hellip;) is carried into events as a synth param of the same name, so melodies can run over any set of control dimensions, not just pitch. <code>music.job</code> arranges shapes into hierarchies whose selection behaviors are rolled <em>at realize time</em>: realizing the same form twice gives two readings. Pure (RNG only).</p>
+            <p>Shapes, morphological operators, and hierarchical forms, inspired by HMSL (the Hierarchical Music Specification Language). A <code>Shape</code> is a sequence of frames over named dimensions &mdash; by default <code>[dur, degree, amp]</code>, but any dimension you add (<code>'cutoff</code>, <code>'pan</code>, &hellip;) is carried into events as a synth param of the same name, so melodies can run over any set of control dimensions, not just pitch. <code>music.job</code> arranges shapes into hierarchies whose selection decisions are made <em>at realize time</em>: realizing the same form twice gives two readings. Pure (RNG only).</p>
             <table>
                 <tr><th>Type / Function</th><th>Description</th></tr>
                 <tr><td><code>Shape</code>, <code>shape(data, dims = ['dur, 'degree, 'amp])</code></td><td>Frames &times; named dimensions.</td></tr>
@@ -521,7 +521,8 @@ canon perform play(v);           <span class="cmt">-- or straight to the player<
                 <tr><td><code>shapeDur(sh)</code> / <code>shapeEvents(sh, t0 = 0.0, legato = 0.9)</code></td><td>Total beats / render to events (pitch from the first of <code>degree</code>/<code>step</code>/<code>hz</code>/<code>cents</code> present). The degree dimension stays Float so morphs can interpolate; rendering rounds it to the nearest whole scale degree.</td></tr>
                 <tr><td><code>Coll</code></td><td><code>leaf Shape</code>, <code>seqc [Coll]</code>, <code>parc [Coll]</code>, <code>rpt (Int, Coll)</code>, <code>sel (Behavior, [Coll])</code>.</td></tr>
                 <tr><td><code>Behavior</code></td><td><code>inOrder</code> (cycle), <code>atRandom</code>, <code>shuffled</code> (no repeat until all seen), <code>weighted [Float]</code>.</td></tr>
-                <tr><td><code>realize(c, t0 = 0.0)</code> / <code>realizeDur(c)</code></td><td>Walk the hierarchy into <code>List&lt;Event&gt;</code>; behaviors and repeats re-roll per call, and selection state advances across visits (e.g. under <code>rpt</code>).</td></tr>
+                <tr><td><code>realize(c, t0 = 0.0)</code> / <code>realizeDur(c)</code></td><td>Walk the hierarchy into <code>List&lt;Event&gt;</code>; behaviors and repeats make fresh selections per call, and selection state advances across visits (e.g. under <code>rpt</code>).</td></tr>
+                <tr><td><code>realizeCo(c, t0 = 0.0)</code></td><td>Incremental realize: the same walk as a <em>lazy</em> stream. Events materialize as the consumer pulls them (cost per pull is bounded by tree depth, not form size) and selection decisions are made just-in-time, one event ahead of playback &mdash; the HMSL-player model. Seeded readings match <code>realize</code> unless randomness sits under <code>parc</code>, whose children are pulled interleaved by onset.</td></tr>
             </table>
             <pre><code><span class="hl-kw">import</span> music.job.*;
 
@@ -537,8 +538,11 @@ canon perform play(v);           <span class="cmt">-- or straight to the player<
     Coll.parc([Coll.leaf(theme), Coll.leaf(shape([[<span class="hl-num">3.0</span>, -<span class="hl-num">7.0</span>, <span class="hl-num">0.4</span>]]))]),
 ]);
 
-<span class="hl-kw">let</span> p = play(realize(form), v);   <span class="cmt">-- one reading</span>
-p enqueue(realize(form));         <span class="cmt">-- a different reading follows it</span></code></pre>
+<span class="hl-kw">let</span> p = play(realize(form), v);   <span class="cmt">-- one reading, realized up front</span>
+p enqueue(realize(form));         <span class="cmt">-- a different reading follows it</span>
+
+<span class="hl-kw">let</span> big = Coll.rpt((<span class="hl-num">10000</span>, Coll.sel((Behavior.shuffled, riffs))));
+play(realizeCo(big), v);          <span class="cmt">-- incremental: selects as it plays</span></code></pre>
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
 
