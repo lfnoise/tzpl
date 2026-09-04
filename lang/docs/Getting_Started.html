@@ -339,6 +339,7 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
         <li><a href="#install-gatekeeper">First launch &amp; Gatekeeper</a></li>
         <li><a href="#install-requirements">Requirements</a></li>
         <li><a href="#install-updating">Updating</a></li>
+        <li><a href="#install-linux">Linux</a></li>
       </ol>
     </li>
     <li><a href="#first-run">First Sounds</a></li>
@@ -401,7 +402,7 @@ Tzopilotl/
 <h3 id="install-requirements">1.3 Requirements</h3>
 
 <ul>
-  <li><strong>macOS.</strong> The app uses CoreAudio; no other audio drivers are needed. (TZPL also builds and runs on Linux, but there is no packaged Linux release yet &mdash; build it from source; see <code>docs/LINUX.md</code> in the repository.)</li>
+  <li><strong>macOS.</strong> The app uses CoreAudio; no other audio drivers are needed. (On Linux, build from source &mdash; see <a href="#install-linux">&sect;1.5</a>.)</li>
   <li><strong>Xcode Command Line Tools.</strong> Compiling synth definitions uses the system C++ compiler. If synthdef compilation fails with a missing-compiler error, install the tools with:
   <pre><code>xcode-select --install</code></pre></li>
 </ul>
@@ -411,6 +412,58 @@ Tzopilotl/
 <p>Replace the whole <code>Tzopilotl/</code> folder with the new version. Nothing of yours is stored inside it, so this is always safe. Never update pieces of it individually &mdash; the app, <code>bin/tzpl</code>, and <code>modules/</code> are matched to each other.</p>
 
 <div class="warning"><strong>Don't edit the stdlib in place.</strong> Anything you change inside the distribution's <code>modules/</code> is lost on the next update. To customize a standard module, copy it into your project's <code>modules/</code> (or a <code>$TZPL_PATH</code> directory) &mdash; those are searched first and <em>shadow</em> the stdlib version (<a href="#env-search">&sect;4.1</a>).</div>
+
+<h3 id="install-linux">1.5 Linux</h3>
+
+<p>TZPL runs natively on Linux. There is no packaged Linux release yet, so
+building from source <em>is</em> the installation; everything after this
+section &mdash; first sounds, the command line, projects &mdash; then works the
+same as on macOS.</p>
+
+<p>You need Clang 19 or newer (GCC is not supported), CMake, and a handful of
+dev packages. On Ubuntu 24.04:</p>
+
+<pre><code>sudo apt install clang-19 g++-14 cmake ninja-build pkg-config \
+    libasound2-dev libjack-jackd2-dev libpulse-dev libsndfile1-dev \
+    libfreetype-dev libfontconfig1-dev libx11-dev libxcomposite-dev \
+    libxcursor-dev libxext-dev libxinerama-dev libxrandr-dev \
+    libxrender-dev libglu1-mesa-dev libcurl4-openssl-dev
+
+git clone https://github.com/lfnoise/tzpl.git
+cd tzpl
+CC=clang-19 CXX=clang++-19 cmake -B build -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release -DTZPL_BUILD_APP_JUCE=ON
+cmake --build build -j$(nproc)</code></pre>
+
+<p>That produces, inside the checkout:</p>
+
+<div class="diagram"><pre>
+build/lang/tzpl                                  the command-line REPL
+build/app/tzpl_app_juce_artefacts/Release/Tzopilotl   the app
+</pre></div>
+
+<p>Run either directly from the build tree &mdash; the standard library is found
+in the checkout's <code>lang/modules/</code> automatically. Launch the app with
+the bridge modules on the search path:</p>
+
+<pre><code>$ ./build/app/tzpl_app_juce_artefacts/Release/Tzopilotl -I bridge/modules:lang/modules</code></pre>
+
+<p>Audio goes through JACK, PulseAudio, or ALSA, whichever is available
+&mdash; PipeWire systems are covered through its compatibility layers, so on a
+modern desktop it works out of the box. Two Linux-specific notes:</p>
+
+<ul>
+  <li><strong>Real-time scheduling.</strong> For glitch-free audio under load,
+  your user needs real-time priority and memory-lock limits (most distros'
+  JACK or PipeWire packages set this up; the app still runs without it, just
+  with weaker guarantees). See <code>docs/LINUX.md</code> in the repository
+  for the one-file setup.</li>
+  <li><strong>Synthdef compilation</strong> uses the compiler the build was
+  configured with, so there is nothing extra to install at runtime.</li>
+</ul>
+
+<p><code>docs/LINUX.md</code> also covers building inside Docker and the full
+platform details.</p>
 
 <!-- ================================================================ -->
 <h2 id="first-run">2. First Sounds</h2>
