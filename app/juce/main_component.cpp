@@ -757,9 +757,13 @@ void MainComponent::openPath(juce::File const& file) {
                 notebook_->detachFile();
                 logLine("(example: editing a copy; Save asks for a location)");
             });
-        } else if (editorPane_.openFileAsCopy(file)) {
+        } else if (int const tabsBefore = editorPane_.tabCount();
+                   editorPane_.openFileAsCopy(file)) {
             setCenterMode(CenterMode::editor);
-            logLine("opened a copy of " + file.getFullPathName());
+            // openFileAsCopy also succeeds by selecting an already-open
+            // copy; only a new tab is worth announcing.
+            if (editorPane_.tabCount() > tabsBefore)
+                logLine("opened a copy of " + file.getFullPathName());
         } else {
             logLine("could not open " + file.getFullPathName());
         }
