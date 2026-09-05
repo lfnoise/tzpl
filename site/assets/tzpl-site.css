@@ -286,6 +286,14 @@ nav.sidebar a.tzpl-spy-current {
   margin-left: 0.6rem;
 }
 .tzpl-sr strong { color: var(--tzpl-sh-accent); font-size: 0.95rem; }
+.tzpl-sr strong code {
+  background: var(--tzpl-sh-hover);
+  border: 1px solid var(--tzpl-sh-border);
+  border-radius: 4px;
+  padding: 0.05rem 0.35rem;
+  margin-right: 0.35rem;
+  font-size: 0.9em;
+}
 .tzpl-sr p {
   margin: 0.2rem 0 0;
   font-size: 0.84rem;

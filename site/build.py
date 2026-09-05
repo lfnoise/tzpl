@@ -426,6 +426,40 @@ def render_gallery_page(page, nav):
 
 
 # --------------------------------------------------------------------------
+# Symbol search table
+# --------------------------------------------------------------------------
+
+def build_symbols(flat, moved_by_orig):
+    """Resolve site/symbols.json (the operator/punctuation lookup the ⌘K
+    modal consults, since Pagefind cannot index punctuation) against the
+    staged pages: anchors that the monolith split moved into a chapter file
+    get the chapter URL, and every target is checked to exist."""
+    src = json.loads((SITE / "symbols.json").read_text(encoding="utf-8"))
+    by_file = {e["file"]: e for e in flat}
+    out = []
+    for s in src["symbols"]:
+        page, anchor = s["page"], s.get("anchor", "")
+        dest = moved_by_orig.get(page, {}).get(anchor, page) if anchor else page
+        if dest not in by_file:
+            raise SystemExit(
+                f"error: symbols.json entry {s['sym']!r} targets unstaged "
+                f"page {dest}")
+        if anchor and f'id="{anchor}"' not in by_file[dest]["content"]:
+            raise SystemExit(
+                f"error: symbols.json entry {s['sym']!r} targets missing "
+                f"anchor {page}#{anchor}")
+        out.append({
+            "sym": s["sym"],
+            "name": s["name"],
+            "aliases": s.get("aliases", []),
+            "note": s.get("note", ""),
+            "href": f"{dest}#{anchor}" if anchor else dest,
+        })
+    (OUT / "assets" / "symbols.json").write_text(
+        json.dumps({"symbols": out}, separators=(",", ":")), encoding="utf-8")
+
+
+# --------------------------------------------------------------------------
 # Landing page helpers
 # --------------------------------------------------------------------------
 
@@ -517,6 +551,8 @@ def main():
         link_re = re.compile(rf'href="({orig_pat})#([^"]+)"')
         for entry in flat:
             entry["content"] = link_re.sub(retarget, entry["content"])
+
+    build_symbols(flat, moved_by_orig)
 
     prevnext = [{"file": e["file"], "title": e["title"].split(" — ")[0]}
                 for e in flat]

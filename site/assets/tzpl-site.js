@@ -99,6 +99,7 @@
   var overlay = null, input, chipsEl, resultsEl;
   var pagefind = null, unavailable = false;
   var activeFilter = null, debounceT = 0, hits = [], sel = -1;
+  var symbols = [];
 
   function buildModal() {
     overlay = document.createElement('div');
@@ -148,6 +149,13 @@
         pagefind.init();
         var f = await pagefind.filters();
         renderChips(Object.keys((f && f.section) || {}));
+        // Operator/punctuation lookup table (Pagefind's tokenizer drops
+        // punctuation, so `::` or `|>` can never hit the full-text index).
+        try {
+          var sr = await fetch(new URL('assets/symbols.json',
+                                       document.baseURI).href);
+          symbols = (await sr.json()).symbols || [];
+        } catch (se) { /* symbol search just stays off */ }
       } catch (e) {
         unavailable = true;
         resultsEl.innerHTML = '<p class="tzpl-search-note">The search index ' +
@@ -182,7 +190,29 @@
     hits[sel].scrollIntoView({ block: 'nearest' });
   }
 
-  function rel(url) { return url.replace(/^\//, ''); }
+  function escHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function symbolHits(q) {
+    var lower = q.toLowerCase();
+    var hasPunct = /[^\w\s]/.test(q);
+    var matches = symbols.filter(function (s) {
+      if (s.sym === q) return true;
+      if (hasPunct && s.sym.indexOf(q) !== -1) return true;
+      return (s.aliases || []).indexOf(lower) !== -1;
+    });
+    matches.sort(function (a, b) {
+      return (b.sym === q) - (a.sym === q);
+    });
+    return matches.slice(0, 5).map(function (s) {
+      return '<div class="tzpl-sr-group">' +
+        '<a class="tzpl-sr" href="' + s.href + '">' +
+        '<span class="tzpl-sr-section">Syntax</span>' +
+        '<strong><code>' + escHtml(s.sym) + '</code> ' + escHtml(s.name) +
+        '</strong><p>' + escHtml(s.note || '') + '</p></a></div>';
+    }).join('');
+  }
 
   async function run() {
     if (!pagefind || unavailable) return;
@@ -193,20 +223,24 @@
     var top = await Promise.all(res.results.slice(0, 10).map(function (r) {
       return r.data();
     }));
-    resultsEl.innerHTML = top.map(function (d) {
+    // Pagefind returns URLs already rooted at the deployed site's base
+    // path (it detects the base from where its bundle is served), so they
+    // are used verbatim; making them page-relative would double the base.
+    var symHtml = activeFilter ? '' : symbolHits(q);
+    resultsEl.innerHTML = symHtml + (top.map(function (d) {
       var subs = (d.sub_results || []).filter(function (s) {
         return s.url.indexOf('#') !== -1;
       }).slice(0, 3).map(function (s) {
-        return '<a class="tzpl-sr-sub" href="' + rel(s.url) + '">' +
+        return '<a class="tzpl-sr-sub" href="' + s.url + '">' +
           s.title + '</a>';
       }).join('');
       return '<div class="tzpl-sr-group">' +
-        '<a class="tzpl-sr" href="' + rel(d.url) + '">' +
+        '<a class="tzpl-sr" href="' + d.url + '">' +
         '<span class="tzpl-sr-section">' + (d.meta.section || '') + '</span>' +
         '<strong>' + (d.meta.title || d.url) + '</strong>' +
         '<p>' + d.excerpt + '</p></a>' + subs + '</div>';
-    }).join('') || '<p class="tzpl-search-note">No results for “' +
-      q.replace(/</g, '&lt;') + '”.</p>';
+    }).join('') || (symHtml ? '' : '<p class="tzpl-search-note">No results ' +
+      'for “' + escHtml(q) + '”.</p>'));
     hits = Array.prototype.slice.call(
       resultsEl.querySelectorAll('.tzpl-sr, .tzpl-sr-sub'));
     sel = -1;
