@@ -96,6 +96,17 @@ to NEWS.md for the curated changelog, and a closing **Requirements** line.
         --notes-file /path/to/notes.md
     gh release upload vX.Y.Z build/Tzopilotl-X.Y.Z.dmg   # if a DMG shipped
 
+Preferred: draft first, so James can test the DMG via a real browser
+download (quarantine flag and all) before anything goes public. Add
+`--draft --target main` to `gh release create`; no git tag is created and
+the release is only visible to collaborators. Swap in a rebuilt DMG with
+`gh release upload vX.Y.Z --clobber ...`, and after James approves,
+publish with `gh release edit vX.Y.Z --draft=false` -- publishing creates
+the vX.Y.Z tag at the target branch's current head, so no manual
+`git tag`/push of the tag is needed (fix-up commits made while testing
+land inside the tag automatically). This replaces step "Tag and push" --
+only `git push origin main` for the release commit is needed up front.
+
 ## 6. Post-release
 
 Open the next cycle with a fresh `## Unreleased` heading at the top of
