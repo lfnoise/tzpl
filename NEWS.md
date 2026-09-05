@@ -7,6 +7,15 @@ documentation site as the Changelog page.
 
 ## Unreleased
 
+**App**
+
+- Distribution examples open cleaner: an unedited example copy no longer
+  prompts to save when the app closes, and clicking an already-open example
+  in the sidebar switches to its tab instead of opening another copy.
+  Editing a copy marks it modified (asterisk) and prompts on close as
+  usual, and Save still asks for a location outside the distribution
+  folder.
+
 ## v0.2.0 (4 September 2026)
 
 **Language & VM**

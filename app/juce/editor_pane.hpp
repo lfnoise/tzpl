@@ -91,8 +91,9 @@ public:
     // Opens `file`; if already open just selects its tab. False on read error.
     bool openFile(juce::File const& file);
     // Open `file`'s contents in a new tab with no file path (an untitled
-    // copy, marked modified): saving prompts for a location. Used for
-    // distribution examples, which are templates.
+    // copy): saving prompts for a location. Used for distribution examples,
+    // which are templates. If an unsaved copy of `file` is already open,
+    // just selects its tab.
     bool openFileAsCopy(juce::File const& file);
     void closeTab(int index);            // unconditional
     int tabCount() const { return (int)tabs_.size(); }
@@ -176,6 +177,10 @@ private:
     struct Tab {
         juce::String name;
         juce::File file;                   // invalid = no path yet
+        // For a copy of a distribution example: the file it was copied
+        // from, so re-opening it selects this tab instead of opening
+        // another copy. Cleared when the tab adopts its own path.
+        juce::File sourceFile;
         std::unique_ptr<juce::CodeDocument> doc;
         std::unique_ptr<TzplCodeEditor> editor;
         // On-disk modification time (ms) when this tab was last loaded or

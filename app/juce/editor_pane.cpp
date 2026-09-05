@@ -260,14 +260,23 @@ bool EditorPane::openFile(juce::File const& file) {
 }
 
 bool EditorPane::openFileAsCopy(juce::File const& file) {
+    for (int i = 0; i < (int)tabs_.size(); ++i) {
+        if (tabs_[i]->sourceFile == file) {
+            tabsUI_.setCurrentTabIndex(i);
+            return true;
+        }
+    }
     if (!file.existsAsFile()) return false;
     auto tab = std::make_unique<Tab>();
     tab->name = file.getFileName();
+    tab->sourceFile = file;
     tab->doc = makeDocument();
     tab->doc->replaceAllContent(file.loadFileAsString());
+    tab->doc->setSavePoint();
     tab->doc->clearUndoHistory();
-    // No file path and no save point: the tab is an untitled copy that
-    // counts as modified, so closing prompts and Save asks for a location.
+    // No file path: Save asks for a location, so a user edit is never
+    // written back into the distribution folder. The save point means an
+    // unedited copy closes silently; editing dirties it like any tab.
     tab->editor = std::make_unique<TzplCodeEditor>(*tab->doc, &tokeniser_);
     addTabInternal(std::move(tab));
     return true;
@@ -321,6 +330,7 @@ bool EditorPane::saveTabAs(int index, juce::File const& f) {
     if (!tab) return false;
     if (!writeTextFile(f, tab->doc->getAllContent())) return false;
     tab->file = f;
+    tab->sourceFile = juce::File();  // no longer a copy of the example
     tab->name = f.getFileName();
     tab->doc->setSavePoint();
     tab->diskModTime = fileModMs(f);
