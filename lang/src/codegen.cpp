@@ -798,7 +798,15 @@ CodeBlock* CodeGen::generateREPL(Program& program) {
         }
         // If this is the last item and it's a printable expression, gen as expression
         if (lastIsExpr && i == program.items.size() - 1) {
-            u16 resultReg = genExpr(static_cast<ExprStmtNode*>(item)->expr.get());
+            auto* expr = static_cast<ExprStmtNode*>(item)->expr.get();
+            u16 resultReg = genExpr(expr);
+            // Inline value types (Complex, Fraction, inline structs/tuples/
+            // enums) occupy sizeWords_ consecutive registers; the REPL result
+            // is the single Word in reg 0, so box them to a heap Obj* first.
+            // Without this, reg 0 held only the first word (e.g. the real
+            // part of 1i, or the numerator of 1/2) and the result formatter
+            // dereferenced it as an object pointer.
+            resultReg = emitBoxIfInline(resultReg, expr->resolvedType);
             if (resultReg != 0) {
                 emitMov(0, resultReg);
             }

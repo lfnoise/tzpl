@@ -42,6 +42,13 @@ inline constexpr i32 kPrettyDefaultWidth = 80;
 // output identical to toString.
 VMString prettyString(Word const* base, Type* type, i32 width);
 
+// Render a single-Word value of static type `type`. Differs from prettyString
+// only for Inline types (Complex, Fraction, inline structs/tuples/enums):
+// `w` must then hold the BOXED heap Obj* rather than the first of the
+// value's inline register words. Used for the REPL result, which boxes
+// inline results into reg 0.
+VMString prettyStringBoxed(Word w, Type* type, i32 width);
+
 } // namespace ts
 
 #endif /* pretty_print_hpp */

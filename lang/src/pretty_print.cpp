@@ -535,4 +535,10 @@ VMString prettyString(Word const* base, Type* type, i32 width) {
     return layout(b, root, width);
 }
 
+VMString prettyStringBoxed(Word w, Type* type, i32 width) {
+    DocBuilder b;
+    u32 root = buildWordDoc(b, w, type);
+    return layout(b, root, width);
+}
+
 } // namespace ts

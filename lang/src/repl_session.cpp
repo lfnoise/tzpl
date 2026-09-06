@@ -251,9 +251,12 @@ REPLSession::EvalResult REPLSession::eval(const std::string& input) {
             VMString vs = wordToString(value, lastType);
             result.formattedValue = toStdString(vs);
             if (lastType && lastType->repr_ == Type::Repr::Inline) {
-                // Inline composites arrive boxed in a single result Word;
-                // the flat form is already correct.
-                result.prettyValue = result.formattedValue;
+                // Inline value types (Complex, Fraction, inline composites)
+                // arrive boxed to a heap Obj* in the single result Word
+                // (generateREPL emits emitBoxIfInline), so read it as one
+                // boxed word rather than as the first inline register word.
+                VMString ps = prettyStringBoxed(value, lastType, impl_->displayWidth);
+                result.prettyValue = toStdString(ps);
             } else {
                 VMString ps = prettyString(&value, lastType, impl_->displayWidth);
                 result.prettyValue = toStdString(ps);
