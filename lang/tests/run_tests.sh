@@ -169,8 +169,16 @@ for test_file in "${TEST_FILES[@]}"; do
 
     # For error tests, strip the absolute path prefix from stderr so that
     # .expected_err files are portable across machines / checkout locations.
+    # On Windows the interpreter prints native paths (D:/a/... or D:\a\...)
+    # while bash knows the root as /d/a/..., so normalize separators and
+    # strip the native spelling too.
     if $is_error_test; then
-        sed -i.bak "s|$ROOT_DIR/||g" "$stderr_file"
+        if [[ "$GOLDEN_OS" == "windows" ]]; then
+            NATIVE_ROOT="$(cygpath -m "$ROOT_DIR" 2>/dev/null || echo "$ROOT_DIR")"
+            sed -i.bak -e 's|\\|/|g' -e "s|$NATIVE_ROOT/||g" -e "s|$ROOT_DIR/||g" "$stderr_file"
+        else
+            sed -i.bak "s|$ROOT_DIR/||g" "$stderr_file"
+        fi
         rm -f "${stderr_file}.bak"
     fi
 

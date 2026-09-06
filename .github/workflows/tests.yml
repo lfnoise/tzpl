@@ -261,7 +261,7 @@ jobs:
         shell: bash
         working-directory: lang/tests
         run: |
-          TZPL_BIN=../../build/lang/tzpl.exe bash run_tests.sh | tee result.txt
+          TZPL_BIN=../../build/lang/tzpl.exe bash run_tests.sh --verbose | tee result.txt
           grep -Eq '[1-9][0-9]* passed' result.txt
 
       # End-to-end: codegen -> llvm-mingw -> .dll -> LoadLibrary -> offline render.
