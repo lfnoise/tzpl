@@ -45,8 +45,8 @@
 #include <sstream>
 
 // Both tzpl and engine define i64/f64/etc. in different ways.
-// engine: namespace engine { using i64 = long; }
-// tzpl:        using i64 = int64_t;  (which is long long on macOS)
+// engine: namespace engine { using i64 = std::int64_t; }
+// tzpl:        using i64 = std::int64_t;  (the same type since the LLP64 sweep)
 // We use explicit namespace qualification and casts where needed.
 
 namespace bridge {
@@ -138,9 +138,9 @@ static void unbindWidgetsForNode(AppContext* ctx, std::int64_t nodeID) {
     if (!ctx || !ctx->uiState) return;
     std::lock_guard<std::mutex> lock(ctx->uiState->mtx);
     for (auto& w : ctx->uiState->widgets) {
-        if (w->target && (nodeID < 0 || w->target->nodeID == (long)nodeID))
+        if (w->target && (nodeID < 0 || w->target->nodeID == (std::int64_t)nodeID))
             w->target.reset();
-        if (w->target2 && (nodeID < 0 || w->target2->nodeID == (long)nodeID))
+        if (w->target2 && (nodeID < 0 || w->target2->nodeID == (std::int64_t)nodeID))
             w->target2.reset();
     }
 }

@@ -24,7 +24,7 @@
 
 namespace bridge {
 
-void untapWidget(engine::Engine* e, long tapID, int silo) {
+void untapWidget(engine::Engine* e, std::int64_t tapID, int silo) {
     if (!e || tapID == 0) return;
     tzpl_SErr err = engine::begin(e);
     if (err == tzpl_errNone) {
@@ -32,7 +32,7 @@ void untapWidget(engine::Engine* e, long tapID, int silo) {
         err = engine::go(silo);
     }
     if (err != tzpl_errNone) {
-        std::fprintf(stderr, "ui: untap %ld failed (%d)\n", tapID, (int)err);
+        std::fprintf(stderr, "ui: untap %lld failed (%d)\n", (long long)tapID, (int)err);
     }
 }
 

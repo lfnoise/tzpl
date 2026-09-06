@@ -183,8 +183,8 @@ void runInternalAudioEngine(string dir, string synthName, int seconds) {
             // non-finite or wildly large output means the synth (or this
             // harness's fixed 2-float outlet buffer) is producing garbage.
             const char* warn = (nonFinite || maxAbs > 10.0) ? "  <<< WARNING: garbage output" : "";
-            printf("offline render: %ld frames, maxAbs=%g, finite=%s%s\n",
-                   nframes, maxAbs, nonFinite ? "NO" : "yes", warn);
+            printf("offline render: %lld frames, maxAbs=%g, finite=%s%s\n",
+                   (long long)nframes, maxAbs, nonFinite ? "NO" : "yes", warn);
         }
         free(data->outlets);
         def.funs.free(data);

@@ -25,6 +25,8 @@
 #ifndef tzpl_simd_hpp
 #define tzpl_simd_hpp
 
+#include <cstdint>
+
 #ifdef __APPLE__
 
 // ============================================================================
@@ -76,17 +78,23 @@ inline f64x4 expm1(f64x4 x) { return f64x4{std::expm1(x[0]), std::expm1(x[1]), s
 // SECTION A — Linux/Clang: ext_vector_type (supports .s0, .xy, .xyxy swizzle)
 // ============================================================================
 
-using u64x2 = unsigned long __attribute__((ext_vector_type(2)));
-using u64x4 = unsigned long __attribute__((ext_vector_type(4)));
-using u64x8 = unsigned long __attribute__((ext_vector_type(8)));
+// 64-bit lanes are spelled via <cstdint> rather than `long`: long is 32 bits
+// on Windows (LLP64), which would silently halve every lane.
+using u32x2 = unsigned int  __attribute__((ext_vector_type(2)));
+using u32x4 = unsigned int  __attribute__((ext_vector_type(4)));
+using u32x8 = unsigned int  __attribute__((ext_vector_type(8)));
+
+using u64x2 = std::uint64_t __attribute__((ext_vector_type(2)));
+using u64x4 = std::uint64_t __attribute__((ext_vector_type(4)));
+using u64x8 = std::uint64_t __attribute__((ext_vector_type(8)));
 
 using i32x2 = int           __attribute__((ext_vector_type(2)));
 using i32x4 = int           __attribute__((ext_vector_type(4)));
 using i32x8 = int           __attribute__((ext_vector_type(8)));
 
-using i64x2 = long          __attribute__((ext_vector_type(2)));
-using i64x4 = long          __attribute__((ext_vector_type(4)));
-using i64x8 = long          __attribute__((ext_vector_type(8)));
+using i64x2 = std::int64_t  __attribute__((ext_vector_type(2)));
+using i64x4 = std::int64_t  __attribute__((ext_vector_type(4)));
+using i64x8 = std::int64_t  __attribute__((ext_vector_type(8)));
 
 using f32x2 = float         __attribute__((ext_vector_type(2)));
 using f32x4 = float         __attribute__((ext_vector_type(4)));
@@ -122,8 +130,8 @@ struct get_traits;
 template <> struct get_traits<float>         { struct type { static constexpr int count = 1; using scalar_t = float; }; };
 template <> struct get_traits<double>        { struct type { static constexpr int count = 1; using scalar_t = double; }; };
 template <> struct get_traits<int>           { struct type { static constexpr int count = 1; using scalar_t = int; }; };
-template <> struct get_traits<long>          { struct type { static constexpr int count = 1; using scalar_t = long; }; };
-template <> struct get_traits<unsigned long> { struct type { static constexpr int count = 1; using scalar_t = unsigned long; }; };
+template <> struct get_traits<std::int64_t>  { struct type { static constexpr int count = 1; using scalar_t = std::int64_t; }; };
+template <> struct get_traits<std::uint64_t> { struct type { static constexpr int count = 1; using scalar_t = std::uint64_t; }; };
 
 // Vector specializations
 template <> struct get_traits<f32x2> { struct type { static constexpr int count = 2; using scalar_t = float; }; };

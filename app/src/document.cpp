@@ -690,7 +690,7 @@ bool saveDocument(DocumentStore const& store, bridge::AppContext& ctx,
 }
 
 // Remove an engine tap (GUI/caller thread; bundles are thread-local).
-static void untapWidget(bridge::AppContext& ctx, long tapID, int silo) {
+static void untapWidget(bridge::AppContext& ctx, std::int64_t tapID, int silo) {
     bridge::untapWidget(ctx.engine, tapID, silo);
 }
 
@@ -974,7 +974,7 @@ SnapshotPtr loadDocument(bridge::AppContext& ctx, std::string const& path,
             if (rp.tag() != Tag::Vec || rp.childCount() < 2) continue;
             std::string panel{rp.child(1).asStr()};
 
-            std::vector<std::pair<long, int>> taps;
+            std::vector<std::pair<std::int64_t, int>> taps;
             {
                 std::lock_guard<std::mutex> lock(ctx.uiState->mtx);
                 auto& ws = ctx.uiState->widgets;
@@ -1109,7 +1109,7 @@ captureWidgets(bridge::UIState* ui, std::vector<std::string> const& panels,
 void restoreWidgets(bridge::AppContext& ctx, WidgetSnapList const& target,
                     std::vector<std::string> const& panels) {
     if (!ctx.uiState) return;
-    std::vector<std::pair<long, int>> taps;
+    std::vector<std::pair<std::int64_t, int>> taps;
     {
         std::lock_guard<std::mutex> lock(ctx.uiState->mtx);
 

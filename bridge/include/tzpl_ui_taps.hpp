@@ -42,11 +42,11 @@ namespace engine { struct Engine; }
 namespace bridge {
 
 // (tapID, silo) pairs, as carried by UIWidget::tapID / tapSilo.
-using TapRef = std::pair<long, int>;
+using TapRef = std::pair<std::int64_t, int>;
 
 // Remove one engine tap. No-op for tapID 0 (= "no tap") or a null engine.
 // Must NOT be called with UIState::mtx held.
-void untapWidget(engine::Engine* e, long tapID, int silo);
+void untapWidget(engine::Engine* e, std::int64_t tapID, int silo);
 
 // Remove several taps in turn. Must NOT be called with UIState::mtx held.
 void untapWidgets(engine::Engine* e, std::vector<TapRef> const& taps);

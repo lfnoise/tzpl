@@ -410,8 +410,8 @@ static tzpl_SErr resolveTarget(ts::VM& vm, i64 nodeID, const char* controlName,
     if (!controlsForNode(ctx, nodeID, controls)) return tzpl_errNodeNotFound;
     for (auto const& c : controls) {
         if (c.name == controlName) {
-            out.nodeID = static_cast<long>(nodeID);
-            out.controlID = static_cast<long>(c.controlID);
+            out.nodeID = static_cast<std::int64_t>(nodeID);
+            out.controlID = static_cast<std::int64_t>(c.controlID);
             out.silo = silo;
             return tzpl_errNone;
         }
@@ -574,7 +574,7 @@ static void ffi_uiSetRange(ts::VM& vm, u16, u16, u16 argBase) {
 
 // Remove an engine tap (best-effort; logs on failure). Must be called
 // WITHOUT ui->mtx held: bundle submission takes the engine's NRT lock.
-static void untapWidget(AppContext* ctx, long tapID, int silo) {
+static void untapWidget(AppContext* ctx, std::int64_t tapID, int silo) {
     if (!ctx) return;
     bridge::untapWidget(ctx->engine, tapID, silo);
 }
@@ -801,7 +801,7 @@ static void ffi_uiRemove(ts::VM& vm, u16, u16, u16 argBase) {
     UIState* ui = getUIState(vm);
     if (!ui) return;
     auto id = static_cast<std::uint64_t>(vm.reg(argBase).i);
-    long tapID = 0;
+    std::int64_t tapID = 0;
     int tapSilo = 0;
     {
         std::lock_guard<std::mutex> lock(ui->mtx);
@@ -818,7 +818,7 @@ static void ffi_uiRemove(ts::VM& vm, u16, u16, u16 argBase) {
 static void ffi_uiClear(ts::VM& vm, u16, u16, u16) {
     UIState* ui = getUIState(vm);
     if (!ui) return;
-    std::vector<std::pair<long, int>> taps;
+    std::vector<std::pair<std::int64_t, int>> taps;
     {
         std::lock_guard<std::mutex> lock(ui->mtx);
         for (auto& w : ui->widgets) {
@@ -879,7 +879,7 @@ static i64 makeTapWidget(ts::VM& vm, const char* name, UIWidgetKind kind,
 // GUI scope display and vice versa.
 // ---------------------------------------------------------------------------
 
-static long widgetTapID(ts::VM& vm, u16 argBase) {
+static std::int64_t widgetTapID(ts::VM& vm, u16 argBase) {
     UIState* ui = getUIState(vm);
     if (!ui) return 0;
     auto id = static_cast<std::uint64_t>(vm.reg(argBase).i);
@@ -891,7 +891,7 @@ static long widgetTapID(ts::VM& vm, u16 argBase) {
 // fn uiTapPeak(id Int) Float
 static void ffi_uiTapPeak(ts::VM& vm, u16 dst, u16, u16 argBase) {
     auto* ctx = getAppContext(vm);
-    long tapID = widgetTapID(vm, argBase);
+    std::int64_t tapID = widgetTapID(vm, argBase);
     vm.reg(dst).f = (ctx && ctx->engine && tapID)
                   ? engine::tapPeak(ctx->engine, tapID) : 0.0;
 }
@@ -899,7 +899,7 @@ static void ffi_uiTapPeak(ts::VM& vm, u16 dst, u16, u16 argBase) {
 // fn uiTapRms(id Int) Float
 static void ffi_uiTapRms(ts::VM& vm, u16 dst, u16, u16 argBase) {
     auto* ctx = getAppContext(vm);
-    long tapID = widgetTapID(vm, argBase);
+    std::int64_t tapID = widgetTapID(vm, argBase);
     vm.reg(dst).f = (ctx && ctx->engine && tapID)
                   ? engine::tapRms(ctx->engine, tapID) : 0.0;
 }
@@ -907,7 +907,7 @@ static void ffi_uiTapRms(ts::VM& vm, u16 dst, u16, u16 argBase) {
 // fn uiTapChans(id Int) Int
 static void ffi_uiTapChans(ts::VM& vm, u16 dst, u16, u16 argBase) {
     auto* ctx = getAppContext(vm);
-    long tapID = widgetTapID(vm, argBase);
+    std::int64_t tapID = widgetTapID(vm, argBase);
     vm.reg(dst).i = (ctx && ctx->engine && tapID)
                   ? engine::tapChans(ctx->engine, tapID) : 0;
 }
@@ -918,7 +918,7 @@ static void ffi_uiTapChans(ts::VM& vm, u16 dst, u16, u16 argBase) {
 // the GUI scope) stay frame-aligned.
 static void ffi_uiTapSamples(ts::VM& vm, u16 dst, u16, u16 argBase) {
     auto* ctx = getAppContext(vm);
-    long tapID = widgetTapID(vm, argBase);
+    std::int64_t tapID = widgetTapID(vm, argBase);
     int maxSamples = static_cast<int>(vm.reg(argBase + 1).i);
     maxSamples = std::min(std::max(maxSamples, 0), 65536);
     int chans = (ctx && ctx->engine && tapID)

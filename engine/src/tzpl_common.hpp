@@ -24,6 +24,8 @@
 #ifndef tzpl_common_hpp
 #define tzpl_common_hpp
 
+#include <cstdint>
+#include <cstddef>
 #include <complex>
 #include <vector>
 #include <string>
@@ -39,20 +41,20 @@ using c8 = char;
 using i8  = char;
 using i16 = short;
 using i32 = int;
-using i64 = long;	// int64_t is 'long long' and breaks compatibility with simd.h.
+using i64 = std::int64_t;   // NOT `long`: 32-bit on Windows (LLP64)
 using i128 = __int128_t;
 
 using u8  = unsigned char ;
 using u16 = unsigned short;
 using u32 = unsigned int;
-using u64 = unsigned long;
+using u64 = std::uint64_t;
 using u128 = __uint128_t;
 
 using f32 = float;
 using f64 = double;
 
 using usize = size_t;
-using isize = ssize_t;
+using isize = std::ptrdiff_t;  // ssize_t does not exist in the MSVC CRT
 
 
 }
