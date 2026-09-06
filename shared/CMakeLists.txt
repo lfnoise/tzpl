@@ -33,6 +33,8 @@ if(NOT APPLE)
     set(SLEEF_BUILD_DFT OFF CACHE BOOL "" FORCE)
     if(WIN32)
         set(SLEEF_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+        # Static Sleef: its header declares dllimport otherwise.
+        target_compile_definitions(shared INTERFACE SLEEF_STATIC_LIBS)
     else()
         set(SLEEF_BUILD_SHARED_LIBS ON CACHE BOOL "" FORCE)
     endif()

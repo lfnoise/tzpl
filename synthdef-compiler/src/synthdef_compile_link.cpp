@@ -223,7 +223,11 @@ static int compile(string const& filepath_c, string const& filepath_o, string co
     std::vector<string> argv{toolchainCommand(), "-x", "c++", "-std=c++23"};
 #if defined(__APPLE__)
     argv.insert(argv.end(), {"-arch", "arm64", "-stdlib=libc++"});
-#elif !defined(_WIN32)
+#elif defined(_WIN32)
+    // Sleef is linked statically into the plugin; without this its header
+    // declares every function __declspec(dllimport) on Windows.
+    argv.push_back("-DSLEEF_STATIC_LIBS");
+#else
     argv.push_back("-fPIC");
 #endif
     argv.push_back("-O3");
