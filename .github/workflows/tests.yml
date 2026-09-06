@@ -247,6 +247,7 @@ jobs:
         shell: pwsh
         run: |
           llvm-objdump -p build\lang\tzpl.exe | Select-String "DLL Name"
+          mt.exe -nologo "-inputresource:build\lang\tzpl.exe;#1" -out:embedded.manifest; Get-Content embedded.manifest
           .\build\lang\tzpl.exe lang\tests\arithmetic\int_basic.x
           "exit code: $LASTEXITCODE"
       - name: Smoke-run tzpl.exe (bash)
