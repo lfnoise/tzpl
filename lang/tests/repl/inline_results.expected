@@ -1,0 +1,22 @@
+→ 0+1i : Complex
+→ 3+4i : Complex
+→ -1+0i : Complex
+→ 1/2 : Fraction
+→ 5/6 : Fraction
+→ 3/4 : Fraction
+→ (1.0, 2.0) : (Float, Float)
+→ (1, 0+1i) : (Int, Complex)
+→ (0+1i, 2/3, (1.0, 2.0)) : (Complex, Fraction, (Float, Float))
+→ [0+1i, 0+2i] : [Complex]
+→ [1/2, 1/3] : [Fraction]
+→ [(1, 2.0), (3, 4.0)] : [(Int, Float)]
+→ P { x: 1.0, y: 2.0 } : P
+→ [P { x: 1.0, y: 2.0 }, P { x: 3.0, y: 4.0 }] : [P]
+→ Sh.circle(2.0) : Sh
+→ Sh.rect(3.0, 4.0) : Sh
+→ Sh.none : Sh
+→ 42 : Int
+→ 1.5 : Float
+→ hi : String
+→ 'sym : Symbol
+→ [1, 2, 3] : [Int]

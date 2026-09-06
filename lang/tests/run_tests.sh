@@ -132,6 +132,16 @@ for test_file in "${TEST_FILES[@]}"; do
         expects_fail=true
     fi
 
+    # Check for @repl marker: "-- @repl" means feed the file to the
+    # interactive REPL on stdin, one line per eval, instead of running it as
+    # a script. Exercises the REPL result path (the "-> value : Type" line)
+    # that script mode never touches. The banner line is stripped so the
+    # golden file holds only results and program output.
+    repl_mode=false
+    if grep -q '^-- @repl' "$test_file"; then
+        repl_mode=true
+    fi
+
     # Run the test with timeout
     stdout_file=$(mktemp)
     stderr_file=$(mktemp)
@@ -145,13 +155,27 @@ for test_file in "${TEST_FILES[@]}"; do
         TIMEOUT_CMD=""
     fi
 
+    # In REPL mode the file is the interpreter's stdin, not its argument.
+    # (An empty array would trip `set -u` on older bash, so use a scalar.)
+    if [[ "$repl_mode" == true ]]; then
+        RUN_ARGS=""
+        RUN_STDIN="$test_file"
+    else
+        RUN_ARGS="$test_file"
+        RUN_STDIN=/dev/null
+    fi
+
     if [[ -n "$TIMEOUT_CMD" ]]; then
-        $TIMEOUT_CMD "${TIMEOUT_SEC}s" "$TZPL" "${I_FLAGS[@]}" "$test_file" \
-            >"$stdout_file" 2>"$stderr_file" || exit_code=$?
+        $TIMEOUT_CMD "${TIMEOUT_SEC}s" "$TZPL" "${I_FLAGS[@]}" ${RUN_ARGS:+"$RUN_ARGS"} \
+            <"$RUN_STDIN" >"$stdout_file" 2>"$stderr_file" || exit_code=$?
     else
         # No timeout command available; run directly
-        "$TZPL" "${I_FLAGS[@]}" "$test_file" \
-            >"$stdout_file" 2>"$stderr_file" || exit_code=$?
+        "$TZPL" "${I_FLAGS[@]}" ${RUN_ARGS:+"$RUN_ARGS"} \
+            <"$RUN_STDIN" >"$stdout_file" 2>"$stderr_file" || exit_code=$?
+    fi
+
+    if [[ "$repl_mode" == true ]]; then
+        sed -i.bak '1{/^Tzopilotl REPL\./d;}' "$stdout_file" && rm -f "$stdout_file.bak"
     fi
 
     timed_out=false
