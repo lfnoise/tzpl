@@ -121,7 +121,9 @@ target_compile_options(tzpl PRIVATE ${TZPL_COMPILE_OPTIONS})
 if(WIN32)
     # Application manifest: UTF-8 active code page (so narrow CRT and
     # std::filesystem calls take UTF-8 paths) and per-monitor DPI awareness.
-    target_sources(tzpl PRIVATE windows/tzpl.rc)
+    # Listed as a source: CMake merges it into the default manifest it embeds
+    # for MSVC-style links (an .rc copy would collide with that one).
+    target_sources(tzpl PRIVATE windows/tzpl.manifest)
 endif()
 
 # Stdlib fallback for dev builds, where the build directory has no modules/
