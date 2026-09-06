@@ -41,11 +41,12 @@ bash lang/tests/run_tests.sh                        # interpreter golden suite
 bash integration-tests/run_synthc_render_ab.sh      # offline render A/B
 ```
 
-A few lang golden files have `.expected.linux` overrides: macOS-only libm
-entry points (`__sinpi`, `__cospi`, `__tanpi`, `__exp10`) fall back to
-portable formulas elsewhere, which shifts a handful of printed values. On
-Linux, `run_tests.sh -u` writes `.linux` overrides instead of touching the
-macOS-authored `.expected` files.
+Three lang golden files have `.expected.linux` overrides, all residual libm
+drift (`cbrt`/`pow` rounding, one complex `exp`). Value hashing, map order,
+`sinpi`/`cospi`/`tanpi`, and the FFT are platform-independent, so the rest
+of the suite shares one golden set. On Linux, `run_tests.sh --update` writes
+`.linux` overrides instead of touching the macOS-authored `.expected` files
+(the runner picks the suffix from `uname`; Windows uses `.windows`).
 
 ## Docker workflow (developing from a Mac)
 

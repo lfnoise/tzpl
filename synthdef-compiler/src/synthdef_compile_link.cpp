@@ -208,7 +208,6 @@ static int link(string const& filepath_o, string const& filepath_dylib,
     cmd += " -dynamiclib";
     cmd += " -undefined dynamic_lookup";
     cmd += " -compatibility_version 1 -current_version 1";
-    cmd += " -framework Accelerate";
 #else
     // ELF shared objects leave undefined symbols to be resolved from the
     // host at dlopen time by default, which is the -undefined dynamic_lookup

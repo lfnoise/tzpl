@@ -23,6 +23,7 @@
 
 #include "builtins_internal.hpp"
 #include "disassemble.hpp"
+#include "stable_hash.hpp"
 #include "tracing_gc.hpp"
 #include "persistent_vector.hpp"
 #include "persistent_map.hpp"
@@ -2885,15 +2886,16 @@ static bool resolve_println(Compiler& compiler, const std::vector<Type*>& args,
 // ============================================================================
 
 static void builtin_hash_int(VM& vm, u16 dst, u16, u16 argBase) {
-    vm.reg(dst).i = (i64)std::hash<i64>{}(vm.reg(argBase).i);
+    vm.reg(dst).i = (i64)stableHashInt(vm.reg(argBase).i);
 }
 
 static void builtin_hash_float(VM& vm, u16 dst, u16, u16 argBase) {
-    vm.reg(dst).i = (i64)std::hash<f64>{}(vm.reg(argBase).f);
+    vm.reg(dst).i = (i64)stableHashFloat(vm.reg(argBase).f);
 }
 
 static void builtin_hash_symbol(VM& vm, u16 dst, u16, u16 argBase) {
-    vm.reg(dst).i = (i64)std::hash<const void*>{}(vm.reg(argBase).s);
+    // By name (Symbol::hash), so the result is the same across runs and platforms.
+    vm.reg(dst).i = (i64)vm.reg(argBase).s->hash();
 }
 
 static void builtin_hash_obj(VM& vm, u16 dst, u16, u16 argBase) {

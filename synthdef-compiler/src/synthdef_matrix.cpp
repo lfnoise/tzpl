@@ -22,6 +22,7 @@
 //
 
 #include "synthdef_matrix.hpp"
+#include "tzpl_sinpi.hpp"
 #include "synthdef_signal_type.hpp"
 
 namespace synthdef {
@@ -91,30 +92,17 @@ VectorT<f64> unary_op_float(VectorT<f64> const& a, UnaryOp op) {
         case UnaryOp::Exp2:
             return unary_op_loop(a, [](f64 x) { return std::exp2(x); });
         case UnaryOp::Exp10:
-#ifdef __APPLE__
-            return unary_op_loop(a, [](f64 x) { return __exp10(x); });
-#else
-            return unary_op_loop(a, [](f64 x) { return std::pow(10., x); });
-#endif
+            return unary_op_loop(a, [](f64 x) { return tzpl_exp10(x); });
         case UnaryOp::Expm1:    
             return unary_op_loop(a, [](f64 x) { return std::expm1(x); });
-#ifdef __APPLE__
+        // The same helpers the generated code uses (tzpl_sinpi.hpp), so
+        // constant folding matches runtime evaluation bit for bit.
         case UnaryOp::SinPi:
-            return unary_op_loop(a, [](f64 x) { return __sinpi(x); });
+            return unary_op_loop(a, [](f64 x) { return tzpl_sinpi(x); });
         case UnaryOp::CosPi:
-            return unary_op_loop(a, [](f64 x) { return __cospi(x); });
+            return unary_op_loop(a, [](f64 x) { return tzpl_cospi(x); });
         case UnaryOp::TanPi:
-            return unary_op_loop(a, [](f64 x) { return __tanpi(x); });
-#else
-        // Same formulas the generated code's tzpl_sinpi helpers use, so
-        // constant folding matches runtime evaluation.
-        case UnaryOp::SinPi:
-            return unary_op_loop(a, [](f64 x) { return std::sin(x * M_PI); });
-        case UnaryOp::CosPi:
-            return unary_op_loop(a, [](f64 x) { return std::cos(x * M_PI); });
-        case UnaryOp::TanPi:
-            return unary_op_loop(a, [](f64 x) { return std::tan(x * M_PI); });
-#endif
+            return unary_op_loop(a, [](f64 x) { return tzpl_tanpi(x); });
         case UnaryOp::Sin:
             return unary_op_loop(a, [](f64 x) { return std::sin(x); });
         case UnaryOp::Cos:

@@ -25,10 +25,14 @@
 #define math_hpp
 
 #include "base_types.hpp"
+#include "tzpl_sinpi.hpp"
+#include <numbers>
 
-const f64 kTwoPi = 2. * M_PI;
-const f64 kDegToRad = M_PI / 180.;
-const f64 kRadToDeg = 180. / M_PI;
+// M_PI is not standard (MSVC needs _USE_MATH_DEFINES); use <numbers>.
+const f64 kPi = std::numbers::pi;
+const f64 kTwoPi = 2. * kPi;
+const f64 kDegToRad = kPi / 180.;
+const f64 kRadToDeg = 180. / kPi;
 const f64 kMinToSecs = 60.; // beats per minute to beats per second
 const f64 kSecsToMin = 1. / 60.; // beats per second to beats per minute
 
@@ -66,23 +70,13 @@ inline f64 qurt(f64 x) { return std::pow(x,.25); }
 inline f64 evenpow(f64 x, f64 p) { return std::pow(std::abs(x), p); }
 inline f64 oddpow(f64 x, f64 p) { return sgn(x) * evenpow(x, p); }
 
-#ifdef __APPLE__
-inline f64 sinpi(f64 x) { return __sinpi(x); }
-inline f64 cospi(f64 x) { return __cospi(x); }
-inline f64 tanpi(f64 x) { return __tanpi(x); }
-inline f64 sin2pi(f64 x) { return __sinpi(2.*x); }
-inline f64 cos2pi(f64 x) { return __cospi(2.*x); }
-inline f64 tan2pi(f64 x) { return __tanpi(2.*x); }
-#else
-// Portable fallbacks (same formulas as builtins_math.cpp): not exact at
-// integer/half-integer arguments the way __sinpi and friends are.
-inline f64 sinpi(f64 x) { return std::sin(x * M_PI); }
-inline f64 cospi(f64 x) { return std::cos(x * M_PI); }
-inline f64 tanpi(f64 x) { return std::tan(x * M_PI); }
-inline f64 sin2pi(f64 x) { return std::sin(x * kTwoPi); }
-inline f64 cos2pi(f64 x) { return std::cos(x * kTwoPi); }
-inline f64 tan2pi(f64 x) { return std::tan(x * kTwoPi); }
-#endif
+// Exact at integer/half-integer arguments on every platform (shared/tzpl_sinpi.hpp).
+inline f64 sinpi(f64 x) { return synthdef::tzpl_sinpi(x); }
+inline f64 cospi(f64 x) { return synthdef::tzpl_cospi(x); }
+inline f64 tanpi(f64 x) { return synthdef::tzpl_tanpi(x); }
+inline f64 sin2pi(f64 x) { return sinpi(2.*x); }
+inline f64 cos2pi(f64 x) { return cospi(2.*x); }
+inline f64 tan2pi(f64 x) { return tanpi(2.*x); }
 
 inline f64 sinc(f64 a) { return a == 0. ? 1. : std::sin(a) / a; }
 
@@ -265,22 +259,22 @@ inline f64 expexp(f64 x, f64 a, f64 b, f64 c, f64 d) { return uniexp(expuni(x, a
 // unipolar to unipolar warps
 inline f64 warp_pow(f64 x, f64 p) { return std::pow(x, p); }  // reciprocal of p gives a curve inverted around y = x.
 inline f64 warp_sin(f64 x) { return sinpi(.5 * x); } // warp_asin is the inverse about y = x.
-inline f64 warp_asin(f64 x) { return (2./M_PI) * std::asin(x); }
+inline f64 warp_asin(f64 x) { return (2./kPi) * std::asin(x); }
 
 // unipolar to unipolar warps, double reflection (i.e., rotated 180 about (0.5,0.5))
 inline f64 warp_powR(f64 x, f64 p) { return 1. - std::pow(1. - x, p); }  // reciprocal of p gives a curve inverted around y = x.
 inline f64 warp_sinR(f64 x) { return 1. - sinpi(.5 * (1. - x)); } // warp_asinR is the inverse about y = x.
-inline f64 warp_asinR(f64 x) { return 1. - (2./M_PI) * std::asin(1. - x); }
+inline f64 warp_asinR(f64 x) { return 1. - (2./kPi) * std::asin(1. - x); }
 
 // unipolar to unipolar S warps
 inline f64 warp_powS(f64 x, f64 p) { return x < .5 ? .5 * std::pow(2. * x, p) : 1. - .5 * std::pow(2. - 2. * x, p); }
 inline f64 warp_sinS(f64 x) { return uni(sinpi(x - 1.)); }
-inline f64 warp_asinS(f64 x) { return std::asin(bi(x))/M_PI + .5; }
+inline f64 warp_asinS(f64 x) { return std::asin(bi(x))/kPi + .5; }
 
 // unipolar to unipolar S warps, double reflection
 inline f64 warp_powSR(f64 x, f64 p) { return x < .5 ? .5 * (1. - std::pow(1. - 2. * x, p)) : .5 * (1. + std::pow(2. * x - 1., p)); }
 inline f64 warp_sinSR(f64 x) { return x < .5 ? .5 * sinpi(x) : 1. + .5 * sinpi(x + 1.); }
-inline f64 warp_asinSR(f64 x) { return x < .5 ? std::asin(2.*x)/M_PI : 1. + std::asin(2.*x - 2.)/M_PI; }
+inline f64 warp_asinSR(f64 x) { return x < .5 ? std::asin(2.*x)/kPi : 1. + std::asin(2.*x - 2.)/kPi; }
 
 // general purpose warp
 inline f64 bwarp(f64 x, f64 w) {  // bipolar to bipolar warping
@@ -353,8 +347,8 @@ inline f64 raddeg(f64 x) { return x*kRadToDeg; } // radians to degrees
 inline f64 hzsec(f64 x) { return 1./x; }
 inline f64 sechz(f64 x) { return 1./x; }
 
-inline f64 cycrad(f64 x) { return 2. * M_PI * x; }
-inline f64 radcyc(f64 x) { return x / (2. * M_PI); }
+inline f64 cycrad(f64 x) { return 2. * kPi * x; }
+inline f64 radcyc(f64 x) { return x / (2. * kPi); }
 
 inline f64 cycdeg(f64 x) { return 360. * x; }
 inline f64 degcyc(f64 x) { return x / 360.; }

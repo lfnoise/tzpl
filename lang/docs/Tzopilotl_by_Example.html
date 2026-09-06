@@ -2276,7 +2276,7 @@ m3 contains(<span class="str">"a"</span>) println;     <span class="cmt">-- fals
 <span class="cmt">-- merge combines two maps (second wins on conflicts)</span>
 <span class="kw">let</span> a = [<span class="str">"x"</span>: <span class="num">1</span>, <span class="str">"y"</span>: <span class="num">2</span>];
 <span class="kw">let</span> b = [<span class="str">"y"</span>: <span class="num">99</span>, <span class="str">"z"</span>: <span class="num">3</span>];
-merge(a, b) println;             <span class="cmt">-- [x: 1, y: 99, z: 3]</span>
+merge(a, b) println;             <span class="cmt">-- [y: 99, z: 3, x: 1]</span>
 
 <span class="cmt">-- copy: maps are passed by reference; copy when an alias must be independent</span>
 <span class="kw">var</span> p = [<span class="str">"k"</span>: <span class="num">1</span>];

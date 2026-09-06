@@ -34,6 +34,7 @@
 //
 
 #include "value_graph.hpp"
+#include "stable_hash.hpp"
 #include "persistent_vector.hpp"
 #include "persistent_map.hpp"
 
@@ -63,15 +64,15 @@ size_t prelim(GCTag tag, size_t local) {
 } // namespace
 
 size_t graphHashSlowWords(Word const* a, Type* type, GraphHashCtx& ctx) {
-    if (!type) return std::hash<i64>{}(a[0].i);
+    if (!type) return stableHashInt(a[0].i);
     if (type->repr_ != Type::Repr::Inline) {
         return graphHashSlowWord(a[0], type, ctx);
     }
     if (type == gCurrentVM->complexType()) {
-        return hashCombine(std::hash<f64>{}(a[0].f), std::hash<f64>{}(a[1].f));
+        return hashCombine(stableHashFloat(a[0].f), stableHashFloat(a[1].f));
     }
     if (type == gCurrentVM->fractionType()) {
-        return hashCombine(std::hash<i64>{}(a[0].i), std::hash<i64>{}(a[1].i));
+        return hashCombine(stableHashInt(a[0].i), stableHashInt(a[1].i));
     }
     DepthGuard guard(ctx);
     auto hashFields = [&](auto const& layout, size_t seed) {
@@ -83,9 +84,9 @@ size_t graphHashSlowWords(Word const* a, Type* type, GraphHashCtx& ctx) {
         return h;
     };
     if (auto* tt = dynamic_cast<TupleType*>(type))   return hashFields(tt->layout_, tt->fields_.size());
-    if (auto* st = dynamic_cast<StructType*>(type))  return hashFields(st->layout_, std::hash<const void*>{}(st->name_));
+    if (auto* st = dynamic_cast<StructType*>(type))  return hashFields(st->layout_, st->name_->hash());
     if (auto* en = dynamic_cast<EnumType*>(type)) {
-        size_t h = std::hash<i64>{}(a[0].i);
+        size_t h = stableHashInt(a[0].i);
         int which = (int)a[0].i;
         if (which >= 0 && (size_t)which < en->layout_.size()) {
             auto const& f = en->layout_[which];
@@ -101,7 +102,7 @@ size_t graphHashSlowWords(Word const* a, Type* type, GraphHashCtx& ctx) {
 size_t graphHashSlowWord(Word w, Type* type, GraphHashCtx& ctx) {
     // Scalar and special-repr branches: identical to the fast path.
     if (type && type->repr_ == Type::Repr::DiscriminantEnum) {
-        return std::hash<i64>{}(w.i);
+        return stableHashInt(w.i);
     }
     if (type && type->repr_ == Type::Repr::NullablePtrEnum) {
         if (!w.o) return 0;
@@ -116,10 +117,10 @@ size_t graphHashSlowWord(Word w, Type* type, GraphHashCtx& ctx) {
         }
     }
     if (type == gCurrentVM->intType() || type == gCurrentVM->boolType()) {
-        return std::hash<i64>{}(w.i);
+        return stableHashInt(w.i);
     }
     if (type == gCurrentVM->floatType()) {
-        return std::hash<f64>{}(w.f);
+        return stableHashFloat(w.f);
     }
     if (type == gCurrentVM->symbolType()) {
         return w.s ? w.s->hash() : 0;
@@ -128,21 +129,21 @@ size_t graphHashSlowWord(Word w, Type* type, GraphHashCtx& ctx) {
     // Leaf object types: no children, no memo.
     if (type == gCurrentVM->stringType()) {
         auto* s = static_cast<StringObj*>(w.o);
-        return std::hash<std::string_view>{}(std::string_view(s->s.data(), s->s.size()));
+        return stableHashString(std::string_view(s->s.data(), s->s.size()));
     }
     if (type == gCurrentVM->bytesType()) {
         auto* s = static_cast<BytesObj*>(w.o);
-        return std::hash<std::string_view>{}(
+        return stableHashString(
             std::string_view((char const*)s->data.data(), s->data.size()));
     }
     if (type == gCurrentVM->fractionType()) {
         auto* frac = static_cast<Fraction*>(w.o);
-        return hashCombine(std::hash<i64>{}(frac->r.numer()),
-                           std::hash<i64>{}(frac->r.denom()));
+        return hashCombine(stableHashInt(frac->r.numer()),
+                           stableHashInt(frac->r.denom()));
     }
     if (type == gCurrentVM->complexType()) {
         auto* c = static_cast<Complex*>(w.o);
-        return hashCombine(std::hash<f64>{}(c->x.real()), std::hash<f64>{}(c->x.imag()));
+        return hashCombine(stableHashFloat(c->x.real()), stableHashFloat(c->x.imag()));
     }
 
     // Heap composites from here down: consult the visited memo. A hit may
@@ -167,8 +168,8 @@ size_t graphHashSlowWord(Word w, Type* type, GraphHashCtx& ctx) {
     }
     if (auto* st = dynamic_cast<StructType*>(type)) {
         auto* s = static_cast<Struct*>(w.o);
-        ctx.memo.emplace(w.o, prelim(GCTag::Struct, std::hash<const void*>{}(st->name_)));
-        size_t h = std::hash<const void*>{}(st->name_);
+        ctx.memo.emplace(w.o, prelim(GCTag::Struct, st->name_->hash()));
+        size_t h = st->name_->hash();
         for (u32 i = 0; i < s->numFields_; ++i) {
             auto const& f = st->layout_[i];
             h = hashCombine(h, graphHashSlowWords(&s->v[f.wordOffset], f.type, ctx));
@@ -179,7 +180,7 @@ size_t graphHashSlowWord(Word w, Type* type, GraphHashCtx& ctx) {
     if (auto* et = dynamic_cast<EnumType*>(type)) {
         auto* e = static_cast<Enum*>(w.o);
         ctx.memo.emplace(w.o, prelim(GCTag::Enum, (size_t)e->which_));
-        size_t h = std::hash<int>{}(e->which_);
+        size_t h = stableHashInt(e->which_);
         Type* caseType = et->cases_[e->which_].type;
         if (caseType != gCurrentVM->voidType()) {
             h = hashCombine(h, graphHashSlowWords(&e->v[0], caseType, ctx));
@@ -222,8 +223,8 @@ size_t graphHashSlowWord(Word w, Type* type, GraphHashCtx& ctx) {
                 auto* a = static_cast<PodArray<x64>*>(w.o);
                 size_t h = a->v.size();
                 for (auto const& v : a->v) {
-                    h = hashCombine(h, hashCombine(std::hash<f64>{}(v.real()),
-                                                   std::hash<f64>{}(v.imag())));
+                    h = hashCombine(h, hashCombine(stableHashFloat(v.real()),
+                                                   stableHashFloat(v.imag())));
                 }
                 return h;
             }
@@ -231,21 +232,21 @@ size_t graphHashSlowWord(Word w, Type* type, GraphHashCtx& ctx) {
                 auto* a = static_cast<PodArray<r64>*>(w.o);
                 size_t h = a->v.size();
                 for (auto const& v : a->v) {
-                    h = hashCombine(h, hashCombine(std::hash<i64>{}(v.numer()),
-                                                   std::hash<i64>{}(v.denom())));
+                    h = hashCombine(h, hashCombine(stableHashInt(v.numer()),
+                                                   stableHashInt(v.denom())));
                 }
                 return h;
             }
             case ArrayBackend::Float: {
                 auto* a = static_cast<PodArray<f64>*>(w.o);
                 size_t h = a->v.size();
-                for (auto val : a->v) h = hashCombine(h, std::hash<f64>{}(val));
+                for (auto val : a->v) h = hashCombine(h, stableHashFloat(val));
                 return h;
             }
             case ArrayBackend::Int: {
                 auto* a = static_cast<PodArray<i64>*>(w.o);
                 size_t h = a->v.size();
-                for (auto val : a->v) h = hashCombine(h, std::hash<i64>{}(val));
+                for (auto val : a->v) h = hashCombine(h, stableHashInt(val));
                 return h;
             }
             case ArrayBackend::Inline: {
@@ -289,7 +290,7 @@ size_t graphHashSlowWord(Word w, Type* type, GraphHashCtx& ctx) {
         auto* r = static_cast<RangeObj*>(w.o);
         auto* rt = static_cast<RangeType*>(r->type_);
         Type* et = rt->elemType_;
-        size_t h = std::hash<bool>{}(r->isInfinite_);
+        size_t h = stableHashInt(r->isInfinite_);
         h = hashCombine(h, graphHashSlowWords(r->startData(), et, ctx));
         h = hashCombine(h, graphHashSlowWords(r->stepData(),  et, ctx));
         if (!r->isInfinite_) h = hashCombine(h, graphHashSlowWords(r->endData(), et, ctx));
@@ -336,7 +337,7 @@ size_t graphHashSlowWord(Word w, Type* type, GraphHashCtx& ctx) {
         return h;
     }
     // Fallback: hash pointer (same as the fast path).
-    return std::hash<void*>{}(w.p);
+    return stableHashPtr(w.p);
 }
 
 } // namespace ts

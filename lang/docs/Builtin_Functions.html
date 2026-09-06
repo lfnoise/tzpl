@@ -1806,7 +1806,7 @@ m pairs println;                 <span class="cmt">-- [(a, 1), (b, 2), (c, 3)]</
             </table>
             <pre><code>let a = ["x": 1, "y": 2];
 let b = ["y": 99, "z": 3];
-merge(a, b) println;             <span class="cmt">-- [x: 1, y: 99, z: 3]</span></code></pre>
+merge(a, b) println;             <span class="cmt">-- [y: 99, z: 3, x: 1]</span></code></pre>
 
             <h3><code>mergeIfAbsent(map1, map2)</code></h3>
             <p>Returns a new map: a copy of <code>map1</code> with entries from <code>map2</code> added only for keys that are <em>not</em> already in <code>map1</code>. Existing keys keep <code>map1</code>'s values. Both inputs are unchanged.</p>
@@ -1816,7 +1816,7 @@ merge(a, b) println;             <span class="cmt">-- [x: 1, y: 99, z: 3]</span>
             </table>
             <pre><code>let a = ["x": 1, "y": 2];
 let b = ["y": 99, "z": 3];
-mergeIfAbsent(a, b) println;     <span class="cmt">-- [x: 1, y: 2, z: 3]</span></code></pre>
+mergeIfAbsent(a, b) println;     <span class="cmt">-- [y: 2, z: 3, x: 1]</span></code></pre>
 
             <h3><code>mergeIfPresent(map1, map2)</code></h3>
             <p>Returns a new map: a copy of <code>map1</code> with values overwritten from <code>map2</code> only for keys that <em>already</em> exist in <code>map1</code>. Keys unique to <code>map2</code> are ignored. Both inputs are unchanged.</p>

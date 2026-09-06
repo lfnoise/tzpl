@@ -7,6 +7,14 @@ set -euo pipefail
 
 # --- Configuration ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Which platform-specific golden overrides apply (empty on macOS, the
+# authoring platform). Git Bash / MSYS2 report MINGW*/MSYS* on Windows.
+case "$(uname -s)" in
+    Linux*)               GOLDEN_OS=linux ;;
+    MINGW*|MSYS*|CYGWIN*) GOLDEN_OS=windows ;;
+    *)                    GOLDEN_OS="" ;;
+esac
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 TZPL="${TZPL_BIN:-$(cd "$ROOT_DIR/.." && pwd)/build/lang/tzpl}"
 TIMEOUT_SEC=10
@@ -100,12 +108,12 @@ for test_file in "${TEST_FILES[@]}"; do
         expected_file="${base}.expected"
     fi
 
-    # Platform-specific golden override: on Linux a .expected.linux (or
-    # .expected_err.linux) file wins when present. Used for the handful of
-    # tests whose output differs because macOS-only libm entry points
-    # (__sinpi, __exp10, ...) fall back to portable formulas elsewhere.
-    if [[ "$(uname)" == "Linux" && -f "${expected_file}.linux" ]]; then
-        expected_file="${expected_file}.linux"
+    # Platform-specific golden override: off macOS, a .expected.<os> (or
+    # .expected_err.<os>) file wins when present, <os> being "linux" or
+    # "windows". Value hashing and sinpi/cospi/tanpi are platform-independent
+    # now, so this is only for residual libm drift (cbrt, pow, ...).
+    if [[ -n "$GOLDEN_OS" && -f "${expected_file}.${GOLDEN_OS}" ]]; then
+        expected_file="${expected_file}.${GOLDEN_OS}"
     fi
 
     # Build -I flags: always include test_dir, plus a _lib subdirectory if it
@@ -173,15 +181,15 @@ for test_file in "${TEST_FILES[@]}"; do
         else
             actual_file="$stdout_file"
         fi
-        if [[ "$(uname)" == "Linux" && "$expected_file" != *.linux ]]; then
-            # Never overwrite the shared golden file from Linux -- it is the
-            # macOS-authored source of truth. Write a .linux override, and
+        if [[ -n "$GOLDEN_OS" && "$expected_file" != *.${GOLDEN_OS} ]]; then
+            # Never overwrite the shared golden file from another OS -- it is
+            # the macOS-authored source of truth. Write a .<os> override, and
             # only when the output actually differs.
             if [[ -f "$expected_file" ]] && diff -q "$expected_file" "$actual_file" >/dev/null 2>&1; then
                 echo -e "${CYAN}UNCHANGED${RESET} $rel_path"
             else
-                cp "$actual_file" "${expected_file}.linux"
-                echo -e "${CYAN}UPDATED${RESET} $rel_path (.linux override)"
+                cp "$actual_file" "${expected_file}.${GOLDEN_OS}"
+                echo -e "${CYAN}UPDATED${RESET} $rel_path (.${GOLDEN_OS} override)"
             fi
         else
             cp "$actual_file" "$expected_file"

@@ -1,7 +1,7 @@
 true
 true
 true
-[8.0, 0.0, 0.0, 0.0, 0.0, 0.0, -0.0, -0.0]
+[8.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 single-bin spectrum: PASS
 one-partial ifft: PASS
 roundtrip: PASS

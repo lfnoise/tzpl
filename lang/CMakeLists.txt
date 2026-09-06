@@ -83,12 +83,6 @@ target_include_directories(tzpl_lib PUBLIC
 )
 # shared/ provides tempo_ramp.hpp (and other common headers).
 target_link_libraries(tzpl_lib PUBLIC shared)
-
-# The fft/ifft builtins run shared/tzpl_fft.hpp host-side; on Apple that is
-# vDSP (the `shared` target is INTERFACE-only, so link Accelerate here).
-if(APPLE)
-    target_link_libraries(tzpl_lib PUBLIC "-framework Accelerate")
-endif()
 target_compile_options(tzpl_lib PRIVATE ${TZPL_COMPILE_OPTIONS})
 
 # Debug flags

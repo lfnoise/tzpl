@@ -107,7 +107,7 @@ public:
 
     SymbolPtr intern(std::string_view sv) {
         assert(!sv.empty());
-        size_t hash_value = std::hash<std::string_view>{}(sv);
+        size_t hash_value = stableHashString(sv);
         size_t idx = bucket_index(hash_value);
 
         while (true) {

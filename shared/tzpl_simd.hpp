@@ -26,6 +26,7 @@
 #define tzpl_simd_hpp
 
 #include <cstdint>
+#include "tzpl_sinpi.hpp"  // exact scalar sinpi/cospi/tanpi/exp10, all platforms
 
 #ifdef __APPLE__
 
@@ -323,9 +324,9 @@ inline f32x2 log1p(f32x2 x)      { return f32x2{std::log1p(x.s0), std::log1p(x.s
 inline f32x2 exp10(f32x2 x)      { return f32x2{std::pow(10.f, x.s0), std::pow(10.f, x.s1)}; }
 inline f32x2 expm1(f32x2 x)      { return f32x2{std::expm1(x.s0), std::expm1(x.s1)}; }
 inline f32x2 fmod(f32x2 x, f32x2 y) { return f32x2{std::fmod(x.s0, y.s0), std::fmod(x.s1, y.s1)}; }
-inline f32x2 sinpi(f32x2 x)      { return f32x2{std::sin(x.s0 * (float)M_PI), std::sin(x.s1 * (float)M_PI)}; }
-inline f32x2 cospi(f32x2 x)      { return f32x2{std::cos(x.s0 * (float)M_PI), std::cos(x.s1 * (float)M_PI)}; }
-inline f32x2 tanpi(f32x2 x)      { return f32x2{std::tan(x.s0 * (float)M_PI), std::tan(x.s1 * (float)M_PI)}; }
+inline f32x2 sinpi(f32x2 x)      { return f32x2{synthdef::tzpl_sinpi(x.s0), synthdef::tzpl_sinpi(x.s1)}; }
+inline f32x2 cospi(f32x2 x)      { return f32x2{synthdef::tzpl_cospi(x.s0), synthdef::tzpl_cospi(x.s1)}; }
+inline f32x2 tanpi(f32x2 x)      { return f32x2{synthdef::tzpl_tanpi(x.s0), synthdef::tzpl_tanpi(x.s1)}; }
 inline f32x2 ceil(f32x2 x)       { return f32x2{std::ceil(x.s0), std::ceil(x.s1)}; }
 inline f32x2 round(f32x2 x)      { return f32x2{std::round(x.s0), std::round(x.s1)}; }
 inline f32x2 trunc(f32x2 x)      { return f32x2{std::trunc(x.s0), std::trunc(x.s1)}; }
@@ -362,9 +363,9 @@ inline f64x2 log1p(f64x2 x)      { return f64x2{std::log1p(x.s0), std::log1p(x.s
 inline f64x2 exp10(f64x2 x)      { return f64x2{std::pow(10., x.s0), std::pow(10., x.s1)}; }
 inline f64x2 expm1(f64x2 x)      { return f64x2{std::expm1(x.s0), std::expm1(x.s1)}; }
 inline f64x2 fmod(f64x2 x, f64x2 y) { return f64x2{std::fmod(x.s0, y.s0), std::fmod(x.s1, y.s1)}; }
-inline f64x2 sinpi(f64x2 x)      { return f64x2{std::sin(x.s0 * M_PI), std::sin(x.s1 * M_PI)}; }
-inline f64x2 cospi(f64x2 x)      { return f64x2{std::cos(x.s0 * M_PI), std::cos(x.s1 * M_PI)}; }
-inline f64x2 tanpi(f64x2 x)      { return f64x2{std::tan(x.s0 * M_PI), std::tan(x.s1 * M_PI)}; }
+inline f64x2 sinpi(f64x2 x)      { return f64x2{synthdef::tzpl_sinpi(x.s0), synthdef::tzpl_sinpi(x.s1)}; }
+inline f64x2 cospi(f64x2 x)      { return f64x2{synthdef::tzpl_cospi(x.s0), synthdef::tzpl_cospi(x.s1)}; }
+inline f64x2 tanpi(f64x2 x)      { return f64x2{synthdef::tzpl_tanpi(x.s0), synthdef::tzpl_tanpi(x.s1)}; }
 inline f64x2 ceil(f64x2 x)       { return f64x2{std::ceil(x.s0), std::ceil(x.s1)}; }
 inline f64x2 round(f64x2 x)      { return f64x2{std::round(x.s0), std::round(x.s1)}; }
 inline f64x2 trunc(f64x2 x)      { return f64x2{std::trunc(x.s0), std::trunc(x.s1)}; }

@@ -27,6 +27,7 @@
 
 #include <string>
 #include <string_view>
+#include "stable_hash.hpp"
 
 namespace ts {
 
@@ -38,7 +39,7 @@ class Symbol {
 public:
     Symbol(std::string str)
         : s_(std::move(str))
-        , hash_(std::hash<std::string>{}(s_)) {}
+        , hash_(stableHashString(s_)) {}
 
     std::string_view str() const noexcept { return s_; }
     const char* cstr() const noexcept { return s_.c_str(); }

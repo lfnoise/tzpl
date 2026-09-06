@@ -20,12 +20,6 @@ target_link_libraries(tzpl_audio_engine_bridge
     PUBLIC  audio_engine_lib
 )
 
-# Spectrum widgets run shared/tzpl_fft.hpp host-side; on Apple that is vDSP.
-# PUBLIC so every consumer of this object library gets the framework too.
-if(APPLE)
-    target_link_libraries(tzpl_audio_engine_bridge PUBLIC "-framework Accelerate")
-endif()
-
 # Match tzpl_lib optimization flags to avoid ODR/inline mismatches
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     target_compile_options(tzpl_audio_engine_bridge PRIVATE -O1)
