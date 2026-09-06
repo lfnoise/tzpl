@@ -34,6 +34,7 @@
 #include <string_view>
 #include <vector>
 #include "tzpl_dynlib.hpp"
+#include "tzpl_paths.hpp"
 #include <filesystem>
 #include <chrono>
 #include <thread>
@@ -281,7 +282,7 @@ bool loadDef(Engine* e, const char* dirPath, const char* defName) {
             && fs::path(p.path()).extension() == kPluginExt
             && fs::path(p.path()).stem() == defNameStr)
         {
-            bool ok = loadOneDef(e, p.path().c_str());
+            bool ok = loadOneDef(e, tzpl::pathToUtf8(p.path()).c_str());  // path::c_str() is wide on Windows
             if (ok) return true;
         }
     }
@@ -296,7 +297,7 @@ bool loadDefs(Engine* e, const char* dirPath) {
     auto iter = fs::recursive_directory_iterator(dirPath);
     for(auto& p : iter) {
         if (p.is_regular_file() && fs::path(p.path()).extension() == kPluginExt) {
-            bool ok = loadOneDef(e, p.path().c_str());
+            bool ok = loadOneDef(e, tzpl::pathToUtf8(p.path()).c_str());  // path::c_str() is wide on Windows
             allOK = allOK && ok;
             anyOK = anyOK || ok;
         }

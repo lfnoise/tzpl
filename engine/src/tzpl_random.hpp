@@ -26,8 +26,9 @@
 
 #include "tzpl_common.hpp"
 #if defined(_WIN32)
-#define _CRT_RAND_S
-#include <stdlib.h>
+// See shared/tzpl_random.hpp: declared directly because _CRT_RAND_S has to
+// precede the first <stdlib.h> in the translation unit.
+extern "C" int __cdecl rand_s(unsigned int* randomValue);
 #elif !defined(__APPLE__)
 #include <sys/random.h>
 #endif

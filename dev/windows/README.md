@@ -8,6 +8,40 @@ Windows, CMake, Ninja, Git for Windows, and the pinned llvm-mingw release.
 `windows-latest` and is the fastest way to see the port's state without a
 Windows box.
 
+## Verified from macOS with the llvm-mingw cross toolchain
+
+llvm-mingw also ships macOS- and Linux-hosted cross compilers
+(`llvm-mingw-<pin>-ucrt-macos-universal.tar.xz`), which is how the port
+was checked before any Windows machine touched it:
+
+- Every non-JUCE source file syntax-checks for `x86_64-w64-windows-gnu`
+  (all `_WIN32` branches, against real Windows and UCRT headers). This
+  found and fixed: two `hash_combine` overloads colliding under LLP64, a
+  `std::filesystem::path::c_str()` (wide on Windows) passed as a narrow
+  string in the engine loader, `_CRT_RAND_S` defined too late for
+  `rand_s`, and `fnmatch(3)` in the plugin tag store.
+- Sleef 3.7 cross-builds as a static library with the mingw toolchain
+  (`-DNATIVE_BUILD_DIR` pointing at a host build first).
+- A real generated `*_synth.cpp` compiles and links into a DLL with the
+  exact command lines `synthdef_compile_link.cpp` uses on Windows; the DLL
+  exports `load` and `tzpl_abi_version` and imports only KERNEL32 and the
+  UCRT api-sets. That is the plugin side of the cross-ABI experiment; the
+  host side (clang-cl + `LoadLibrary`) is item 3 below.
+
+Not verifiable without Windows: anything compiled by clang-cl against the
+MSVC STL (different headers from mingw's libc++), JUCE, WASAPI at runtime,
+the console behaviour, the PowerShell scripts.
+
+To repeat the sweep (from the repo root, with the tarball unpacked to
+`$MG` and a mingw Sleef installed to `$SLEEF`, plus a copy of `sndfile.h`):
+
+    CXX=$MG/bin/x86_64-w64-mingw32-clang++
+    for f in lang/src/*.cpp engine/src/*.cpp synthdef-compiler/src/*.cpp bridge/src/*.cpp osc/src/*.cpp shared/*.cpp; do
+      $CXX -std=c++23 -fsyntax-only -DNOMINMAX -DWIN32_LEAN_AND_MEAN -D_WIN32_WINNT=0x0A00 \
+           -Ishared -I$SLEEF/include -Ilang/src -Ilang/include -Isynthdef-compiler/src -Iosc/include \
+           -Iengine/src -Ibridge/include -Ithird_party/oscpack -Ithird_party/rtaudio -Iapp/src "$f" || echo "FAIL $f"
+    done
+
 ## First-build checklist
 
 The port was written and verified on macOS and Linux (the POSIX paths are

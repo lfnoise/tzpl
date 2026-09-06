@@ -21,10 +21,11 @@
 
 #include "plugin_tags.hpp"
 
+#include "tzpl_paths.hpp"
+
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>
-#include <fnmatch.h>
 #include <fstream>
 #include <sstream>
 
@@ -32,19 +33,50 @@ namespace tzplapp {
 
 namespace fs = std::filesystem;
 
+// Per-user config dir (~/Library/Application Support/Tzopilotl, ~/.config/tzpl,
+// %APPDATA%\Tzopilotl) -- the same place as tzpl-config.
 static std::string defaultStorePath() {
-    char const* home = std::getenv("HOME");
-    std::string base;
-#ifdef __APPLE__
-    base = std::string(home ? home : "") + "/Library/Application Support/Tzopilotl";
-#else
-    if (char const* xdg = std::getenv("XDG_CONFIG_HOME")) {
-        base = std::string(xdg) + "/tzpl";
-    } else {
-        base = std::string(home ? home : "") + "/.config/tzpl";
+    fs::path dir = tzpl::userConfigDir();
+    return tzpl::pathToUtf8(dir / "plugin_tags.txt");
+}
+
+// Shell-style glob: `*` any run, `?` one char, `[...]` a set (with `!`/`^`
+// negation and ranges). Replaces fnmatch(3), which Windows does not have.
+static bool globMatch(char const* pat, char const* str) {
+    for (;;) {
+        char p = *pat;
+        if (p == '\0') return *str == '\0';
+        if (p == '*') {
+            while (*pat == '*') ++pat;
+            if (*pat == '\0') return true;
+            for (char const* s = str; ; ++s) {
+                if (globMatch(pat, s)) return true;
+                if (*s == '\0') return false;
+            }
+        }
+        if (*str == '\0') return false;
+        if (p == '?') { ++pat; ++str; continue; }
+        if (p == '[') {
+            char const* q = pat + 1;
+            bool negate = (*q == '!' || *q == '^');
+            if (negate) ++q;
+            bool matched = false;
+            bool first = true;
+            for (; *q && (*q != ']' || first); ++q, first = false) {
+                if (q[1] == '-' && q[2] && q[2] != ']') {
+                    if (*str >= q[0] && *str <= q[2]) matched = true;
+                    q += 2;
+                } else if (*q == *str) {
+                    matched = true;
+                }
+            }
+            if (*q != ']') return false;  // unterminated set: no match
+            if (matched == negate) return false;
+            pat = q + 1; ++str; continue;
+        }
+        if (p != *str) return false;
+        ++pat; ++str;
     }
-#endif
-    return base + "/plugin_tags.txt";
 }
 
 PluginTagStore::PluginTagStore() : PluginTagStore(defaultStorePath()) {}
@@ -92,7 +124,7 @@ std::vector<std::string> PluginTagStore::effectiveTags(
     };
     for (auto const& t : embedded) add(t);
     for (auto const& rule : patterns_) {
-        if (fnmatch(rule.glob.c_str(), name.c_str(), 0) == 0) add(rule.tag);
+        if (globMatch(rule.glob.c_str(), name.c_str())) add(rule.tag);
     }
     if (auto it = local_.find(name); it != local_.end()) {
         for (auto const& t : it->second) add(t);

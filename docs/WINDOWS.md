@@ -7,9 +7,12 @@ the JUCE app (`tzpl_app_juce`, which is the GUI; the Dear ImGui app is
 macOS-only, as on Linux).
 
 Status: the port landed on the `windows-port` branch with the macOS and
-Linux suites green; `dev/windows/README.md` carries the checklist for the
-first Windows build. Until that is done, treat this document as the design
-and the intended developer workflow.
+Linux suites green and every Windows code path syntax-checked with the
+llvm-mingw cross compiler (a generated plugin compiles and links into a DLL
+from macOS). The clang-cl host build, JUCE, and runtime behaviour still
+need a first run on a Windows machine; `dev/windows/README.md` has that
+checklist. Until then, treat this document as the design and the intended
+developer workflow.
 
 ## Two toolchains
 
