@@ -103,7 +103,13 @@ $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
 try {
     $cxx = Join-Path $Dest 'bin\x86_64-w64-mingw32-clang++.exe'
     & $cxx -std=c++23 -O2 -c (Join-Path $probe 'probe.cpp') -o (Join-Path $probe 'probe.o')
-    if ($LASTEXITCODE -ne 0) { throw "subset cannot compile the probe" }
+    if ($LASTEXITCODE -ne 0) {
+        # Show what the driver resolved and what the subset holds.
+        & $cxx -v -std=c++23 -fsyntax-only (Join-Path $probe 'probe.cpp') 2>&1 | Select-Object -First 60
+        Get-ChildItem $Dest | Select-Object -ExpandProperty Name
+        Test-Path (Join-Path $Dest 'include\c++\v1\cmath')
+        throw "subset cannot compile the probe"
+    }
     # (quoted: a bare comma is PowerShell's array separator)
     & $cxx -shared -static '-Wl,--exclude-all-symbols' -o (Join-Path $probe 'probe.dll') (Join-Path $probe 'probe.o')
     if ($LASTEXITCODE -ne 0) { throw "subset cannot link the probe DLL" }
