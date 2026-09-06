@@ -6,13 +6,14 @@ interpreter, the synthdef compiler (including its runtime compile -> `.dll`
 the JUCE app (`tzpl_app_juce`, which is the GUI; the Dear ImGui app is
 macOS-only, as on Linux).
 
-Status: the port landed on the `windows-port` branch with the macOS and
-Linux suites green and every Windows code path syntax-checked with the
-llvm-mingw cross compiler (a generated plugin compiles and links into a DLL
-from macOS). The clang-cl host build, JUCE, and runtime behaviour still
-need a first run on a Windows machine; `dev/windows/README.md` has that
-checklist. Until then, treat this document as the design and the intended
-developer workflow.
+Status: verified in CI on `windows-latest` (the `windows-core` job): the
+whole tree builds with clang-cl, all 475 interpreter golden tests pass, the
+runtime plugin pipeline compiles, links, loads, and renders every test
+synth with the llvm-mingw toolchain, the ABI layout matches between the
+two compilers, and the JUCE app's headless self-test passes. Not yet
+exercised: a real audio device, and the distribution zip on a clean
+machine (`dev/windows/README.md`). There is no packaged Windows release
+yet.
 
 ## Two toolchains
 

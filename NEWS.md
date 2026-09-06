@@ -9,11 +9,11 @@ documentation site as the Changelog page.
 
 **Platform**
 
-- Windows x64 port (in progress; `docs/WINDOWS.md`): the interpreter,
-  synthdef compiler (runtime plugin compilation to `.dll` with a bundled
-  llvm-mingw toolchain, so no developer tools are needed on the user's
-  machine), audio engine (WASAPI/DirectSound), bridges, OSC, and the JUCE
-  app build with clang-cl. Every host-side OS call now goes through small
+- Windows x64 port (`docs/WINDOWS.md`): the interpreter, synthdef compiler
+  (runtime plugin compilation to `.dll` with a bundled llvm-mingw
+  toolchain, so no developer tools are needed on the user's machine), audio
+  engine (WASAPI/DirectSound), bridges, OSC, and the JUCE app build with
+  clang-cl; the test suites pass in CI. No packaged Windows release yet. Every host-side OS call now goes through small
   shared shims (dynamic loading, process spawning, well-known paths), which
   also fixed plugin compilation for paths containing spaces on every
   platform, and every 64-bit integer is spelled via `<cstdint>` (`long` is

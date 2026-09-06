@@ -42,6 +42,19 @@ To repeat the sweep (from the repo root, with the tarball unpacked to
            -Iengine/src -Ibridge/include -Ithird_party/oscpack -Ithird_party/rtaudio -Iapp/src "$f" || echo "FAIL $f"
     done
 
+## Verified in CI (windows-latest, clang-cl + llvm-mingw)
+
+Items 1 to 7 of the checklist below pass in the `windows-core` job as of
+September 2026: the full build, the ABI layout diff, all 475 golden tests
+(one `.expected.windows` override, `qa/edge_complex`, libm drift),
+`synthdef-compiler --test` end to end with the mingw toolchain, the doc
+and config tests, and `TZPL_JUCE_SELFTEST=1` including the LF-only save
+check. Getting there took twelve CI iterations; the fixes are in the
+branch history (manifest merge, Sleef include scope and `SLEEF_STATIC_LIBS`,
+argument-evaluation order in `parseInt`, NaN spelling, integer division
+by zero, POSIX-only calls in the integration tests). Still untested:
+audio through a real device (the runner has none) and item 8.
+
 ## First-build checklist
 
 The port was written and verified on macOS and Linux (the POSIX paths are

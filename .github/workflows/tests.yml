@@ -239,23 +239,14 @@ jobs:
           $d = Compare-Object $h $p
           if ($d) { $d | Format-Table -AutoSize | Out-String | Write-Host; throw "ABI layout differs between clang-cl and llvm-mingw" }
 
-      # Launch diagnostics: the interpreter run directly from PowerShell and
-      # from Git Bash (with and without coreutils `timeout`, which the test
-      # runner uses), plus its DLL imports, so a startup failure shows its
-      # real cause instead of 475 identical golden failures.
-      - name: Smoke-run tzpl.exe (pwsh)
+      # A startup failure (a bad embedded manifest once caused one) would
+      # otherwise surface as 475 identical golden failures with no stderr.
+      - name: Smoke-run tzpl.exe
         shell: pwsh
         run: |
           llvm-objdump -p build\lang\tzpl.exe | Select-String "DLL Name"
-          mt.exe -nologo "-inputresource:build\lang\tzpl.exe;#1" -out:embedded.manifest; Get-Content embedded.manifest
           .\build\lang\tzpl.exe lang\tests\arithmetic\int_basic.x
-          "exit code: $LASTEXITCODE"
-      - name: Smoke-run tzpl.exe (bash)
-        shell: bash
-        run: |
-          ./build/lang/tzpl.exe lang/tests/arithmetic/int_basic.x; echo "direct exit: $?"
-          command -v timeout && timeout 10s ./build/lang/tzpl.exe lang/tests/arithmetic/int_basic.x; echo "timeout exit: $?"
-          cd lang/tests && TZPL_BIN=../../build/lang/tzpl.exe bash run_tests.sh --verbose --stop-on-fail --filter arithmetic/int_basic || true
+          if ($LASTEXITCODE -ne 0) { throw "tzpl.exe exit code $LASTEXITCODE" }
 
       - name: Run lang tests
         shell: bash
