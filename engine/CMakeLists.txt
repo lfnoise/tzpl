@@ -62,7 +62,12 @@ elseif(WIN32)
             GIT_TAG 1.2.2
             GIT_SHALLOW TRUE
         )
+        # libsndfile 1.2.2 declares cmake_minimum_required(3.1.2), which
+        # CMake 4 rejects outright; this directory-scoped floor lets it
+        # configure (it only affects the sndfile sub-build).
+        set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
         FetchContent_MakeAvailable(sndfile)
+        unset(CMAKE_POLICY_VERSION_MINIMUM)
     endif()
     target_link_libraries(audio_engine_lib PUBLIC SndFile::sndfile avrt)
 elseif(UNIX)
