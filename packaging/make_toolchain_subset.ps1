@@ -8,8 +8,9 @@
     `defSynth` compiles plugins on a machine with no developer tools. From
     the llvm-mingw UCRT x86_64 release (pinned in docs/WINDOWS.md) it keeps:
 
-      bin\        clang.exe, clang++.exe, the x86_64-w64-mingw32-clang*
-                  wrappers, ld.lld.exe / lld.exe, and the DLLs those import
+      bin\        the clang-<N>.exe compiler, the clang.exe / clang++.exe /
+                  x86_64-w64-mingw32-clang* launchers, ld.lld.exe, and the
+                  DLLs those import (libLLVM, libclang-cpp, libc++, ...)
       lib\clang\<ver>\include   compiler builtin headers
       lib\clang\<ver>\lib\windows   compiler-rt builtins
       include\    libc++ headers (shared across targets)
@@ -49,16 +50,25 @@ function Copy-File([string]$rel) {
     Copy-Item -Force $from $to
 }
 
-# Tools. clang++.exe and the target-prefixed wrappers are what
-# synthdef_compile_link.cpp runs; lld is the linker clang invokes.
-foreach ($f in 'clang.exe', 'clang++.exe', 'lld.exe', 'ld.lld.exe',
+# Tools. In the Windows package clang.exe, clang++.exe and the target-
+# prefixed names are small launchers for the real clang-<N>.exe; ld.lld.exe
+# is the linker clang invokes (there is no lld.exe).
+foreach ($f in 'clang.exe', 'clang++.exe', 'clang-target-wrapper.exe', 'ld.lld.exe',
                'x86_64-w64-mingw32-clang.exe', 'x86_64-w64-mingw32-clang++.exe') {
     Copy-File "bin\$f"
 }
-# Every DLL in bin\: the tools themselves are dynamically linked against
-# libc++.dll / libunwind.dll / libwinpthread-1.dll (and zlib/zstd when
-# present). A few MB; cheaper than resolving the import graph by hand.
-Get-ChildItem (Join-Path $Source 'bin') -Filter '*.dll' | ForEach-Object { Copy-File "bin\$($_.Name)" }
+$realClang = Get-ChildItem (Join-Path $Source 'bin') -Filter 'clang-*.exe' |
+             Where-Object { $_.Name -match '^clang-\d+\.exe$' } | Select-Object -First 1
+if (-not $realClang) { throw "no clang-<N>.exe in $Source\bin" }
+Copy-File "bin\$($realClang.Name)"
+# The DLLs clang-<N>.exe and ld.lld.exe import (libLLVM, libclang-cpp,
+# libc++, and what libc++ needs). lldb, python, OpenMP and ASan DLLs stay
+# behind: they are most of bin\ and nothing here loads them.
+foreach ($dll in Get-ChildItem (Join-Path $Source 'bin') -Filter '*.dll') {
+    if ($dll.Name -match '^(libLLVM-\d+|libclang-cpp|libc\+\+|libunwind|libwinpthread-1|zlib1|libzstd)\.dll$') {
+        Copy-File "bin\$($dll.Name)"
+    }
+}
 
 # Compiler resource directory (builtin headers + compiler-rt for the target).
 $clangLib = Get-ChildItem (Join-Path $Source 'lib\clang') | Select-Object -First 1
