@@ -1,7 +1,9 @@
 # Download & Install
 
-TZPL currently runs on **macOS** (Apple Silicon and Intel). Cross-platform
-support is planned.
+TZPL runs on **macOS** (packaged releases) and **Linux** (build from
+source). A **Windows** port is in progress; see
+[docs/WINDOWS.md](https://github.com/lfnoise/tzpl/blob/main/docs/WINDOWS.md)
+for the state of it and how to build.
 
 ## Packaged releases
 
@@ -21,6 +23,7 @@ Tzopilotl/
   examples/         runnable demos -- open one in the app
   docs/             the guides and reference documentation
   editors/          syntax packages for VS Code, TextMate, tree-sitter
+  include/          plugin headers (used when compiling synth definitions)
   README.txt
 ```
 
@@ -36,6 +39,9 @@ Nothing of yours is stored inside it, so this is always safe.
 - **Xcode Command Line Tools.** Compiling synth definitions uses the system
   C++ compiler. If synthdef compilation fails with a missing-compiler
   error: `xcode-select --install`.
+- **Linux**: see [docs/LINUX.md](https://github.com/lfnoise/tzpl/blob/main/docs/LINUX.md).
+  **Windows**: see [docs/WINDOWS.md](https://github.com/lfnoise/tzpl/blob/main/docs/WINDOWS.md)
+  (the Windows folder bundles its own plugin compiler).
 
 ## Building from source
 

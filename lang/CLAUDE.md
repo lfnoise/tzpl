@@ -22,7 +22,7 @@ Targets: `tzpl` (CLI executable), `tzpl_lib` (static library).
 cd lang/tests && bash run_tests.sh
 ```
 
-~332 tests in `.x` files with `.expected` golden outputs, organized across 38 subdirectories. Flags: `-v` (verbose), `-f "pattern"` (filter), `-u` (update golden files), `-x` (stop on first failure).
+~332 tests in `.x` files with `.expected` golden outputs, organized across 38 subdirectories. Flags: `--verbose`, `--filter "pattern"`, `--update` (regenerate golden files; off macOS writes `.expected.<os>` overrides), `--stop-on-fail`.
 
 ## Running
 

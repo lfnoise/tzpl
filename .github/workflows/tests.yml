@@ -172,3 +172,89 @@ jobs:
           BIN=./build/app/tzpl_app_juce_artefacts/Release/Tzopilotl
           xvfb-run -a env TZPL_JUCE_SELFTEST=1 "$BIN" -I bridge/modules:lang/modules | tee st.txt
           grep -q "SELFTEST OK" st.txt
+
+  # Windows core + JUCE app. Host: clang-cl (preinstalled LLVM) with the VS
+  # 2022 Build Tools on the runner; runtime plugins: a pinned llvm-mingw
+  # (see docs/WINDOWS.md). Informational until it has a green streak on
+  # main; then drop continue-on-error and make it required.
+  windows-core:
+    runs-on: windows-latest
+    continue-on-error: true
+    env:
+      LLVM_MINGW: llvm-mingw-20260826-ucrt-x86_64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - uses: seanmiddleditch/gha-setup-ninja@v5
+
+      - name: Cache llvm-mingw
+        id: cache-mingw
+        uses: actions/cache@v4
+        with:
+          path: C:\${{ env.LLVM_MINGW }}
+          key: ${{ env.LLVM_MINGW }}
+
+      - name: Fetch llvm-mingw (plugin toolchain)
+        if: steps.cache-mingw.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          Invoke-WebRequest "https://github.com/mstorsjo/llvm-mingw/releases/download/20260826/$env:LLVM_MINGW.zip" -OutFile llvm-mingw.zip
+          Expand-Archive llvm-mingw.zip -DestinationPath C:\
+
+      - name: Cache FetchContent deps
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: windows-core-deps-${{ hashFiles('shared/CMakeLists.txt', 'app/CMakeLists.txt', 'engine/CMakeLists.txt') }}
+
+      - name: Configure
+        shell: pwsh
+        run: >
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl
+          -DTZPL_PLUGIN_TOOLCHAIN_DIR=C:\$env:LLVM_MINGW
+          -DTZPL_BUILD_APP_JUCE=ON -DTZPL_BUILD_TESTS=ON
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build build
+
+      # Host (clang-cl) and plugin (llvm-mingw) builds must agree on every
+      # struct in the plugin ABI.
+      - name: ABI layout check
+        shell: pwsh
+        run: |
+          clang-cl /nologo /Ishared shared\tzpl_abi_layout_check.c /Fe:abi_host.exe
+          & "C:\$env:LLVM_MINGW\bin\clang.exe" -Ishared shared\tzpl_abi_layout_check.c -o abi_plugin.exe
+          .\abi_host.exe > abi_host.txt
+          .\abi_plugin.exe > abi_plugin.txt
+          if (Compare-Object (Get-Content abi_host.txt) (Get-Content abi_plugin.txt)) { throw "ABI layout differs between clang-cl and llvm-mingw" }
+
+      - name: Run lang tests
+        shell: bash
+        working-directory: lang/tests
+        run: |
+          TZPL_BIN=../../build/lang/tzpl.exe bash run_tests.sh | tee result.txt
+          grep -Eq '[1-9][0-9]* passed' result.txt
+
+      # End-to-end: codegen -> llvm-mingw -> .dll -> LoadLibrary -> offline render.
+      - name: Synthdef compiler tests
+        shell: pwsh
+        run: .\build\synthdef-compiler\synthdef-compiler.exe --test
+
+      - name: Doc and config tests
+        shell: pwsh
+        run: |
+          .\build\app\tzpl_doc_tests.exe
+          .\build\app\tzpl_config_tests.exe
+
+      - name: JUCE headless self-test
+        shell: pwsh
+        run: |
+          $env:TZPL_JUCE_SELFTEST = "1"
+          .\build\app\tzpl_app_juce_artefacts\Release\Tzopilotl.exe -I "bridge/modules;lang/modules" | Tee-Object st.txt
+          if (-not (Select-String -Path st.txt -Pattern "SELFTEST OK" -Quiet)) { throw "self-test failed" }

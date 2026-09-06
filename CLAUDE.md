@@ -25,13 +25,13 @@ AddressSanitizer build:
 
 The build directory is `build/` at the project root. Key targets: `tzpl`, `tzpl_lib`, `engine`, `audio_engine_lib`, `synthdef-compiler`, `synthdef_compiler_lib`, `tzpl_app`.
 
-**Requirements**: Clang 19+ (Clang required: `ext_vector_type` swizzles and `[[clang::musttail]]`), CMake 3.21+, C++23. macOS (CoreAudio) or Linux (ALSA/JACK/Pulse; see `docs/LINUX.md`).
+**Requirements**: Clang 19+ (Clang required: `ext_vector_type` swizzles and `[[clang::musttail]]`), CMake 3.21+, C++23. macOS (CoreAudio), Linux (ALSA/JACK/Pulse; see `docs/LINUX.md`), or Windows x64 (clang-cl host + bundled llvm-mingw for runtime plugins; see `docs/WINDOWS.md`). Every platform seam is `#if defined(__APPLE__)` / `#elif defined(_WIN32)` / `#else` (Linux); host-side OS calls go through `shared/tzpl_dynlib.hpp`, `tzpl_process.hpp`, `tzpl_paths.hpp`.
 
 ## Testing
 
     cd lang/tests && bash run_tests.sh
 
-Flags: `-v` (verbose), `-f "pattern"` (filter), `-u` (update golden files), `-x` (stop on failure).
+Flags: `--verbose`, `--filter "pattern"`, `--update` (regenerate golden files; off macOS writes `.expected.<os>` overrides), `--stop-on-fail`.
 
 Synthdef compiler tests:
 

@@ -7,6 +7,28 @@ documentation site as the Changelog page.
 
 ## Unreleased
 
+**Platform**
+
+- Windows x64 port (in progress; `docs/WINDOWS.md`): the interpreter,
+  synthdef compiler (runtime plugin compilation to `.dll` with a bundled
+  llvm-mingw toolchain, so no developer tools are needed on the user's
+  machine), audio engine (WASAPI/DirectSound), bridges, OSC, and the JUCE
+  app build with clang-cl. Every host-side OS call now goes through small
+  shared shims (dynamic loading, process spawning, well-known paths), which
+  also fixed plugin compilation for paths containing spaces on every
+  platform, and every 64-bit integer is spelled via `<cstdint>` (`long` is
+  32 bits on Windows).
+- Printed Map and Set order is now the same on every platform: value
+  hashing no longer depends on the C++ standard library's `std::hash`.
+  String-keyed maps print in a different order than before on macOS
+  (e.g. `[y: 99, z: 3, x: 1]` where `[x: 1, y: 99, z: 3]` used to appear);
+  `hash(Symbol)` is deterministic across runs. `sinpi`/`cospi`/`tanpi` and
+  the FFT are exact and identical on every platform too, so the golden test
+  suite shares one set of expected files.
+- The distribution folder now includes `include/` (the plugin headers), so
+  synth definitions compile on machines without a source checkout. Earlier
+  releases relied on the build machine's source path.
+
 ## v0.2.1 (4 September 2026)
 
 **App**

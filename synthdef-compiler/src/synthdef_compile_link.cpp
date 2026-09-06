@@ -73,9 +73,13 @@ static string toolchainCommand() {
         if (char const* cc = getenv("TZPL_CC"); cc && cc[0]) return string(cc);
 #if defined(_WIN32)
         if (fs::path root = tzpl::distRoot(); !root.empty()) {
-            fs::path bundled = root / "toolchain" / "bin" / "clang++.exe";
+            // llvm-mingw's target-prefixed driver pins the target and runtime
+            // choices; bare clang++.exe relies on the toolchain's defaults.
             std::error_code ec;
-            if (fs::is_regular_file(bundled, ec)) return bundled.generic_string();
+            for (char const* name : {"x86_64-w64-mingw32-clang++.exe", "clang++.exe"}) {
+                fs::path bundled = root / "toolchain" / "bin" / name;
+                if (fs::is_regular_file(bundled, ec)) return bundled.generic_string();
+            }
         }
 #elif defined(__APPLE__)
         return string("clang");

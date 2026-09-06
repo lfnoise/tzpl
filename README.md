@@ -1,6 +1,6 @@
 # TZPL — Audio Coding Platform
 
-An audio coding platform for composing, experimenting with, and performing music, combining a statically typed programming language, an audio signal graph compiler, and a real-time audio engine. Runs on macOS (CoreAudio) and Linux (ALSA/JACK/PulseAudio).
+An audio coding platform for composing, experimenting with, and performing music, combining a statically typed programming language, an audio signal graph compiler, and a real-time audio engine. Runs on macOS (CoreAudio) and Linux (ALSA/JACK/PulseAudio); a Windows (WASAPI) port is in progress (`docs/WINDOWS.md`).
 
 ## Sub-Projects
 
@@ -102,16 +102,20 @@ tzpl/
 
 ## Prerequisites
 
-- **Compiler**: Clang (AppleClang on macOS; Clang 19+ on Linux). GCC is not
-  supported: the engine uses Clang-only `ext_vector_type` swizzles, and the
-  VM uses `[[clang::musttail]]`
+- **Compiler**: Clang (AppleClang on macOS; Clang 19+ on Linux; clang-cl on
+  Windows). GCC and MSVC are not supported: the engine uses Clang-only
+  `ext_vector_type` swizzles, and the VM uses `[[clang::musttail]]`
 - **CMake**: 3.21+
 - **C++ Standard**: C++23
-- **Platform**: macOS (CoreAudio) and Linux (ALSA/JACK/PulseAudio; see `docs/LINUX.md`).
+- **Platform**: macOS (CoreAudio), Linux (ALSA/JACK/PulseAudio; see
+  `docs/LINUX.md`), Windows x64 (WASAPI/DirectSound; see `docs/WINDOWS.md`,
+  port in progress).
 - **Frameworks** (macOS): CoreAudio, CoreFoundation, AudioToolbox (found automatically)
 - **Packages** (Linux): `libasound2-dev` and `libsndfile1-dev` required; JACK,
   PulseAudio, and the JUCE GUI need more — see `docs/LINUX.md` for the full
   list, a ready-made Docker dev environment, and real-time setup
+- **Windows**: Visual Studio 2022 Build Tools, LLVM (clang-cl), Ninja, and the
+  pinned llvm-mingw for runtime plugin compilation — see `docs/WINDOWS.md`
 
 ## Building
 

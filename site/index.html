@@ -185,7 +185,7 @@ in the assembled site. Run <code>python3 site/build.py</code> and open
     platform for composing, experimenting with, and performing music — a signal-graph
     compiler that turns synth definitions into native plugins, and a real-time engine
     that hot-loads them while the music plays.</p>
-    <p class="runs-on">Runs natively on macOS and Linux.</p>
+    <p class="runs-on">Runs natively on macOS and Linux; Windows port in progress.</p>
     <div class="hero-actions">
       <a class="primary" href="Getting_Started.html">Get Started</a>
       <a class="secondary" href="Tzopilotl_by_Example.html">By Example</a>
@@ -254,16 +254,18 @@ bubbles <span class="fnm">defSynthX</span>(<span class="str">"bubbles"</span>) <
 
   <section class="install">
     <h2>Build from source</h2>
-    <p>TZPL runs on macOS (CoreAudio) and Linux (ALSA/JACK/PulseAudio). Build
-    from a checkout:</p>
+    <p>TZPL runs on macOS (CoreAudio) and Linux (ALSA/JACK/PulseAudio), with a
+    Windows (WASAPI) port in progress. Build from a checkout:</p>
 <pre><code>git clone https://github.com/lfnoise/tzpl.git
 cd tzpl
 ./build.sh              <span class="cmt"># Release build, all cores</span>
 ./build/lang/tzpl       <span class="cmt"># start the Tzopilotl REPL</span></code></pre>
-    <p class="reqs">Requires Clang (AppleClang on macOS, Clang 19+ on Linux),
-    CMake 3.21+, and a C++23 toolchain. Linux packages, a Docker dev
-    environment, and real-time setup are covered in
-    <a href="https://github.com/lfnoise/tzpl/blob/main/docs/LINUX.md">docs/LINUX.md</a>.
+    <p class="reqs">Requires Clang (AppleClang on macOS, Clang 19+ on Linux,
+    clang-cl on Windows), CMake 3.21+, and a C++23 toolchain. Linux packages,
+    a Docker dev environment, and real-time setup are covered in
+    <a href="https://github.com/lfnoise/tzpl/blob/main/docs/LINUX.md">docs/LINUX.md</a>;
+    the Windows toolchains in
+    <a href="https://github.com/lfnoise/tzpl/blob/main/docs/WINDOWS.md">docs/WINDOWS.md</a>.
     See <a href="Getting_Started.html">Getting Started</a> for the desktop
     app, packaged releases, and first sounds.</p>
   </section>

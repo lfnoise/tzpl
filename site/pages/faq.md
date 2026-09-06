@@ -34,9 +34,10 @@ module's documentation states whether it is RT-safe.
 ## Sound & synthdefs
 
 **`defSynthX` fails with a compiler error about clang.**
-Synthdef compilation emits C++ and compiles it with the system toolchain,
-so a working `clang` must be on `PATH`. On macOS:
-`xcode-select --install`.
+Synthdef compilation emits C++ and compiles it with a C++ compiler: on macOS
+`clang` from the Xcode Command Line Tools (`xcode-select --install`), on
+Linux the `clang++` the build was configured with (or `$TZPL_CC`), on
+Windows the llvm-mingw toolchain bundled in the distribution folder.
 
 **I redefined a synth while it was playing -- why didn't the sound change
 immediately?**
@@ -65,6 +66,6 @@ code keeps its original permissive licenses; see
 [THIRD_PARTY_NOTICES.md](https://github.com/lfnoise/tzpl/blob/main/THIRD_PARTY_NOTICES.md).
 
 **Will it run on Linux or Windows?**
-Currently macOS only (the engine speaks CoreAudio). Cross-platform support
-is planned; the interpreter and compilers are portable C++23, so the audio
-backend is the main porting surface.
+Linux is supported (build from source; `docs/LINUX.md`). A Windows x64 port
+is in progress (`docs/WINDOWS.md`): clang-cl for the app and a bundled
+llvm-mingw for runtime-compiled synth plugins.
