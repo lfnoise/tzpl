@@ -32,6 +32,13 @@ CLI="$STAGE/Tzopilotl/bin/tzpl"
 IDENTITY="${TZPL_CODESIGN_IDENTITY:-}"
 PROFILE="${TZPL_NOTARY_PROFILE:-}"
 
+# Runtime synthdef compilation needs the plugin headers beside modules/
+# (users have no source tree); the dist component installs them.
+if [[ ! -f "$STAGE/Tzopilotl/include/tzpl_plugin_abi.h" ]]; then
+    echo "dist: ERROR: $STAGE/Tzopilotl/include/ is missing the plugin headers" >&2
+    exit 1
+fi
+
 # A distributable binary must reference only system libraries: a stray
 # Homebrew dylib path (e.g. libnats when the static-link config fell back
 # to dynamic) would make the app fail to launch on end-user machines.

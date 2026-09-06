@@ -44,6 +44,14 @@ inline constexpr char kPathListSep = ':';
 // Split a PATH-style list on kPathListSep, dropping empty entries.
 std::vector<std::string> splitPathList(std::string_view list);
 
+// Strings in the language are UTF-8 bytes; std::filesystem::path::string()
+// is the ANSI code page on Windows. These convert losslessly on every
+// platform. pathToUtf8 keeps the native separator; pathToUtf8Generic uses
+// '/', which is what .x code (std.path) expects.
+std::filesystem::path pathFromUtf8(std::string_view utf8);
+std::string pathToUtf8(std::filesystem::path const& p);
+std::string pathToUtf8Generic(std::filesystem::path const& p);
+
 // Absolute path of the running executable with symlinks resolved. Empty on
 // failure.
 std::filesystem::path executablePath();

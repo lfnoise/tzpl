@@ -1,10 +1,10 @@
 -- Async file I/O builtins (NRT): readFileAsync / writeFileAsync & co.
 -- The syscalls run on the NRTVM's I/O worker; a top-level await parks via
 -- the host-wait hook. Output is deterministic because awaited values print
--- in program order. Uses a scratch dir under /tmp.
+-- in program order. Uses a scratch dir under tempDir().
 import std.futures.*;
 
-let dir = "/tmp/tzpl_test_async_fileio";
+let dir = tempDir() $ "/tzpl_test_async_fileio";
 makeDir(dir) println;
 
 -- sync write, async readback

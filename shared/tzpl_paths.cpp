@@ -47,6 +47,21 @@ std::vector<std::string> splitPathList(std::string_view list) {
     return result;
 }
 
+fs::path pathFromUtf8(std::string_view utf8) {
+    return fs::path(std::u8string_view(reinterpret_cast<char8_t const*>(utf8.data()),
+                                       utf8.size()));
+}
+
+std::string pathToUtf8(fs::path const& p) {
+    std::u8string u = p.u8string();
+    return std::string(reinterpret_cast<char const*>(u.data()), u.size());
+}
+
+std::string pathToUtf8Generic(fs::path const& p) {
+    std::u8string u = p.generic_u8string();
+    return std::string(reinterpret_cast<char const*>(u.data()), u.size());
+}
+
 static fs::path envPath(char const* name) {
     char const* v = std::getenv(name);
     return (v && *v) ? fs::path(v) : fs::path{};

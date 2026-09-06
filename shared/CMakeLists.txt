@@ -44,6 +44,23 @@ endif()
 
 include(GNUInstallDirs)
 
+# The distribution folder carries the plugin headers as include/ beside
+# modules/: generated synthdef code #includes them at runtime, and a user's
+# machine has no source tree (synthdef_compile_link.cpp resolves the
+# distribution's include/ after $TZPL_SHARED_INCLUDE). Sleef goes with them
+# where plugins link it.
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/
+    DESTINATION include
+    COMPONENT dist
+    FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
+)
+if(UNIX AND NOT APPLE)
+    install(TARGETS sleef LIBRARY DESTINATION lib COMPONENT dist
+            NAMELINK_COMPONENT dist)
+    install(FILES ${sleef_BINARY_DIR}/include/sleef.h
+            DESTINATION include COMPONENT dist)
+endif()
+
 install(FILES
     tzpl_plugin_abi.h
     tempo_ramp.hpp

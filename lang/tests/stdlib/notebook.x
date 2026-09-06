@@ -1,5 +1,5 @@
 -- std.notebook: programmatic .tzd construction. Checks the Msg layout,
--- the TZB header, and a write/read-back round trip through /tmp.
+-- the TZB header, and a write/read-back round trip through tempDir().
 import std.message.*;
 import std.messageEncoding.*;
 import std.notebook.*;
@@ -24,7 +24,7 @@ b isMessage println;
 println(decode(b) toString == cells notebookMsg toString);
 
 -- File round trip.
-let dir = "/tmp/tzpl_test_stdlib_notebook";
+let dir = tempDir() $ "/tzpl_test_stdlib_notebook";
 makeDir(dir) println;
 saveNotebook(dir $ "/gen.tzd", cells) println;
 match (readFileBytes(dir $ "/gen.tzd")) {

@@ -29,6 +29,18 @@
 #include <stddef.h>
 #include <stdlib.h>
 
+/* Marks the symbols a plugin exports for the loader (load, tzpl_abi_version,
+ * tzpl_sharedInput, ...). A Windows DLL exports nothing unless told to; on
+ * ELF/Mach-O this is the default visibility, spelled out so a plugin built
+ * with -fvisibility=hidden still works. Emitted by both code generators. */
+#if defined(_WIN32)
+  #define TZPL_PLUGIN_EXPORT __declspec(dllexport)
+#elif defined(__GNUC__)
+  #define TZPL_PLUGIN_EXPORT __attribute__((visibility("default")))
+#else
+  #define TZPL_PLUGIN_EXPORT
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif

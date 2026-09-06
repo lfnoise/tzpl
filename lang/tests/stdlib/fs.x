@@ -1,8 +1,8 @@
--- File/OS builtins + std.fs wrappers (NRT). Uses a scratch dir under /tmp.
+-- File/OS builtins + std.fs wrappers (NRT). Uses a scratch dir under tempDir().
 import std.fs.*;
 import std.result.*;
 
-let dir = "/tmp/tzpl_test_stdlib_fs";
+let dir = tempDir() $ "/tzpl_test_stdlib_fs";
 makeDir(dir) println;
 makeDir(dir $ "/nested/deep") println;
 
@@ -21,7 +21,7 @@ writeLines(dir $ "/l.txt", ["one", "two"]) println;
 readLines(dir $ "/l.txt") unwrap println;
 readFileOr(dir $ "/nope.txt", "dflt") println;
 readFileResult(dir $ "/l.txt") isOk println;
-readFileResult(dir $ "/nope.txt") errOption unwrap println;
+readFileResult(dir $ "/nope.txt") errOption unwrap replace(dir, "<dir>") println;
 
 listDir(dir) unwrap println;
 renameFile(dir $ "/a.txt", dir $ "/b.txt") println;
