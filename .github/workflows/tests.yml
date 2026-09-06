@@ -270,3 +270,25 @@ jobs:
           $env:TZPL_JUCE_SELFTEST = "1"
           .\build\app\tzpl_app_juce_artefacts\Release\Tzopilotl.exe -I "bridge/modules;lang/modules" | Tee-Object st.txt
           if (-not (Select-String -Path st.txt -Pattern "SELFTEST OK" -Quiet)) { throw "self-test failed" }
+
+      # Distribution zip (unsigned): the folder a user unzips, with the
+      # trimmed llvm-mingw as toolchain/ so synthdefs compile on a machine
+      # with no developer tools. Uploaded so testers can exercise audio on
+      # real hardware, which the runner has none of. Runs only after the
+      # tests above, so a broken build is never handed out.
+      - name: Package (dist zip)
+        shell: pwsh
+        run: |
+          $subset = Join-Path $env:RUNNER_TEMP "tzpl-toolchain"
+          powershell -NoProfile -ExecutionPolicy Bypass -File packaging\make_toolchain_subset.ps1 -Source "C:\$env:LLVM_MINGW" -Dest $subset
+          cmake -B build -DTZPL_BUNDLE_TOOLCHAIN_DIR="$subset"
+          cmake --build build --target dist
+          Get-ChildItem build\Tzopilotl-*-win64.zip | ForEach-Object { "{0}  {1:N1} MB" -f $_.Name, ($_.Length / 1MB) }
+
+      - name: Upload dist zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tzopilotl-win64
+          path: build/Tzopilotl-*-win64.zip
+          retention-days: 14
+          if-no-files-found: error
