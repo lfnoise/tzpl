@@ -104,10 +104,18 @@ try {
     $cxx = Join-Path $Dest 'bin\x86_64-w64-mingw32-clang++.exe'
     & $cxx -std=c++23 -O2 -c (Join-Path $probe 'probe.cpp') -o (Join-Path $probe 'probe.o')
     if ($LASTEXITCODE -ne 0) {
-        # Show what the driver resolved and what the subset holds.
-        & $cxx -v -std=c++23 -fsyntax-only (Join-Path $probe 'probe.cpp') 2>&1 | Select-Object -First 60
+        # Show what the driver resolved and what the subset holds. Native
+        # stderr goes through cmd so Windows PowerShell does not turn it into
+        # a terminating error.
+        $ErrorActionPreference = 'Continue'
+        $probeCpp = Join-Path $probe 'probe.cpp'
+        Write-Host "--- files under include: $((Get-ChildItem -Recurse -File (Join-Path $Dest 'include')).Count); cmath present: $(Test-Path (Join-Path $Dest 'include\c++\v1\cmath'))"
+        Write-Host "--- with explicit -isystem:"
+        cmd /c "`"$cxx`" -std=c++23 -fsyntax-only -isystem `"$Dest\include\c++\v1`" -isystem `"$Dest\include`" `"$probeCpp`" 2>&1 && echo EXPLICIT-ISYSTEM-OK"
+        Write-Host "--- driver -v:"
+        cmd /c "`"$cxx`" -v -std=c++23 -fsyntax-only `"$probeCpp`" 2>&1"
+        cmd /c "`"$cxx`" -print-resource-dir 2>&1"
         Get-ChildItem $Dest | Select-Object -ExpandProperty Name
-        Test-Path (Join-Path $Dest 'include\c++\v1\cmath')
         throw "subset cannot compile the probe"
     }
     # (quoted: a bare comma is PowerShell's array separator)
