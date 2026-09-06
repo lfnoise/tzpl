@@ -16,13 +16,20 @@ else()
                     "Use -DCMAKE_CXX_COMPILER=clang++ or g++-15 to configure.")
 endif()
 
-# Common compiler flags
-set(TZPL_COMPILE_OPTIONS
-    -Wall -Wextra -Wpedantic
-    -Wno-unused-parameter
-    # Note: exceptions are used for initialization errors only.
-    # The real-time execution path does not throw.
-)
+# Common compiler flags. GNU-style options only reach GNU-style drivers;
+# clang-cl (Windows) takes MSVC syntax and CMake's per-config flags.
+if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+    set(TZPL_GNU_DRIVER OFF)
+    set(TZPL_COMPILE_OPTIONS /W3)
+else()
+    set(TZPL_GNU_DRIVER ON)
+    set(TZPL_COMPILE_OPTIONS
+        -Wall -Wextra -Wpedantic
+        -Wno-unused-parameter
+        # Note: exceptions are used for initialization errors only.
+        # The real-time execution path does not throw.
+    )
+endif()
 
 # --- tzpl_lib static library (everything except main.cpp) ---
 
@@ -85,19 +92,25 @@ target_include_directories(tzpl_lib PUBLIC
 target_link_libraries(tzpl_lib PUBLIC shared)
 target_compile_options(tzpl_lib PRIVATE ${TZPL_COMPILE_OPTIONS})
 
-# Debug flags
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    target_compile_options(tzpl_lib PRIVATE -g -O0)
-endif()
-
-# Release flags
-if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    target_compile_options(tzpl_lib PRIVATE -O2)
+# Debug / Release flags (GNU drivers; clang-cl uses CMake's /Od and /O2)
+if(TZPL_GNU_DRIVER)
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        target_compile_options(tzpl_lib PRIVATE -g -O0)
+    endif()
+    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+        target_compile_options(tzpl_lib PRIVATE -O2)
+    endif()
 endif()
 
 # --- Linenoise line-editing library (vendored C, CLI only) ---
-
-add_library(linenoise STATIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/linenoise/linenoise.c)
+#
+# linenoise is termios-only. On Windows a stub with the same six entry
+# points reads lines with fgets; the REPL loses editing and history there.
+if(WIN32)
+    add_library(linenoise STATIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/linenoise/linenoise_win.c)
+else()
+    add_library(linenoise STATIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/linenoise/linenoise.c)
+endif()
 target_include_directories(linenoise PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/linenoise)
 
 # --- tzpl executable (CLI + REPL) ---
@@ -105,6 +118,11 @@ target_include_directories(linenoise PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_pa
 add_executable(tzpl src/main.cpp)
 target_link_libraries(tzpl PRIVATE tzpl_lib linenoise)
 target_compile_options(tzpl PRIVATE ${TZPL_COMPILE_OPTIONS})
+if(WIN32)
+    # Application manifest: UTF-8 active code page (so narrow CRT and
+    # std::filesystem calls take UTF-8 paths) and per-monitor DPI awareness.
+    target_sources(tzpl PRIVATE windows/tzpl.rc)
+endif()
 
 # Stdlib fallback for dev builds, where the build directory has no modules/
 # ancestor for the executable-relative walk-up to find (see module_paths.hpp).
@@ -113,14 +131,13 @@ target_compile_definitions(tzpl PRIVATE
     EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/examples"
 )
 
-# Debug flags
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    target_compile_options(tzpl PRIVATE -g -O0)
-endif()
-
-# Release flags
-if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    target_compile_options(tzpl PRIVATE -O2)
+if(TZPL_GNU_DRIVER)
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        target_compile_options(tzpl PRIVATE -g -O0)
+    endif()
+    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+        target_compile_options(tzpl PRIVATE -O2)
+    endif()
 endif()
 
 # --- install targets ---
@@ -135,7 +152,13 @@ install(FILES
     include/tzpl.hpp
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/tzpl
 )
-install(TARGETS tzpl
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-    COMPONENT dist
-)
+# The distribution folder on Windows keeps tzpl.exe at its root next to
+# modules/ (no bin/), like Tzopilotl.exe.
+if(WIN32)
+    install(TARGETS tzpl RUNTIME DESTINATION . COMPONENT dist)
+else()
+    install(TARGETS tzpl
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        COMPONENT dist
+    )
+endif()

@@ -16,7 +16,11 @@
 #include <cstdint>
 #include <cstdio>
 #include <functional>
-#include <pthread.h>
+#ifdef _WIN32
+  #include <cstdint>
+#else
+  #include <pthread.h>
+#endif
 
 #include "repl_session.hpp"
 
@@ -109,7 +113,11 @@ struct EvalFlash {
 struct GuiState;  // forward
 
 struct AsyncEval {
+#ifdef _WIN32
+    std::uintptr_t thread_ = 0;  // _beginthreadex handle
+#else
     pthread_t thread_{};
+#endif
     bool threadActive_ = false;
     std::atomic<bool> running{false};
 

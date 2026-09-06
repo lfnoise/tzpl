@@ -45,8 +45,10 @@
 #include <format>
 #include <charconv>
 #include <cstdlib>
-#ifdef __APPLE__
+#if defined(__APPLE__)
 #include <xlocale.h>  // locale_t / newlocale / strtod_l
+#elif defined(_WIN32)
+#include <locale.h>   // _locale_t / _create_locale / _strtod_l (UCRT)
 #else
 #include <locale.h>   // glibc: locale_t / newlocale here; strtod_l via
                       // <stdlib.h> under _GNU_SOURCE (implied by clang++)
@@ -85,8 +87,14 @@ using isize = ptrdiff_t;
 // is correctly rounded, so parseFloatC(formatFloat(v)) == v bit-for-bit.
 // (FP std::from_chars needs a macOS 26 deployment target; revisit then.)
 inline f64 parseFloatC(char const* s, char** end) {
+#if defined(_WIN32)
+    // UCRT strtod is correctly rounded too, so the round-trip guarantee holds.
+    static _locale_t cLocale = _create_locale(LC_ALL, "C");
+    return _strtod_l(s, end, cLocale);
+#else
     static locale_t cLocale = newlocale(LC_ALL_MASK, "C", (locale_t)0);
     return strtod_l(s, end, cLocale);
+#endif
 }
 
 // Format a double to its shortest round-trip representation.

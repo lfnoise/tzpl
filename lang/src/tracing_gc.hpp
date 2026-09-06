@@ -31,20 +31,24 @@
 #include "gc.hpp"
 #include "mmu_governor.hpp"
 #include <vector>
+#if defined(__APPLE__)
 #include <time.h>
+#else
+#include <chrono>
+#endif
 
 namespace ts {
 
 // Monotonic wall-clock in nanoseconds. RT-safe on macOS (vDSO, no syscall),
-// invariant across CPU migrations, unaffected by NTP adjustments. Linux gets
-// CLOCK_MONOTONIC for the same guarantees.
+// invariant across CPU migrations, unaffected by NTP adjustments. Elsewhere
+// std::chrono::steady_clock: CLOCK_MONOTONIC on Linux, QueryPerformanceCounter
+// on Windows, the same guarantees.
 inline u64 gcMonoNanos() {
 #if defined(__APPLE__)
     return ::clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
 #else
-    struct timespec ts;
-    ::clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (u64)ts.tv_sec * 1'000'000'000ull + (u64)ts.tv_nsec;
+    using namespace std::chrono;
+    return (u64)duration_cast<nanoseconds>(steady_clock::now().time_since_epoch()).count();
 #endif
 }
 

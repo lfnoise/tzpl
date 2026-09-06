@@ -33,11 +33,38 @@ set_target_properties(audio_engine_lib PROPERTIES OUTPUT_NAME audio_engine)
 
 target_include_directories(audio_engine_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(audio_engine_lib PUBLIC shared rtaudio)
-target_compile_definitions(audio_engine_lib PUBLIC HAVE_GETTIMEOFDAY=1)
+if(NOT WIN32)
+    target_compile_definitions(audio_engine_lib PUBLIC HAVE_GETTIMEOFDAY=1)
+endif()
 
 if(APPLE)
     find_library(AUDIOTOOLBOX_FRAMEWORK AudioToolbox REQUIRED)
     target_link_libraries(audio_engine_lib PUBLIC ${AUDIOTOOLBOX_FRAMEWORK})
+elseif(WIN32)
+    # libsndfile backs the audio-file reader, as on Linux: a CMake config
+    # package if one is on CMAKE_PREFIX_PATH (vcpkg), else a static
+    # FetchContent build (WAV/AIFF/CAF/FLAC-less; no external codecs).
+    # avrt: MMCSS "Pro Audio" scheduling for the worker silos.
+    find_package(SndFile CONFIG QUIET)
+    if(NOT SndFile_FOUND)
+        include(FetchContent)
+        set(BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
+        set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+        set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+        set(BUILD_REGTEST OFF CACHE BOOL "" FORCE)
+        set(ENABLE_EXTERNAL_LIBS OFF CACHE BOOL "" FORCE)
+        set(ENABLE_MPEG OFF CACHE BOOL "" FORCE)
+        set(ENABLE_CPACK OFF CACHE BOOL "" FORCE)
+        set(ENABLE_PACKAGE_CONFIG OFF CACHE BOOL "" FORCE)
+        set(INSTALL_PKGCONFIG_MODULE OFF CACHE BOOL "" FORCE)
+        FetchContent_Declare(sndfile
+            GIT_REPOSITORY https://github.com/libsndfile/libsndfile.git
+            GIT_TAG 1.2.2
+            GIT_SHALLOW TRUE
+        )
+        FetchContent_MakeAvailable(sndfile)
+    endif()
+    target_link_libraries(audio_engine_lib PUBLIC SndFile::sndfile avrt)
 elseif(UNIX)
     # libsndfile backs the audio-file reader (tzpl_audio_file.hpp) that
     # AudioToolbox provides on macOS. Sleef comes in via the shared target.

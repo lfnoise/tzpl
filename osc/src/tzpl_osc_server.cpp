@@ -22,14 +22,46 @@
 //
 
 #include "tzpl_osc.hpp"
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
+#ifdef _WIN32
+  #ifndef WIN32_LEAN_AND_MEAN
+  #define WIN32_LEAN_AND_MEAN
+  #endif
+  #include <winsock2.h>
+  #include <ws2tcpip.h>
+  #include <mutex>
+#else
+  #include <sys/socket.h>
+  #include <netinet/in.h>
+  #include <arpa/inet.h>
+  #include <unistd.h>
+#endif
 #include <print>
 #include <cstring>
 
 namespace osc {
+
+// Socket-API differences, kept to one place. OscSocket is the handle type
+// declared in tzpl_osc.hpp (SOCKET on Windows, int elsewhere).
+namespace {
+#ifdef _WIN32
+constexpr OscSocket kInvalidSocket = INVALID_SOCKET;
+inline bool socketValid(OscSocket s) { return s != INVALID_SOCKET; }
+inline void closeSocket(OscSocket s) { ::closesocket(s); }
+using SockLen = int;
+using RecvLen = int;
+inline void ensureWinsock() {
+    static std::once_flag once;
+    std::call_once(once, [] { WSADATA wsa; WSAStartup(MAKEWORD(2, 2), &wsa); });
+}
+#else
+constexpr OscSocket kInvalidSocket = -1;
+inline bool socketValid(OscSocket s) { return s >= 0; }
+inline void closeSocket(OscSocket s) { ::close(s); }
+using SockLen = socklen_t;
+using RecvLen = ssize_t;
+inline void ensureWinsock() {}
+#endif
+} // namespace
 
 OscServer::OscServer(OscDispatcher& dispatcher)
     : dispatcher_(dispatcher) {}
@@ -41,15 +73,17 @@ OscServer::~OscServer() {
 bool OscServer::start(int port) {
     if (running_.load()) return false;
 
+    ensureWinsock();
     socket_ = ::socket(AF_INET, SOCK_DGRAM, 0);
-    if (socket_ < 0) {
+    if (!socketValid(socket_)) {
         std::print(stderr, "OSC: failed to create socket\n");
         return false;
     }
 
     // Allow address reuse
     int reuse = 1;
-    setsockopt(socket_, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+    setsockopt(socket_, SOL_SOCKET, SO_REUSEADDR,
+               reinterpret_cast<char const*>(&reuse), sizeof(reuse));
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
@@ -58,8 +92,8 @@ bool OscServer::start(int port) {
 
     if (::bind(socket_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
         std::print(stderr, "OSC: failed to bind to port {}\n", port);
-        ::close(socket_);
-        socket_ = -1;
+        closeSocket(socket_);
+        socket_ = kInvalidSocket;
         return false;
     }
 
@@ -77,9 +111,9 @@ void OscServer::stop() {
     running_.store(false);
 
     // Close socket to unblock recvfrom
-    if (socket_ >= 0) {
-        ::close(socket_);
-        socket_ = -1;
+    if (socketValid(socket_)) {
+        closeSocket(socket_);
+        socket_ = kInvalidSocket;
     }
 
     if (thread_.joinable()) {
@@ -96,11 +130,11 @@ void OscServer::listenerLoop() {
 
     while (running_.load()) {
         sockaddr_in senderAddr{};
-        socklen_t senderLen = sizeof(senderAddr);
+        SockLen senderLen = sizeof(senderAddr);
 
-        ssize_t bytesRead = ::recvfrom(socket_, buffer, kMaxPacketSize, 0,
-                                        reinterpret_cast<sockaddr*>(&senderAddr),
-                                        &senderLen);
+        RecvLen bytesRead = ::recvfrom(socket_, buffer, kMaxPacketSize, 0,
+                                       reinterpret_cast<sockaddr*>(&senderAddr),
+                                       &senderLen);
 
         if (bytesRead <= 0) {
             if (!running_.load()) break;  // Socket closed for shutdown

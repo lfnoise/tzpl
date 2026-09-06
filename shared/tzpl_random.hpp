@@ -24,10 +24,13 @@
 #ifndef synthdef_random_hpp
 #define synthdef_random_hpp
 
+#if defined(_WIN32)
+#define _CRT_RAND_S  // rand_s, before any <stdlib.h>
+#endif
 #include "synthdef_types.hpp"
 #include "tzpl_simd.hpp"
 #include <cstdlib>
-#ifndef __APPLE__
+#if !defined(__APPLE__) && !defined(_WIN32)
 #include <sys/random.h>
 #endif
 
@@ -143,8 +146,13 @@ void arc4seedrand(RandState<Chans>& r) {
 		}
 		return;
 	}
-#ifdef __APPLE__
+#if defined(__APPLE__)
 	arc4random_buf(&r, sizeof(r));
+#elif defined(_WIN32)
+	// rand_s: the CRT's cryptographic RNG (RtlGenRandom), no extra library
+	// -- this header is also compiled into runtime plugins.
+	unsigned int* words = reinterpret_cast<unsigned int*>(&r);
+	for (usize i = 0; i < sizeof(r) / sizeof(unsigned int); ++i) rand_s(&words[i]);
 #else
 	getrandom(&r, sizeof(r), 0);
 #endif

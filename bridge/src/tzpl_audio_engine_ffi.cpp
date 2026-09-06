@@ -38,6 +38,7 @@
 #include "incremental_compiler.hpp"
 #include "diagnostic.hpp"
 #include <thread>
+#include <chrono>
 #include <string>
 #include <utility>
 #include <cmath>
@@ -1680,7 +1681,7 @@ static void ffi_nrtActorMsgTake(ts::VM& vm, u16 dst, u16, u16) {
 // fn _sleepMs(ms Int) Void -- NRT only; used by the actor-server poll loop.
 static void ffi_sleepMs(ts::VM& vm, u16 dst, u16, u16 argBase) {
     int ms = static_cast<int>(vm.reg(argBase).i);
-    if (ms > 0) usleep(static_cast<useconds_t>(ms) * 1000);
+    if (ms > 0) std::this_thread::sleep_for(std::chrono::milliseconds(ms));
     vm.reg(dst).i = 0;
 }
 

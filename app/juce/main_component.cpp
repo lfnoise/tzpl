@@ -33,7 +33,9 @@
 #include "tzpl_fonts.hpp"
 #include <cstdio>
 #include <cstdlib>
+#if JUCE_MAC || JUCE_LINUX
 #include <unistd.h>  // getpid, for the relaunch watcher
+#endif
 
 namespace tzplapp {
 

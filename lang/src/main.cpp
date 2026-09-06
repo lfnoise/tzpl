@@ -25,7 +25,21 @@
 #include <fstream>
 #include <sstream>
 #include <cstdlib>
-#include <unistd.h>
+#ifdef _WIN32
+  #include <io.h>
+  #include <fcntl.h>
+  #ifndef WIN32_LEAN_AND_MEAN
+  #define WIN32_LEAN_AND_MEAN
+  #endif
+  #ifndef NOMINMAX
+  #define NOMINMAX
+  #endif
+  #include <windows.h>
+  #define isatty _isatty
+  #define fileno _fileno
+#else
+  #include <unistd.h>
+#endif
 #include "linenoise.h"
 #include "tzpl.hpp"
 #include "tzpl_paths.hpp"
@@ -323,7 +337,29 @@ static void runREPL(VM& vm, Compiler& compiler, const VMTarget& target,
     }
 }
 
+#ifdef _WIN32
+// Console setup: binary stdout/stderr (the golden suite byte-compares LF
+// output; the CRT would otherwise write CRLF), UTF-8 code pages for the
+// interpreter's UTF-8 strings, and VT processing so the ANSI colours in
+// diagnostic.cpp render instead of printing as escape sequences.
+static void setupWindowsConsole() {
+    _setmode(_fileno(stdout), _O_BINARY);
+    _setmode(_fileno(stderr), _O_BINARY);
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+    for (DWORD which : {STD_OUTPUT_HANDLE, STD_ERROR_HANDLE}) {
+        HANDLE h = GetStdHandle(which);
+        DWORD mode = 0;
+        if (h != INVALID_HANDLE_VALUE && GetConsoleMode(h, &mode))
+            SetConsoleMode(h, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+    }
+}
+#endif
+
 int main(int argc, const char* argv[]) {
+#ifdef _WIN32
+    setupWindowsConsole();
+#endif
     try {
         // Create TypeUniverse (system-allocated, shared) and Compiler
         TypeUniverse types;

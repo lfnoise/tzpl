@@ -210,8 +210,14 @@ static int findDeviceByName(RtAudio* rta, const char* name) {
 }
 
 static std::unique_ptr<RtAudio> makeRtAudio() {
-#ifdef __APPLE__
+#if defined(__APPLE__)
     return std::make_unique<RtAudio>(RtAudio::MACOSX_CORE);
+#elif defined(_WIN32)
+    // WASAPI first; UNSPECIFIED (WASAPI, then DirectSound) if it lists no
+    // devices, e.g. an audio-less CI runner.
+    auto rt = std::make_unique<RtAudio>(RtAudio::WINDOWS_WASAPI);
+    if (rt->getDeviceCount() == 0) rt = std::make_unique<RtAudio>(RtAudio::UNSPECIFIED);
+    return rt;
 #else
     // Auto-select among the compiled-in APIs -- on Linux: JACK, then Pulse,
     // then ALSA, whichever is available and reports devices.
@@ -302,11 +308,7 @@ void RtAudioBackend::init(Engine* e) {
             // --- Open a separate input-only stream ---
             const char* inputDevName = e->streamParams_.inputDeviceName;
 
-#ifdef __APPLE__
-            inputRtaudio_ = std::make_unique<RtAudio>(RtAudio::MACOSX_CORE);
-#else
-            inputRtaudio_ = std::make_unique<RtAudio>(RtAudio::UNSPECIFIED);
-#endif
+            inputRtaudio_ = makeRtAudio();
             inputRtaudio_->setErrorCallback(errorCallback);
 
             int inputDeviceID = -1;

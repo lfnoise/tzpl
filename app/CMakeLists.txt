@@ -160,12 +160,15 @@ target_compile_definitions(tzpl_app PRIVATE
     EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/examples"
 )
 
+endif() # TZPL_BUILD_APP
+
 # ---------------------------------------------------------------------------
 # Headless document-layer tests (save/load round trips, content hashing,
 # interning, persistent history). Runs with an all-null AppContext.
+# These test the sources both GUI apps share, so they build with either.
 # ---------------------------------------------------------------------------
 
-if(TZPL_BUILD_GUI)
+if((TZPL_BUILD_APP AND TZPL_BUILD_GUI) OR TZPL_BUILD_APP_JUCE)
     add_executable(tzpl_doc_tests
         tests/doc_roundtrip_test.cpp
         src/document.cpp
@@ -192,16 +195,18 @@ if(TZPL_BUILD_GUI)
 
     # Headless widget-interaction tests: an ImGui context with no
     # rendering backend, driven by injected IO events (slider drags,
-    # fine control, cmd-click text entry, range gestures).
-    add_executable(tzpl_widget_tests
-        tests/widget_interaction_test.cpp
-        src/widget_draw.cpp
-    )
-    target_include_directories(tzpl_widget_tests PRIVATE src)
-    target_link_libraries(tzpl_widget_tests
-        PRIVATE imgui_lib
-        PRIVATE tzpl_audio_engine_bridge
-    )
+    # fine control, cmd-click text entry, range gestures). ImGui app only.
+    if(TZPL_BUILD_APP AND TZPL_BUILD_GUI)
+        add_executable(tzpl_widget_tests
+            tests/widget_interaction_test.cpp
+            src/widget_draw.cpp
+        )
+        target_include_directories(tzpl_widget_tests PRIVATE src)
+        target_link_libraries(tzpl_widget_tests
+            PRIVATE imgui_lib
+            PRIVATE tzpl_audio_engine_bridge
+        )
+    endif()
 
     # Headless graph view-model + auto-layout + edit-helper tests
     # (graph editor mode). Links the engine test plugins so the edit
@@ -233,11 +238,11 @@ endif()
 
 include(GNUInstallDirs)
 
-install(TARGETS tzpl_app
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-)
-
-endif() # TZPL_BUILD_APP
+if(TZPL_BUILD_APP)
+    install(TARGETS tzpl_app
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+endif()
 
 # ---------------------------------------------------------------------------
 # JUCE application target (tzpl_app_juce)
@@ -440,11 +445,17 @@ if(TZPL_BUILD_APP_JUCE)
 
     # The bundle goes at the root of the distribution folder, next to
     # modules/ (found at runtime via the executable-relative walk-up).
-    # On Linux the artefact is a plain executable, so install it into bin/
-    # (still adjacent to modules/ via the same walk-up).
+    # On Windows the .exe sits at that root too. On Linux the artefact is a
+    # plain executable installed into bin/ (still adjacent to modules/ via
+    # the same walk-up).
     if(APPLE)
         install(TARGETS tzpl_app_juce
             BUNDLE DESTINATION .
+            COMPONENT dist
+        )
+    elseif(WIN32)
+        install(TARGETS tzpl_app_juce
+            RUNTIME DESTINATION .
             COMPONENT dist
         )
     else()

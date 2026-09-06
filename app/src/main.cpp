@@ -27,7 +27,16 @@
 #include <sstream>
 #include <cstdlib>
 #include <cctype>
-#include <unistd.h>
+#ifdef _WIN32
+  #include <io.h>
+  #define isatty _isatty
+  #define fileno _fileno
+  #ifndef STDIN_FILENO
+  #define STDIN_FILENO 0
+  #endif
+#else
+  #include <unistd.h>
+#endif
 #include <csignal>
 #include <optional>
 #include <filesystem>
@@ -1119,7 +1128,7 @@ int main(int argc, const char* argv[]) {
                     // Non-interactive but listeners active: wait for messages
                     std::cout << "Running headless. Press Ctrl-C to stop.\n";
                     while (!gShouldQuit) {
-                        usleep(100000); // 100ms
+                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
                     }
                     std::cout << "\nStopping.\n";
                 }
