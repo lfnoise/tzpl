@@ -9,8 +9,9 @@
     the llvm-mingw UCRT x86_64 release (pinned in docs/WINDOWS.md) it keeps:
 
       bin\        the clang-<N>.exe compiler, the clang.exe / clang++.exe /
-                  x86_64-w64-mingw32-clang* launchers, ld.lld.exe, and the
-                  DLLs those import (libLLVM, libclang-cpp, libc++, ...)
+                  x86_64-w64-mingw32-clang* launchers, ld.lld.exe, the DLLs
+                  those import (libLLVM, libclang-cpp, libc++, ...), and the
+                  *.cfg Clang config files that select libc++/compiler-rt/lld
       lib\clang\<ver>\include   compiler builtin headers
       lib\clang\<ver>\lib\windows   compiler-rt builtins
       include\    CRT, Win32 and libc++ headers (shared across targets)
@@ -57,6 +58,10 @@ foreach ($f in 'clang.exe', 'clang++.exe', 'clang-target-wrapper.exe', 'ld.lld.e
                'x86_64-w64-mingw32-clang.exe', 'x86_64-w64-mingw32-clang++.exe') {
     Copy-File "bin\$f"
 }
+# Clang config files: <triple>.cfg pulls in mingw32-common.cfg, which is
+# where -stdlib=libc++ -rtlib=compiler-rt -unwindlib=libunwind -fuse-ld=lld
+# come from. Without them the driver looks for libstdc++ headers.
+Get-ChildItem (Join-Path $Source 'bin') -Filter '*.cfg' | ForEach-Object { Copy-File "bin\$($_.Name)" }
 $realClang = Get-ChildItem (Join-Path $Source 'bin') -Filter 'clang-*.exe' |
              Where-Object { $_.Name -match '^clang-\d+\.exe$' } | Select-Object -First 1
 if (-not $realClang) { throw "no clang-<N>.exe in $Source\bin" }
