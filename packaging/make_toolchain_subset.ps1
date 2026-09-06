@@ -13,8 +13,8 @@
                   DLLs those import (libLLVM, libclang-cpp, libc++, ...)
       lib\clang\<ver>\include   compiler builtin headers
       lib\clang\<ver>\lib\windows   compiler-rt builtins
-      include\    libc++ headers (shared across targets)
-      x86_64-w64-mingw32\include, \lib   mingw-w64 CRT/Win32 headers and libs
+      include\    CRT, Win32 and libc++ headers (shared across targets)
+      x86_64-w64-mingw32\lib   the x86_64 CRT, Win32 import and runtime libs
 
     and drops the other target sysroots, lldb, clangd, clang-tidy, python,
     and the rest. The result is a few hundred MB unpacked, ~60 MB zipped.
@@ -75,9 +75,10 @@ $clangLib = Get-ChildItem (Join-Path $Source 'lib\clang') | Select-Object -First
 Copy-Tree "lib\clang\$($clangLib.Name)\include"
 Copy-Tree "lib\clang\$($clangLib.Name)\lib\windows"
 
-# Headers and libraries for the x86_64 target.
-if (Test-Path (Join-Path $Source 'include')) { Copy-Tree 'include' }
-Copy-Tree 'x86_64-w64-mingw32\include'
+# Headers (all under the top-level include\ in the Windows package; a
+# per-target include\ exists only in some layouts) and the x86_64 libs.
+Copy-Tree 'include'
+if (Test-Path (Join-Path $Source 'x86_64-w64-mingw32\include')) { Copy-Tree 'x86_64-w64-mingw32\include' }
 Copy-Tree 'x86_64-w64-mingw32\lib'
 foreach ($doc in 'LICENSE.TXT', 'README.md') {
     if (Test-Path (Join-Path $Source $doc)) { Copy-File $doc }
