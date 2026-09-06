@@ -590,7 +590,9 @@ static void printHelp() {
 // Main
 // ---------------------------------------------------------------------------
 
-int main(int argc, const char* argv[]) {
+// The real entry point. main() below forwards to it; on Windows the JUCE
+// app is a GUI-subsystem executable whose entry point is WinMain instead.
+static int tzplMain(int argc, const char* argv[]) {
     try {
         TypeUniverse types;
         Compiler compiler(types);
@@ -1176,3 +1178,51 @@ int main(int argc, const char* argv[]) {
         return 1;
     }
 }
+
+#if defined(_WIN32) && defined(TZPL_GUI_JUCE)
+
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <shellapi.h>
+#include <io.h>
+#include <string>
+#include <vector>
+
+// juce_add_gui_app links Tzopilotl.exe with /SUBSYSTEM:WINDOWS, so the CRT
+// looks for WinMain. Arguments come from the wide command line as UTF-8
+// (the language's string encoding); a GUI process started from a console
+// has no stdio unless the shell redirected it, so attach the parent console
+// for --nogui runs and the self-test, leaving redirected handles alone.
+int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
+    if (AttachConsole(ATTACH_PARENT_PROCESS)) {
+        FILE* f = nullptr;
+        if (_fileno(stdout) < 0) freopen_s(&f, "CONOUT$", "w", stdout);
+        if (_fileno(stderr) < 0) freopen_s(&f, "CONOUT$", "w", stderr);
+        if (_fileno(stdin) < 0) freopen_s(&f, "CONIN$", "r", stdin);
+    }
+    int argc = 0;
+    LPWSTR* wargv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    std::vector<std::string> args;
+    std::vector<const char*> argv;
+    for (int i = 0; wargv && i < argc; ++i) {
+        int n = WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, nullptr, 0, nullptr, nullptr);
+        std::string a(n > 0 ? (size_t)n - 1 : 0, '\0');
+        if (n > 0) WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, a.data(), n, nullptr, nullptr);
+        args.push_back(std::move(a));
+    }
+    if (wargv) LocalFree(wargv);
+    for (auto const& a : args) argv.push_back(a.c_str());
+    argv.push_back(nullptr);
+    return tzplMain((int)args.size(), argv.data());
+}
+
+#else
+
+int main(int argc, const char* argv[]) { return tzplMain(argc, argv); }
+
+#endif
