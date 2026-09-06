@@ -49,11 +49,16 @@ September 2026: the full build, the ABI layout diff, all 475 golden tests
 (one `.expected.windows` override, `qa/edge_complex`, libm drift),
 `synthdef-compiler --test` end to end with the mingw toolchain, the doc
 and config tests, and `TZPL_JUCE_SELFTEST=1` including the LF-only save
-check. Getting there took twelve CI iterations; the fixes are in the
-branch history (manifest merge, Sleef include scope and `SLEEF_STATIC_LIBS`,
-argument-evaluation order in `parseInt`, NaN spelling, integer division
-by zero, POSIX-only calls in the integration tests). Still untested:
-audio through a real device (the runner has none) and item 8.
+check. The job then builds the distribution zip: `make_toolchain_subset.ps1`
+(334 MB unpacked subset; the `bin\*.cfg` files are what select libc++,
+compiler-rt and lld, do not drop them) and `make_dist_win.ps1`, uploaded
+as the `Tzopilotl-win64` artifact (~95 MB). Getting there took about
+twenty CI iterations; the fixes are in the branch history (manifest merge,
+Sleef include scope and `SLEEF_STATIC_LIBS`, argument-evaluation order in
+`parseInt`, NaN spelling, integer division by zero, POSIX-only calls in
+the integration tests, the Windows llvm-mingw layout). Still untested:
+audio through a real device (the runner has none) and the zip on a clean
+machine, which is item 8.
 
 ## First-build checklist
 

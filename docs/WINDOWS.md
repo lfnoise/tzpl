@@ -10,10 +10,11 @@ Status: verified in CI on `windows-latest` (the `windows-core` job): the
 whole tree builds with clang-cl, all 475 interpreter golden tests pass, the
 runtime plugin pipeline compiles, links, loads, and renders every test
 synth with the llvm-mingw toolchain, the ABI layout matches between the
-two compilers, and the JUCE app's headless self-test passes. Not yet
-exercised: a real audio device, and the distribution zip on a clean
-machine (`dev/windows/README.md`). There is no packaged Windows release
-yet.
+two compilers, and the JUCE app's headless self-test passes. The job also
+builds the distribution zip (about 95 MB, toolchain included) and uploads
+it as the `Tzopilotl-win64` artifact of each run, kept for 14 days. Not yet
+exercised: a real audio device, and that zip on a clean machine
+(`dev/windows/README.md`). There is no packaged Windows release yet.
 
 ## Two toolchains
 
@@ -118,7 +119,9 @@ an earlier session could not prune are removed at the next launch.
 
 `cmake --build build --target dist` (with `TZPL_BUNDLE_TOOLCHAIN_DIR`
 pointing at a subset made by `packaging\make_toolchain_subset.ps1`)
-produces `build\Tzopilotl-<version>-win64.zip`:
+produces `build\Tzopilotl-<version>-win64.zip`; CI does the same and
+attaches the zip to every `windows-core` run (Actions tab, run summary,
+Artifacts, `Tzopilotl-win64`):
 
 ```
 Tzopilotl\
