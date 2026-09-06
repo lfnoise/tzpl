@@ -281,8 +281,10 @@ jobs:
         run: |
           $subset = Join-Path $env:RUNNER_TEMP "tzpl-toolchain"
           powershell -NoProfile -ExecutionPolicy Bypass -File packaging\make_toolchain_subset.ps1 -Source "C:\$env:LLVM_MINGW" -Dest $subset
+          if ($LASTEXITCODE -ne 0) { throw "toolchain subset failed" }
           cmake -B build -DTZPL_BUNDLE_TOOLCHAIN_DIR="$subset"
           cmake --build build --target dist
+          if ($LASTEXITCODE -ne 0) { throw "dist failed" }
           Get-ChildItem build\Tzopilotl-*-win64.zip | ForEach-Object { "{0}  {1:N1} MB" -f $_.Name, ($_.Length / 1MB) }
 
       - name: Upload dist zip

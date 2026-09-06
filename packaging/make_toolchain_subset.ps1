@@ -93,7 +93,8 @@ try {
     $cxx = Join-Path $Dest 'bin\x86_64-w64-mingw32-clang++.exe'
     & $cxx -std=c++23 -O2 -c (Join-Path $probe 'probe.cpp') -o (Join-Path $probe 'probe.o')
     if ($LASTEXITCODE -ne 0) { throw "subset cannot compile the probe" }
-    & $cxx -shared -static -Wl,--exclude-all-symbols -o (Join-Path $probe 'probe.dll') (Join-Path $probe 'probe.o')
+    # (quoted: a bare comma is PowerShell's array separator)
+    & $cxx -shared -static '-Wl,--exclude-all-symbols' -o (Join-Path $probe 'probe.dll') (Join-Path $probe 'probe.o')
     if ($LASTEXITCODE -ne 0) { throw "subset cannot link the probe DLL" }
 } finally {
     $env:PATH = $oldPath

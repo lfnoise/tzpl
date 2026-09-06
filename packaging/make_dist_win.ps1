@@ -28,8 +28,9 @@ foreach ($required in 'Tzopilotl.exe', 'tzpl.exe', 'modules', 'include\tzpl_plug
     }
 }
 
-# Bundled plugin toolchain.
-if ($ToolchainDir -and (Test-Path $ToolchainDir)) {
+# Bundled plugin toolchain. A configured-but-missing directory is an error
+# (the subset step failed); an unset one is a deliberate local build.
+if ($ToolchainDir) {
     if (-not (Test-Path (Join-Path $ToolchainDir 'bin\clang++.exe'))) {
         throw "dist: $ToolchainDir has no bin\clang++.exe (run make_toolchain_subset.ps1 first)"
     }
