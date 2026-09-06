@@ -23,6 +23,7 @@
 //
 
 #include "opcodes.hpp"
+#include "math.hpp"      // truncDivInt / truncModInt
 #include "value.hpp"
 #include "persistent_vector.hpp"
 #include "persistent_map.hpp"
@@ -227,14 +228,14 @@ void op_mul_int(VM& vm, Code* pc) {
 // DIV_INT Rd, Ra, Rb  (2 words: op, regs)
 void op_div_int(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    vm.reg(dst).i = vm.reg(a).i / vm.reg(b).i;
+    vm.reg(dst).i = truncDivInt(vm.reg(a).i, vm.reg(b).i);
     DISPATCH(2);
 }
 
 // MOD_INT Rd, Ra, Rb  (2 words: op, regs)
 void op_mod_int(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    vm.reg(dst).i = vm.reg(a).i % vm.reg(b).i;
+    vm.reg(dst).i = truncModInt(vm.reg(a).i, vm.reg(b).i);
     DISPATCH(2);
 }
 
@@ -762,7 +763,7 @@ void op_make_complex(VM& vm, Code* pc) {
 
 void op_int_div(VM& vm, Code* pc) {
     u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    vm.reg(dst).i = vm.reg(a).i / vm.reg(b).i;
+    vm.reg(dst).i = truncDivInt(vm.reg(a).i, vm.reg(b).i);
     DISPATCH(2);
 }
 

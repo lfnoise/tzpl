@@ -33,6 +33,22 @@ const f64 kPi = std::numbers::pi;
 const f64 kTwoPi = 2. * kPi;
 const f64 kDegToRad = kPi / 180.;
 const f64 kRadToDeg = 180. / kPi;
+// Integer division and remainder with defined results at the two points
+// where the C operators are undefined behaviour: x / 0 and x % 0 (a trap on
+// x86, silent results on ARM), and INT64_MIN / -1 (overflow, also a trap on
+// x86). The results are the ones ARM64 hardware gives, which the language
+// has always shipped on macOS: x / 0 == 0, x % 0 == x, INT64_MIN / -1 wraps.
+inline i64 truncDivInt(i64 a, i64 b) {
+    if (b == 0) return 0;
+    if (b == -1) return (i64)(0 - (u64)a);
+    return a / b;
+}
+inline i64 truncModInt(i64 a, i64 b) {
+    if (b == 0) return a;
+    if (b == -1) return 0;
+    return a % b;
+}
+
 const f64 kMinToSecs = 60.; // beats per minute to beats per second
 const f64 kSecsToMin = 1. / 60.; // beats per second to beats per minute
 

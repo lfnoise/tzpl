@@ -44,6 +44,7 @@
 #include <print>
 #include <format>
 #include <charconv>
+#include <cstring>
 #include <cstdlib>
 #if defined(__APPLE__)
 #include <xlocale.h>  // locale_t / newlocale / strtod_l
@@ -101,6 +102,14 @@ inline f64 parseFloatC(char const* s, char** end) {
 // Always includes a decimal point (e.g., "1.0" not "1").
 // Writes a null-terminated string to buf. Returns the length (excluding null).
 inline size_t formatFloat(f64 value, char* buf, size_t bufsize) {
+    // Every NaN prints as "nan": to_chars would spell the sign (and MSVC's
+    // adds "(ind)"), and whether 0.0/0.0 sets the sign bit differs between
+    // x86 and ARM, so leaving it in would make output platform-dependent.
+    if (std::isnan(value)) {
+        if (bufsize < 4) { if (bufsize) buf[0] = '\0'; return 0; }
+        std::memcpy(buf, "nan", 4);
+        return 3;
+    }
     auto [ptr, ec] = std::to_chars(buf, buf + bufsize - 1, value);
     size_t len = static_cast<size_t>(ptr - buf);
 

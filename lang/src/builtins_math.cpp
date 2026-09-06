@@ -678,15 +678,18 @@ static bool parseIntStrict(VMString const& s, int radix, i64& out) {
 static void builtin_parseInt_string(VM& vm, u16 dst, u16, u16 ab) {
     auto* s = static_cast<StringObj*>(vm.reg(ab).o);
     i64 v = 0;
-    writeOptionIntResult(vm, dst, parseIntStrict(s->s, 10, v), v);
+    // Two statements: argument evaluation order is unspecified, and Clang
+    // evaluates right-to-left on the MSVC ABI (v would be read before set).
+    bool ok = parseIntStrict(s->s, 10, v);
+    writeOptionIntResult(vm, dst, ok, v);
 }
 
 // parseInt(String, Int) -> Option<Int> -- radix 2..36.
 static void builtin_parseInt_radix_string(VM& vm, u16 dst, u16, u16 ab) {
     auto* s = static_cast<StringObj*>(vm.reg(ab).o);
     i64 v = 0;
-    writeOptionIntResult(vm, dst,
-        parseIntStrict(s->s, (int)vm.reg(ab + 1).i, v), v);
+    bool ok = parseIntStrict(s->s, (int)vm.reg(ab + 1).i, v);
+    writeOptionIntResult(vm, dst, ok, v);
 }
 
 // parseFloat(String) -> Option<Float> -- strict: the whole string must be a
