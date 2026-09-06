@@ -26,9 +26,12 @@
  *      <llvm-mingw>\bin\clang -Ishared shared\tzpl_abi_layout_check.c -o plugin.exe
  *      host.exe > host.txt && plugin.exe > plugin.txt && fc host.txt plugin.txt
  *
- *  Any difference means the two sides would read each other's structs at
- *  the wrong offsets. Also useful on one toolchain as a record of the
- *  layout a given TZPL_PLUGIN_ABI_VERSION stands for.
+ *  Any difference in the struct rows means the two sides would read each
+ *  other's structs at the wrong offsets. Rows prefixed "info:" are context
+ *  (long double, for one, is 16 bytes under mingw and 8 under MSVC) and are
+ *  legitimately allowed to differ: nothing in the ABI uses those types. Also
+ *  useful on one toolchain as a record of the layout a given
+ *  TZPL_PLUGIN_ABI_VERSION stands for.
  */
 
 #include "tzpl_plugin_abi.h"
@@ -39,9 +42,9 @@
 
 int main(void) {
     printf("TZPL_PLUGIN_ABI_VERSION %d\n", TZPL_PLUGIN_ABI_VERSION);
-    printf("%-32s size %4zu\n", "void*", sizeof(void*));
-    printf("%-32s size %4zu\n", "long", sizeof(long));
-    printf("%-32s size %4zu\n", "long double", sizeof(long double));
+    printf("info: %-26s size %4zu\n", "void*", sizeof(void*));
+    printf("info: %-26s size %4zu\n", "long", sizeof(long));
+    printf("info: %-26s size %4zu\n", "long double", sizeof(long double));
     SHOW(tzpl_SErr);
     SHOW(tzpl_Rate);
     SHOW(tzpl_ElemType);

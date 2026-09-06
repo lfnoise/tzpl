@@ -232,7 +232,12 @@ jobs:
           & "C:\$env:LLVM_MINGW\bin\clang.exe" -Ishared shared\tzpl_abi_layout_check.c -o abi_plugin.exe
           .\abi_host.exe > abi_host.txt
           .\abi_plugin.exe > abi_plugin.txt
-          if (Compare-Object (Get-Content abi_host.txt) (Get-Content abi_plugin.txt)) { throw "ABI layout differs between clang-cl and llvm-mingw" }
+          Get-Content abi_host.txt
+          # "info:" rows (long double etc.) may differ; every struct row must not.
+          $h = Get-Content abi_host.txt | Where-Object { $_ -notmatch '^info:' }
+          $p = Get-Content abi_plugin.txt | Where-Object { $_ -notmatch '^info:' }
+          $d = Compare-Object $h $p
+          if ($d) { $d | Format-Table -AutoSize | Out-String | Write-Host; throw "ABI layout differs between clang-cl and llvm-mingw" }
 
       - name: Run lang tests
         shell: bash
