@@ -23,3 +23,12 @@ lang/scratch/
 /_site/
 /site/_audio/
 __pycache__/
+
+# Windows build artifacts
+*.dll
+*.exe
+*.pdb
+*.obj
+*.ilk
+*.exp
+*.lib
