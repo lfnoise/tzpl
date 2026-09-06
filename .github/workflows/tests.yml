@@ -175,11 +175,9 @@ jobs:
 
   # Windows core + JUCE app. Host: clang-cl (preinstalled LLVM) with the VS
   # 2022 Build Tools on the runner; runtime plugins: a pinned llvm-mingw
-  # (see docs/WINDOWS.md). Informational until it has a green streak on
-  # main; then drop continue-on-error and make it required.
+  # (see docs/WINDOWS.md). Required: a failure here fails the workflow.
   windows-core:
     runs-on: windows-latest
-    continue-on-error: true
     env:
       LLVM_MINGW: llvm-mingw-20260826-ucrt-x86_64
     steps:
