@@ -28,7 +28,6 @@
 #include <chrono>
 #include <cassert>
 #include <cstdlib>
-#include <dlfcn.h>
 #include <random>
 
 using namespace engine;

@@ -28,6 +28,7 @@
 #include <unistd.h>
 #include "linenoise.h"
 #include "tzpl.hpp"
+#include "tzpl_paths.hpp"
 #include "builtins.hpp"
 #include "nrt_vm.hpp"
 #include "module_compiler.hpp"
@@ -77,20 +78,9 @@ static std::string readFile(const std::string& path) {
     return ss.str();
 }
 
-// Split a colon-separated path string into individual directories
+// Split a PATH-style list (':' on POSIX, ';' on Windows) into directories.
 static std::vector<std::string> splitPaths(const std::string& paths) {
-    std::vector<std::string> result;
-    size_t start = 0;
-    while (start < paths.size()) {
-        size_t end = paths.find(':', start);
-        if (end == std::string::npos) end = paths.size();
-        std::string dir = paths.substr(start, end - start);
-        if (!dir.empty()) {
-            result.push_back(std::move(dir));
-        }
-        start = end + 1;
-    }
-    return result;
+    return tzpl::splitPathList(paths);
 }
 
 // --- REPL ---
@@ -179,9 +169,9 @@ static bool isInputComplete(const std::string& input) {
 
 // Get the history file path (~/.tzpl_history)
 static std::string historyPath() {
-    const char* home = getenv("HOME");
-    if (!home) return "";
-    return std::string(home) + "/.tzpl_history";
+    auto home = tzpl::homeDir();
+    if (home.empty()) return "";
+    return (home / ".tzpl_history").string();
 }
 
 // Read a possibly multi-line REPL input using linenoise

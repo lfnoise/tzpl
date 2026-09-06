@@ -2,7 +2,18 @@ add_library(shared INTERFACE)
 target_include_directories(shared INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(shared INTERFACE TZPL_SHARED_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
-target_link_libraries(shared INTERFACE Threads::Threads ${CMAKE_DL_LIBS})
+# Host-side platform shims (dynamic loading, process spawning, well-known
+# paths). One small static library so every consumer of the shared headers
+# gets them; never part of generated plugin code.
+add_library(tzpl_platform STATIC
+    tzpl_dynlib.cpp
+    tzpl_process.cpp
+    tzpl_paths.cpp
+)
+target_include_directories(tzpl_platform PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(tzpl_platform PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
+
+target_link_libraries(shared INTERFACE tzpl_platform)
 
 # Sleef supplies the vector math that <simd/simd.h> provides on macOS
 # (tzpl_simd.hpp includes <sleef.h> on non-Apple), so every consumer of the

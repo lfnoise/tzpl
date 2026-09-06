@@ -37,7 +37,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
-#include <dlfcn.h>
+#include "tzpl_dynlib.hpp"
 
 // ---------------------------------------------------------------------------
 // Test runner helpers
@@ -371,14 +371,14 @@ static void test_def_desc_introspection() {
 
     if (!bufdescPath.empty()) {
         // The freshly compiled plugin carries the current ABI version stamp.
-        if (void* handle = dlopen(bufdescPath.c_str(), RTLD_NOW | RTLD_LOCAL)) {
-            void* verPtr = dlsym(handle, "tzpl_abi_version");
+        if (void* handle = tzpl::dynlibOpenLocal(bufdescPath.c_str())) {
+            void* verPtr = tzpl::dynlibSym(handle, "tzpl_abi_version");
             check(verPtr != nullptr, "plugin exports tzpl_abi_version");
             if (verPtr) {
                 check(*(int64_t*)verPtr == TZPL_PLUGIN_ABI_VERSION,
                       "tzpl_abi_version matches TZPL_PLUGIN_ABI_VERSION");
             }
-            dlclose(handle);
+            tzpl::dynlibClose(handle);
         }
 
         engine::DefDesc fileDesc;

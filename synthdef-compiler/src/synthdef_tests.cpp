@@ -27,7 +27,8 @@
 #include <iostream>
 #include <iomanip>
 #include <float.h>
-#include <unistd.h>
+#include <chrono>
+#include <thread>
 
 // Forward declare test function
 namespace synthdef {
@@ -561,7 +562,7 @@ void test_synthdef() {
     
     initAudio(&e);
     startAudio(&e);
-    sleep(8);
+    std::this_thread::sleep_for(std::chrono::seconds(8));
     stopAudio(&e);
     uninitAudio(&e);
 }

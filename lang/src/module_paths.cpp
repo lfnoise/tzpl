@@ -1,51 +1,19 @@
 #include "module_paths.hpp"
+#include "tzpl_paths.hpp"
 
 #include <cstdlib>
-#include <cstring>
 #include <filesystem>
-
-#ifdef __APPLE__
-#include <mach-o/dyld.h>
-#endif
 
 namespace fs = std::filesystem;
 
 namespace ts {
 
 std::vector<std::string> envModulePaths() {
-    std::vector<std::string> paths;
+    // Separated by ':' on POSIX and ';' on Windows (tzpl::kPathListSep).
     if (const char* envPath = std::getenv("TZPL_PATH")) {
-        std::string pathStr(envPath);
-        size_t start = 0;
-        while (start < pathStr.size()) {
-            size_t end = pathStr.find(':', start);
-            if (end == std::string::npos) end = pathStr.size();
-            std::string dir = pathStr.substr(start, end - start);
-            if (!dir.empty()) {
-                paths.push_back(std::move(dir));
-            }
-            start = end + 1;
-        }
+        return tzpl::splitPathList(envPath);
     }
-    return paths;
-}
-
-// Absolute path of the running executable with symlinks resolved (so a
-// symlinked CLI still walks up from its real install location). Empty on
-// failure.
-static fs::path executablePath() {
-    std::error_code ec;
-#ifdef __APPLE__
-    uint32_t size = 0;
-    _NSGetExecutablePath(nullptr, &size);
-    std::string buf(size, '\0');
-    if (_NSGetExecutablePath(buf.data(), &size) != 0) return {};
-    buf.resize(std::strlen(buf.c_str()));
-    fs::path exe = fs::canonical(buf, ec);
-#else
-    fs::path exe = fs::canonical("/proc/self/exe", ec);
-#endif
-    return ec ? fs::path{} : exe;
+    return {};
 }
 
 std::vector<std::string> defaultModulePaths(
@@ -82,7 +50,7 @@ std::vector<std::string> defaultModulePaths(
     // so a stray modules/ far up the tree can't be picked up by accident; six
     // levels covers the deepest expected layout (.app/Contents/MacOS inside a
     // distribution folder).
-    if (fs::path exe = executablePath(); !exe.empty()) {
+    if (fs::path exe = tzpl::executablePath(); !exe.empty()) {
         fs::path dir = exe.parent_path();
         for (int depth = 0;
              depth < 6 && !dir.empty() && dir != dir.root_path();

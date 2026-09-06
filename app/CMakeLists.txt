@@ -188,6 +188,7 @@ if(TZPL_BUILD_GUI)
         src/app_config.cpp
     )
     target_include_directories(tzpl_config_tests PRIVATE src)
+    target_link_libraries(tzpl_config_tests PRIVATE tzpl_platform)
 
     # Headless widget-interaction tests: an ImGui context with no
     # rendering backend, driven by injected IO events (slider drags,

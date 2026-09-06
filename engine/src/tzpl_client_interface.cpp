@@ -33,7 +33,7 @@
 #include <map>
 #include <string_view>
 #include <vector>
-#include <dlfcn.h> // dlopen, dlclose
+#include "tzpl_dynlib.hpp"
 #include <filesystem>
 #include <chrono>
 #include <thread>
@@ -86,11 +86,8 @@ void copyNodeDefs(Engine* from, Engine* to) {
                 // dlcloses) the original during concurrent evaluation.
                 void* handle = nullptr;
                 if (def->dlHandle_) {
-                    Dl_info dl;
-                    if (dladdr((void*)def->info_.funs.processAudio, &dl)
-                        && dl.dli_fname) {
-                        handle = dlopen(dl.dli_fname, RTLD_NOW);
-                    }
+                    handle = tzpl::dynlibRetainFromAddress(
+                        (void const*)def->info_.funs.processAudio);
                 }
                 addNodeDef(to, def->info_, handle);
             }
@@ -136,7 +133,7 @@ f32 getSharedInput(int slot) {
 // versioning and its tzpl_SynthDef layout is unknowable (see the header).
 // Callers must refuse those rather than reading their structs.
 static bool pluginAbiVersion(void* handle, i64& out) {
-    if (void* ptr = dlsym(handle, "tzpl_abi_version")) {
+    if (void* ptr = tzpl::dynlibSym(handle, "tzpl_abi_version")) {
         out = *(int64_t*)ptr;
         return true;
     }
@@ -166,7 +163,7 @@ static bool pluginAbiAcceptable(void* handle, char const* path, bool verbose) {
     // Version 2 appended loop fields to tzpl_SampleBankEntry, changing the
     // samples[] stride. Only plugins that index bank entries are affected, and
     // exactly those export "swapSampleBank" (see the header's version notes).
-    if (version < 2 && dlsym(handle, "swapSampleBank")) {
+    if (version < 2 && tzpl::dynlibSym(handle, "swapSampleBank")) {
         if (verbose) {
             fprintf(stderr, "*** ERROR: plugin '%s' (ABI version %lld) uses sample "
                     "banks, whose entry layout changed in version 2; rebuild it\n",
@@ -214,26 +211,26 @@ static bool validSynthDefArrays(tzpl_SynthDef const& def,
 }
 
 bool loadOneDef(Engine* e, const char* path) {
-    void* handle = dlopen(path, RTLD_NOW);
+    void* handle = tzpl::dynlibOpen(path);
 
     if (!handle) {
-        fprintf(stderr, "*** ERROR: dlopen '%s' err '%s'\n", path, dlerror());
-        fprintf(stdout, "*** ERROR: dlopen '%s' err '%s'\n", path, dlerror());
-        dlclose(handle);
+        fprintf(stderr, "*** ERROR: dlopen '%s' err '%s'\n", path, tzpl::dynlibError().c_str());
+        fprintf(stdout, "*** ERROR: dlopen '%s' err '%s'\n", path, tzpl::dynlibError().c_str());
+        tzpl::dynlibClose(handle);
         return false;
     }
 
     if (!pluginAbiAcceptable(handle, path, /*verbose=*/true)) {
-        dlclose(handle);
+        tzpl::dynlibClose(handle);
         return false;
     }
 
     void *ptr;
 
-    ptr = dlsym(handle, "load");
+    ptr = tzpl::dynlibSym(handle, "load");
     if (!ptr) {
-        fprintf(stderr, "*** ERROR: dlsym %s err '%s'\n", "load", dlerror());
-        dlclose(handle);
+        fprintf(stderr, "*** ERROR: dlsym %s err '%s'\n", "load", tzpl::dynlibError().c_str());
+        tzpl::dynlibClose(handle);
         return false;
     }
 
@@ -242,18 +239,18 @@ bool loadOneDef(Engine* e, const char* path) {
     // Optional symbols: absent for plugins without sample buffers / tags /
     // sample banks (or built before the symbols existed).
     tzpl_BufferDefList bufs{0, nullptr};
-    if (void* bufPtr = dlsym(handle, "loadBufferDefs")) {
+    if (void* bufPtr = tzpl::dynlibSym(handle, "loadBufferDefs")) {
         bufs = (*(tzpl_LoadBufferDefsFun)bufPtr)();
     }
     tzpl_TagList tags{0, nullptr};
-    if (void* tagPtr = dlsym(handle, "loadTags")) {
+    if (void* tagPtr = tzpl::dynlibSym(handle, "loadTags")) {
         tags = (*(tzpl_LoadTagsFun)tagPtr)();
     }
     tzpl_SampleBankDefList banks{0, nullptr};
-    if (void* bankPtr = dlsym(handle, "loadSampleBankDefs")) {
+    if (void* bankPtr = tzpl::dynlibSym(handle, "loadSampleBankDefs")) {
         banks = (*(tzpl_LoadSampleBankDefsFun)bankPtr)();
     }
-    auto swapBank = (tzpl_SwapSampleBankFun)dlsym(handle, "swapSampleBank");
+    auto swapBank = (tzpl_SwapSampleBankFun)tzpl::dynlibSym(handle, "swapSampleBank");
 
     // Refuse a def whose counts and arrays disagree rather than registering
     // bogus pointers with the engine -- addSynthDef reinterpret_casts ins/outs
@@ -261,7 +258,7 @@ bool loadOneDef(Engine* e, const char* path) {
     // long after this call.
     if (!validSynthDefArrays(def, &bufs, &tags, &banks)) {
         fprintf(stderr, "*** ERROR: refusing malformed plugin '%s'\n", path);
-        dlclose(handle);
+        tzpl::dynlibClose(handle);
         return false;
     }
 
@@ -538,7 +535,7 @@ void addNodeDef(Engine* e, NodeDefInfo const& info, void* dlHandle) {
             if (old->refCount_ == 0) {
                 // No live nodes -- remove from chain and clean up now.
                 prev->next_ = old->next_;
-                if (old->dlHandle_) dlclose(old->dlHandle_);
+                if (old->dlHandle_) tzpl::dynlibClose(old->dlHandle_);
                 delete old;
             }
             break;
@@ -565,7 +562,7 @@ void releaseNodeDef(Engine* e, NodeDef* def) {
             prev = cur;
             cur = cur->next_;
         }
-        if (def->dlHandle_) dlclose(def->dlHandle_);
+        if (def->dlHandle_) tzpl::dynlibClose(def->dlHandle_);
         delete def;
     }
 }
@@ -593,7 +590,7 @@ void addSynthDef(Engine* e, tzpl_SynthDef const& def, void* dlHandle,
     // one choke point every plugin handle passes through (loadOneDef and the
     // bridge's compile-and-register paths both land here). Idempotent.
     if (dlHandle) {
-        if (void* siPtr = dlsym(dlHandle, "tzpl_sharedInput")) {
+        if (void* siPtr = tzpl::dynlibSym(dlHandle, "tzpl_sharedInput")) {
             *(tzpl_SharedInput const**)siPtr = &gSharedInput;
         }
     }
@@ -915,28 +912,28 @@ bool getPluginFileDesc(char const* path, DefDesc& out) {
     }
 
     CacheEntry entry{mtime, false, {}};
-    if (void* handle = dlopen(path, RTLD_NOW | RTLD_LOCAL)) {
+    if (void* handle = tzpl::dynlibOpenLocal(path)) {
         // Unstamped (pre-versioning) or newer-ABI plugin: its structs may not
         // match ours, so we must not read them. The cached failure keeps the
         // browser from probing it again on every selection change. Quiet here:
         // browsing a directory of mixed plugins should not spam the log.
         if (!pluginAbiAcceptable(handle, path, /*verbose=*/false)) {
-            dlclose(handle);
+            tzpl::dynlibClose(handle);
             cache[path] = std::move(entry);
             return false;
         }
-        if (void* ptr = dlsym(handle, "load")) {
+        if (void* ptr = tzpl::dynlibSym(handle, "load")) {
             tzpl_SynthDef def = (*(tzpl_LoadSynthDefFun)ptr)();
             tzpl_BufferDefList bufs{0, nullptr};
-            if (void* bufPtr = dlsym(handle, "loadBufferDefs")) {
+            if (void* bufPtr = tzpl::dynlibSym(handle, "loadBufferDefs")) {
                 bufs = (*(tzpl_LoadBufferDefsFun)bufPtr)();
             }
             tzpl_TagList tags{0, nullptr};
-            if (void* tagPtr = dlsym(handle, "loadTags")) {
+            if (void* tagPtr = tzpl::dynlibSym(handle, "loadTags")) {
                 tags = (*(tzpl_LoadTagsFun)tagPtr)();
             }
             tzpl_SampleBankDefList banks{0, nullptr};
-            if (void* bankPtr = dlsym(handle, "loadSampleBankDefs")) {
+            if (void* bankPtr = tzpl::dynlibSym(handle, "loadSampleBankDefs")) {
                 banks = (*(tzpl_LoadSampleBankDefsFun)bankPtr)();
             }
             if (validSynthDefArrays(def, &bufs, &tags, &banks)) {
@@ -944,7 +941,7 @@ bool getPluginFileDesc(char const* path, DefDesc& out) {
                 entry.ok = true;
             }
         }
-        dlclose(handle);
+        tzpl::dynlibClose(handle);
     }
     auto& stored = cache[path] = std::move(entry);
     if (!stored.ok) return false;
