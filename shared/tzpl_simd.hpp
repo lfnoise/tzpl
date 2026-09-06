@@ -118,7 +118,13 @@ using f64x8 = double        __attribute__((ext_vector_type(8)));
 
 #else // !__APPLE__
 
+// File scope, never inside simd_compat: with the MSVC toolchain <sleef.h>
+// pulls in headers that open `namespace std`, which nested inside
+// simd_compat would shadow ::std for every std:: call below.
 #include <type_traits>
+#include <algorithm>
+#include <cmath>
+#include <sleef.h>
 
 namespace simd_compat {
 
@@ -189,9 +195,6 @@ template <> struct Vector<unsigned long, 8> { using type = u64x8; };
 // ============================================================================
 // SECTION C — Math wrappers (4-wide only, via Sleef)
 // ============================================================================
-
-#include <sleef.h>
-#include <cmath>
 
 // --- f32x4 math ---
 inline f32x4 sin(f32x4 x)        { return Sleef_sinf4_u10(x); }
