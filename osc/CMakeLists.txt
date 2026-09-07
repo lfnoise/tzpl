@@ -16,11 +16,17 @@ target_link_libraries(osc_lib
     PUBLIC  oscpack
     PUBLIC  audio_engine_lib
 )
-
-# Match tzpl_lib optimization flags
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    target_compile_options(osc_lib PRIVATE -O1)
+if(WIN32)
+    target_link_libraries(osc_lib PUBLIC ws2_32)
 endif()
-if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    target_compile_options(osc_lib PRIVATE -O2)
+
+# Match tzpl_lib optimization flags (GNU-style drivers only; clang-cl uses
+# CMake's per-config /O flags everywhere, which already match).
+if(NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        target_compile_options(osc_lib PRIVATE -O1)
+    endif()
+    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+        target_compile_options(osc_lib PRIVATE -O2)
+    endif()
 endif()

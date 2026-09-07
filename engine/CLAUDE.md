@@ -14,7 +14,7 @@ The shared plugin ABI header lives in `../shared/tzpl_plugin_abi.h`.
 |---------|------|
 | `tzpl_client_interface.hpp/cpp` | Public API: engine lifecycle, command bundling, plugin loading |
 | `tzpl_audio_backend.hpp` | AudioBackend interface (device open/start/stop/streamTime) + `processAudioBlock()` |
-| `tzpl_audio_backend_rtaudio.hpp/cpp` | Default RtAudio backend (CoreAudio/ALSA), separate-input-device staging, macOS sample-rate listener |
+| `tzpl_audio_backend_rtaudio.hpp/cpp` | Default RtAudio backend (CoreAudio/ALSA/WASAPI), separate-input-device staging, macOS sample-rate listener |
 | `tzpl_engine.hpp/cpp` | Engine struct, safety limiter, built-in node defs, NRT/dead-node threads |
 | `tzpl_silo.hpp/cpp` | Parallel processing unit: node tables, topological sort, audio processing, command dispatch |
 | `tzpl_node.hpp/cpp` | Node, InPort, OutPort, Control, NodeDef — the graph data model |
@@ -34,7 +34,7 @@ The shared plugin ABI header lives in `../shared/tzpl_plugin_abi.h`.
 
 - Currently uses Xcode. A CMakeLists.txt also exists.
 - Requires C++23 or later.
-- macOS (CoreAudio) or Linux (ALSA/JACK/Pulse). SIMD via `<simd/simd.h>` on macOS, Clang `ext_vector_type` + Sleef elsewhere (`shared/tzpl_simd.hpp`).
+- macOS (CoreAudio), Linux (ALSA/JACK/Pulse), or Windows (WASAPI/DirectSound). SIMD via `<simd/simd.h>` on macOS, Clang `ext_vector_type` + Sleef elsewhere (`shared/tzpl_simd.hpp`). Plugins load through `shared/tzpl_dynlib.hpp` (dlopen / LoadLibrary).
 - Links CoreAudio and CoreFoundation frameworks.
 
 ## C++ Coding Style
@@ -67,4 +67,4 @@ provide a `tzpl_SynthFuns` function table (alloc, free, init, processAudio, note
 - Use `AtomicFifo` for all cross-thread data passing.
 - NRT operations are protected by `nrt_lock_` mutex.
 - Dead nodes are pushed to a FIFO and deleted by a background thread.
-- Worker threads run at SCHED_RR priority 63.
+- Worker threads run at SCHED_RR priority 63 (MMCSS "Pro Audio" + TIME_CRITICAL on Windows).

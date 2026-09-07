@@ -27,7 +27,16 @@
 #include "tzpl_chanadapt.hpp"
 #include <chrono>
 #include <cmath>
-#ifndef __APPLE__
+#if defined(_WIN32)
+  #ifndef WIN32_LEAN_AND_MEAN
+  #define WIN32_LEAN_AND_MEAN
+  #endif
+  #ifndef NOMINMAX
+  #define NOMINMAX
+  #endif
+  #include <windows.h>
+  #include <avrt.h>
+#elif !defined(__APPLE__)
 #include <mutex>
 #include <sys/mman.h>
 #endif
@@ -279,6 +288,17 @@ void Silo::processFrames() {
 }
 
 void make_this_thread_realtime() {
+#if defined(_WIN32)
+    // MMCSS "Pro Audio" is what WASAPI clients use for their own callback
+    // threads: it lifts the thread into the multimedia scheduling class.
+    // TIME_CRITICAL on top matches the SCHED_RR-max intent below.
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+    DWORD taskIndex = 0;
+    if (!AvSetMmThreadCharacteristicsW(L"Pro Audio", &taskIndex)) {
+        printf("AvSetMmThreadCharacteristics failed; worker thread keeps normal scheduling.\n");
+    }
+    return;
+#else
     pthread_t thread = pthread_self();
 
     int policy;
@@ -305,6 +325,7 @@ void make_this_thread_realtime() {
     if (pthread_setschedparam(thread, SCHED_RR, &param) != 0) {
         printf("Failed to change thread priority.\n");
     }
+#endif
 }
 
 void Silo::workLoop(Silo* s) {

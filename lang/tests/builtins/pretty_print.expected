@@ -27,11 +27,14 @@ Point {
   y: 2.5
 }
 [
+  beta: [
+    3,
+    4
+  ],
   alpha: [
     1,
     2
-  ],
-  beta: [3, 4]
+  ]
 ]
 Shape.rect(3.0, 4.0)
 Shape.rect(

@@ -123,8 +123,8 @@ enum class UIWidgetKind : int {
 // setControl(nodeID, controlID, value) in a per-frame bundle, without
 // entering the VM.
 struct UIEngineTarget {
-    long nodeID = -1;
-    long controlID = -1;
+    std::int64_t nodeID = -1;
+    std::int64_t controlID = -1;
     int silo = 0;
 };
 
@@ -230,7 +230,7 @@ struct UIWidget {
     // on tapSilo's RT tap table; removing the widget untaps it. A tap on the
     // master bus rather than a node outlet is created with tapSilo 0 and is
     // otherwise indistinguishable here.
-    long tapID = 0;
+    std::int64_t tapID = 0;
     int tapSilo = 0;
 
     // GUI-thread-only scope display state. scopeRing holds interleaved

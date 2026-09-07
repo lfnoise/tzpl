@@ -44,9 +44,12 @@
 #include <print>
 #include <format>
 #include <charconv>
+#include <cstring>
 #include <cstdlib>
-#ifdef __APPLE__
+#if defined(__APPLE__)
 #include <xlocale.h>  // locale_t / newlocale / strtod_l
+#elif defined(_WIN32)
+#include <locale.h>   // _locale_t / _create_locale / _strtod_l (UCRT)
 #else
 #include <locale.h>   // glibc: locale_t / newlocale here; strtod_l via
                       // <stdlib.h> under _GNU_SOURCE (implied by clang++)
@@ -59,13 +62,13 @@ using c8 = char;
 using i8 = int8_t;
 using i16 = int16_t;
 using i32 = int32_t;
-using i64 = long;  // matches engine convention (long == 64-bit on macOS ARM64)
+using i64 = std::int64_t;   // NOT `long`: 32-bit on Windows (LLP64)
 using i128 = __int128_t;
 
 using u8 = uint8_t ;
 using u16 = uint16_t;
 using u32 = uint32_t;
-using u64 = unsigned long;  // matches engine convention
+using u64 = std::uint64_t;
 using u128 = __uint128_t;
 
 using f32 = float;
@@ -85,14 +88,28 @@ using isize = ptrdiff_t;
 // is correctly rounded, so parseFloatC(formatFloat(v)) == v bit-for-bit.
 // (FP std::from_chars needs a macOS 26 deployment target; revisit then.)
 inline f64 parseFloatC(char const* s, char** end) {
+#if defined(_WIN32)
+    // UCRT strtod is correctly rounded too, so the round-trip guarantee holds.
+    static _locale_t cLocale = _create_locale(LC_ALL, "C");
+    return _strtod_l(s, end, cLocale);
+#else
     static locale_t cLocale = newlocale(LC_ALL_MASK, "C", (locale_t)0);
     return strtod_l(s, end, cLocale);
+#endif
 }
 
 // Format a double to its shortest round-trip representation.
 // Always includes a decimal point (e.g., "1.0" not "1").
 // Writes a null-terminated string to buf. Returns the length (excluding null).
 inline size_t formatFloat(f64 value, char* buf, size_t bufsize) {
+    // Every NaN prints as "nan": to_chars would spell the sign (and MSVC's
+    // adds "(ind)"), and whether 0.0/0.0 sets the sign bit differs between
+    // x86 and ARM, so leaving it in would make output platform-dependent.
+    if (std::isnan(value)) {
+        if (bufsize < 4) { if (bufsize) buf[0] = '\0'; return 0; }
+        std::memcpy(buf, "nan", 4);
+        return 3;
+    }
     auto [ptr, ec] = std::to_chars(buf, buf + bufsize - 1, value);
     size_t len = static_cast<size_t>(ptr - buf);
 

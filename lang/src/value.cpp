@@ -23,6 +23,7 @@
 
 #include "value.hpp"
 #include "value_graph.hpp"
+#include "stable_hash.hpp"
 #include "vm.hpp"
 #include "tracing_gc.hpp"
 #include "persistent_vector.hpp"
@@ -1321,12 +1322,12 @@ size_t hashWordsFast(Word const* base, Type* type) {
         return WordHash{type}.hashFast(base[0]);
     }
     if (type == gCurrentVM->complexType()) {
-        return hashCombine(std::hash<f64>{}(base[0].f),
-                           std::hash<f64>{}(base[1].f));
+        return hashCombine(stableHashFloat(base[0].f),
+                           stableHashFloat(base[1].f));
     }
     if (type == gCurrentVM->fractionType()) {
-        return hashCombine(std::hash<i64>{}(base[0].i),
-                           std::hash<i64>{}(base[1].i));
+        return hashCombine(stableHashInt(base[0].i),
+                           stableHashInt(base[1].i));
     }
     if (auto* tt = dynamic_cast<TupleType*>(type)) {
         size_t h = tt->fields_.size();
@@ -1337,7 +1338,7 @@ size_t hashWordsFast(Word const* base, Type* type) {
         return h;
     }
     if (auto* st = dynamic_cast<StructType*>(type)) {
-        size_t h = std::hash<const void*>{}(st->name_);
+        size_t h = st->name_->hash();
         for (size_t i = 0; i < st->fields_.size(); ++i) {
             auto const& f = st->layout_[i];
             h = hashCombine(h, hashWordsFast(base + f.wordOffset, f.type));
@@ -1346,7 +1347,7 @@ size_t hashWordsFast(Word const* base, Type* type) {
     }
     if (auto* en = dynamic_cast<EnumType*>(type)) {
         int which = (int)base[0].i;
-        size_t h = std::hash<int>{}(which);
+        size_t h = stableHashInt(which);
         if (which >= 0 && (size_t)which < en->layout_.size()) {
             auto const& f = en->layout_[which];
             bool isVoid = f.type && !f.type->isObjType()
@@ -1370,7 +1371,7 @@ size_t WordHash::operator()(Word w) const {
 size_t WordHash::hashFast(Word w) const {
     hashFuelTick();
     if (type && type->repr_ == Type::Repr::DiscriminantEnum) {
-        return std::hash<i64>{}(w.i);
+        return stableHashInt(w.i);
     }
     if (type && type->repr_ == Type::Repr::NullablePtrEnum) {
         // null = none = 0; otherwise hash by inner type
@@ -1390,10 +1391,10 @@ size_t WordHash::hashFast(Word w) const {
         }
     }
     if (type == gCurrentVM->intType() || type == gCurrentVM->boolType()) {
-        return std::hash<i64>{}(w.i);
+        return stableHashInt(w.i);
     }
     if (type == gCurrentVM->floatType()) {
-        return std::hash<f64>{}(w.f);
+        return stableHashFloat(w.f);
     }
     if (type == gCurrentVM->symbolType()) {
         // Use the symbol's precomputed string-based hash so iteration order
@@ -1402,17 +1403,17 @@ size_t WordHash::hashFast(Word w) const {
     }
     if (type == gCurrentVM->stringType()) {
         auto* s = static_cast<StringObj*>(w.o);
-        return std::hash<std::string_view>{}(std::string_view(s->s.data(), s->s.size()));
+        return stableHashString(std::string_view(s->s.data(), s->s.size()));
     }
     if (type == gCurrentVM->bytesType()) {
         auto* s = static_cast<BytesObj*>(w.o);
-        return std::hash<std::string_view>{}(
+        return stableHashString(
             std::string_view((char const*)s->data.data(), s->data.size()));
     }
     if (type == gCurrentVM->fractionType()) {
         auto* frac = static_cast<Fraction*>(w.o);
-        return hashCombine(std::hash<i64>{}(frac->r.numer()),
-                           std::hash<i64>{}(frac->r.denom()));
+        return hashCombine(stableHashInt(frac->r.numer()),
+                           stableHashInt(frac->r.denom()));
     }
     if (auto* tt = dynamic_cast<TupleType*>(type)) {
         // Phase 4g.13: heap Tuple stores fields natively per layout; hash
@@ -1427,7 +1428,7 @@ size_t WordHash::hashFast(Word w) const {
     }
     if (auto* st = dynamic_cast<StructType*>(type)) {
         auto* s = static_cast<Struct*>(w.o);
-        size_t h = std::hash<const void*>{}(st->name_);
+        size_t h = st->name_->hash();
         for (u32 i = 0; i < s->numFields_; ++i) {
             auto const& f = st->layout_[i];
             h = hashCombine(h, wordsHashFast(&s->v[f.wordOffset], f.type));
@@ -1436,7 +1437,7 @@ size_t WordHash::hashFast(Word w) const {
     }
     if (auto* et = dynamic_cast<EnumType*>(type)) {
         auto* e = static_cast<Enum*>(w.o);
-        size_t h = std::hash<int>{}(e->which_);
+        size_t h = stableHashInt(e->which_);
         Type* caseType = et->cases_[e->which_].type;
         if (caseType != gCurrentVM->voidType()) {
             // Phase 4g.15: payload lives natively in e->v[]; hash multi-word.
@@ -1470,7 +1471,7 @@ size_t WordHash::hashFast(Word w) const {
     }
     if (type == gCurrentVM->complexType()) {
         auto* c = static_cast<Complex*>(w.o);
-        return hashCombine(std::hash<f64>{}(c->x.real()), std::hash<f64>{}(c->x.imag()));
+        return hashCombine(stableHashFloat(c->x.real()), stableHashFloat(c->x.imag()));
     }
     if (auto* arrT = dynamic_cast<ArrayType*>(type)) {
         Type* et = arrT->elemType_;
@@ -1481,8 +1482,8 @@ size_t WordHash::hashFast(Word w) const {
                 auto* a = static_cast<PodArray<x64>*>(w.o);
                 size_t h = a->v.size();
                 for (auto const& v : a->v) {
-                    h = hashCombine(h, hashCombine(std::hash<f64>{}(v.real()),
-                                                   std::hash<f64>{}(v.imag())));
+                    h = hashCombine(h, hashCombine(stableHashFloat(v.real()),
+                                                   stableHashFloat(v.imag())));
                 }
                 return h;
             }
@@ -1490,21 +1491,21 @@ size_t WordHash::hashFast(Word w) const {
                 auto* a = static_cast<PodArray<r64>*>(w.o);
                 size_t h = a->v.size();
                 for (auto const& v : a->v) {
-                    h = hashCombine(h, hashCombine(std::hash<i64>{}(v.numer()),
-                                                   std::hash<i64>{}(v.denom())));
+                    h = hashCombine(h, hashCombine(stableHashInt(v.numer()),
+                                                   stableHashInt(v.denom())));
                 }
                 return h;
             }
             case ArrayBackend::Float: {
                 auto* a = static_cast<PodArray<f64>*>(w.o);
                 size_t h = a->v.size();
-                for (auto val : a->v) h = hashCombine(h, std::hash<f64>{}(val));
+                for (auto val : a->v) h = hashCombine(h, stableHashFloat(val));
                 return h;
             }
             case ArrayBackend::Int: {
                 auto* a = static_cast<PodArray<i64>*>(w.o);
                 size_t h = a->v.size();
-                for (auto val : a->v) h = hashCombine(h, std::hash<i64>{}(val));
+                for (auto val : a->v) h = hashCombine(h, stableHashInt(val));
                 return h;
             }
             case ArrayBackend::Inline: {
@@ -1547,7 +1548,7 @@ size_t WordHash::hashFast(Word w) const {
         auto* r = static_cast<RangeObj*>(w.o);
         auto* rt = static_cast<RangeType*>(r->type_);
         Type* et = rt->elemType_;
-        size_t h = std::hash<bool>{}(r->isInfinite_);
+        size_t h = stableHashInt(r->isInfinite_);
         h = hashCombine(h, wordsHashFast(r->startData(), et));
         h = hashCombine(h, wordsHashFast(r->stepData(),  et));
         if (!r->isInfinite_) h = hashCombine(h, wordsHashFast(r->endData(), et));
@@ -1589,7 +1590,7 @@ size_t WordHash::hashFast(Word w) const {
         return h;
     }
     // Fallback: hash pointer
-    return std::hash<void*>{}(w.p);
+    return stableHashPtr(w.p);
 }
 
 // --- WordEqual ---
@@ -2117,15 +2118,15 @@ size_t wordsHash(Word const* a, Type* type) {
 }
 
 size_t wordsHashFast(Word const* a, Type* type) {
-    if (!type) return std::hash<i64>{}(a[0].i);
+    if (!type) return stableHashInt(a[0].i);
     if (type->repr_ != Type::Repr::Inline) {
         return WordHash{type}.hashFast(a[0]);
     }
     if (type == gCurrentVM->complexType()) {
-        return hashCombine(std::hash<f64>{}(a[0].f), std::hash<f64>{}(a[1].f));
+        return hashCombine(stableHashFloat(a[0].f), stableHashFloat(a[1].f));
     }
     if (type == gCurrentVM->fractionType()) {
-        return hashCombine(std::hash<i64>{}(a[0].i), std::hash<i64>{}(a[1].i));
+        return hashCombine(stableHashInt(a[0].i), stableHashInt(a[1].i));
     }
     auto hashFields = [&](auto const& layout, size_t seed) {
         size_t h = seed;
@@ -2136,9 +2137,9 @@ size_t wordsHashFast(Word const* a, Type* type) {
         return h;
     };
     if (auto* tt = dynamic_cast<TupleType*>(type))   return hashFields(tt->layout_, tt->fields_.size());
-    if (auto* st = dynamic_cast<StructType*>(type))  return hashFields(st->layout_, std::hash<const void*>{}(st->name_));
+    if (auto* st = dynamic_cast<StructType*>(type))  return hashFields(st->layout_, st->name_->hash());
     if (auto* en = dynamic_cast<EnumType*>(type)) {
-        size_t h = std::hash<i64>{}(a[0].i);
+        size_t h = stableHashInt(a[0].i);
         int which = (int)a[0].i;
         if (which >= 0 && (size_t)which < en->layout_.size()) {
             auto const& f = en->layout_[which];

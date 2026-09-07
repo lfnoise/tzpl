@@ -40,9 +40,21 @@
 #include <string>
 #include <vector>
 
-#include <dirent.h>
-#include <sys/stat.h>
-#include <unistd.h>
+#include <filesystem>
+#include "tzpl_paths.hpp"
+#ifdef _WIN32
+  #ifndef WIN32_LEAN_AND_MEAN
+  #define WIN32_LEAN_AND_MEAN
+  #endif
+  #ifndef NOMINMAX
+  #define NOMINMAX
+  #endif
+  #include <windows.h>
+#else
+  #include <sys/stat.h>
+#endif
+
+namespace fs = std::filesystem;
 
 namespace ts {
 
@@ -282,31 +294,49 @@ static void builtin_append_file_bytes_async(VM& vm, u16 dst, u16, u16 ab) {
 // File metadata
 // ---------------------------------------------------------------------------
 
+static fs::path argPath(VM& vm, u16 ab) {
+    const VMString& p = argString(vm, ab);
+    return tzpl::pathFromUtf8(std::string_view(p.data(), p.size()));
+}
+
 // fileExists(path String) Bool -- true for any existing entry (file or dir).
 static void builtin_file_exists(VM& vm, u16 dst, u16, u16 ab) {
-    struct stat st;
-    vm.reg(dst).i = ::stat(argString(vm, ab).c_str(), &st) == 0;
+    std::error_code ec;
+    vm.reg(dst).i = fs::exists(argPath(vm, ab), ec);
 }
 
 // isDirectory(path String) Bool
 static void builtin_is_directory(VM& vm, u16 dst, u16, u16 ab) {
-    struct stat st;
-    vm.reg(dst).i = ::stat(argString(vm, ab).c_str(), &st) == 0
-                 && S_ISDIR(st.st_mode);
+    std::error_code ec;
+    vm.reg(dst).i = fs::is_directory(argPath(vm, ab), ec);
 }
 
 // fileSize(path String) Option<Int> -- size in bytes of a regular file.
 static void builtin_file_size(VM& vm, u16 dst, u16, u16 ab) {
-    struct stat st;
-    bool ok = ::stat(argString(vm, ab).c_str(), &st) == 0 && S_ISREG(st.st_mode);
-    writeOptionIntResult(vm, dst, ok, ok ? (i64)st.st_size : 0);
+    std::error_code ec;
+    fs::path p = argPath(vm, ab);
+    bool ok = fs::is_regular_file(p, ec);
+    auto size = ok ? fs::file_size(p, ec) : 0;
+    ok = ok && !ec;
+    writeOptionIntResult(vm, dst, ok, ok ? (i64)size : 0);
 }
 
 // fileModTime(path String) Option<Float> -- last-modified time, Unix seconds.
 static void builtin_file_mod_time(VM& vm, u16 dst, u16, u16 ab) {
-    struct stat st;
-    bool ok = ::stat(argString(vm, ab).c_str(), &st) == 0;
+    fs::path p = argPath(vm, ab);
+    bool ok = false;
     f64 t = 0.0;
+#ifdef _WIN32
+    WIN32_FILE_ATTRIBUTE_DATA fad;
+    ok = GetFileAttributesExW(p.c_str(), GetFileExInfoStandard, &fad) != 0;
+    if (ok) {
+        // FILETIME: 100 ns ticks since 1601-01-01; 11644473600 s to the Unix epoch.
+        u64 ticks = ((u64)fad.ftLastWriteTime.dwHighDateTime << 32) | fad.ftLastWriteTime.dwLowDateTime;
+        t = (f64)ticks * 1e-7 - 11644473600.0;
+    }
+#else
+    struct stat st;
+    ok = ::stat(p.c_str(), &st) == 0;
     if (ok) {
 #ifdef __APPLE__
         t = (f64)st.st_mtimespec.tv_sec + (f64)st.st_mtimespec.tv_nsec * 1e-9;
@@ -314,6 +344,7 @@ static void builtin_file_mod_time(VM& vm, u16 dst, u16, u16 ab) {
         t = (f64)st.st_mtim.tv_sec + (f64)st.st_mtim.tv_nsec * 1e-9;
 #endif
     }
+#endif
     writeOptionFloatResult(vm, dst, ok, t);
 }
 
@@ -324,14 +355,13 @@ static void builtin_file_mod_time(VM& vm, u16 dst, u16, u16 ab) {
 // listDir(path String) Option<[String]> -- entry names (no "." / ".."),
 // sorted for determinism.
 static void builtin_list_dir(VM& vm, u16 dst, u16, u16 ab) {
-    DIR* d = ::opendir(argString(vm, ab).c_str());
-    if (!d) { vm.reg(dst).o = nullptr; return; }
+    std::error_code ec;
+    fs::directory_iterator it(argPath(vm, ab), ec);
+    if (ec) { vm.reg(dst).o = nullptr; return; }
     std::vector<std::string> names;
-    while (struct dirent* ent = ::readdir(d)) {
-        std::string name = ent->d_name;
-        if (name != "." && name != "..") names.push_back(std::move(name));
+    for (auto const& entry : it) {
+        names.push_back(tzpl::pathToUtf8(entry.path().filename()));
     }
-    ::closedir(d);
     std::sort(names.begin(), names.end());
     auto* arr = new ObjArray(vm.arrayType(vm.stringType()));
     GCKeepAliveScope keep(vm, arr);
@@ -342,28 +372,28 @@ static void builtin_list_dir(VM& vm, u16 dst, u16, u16 ab) {
 // makeDir(path String) Bool -- create the directory (and missing parents);
 // true if the directory exists afterwards.
 static void builtin_make_dir(VM& vm, u16 dst, u16, u16 ab) {
-    const VMString& path = argString(vm, ab);
-    std::string p(path.data(), path.size());
-    // Create each parent in turn; EEXIST is fine at every step.
-    for (size_t i = 1; i <= p.size(); ++i) {
-        if (i == p.size() || p[i] == '/') {
-            std::string prefix = p.substr(0, i);
-            if (::mkdir(prefix.c_str(), 0755) != 0 && errno != EEXIST) break;
-        }
-    }
-    struct stat st;
-    vm.reg(dst).i = ::stat(p.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+    std::error_code ec;
+    fs::path p = argPath(vm, ab);
+    fs::create_directories(p, ec);
+    ec.clear();
+    vm.reg(dst).i = fs::is_directory(p, ec);
 }
 
 // removeFile(path String) Bool -- delete a file (not a directory).
 static void builtin_remove_file(VM& vm, u16 dst, u16, u16 ab) {
-    vm.reg(dst).i = ::unlink(argString(vm, ab).c_str()) == 0;
+    std::error_code ec;
+    fs::path p = argPath(vm, ab);
+    if (fs::is_directory(p, ec)) { vm.reg(dst).i = 0; return; }
+    vm.reg(dst).i = fs::remove(p, ec) && !ec;
 }
 
 // renameFile(from String, to String) Bool
 static void builtin_rename_file(VM& vm, u16 dst, u16, u16 ab) {
-    vm.reg(dst).i = ::rename(argString(vm, ab).c_str(),
-                             argString(vm, (u16)(ab + 1)).c_str()) == 0;
+    // fs::rename replaces an existing target on every platform (POSIX
+    // rename semantics; std::rename would refuse on Windows).
+    std::error_code ec;
+    fs::rename(argPath(vm, ab), argPath(vm, (u16)(ab + 1)), ec);
+    vm.reg(dst).i = !ec;
 }
 
 // ---------------------------------------------------------------------------
@@ -384,11 +414,25 @@ static void builtin_program_args(VM& vm, u16 dst, u16, u16) {
     vm.reg(dst).o = arr;
 }
 
-// currentDir() Option<String>
+// currentDir() Option<String> -- '/'-separated on every platform, the form
+// std.path works with.
 static void builtin_current_dir(VM& vm, u16 dst, u16, u16) {
-    char buf[4096];
-    vm.reg(dst).o = ::getcwd(buf, sizeof buf)
-                  ? makeString(buf, std::strlen(buf)) : nullptr;
+    std::error_code ec;
+    fs::path cwd = fs::current_path(ec);
+    if (ec) { vm.reg(dst).o = nullptr; return; }
+    std::string s = tzpl::pathToUtf8Generic(cwd);
+    vm.reg(dst).o = makeString(s.data(), s.size());
+}
+
+// tempDir() String -- the system scratch directory ($TMPDIR or /tmp on
+// POSIX, %TEMP% on Windows), '/'-separated, no trailing separator.
+static void builtin_temp_dir(VM& vm, u16 dst, u16, u16) {
+    std::error_code ec;
+    fs::path tmp = fs::temp_directory_path(ec);
+    if (ec || tmp.empty()) tmp = "/tmp";
+    std::string s = tzpl::pathToUtf8Generic(tmp);
+    while (s.size() > 1 && s.back() == '/') s.pop_back();
+    vm.reg(dst).o = makeString(s.data(), s.size());
 }
 
 // ---------------------------------------------------------------------------
@@ -442,6 +486,7 @@ void registerIoBuiltins(Compiler& compiler, FuncMap& functions) {
     registerOne(compiler, functions, "getEnv",        OptStr,   {Str},        builtin_get_env,            /*pure=*/false, /*rtSafe=*/false);
     registerOne(compiler, functions, "programArgs",   ArrayStr, {},           builtin_program_args,       /*pure=*/false, /*rtSafe=*/false);
     registerOne(compiler, functions, "currentDir",    OptStr,   {},           builtin_current_dir,        /*pure=*/false, /*rtSafe=*/false);
+    registerOne(compiler, functions, "tempDir",       Str,      {},           builtin_temp_dir,           /*pure=*/false, /*rtSafe=*/false);
 }
 
 } // namespace ts

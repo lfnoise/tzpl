@@ -1,0 +1,25 @@
+# Line endings. The lang golden suite byte-compares interpreter output
+# (always LF) against .expected files, so every text file is checked out
+# LF on every platform -- including Windows, where Git's default autocrlf
+# would otherwise rewrite all 440 goldens to CRLF and fail every test.
+* text=auto eol=lf
+
+*.expected      text eol=lf
+*.expected_err  text eol=lf
+*.expected.*    text eol=lf
+*.x             text eol=lf
+*.sh            text eol=lf
+*.ps1           text eol=crlf
+*.bat           text eol=crlf
+
+# Binary assets
+*.png   binary
+*.webp  binary
+*.icns  binary
+*.ico   binary
+*.ttf   binary
+*.otf   binary
+*.wav   binary
+*.aif   binary
+*.aiff  binary
+*.tzd   binary

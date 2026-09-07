@@ -37,7 +37,8 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
-#include <dlfcn.h>
+#include "tzpl_dynlib.hpp"
+#include "test_print_capture.hpp"
 
 // ---------------------------------------------------------------------------
 // Test runner helpers
@@ -371,14 +372,14 @@ static void test_def_desc_introspection() {
 
     if (!bufdescPath.empty()) {
         // The freshly compiled plugin carries the current ABI version stamp.
-        if (void* handle = dlopen(bufdescPath.c_str(), RTLD_NOW | RTLD_LOCAL)) {
-            void* verPtr = dlsym(handle, "tzpl_abi_version");
+        if (void* handle = tzpl::dynlibOpenLocal(bufdescPath.c_str())) {
+            void* verPtr = tzpl::dynlibSym(handle, "tzpl_abi_version");
             check(verPtr != nullptr, "plugin exports tzpl_abi_version");
             if (verPtr) {
                 check(*(int64_t*)verPtr == TZPL_PLUGIN_ABI_VERSION,
                       "tzpl_abi_version matches TZPL_PLUGIN_ABI_VERSION");
             }
-            dlclose(handle);
+            tzpl::dynlibClose(handle);
         }
 
         engine::DefDesc fileDesc;
@@ -825,10 +826,8 @@ static void test_low_level_ffi() {
     bridge::setAppContextOnVM(&vm, &appCtx);
 
     // Capture print output so we can assert on it.
-    char* buf = nullptr;
-    size_t bufSize = 0;
-    FILE* memOut = open_memstream(&buf, &bufSize);
-    vm.setPrintOutput(memOut);
+    TestPrintCapture capture;
+    vm.setPrintOutput(capture.file);
 
     const char* source = R"LANG(
         import synthdef.*;
@@ -842,10 +841,7 @@ static void test_low_level_ffi() {
     bool ok = compileAndRun(compiler, vm, source, "low_level_ffi.x", &moduleCompiler);
     check(ok, "low-level FFI source compiles and runs");
 
-    fflush(memOut);
-    std::string output = buf ? std::string(buf, bufSize) : "";
-    fclose(memOut);
-    free(buf);
+    std::string output = capture.finish();
 
     check(output.find("DUMP_OK") != std::string::npos,
           "synthdefAnalysisDump returns address-free dump");
@@ -889,10 +885,8 @@ static void run_synthc_diff_script(char const* scriptFile, char const* sentinel,
     bridge::AppContext appCtx; appCtx.engine = eng;
     bridge::setAppContextOnVM(&vm, &appCtx);
 
-    char* buf = nullptr;
-    size_t bufSize = 0;
-    FILE* memOut = open_memstream(&buf, &bufSize);
-    vm.setPrintOutput(memOut);
+    TestPrintCapture capture;
+    vm.setPrintOutput(capture.file);
 
     std::string source = readScript(std::string(SCRIPTS_DIR) + "/" + scriptFile);
     check(!source.empty(), std::format("{} script found", scriptFile).c_str());
@@ -900,10 +894,7 @@ static void run_synthc_diff_script(char const* scriptFile, char const* sentinel,
     bool ok = compileAndRun(compiler, vm, source.c_str(), scriptFile, &moduleCompiler);
     check(ok, std::format("{} compiles and runs", scriptFile).c_str());
 
-    fflush(memOut);
-    std::string output = buf ? std::string(buf, bufSize) : "";
-    fclose(memOut);
-    free(buf);
+    std::string output = capture.finish();
 
     bool pass = output.find(sentinel) != std::string::npos;
     if (!pass) {
@@ -1039,7 +1030,13 @@ int main(int argc, char const* argv[]) {
 
     // Everything this harness compiles via defSynth/defSynthX is born tagged
     // "test" so the plugin browser can filter it out of user-facing lists.
-    setenv("TZPL_DEFAULT_TAGS", "test", /*overwrite=*/0);
+    if (!std::getenv("TZPL_DEFAULT_TAGS")) {
+#ifdef _WIN32
+        _putenv_s("TZPL_DEFAULT_TAGS", "test");
+#else
+        setenv("TZPL_DEFAULT_TAGS", "test", /*overwrite=*/0);
+#endif
+    }
 
     test_compile_success();
     test_compile_error();

@@ -89,8 +89,8 @@ std::uint64_t bindControlWidget(UIState* ui, std::string const& panel,
         w->values.resize((size_t)chans, spec.clamp(spec.init));
         for (auto& v : w->values) v = spec.clamp(v);
     }
-    w->target = UIEngineTarget{static_cast<long>(nodeID),
-                               static_cast<long>(c.controlID), silo};
+    w->target = UIEngineTarget{static_cast<std::int64_t>(nodeID),
+                               static_cast<std::int64_t>(c.controlID), silo};
     w->dirtyEngine = true;  // push current value(s) through the fresh binding
     return w->id;
 }
@@ -121,9 +121,9 @@ std::uint64_t bindTapWidget(UIState* ui, engine::Engine* e,
 
     // Claim the tap id and hand it to the widget first, so a retap can
     // release the old tap after the lock is dropped.
-    long oldTap = 0;
+    std::int64_t oldTap = 0;
     int oldSilo = 0;
-    long tapID = (long)engine::allocTapID(e);
+    std::int64_t tapID = (std::int64_t)engine::allocTapID(e);
     std::uint64_t widgetID = 0;
     {
         std::lock_guard<std::mutex> lock(ui->mtx);

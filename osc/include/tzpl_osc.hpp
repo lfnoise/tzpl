@@ -38,6 +38,15 @@ namespace engine { struct Engine; }
 
 namespace osc {
 
+// UDP socket handle: SOCKET (an unsigned integer, invalid = INVALID_SOCKET)
+// on Windows, a file descriptor elsewhere. tzpl_osc_server.cpp owns the
+// platform differences.
+#ifdef _WIN32
+using OscSocket = std::uintptr_t;
+#else
+using OscSocket = int;
+#endif
+
 // ---------------------------------------------------------------------------
 // OscClient -- sends OSC messages over UDP
 // ---------------------------------------------------------------------------
@@ -135,7 +144,11 @@ private:
     OscDispatcher& dispatcher_;
     std::thread thread_;
     std::atomic<bool> running_{false};
-    int socket_ = -1;
+#ifdef _WIN32
+    OscSocket socket_ = ~OscSocket{0};  // INVALID_SOCKET
+#else
+    OscSocket socket_ = -1;
+#endif
     int port_ = 0;
 };
 

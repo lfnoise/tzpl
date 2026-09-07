@@ -16,6 +16,41 @@ endif()
 
 find_package(Threads REQUIRED)
 
+# --- Windows host toolchain --------------------------------------------------
+#
+# Windows builds use clang-cl (Clang with the MSVC ABI, the configuration JUCE
+# supports) from an x64 developer shell:
+#
+#     cmake -B build -G Ninja -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl ...
+#
+# Runtime-compiled plugins use a separate, redistributable llvm-mingw
+# toolchain (TZPL_PLUGIN_TOOLCHAIN_DIR at build time, toolchain/ in the
+# distribution folder); see docs/WINDOWS.md. GNU-style compile options in the
+# sub-projects are guarded on CMAKE_CXX_COMPILER_FRONTEND_VARIANT so they only
+# reach GNU-style drivers.
+if(WIN32)
+    if(NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+        message(WARNING "Windows builds are developed and tested with clang-cl "
+                        "(CMAKE_CXX_COMPILER_FRONTEND_VARIANT=MSVC); found "
+                        "${CMAKE_CXX_COMPILER_FRONTEND_VARIANT}.")
+    endif()
+    enable_language(RC)
+    # /MD: the VC++ runtime DLLs ship app-local in the distribution zip, and
+    # host and runtime-compiled plugins then share one ucrtbase heap.
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+    add_compile_options(/utf-8 /bigobj $<$<COMPILE_LANGUAGE:CXX>:/EHsc>)
+    add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS
+                            _WIN32_WINNT=0x0A00)
+    # The parser and type checker recurse; Windows' default 1 MB thread stack
+    # is far below macOS's 8 MB.
+    add_link_options(/STACK:16777216)
+
+    set(TZPL_PLUGIN_TOOLCHAIN_DIR "" CACHE PATH
+        "llvm-mingw root used to compile synthdef plugins at runtime (dev builds); the dist bundles a trimmed copy")
+    set(TZPL_BUNDLE_TOOLCHAIN_DIR "" CACHE PATH
+        "Trimmed llvm-mingw copied into the distribution zip as toolchain/ (see packaging/make_toolchain_subset.ps1)")
+endif()
+
 # --- Options ----------------------------------------------------------------
 
 option(TZPL_BUILD_AUDIO_ENGINE      "Build the engine library and executable"             ON)
@@ -159,17 +194,35 @@ install(FILES packaging/README.txt
     COMPONENT dist
 )
 
-# --- Distribution folder + DMG ------------------------------------------------
+# --- Distribution folder + DMG / zip ------------------------------------------
 #
 # `cmake --build build --target dist` assembles the drag-anywhere user folder
 #
 #     Tzopilotl/            <- the unit users install and updates replace
 #       Tzopilotl.app         (finds ../modules via the executable walk-up)
 #       bin/tzpl
-#       modules/  examples/  docs/  editors/  README.txt
+#       modules/  examples/  docs/  editors/  include/  README.txt
 #
-# from the COMPONENT dist install rules, then wraps it in a compressed DMG.
+# from the COMPONENT dist install rules, then wraps it in a compressed DMG
+# (macOS) or a zip (Windows: Tzopilotl.exe and tzpl.exe sit at the folder
+# root, plus the VC++ runtime DLLs and the bundled plugin toolchain/).
 # User work lives outside the folder (projects), so replacing it is an update.
+if(WIN32 AND TZPL_BUILD_APP_JUCE)
+    set(TZPL_DIST_STAGE "${CMAKE_BINARY_DIR}/dist-stage")
+    add_custom_target(dist
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${TZPL_DIST_STAGE}"
+        COMMAND ${CMAKE_COMMAND} --install "${CMAKE_BINARY_DIR}"
+                --component dist --prefix "${TZPL_DIST_STAGE}/Tzopilotl"
+        COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+                -File "${CMAKE_SOURCE_DIR}/packaging/make_dist_win.ps1"
+                -Stage "${TZPL_DIST_STAGE}"
+                -Zip "${CMAKE_BINARY_DIR}/Tzopilotl-${PROJECT_VERSION}-win64.zip"
+                -ToolchainDir "${TZPL_BUNDLE_TOOLCHAIN_DIR}"
+        DEPENDS tzpl tzpl_app_juce
+        COMMENT "Assembling distribution folder and zip"
+        VERBATIM
+    )
+endif()
 if(APPLE AND TZPL_BUILD_APP_JUCE)
     set(TZPL_DIST_STAGE "${CMAKE_BINARY_DIR}/dist-stage")
     # Signing and notarization are opt-in via environment variables read by

@@ -27,7 +27,13 @@
 #include "synthdef_types.hpp"
 #include "tzpl_simd.hpp"
 #include <cstdlib>
-#ifndef __APPLE__
+#if defined(_WIN32)
+// rand_s is the CRT's cryptographic RNG (RtlGenRandom). <stdlib.h> only
+// declares it when _CRT_RAND_S is defined before its first inclusion, which
+// an including translation unit (generated plugin code starts with
+// tzpl_plugin_abi.h) cannot guarantee, so declare it here.
+extern "C" int __cdecl rand_s(unsigned int* randomValue);
+#elif !defined(__APPLE__)
 #include <sys/random.h>
 #endif
 
@@ -143,8 +149,13 @@ void arc4seedrand(RandState<Chans>& r) {
 		}
 		return;
 	}
-#ifdef __APPLE__
+#if defined(__APPLE__)
 	arc4random_buf(&r, sizeof(r));
+#elif defined(_WIN32)
+	// rand_s: the CRT's cryptographic RNG (RtlGenRandom), no extra library
+	// -- this header is also compiled into runtime plugins.
+	unsigned int* words = reinterpret_cast<unsigned int*>(&r);
+	for (usize i = 0; i < sizeof(r) / sizeof(unsigned int); ++i) rand_s(&words[i]);
 #else
 	getrandom(&r, sizeof(r), 0);
 #endif

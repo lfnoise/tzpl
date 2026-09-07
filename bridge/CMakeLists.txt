@@ -20,17 +20,11 @@ target_link_libraries(tzpl_audio_engine_bridge
     PUBLIC  audio_engine_lib
 )
 
-# Spectrum widgets run shared/tzpl_fft.hpp host-side; on Apple that is vDSP.
-# PUBLIC so every consumer of this object library gets the framework too.
-if(APPLE)
-    target_link_libraries(tzpl_audio_engine_bridge PUBLIC "-framework Accelerate")
-endif()
-
 # Match tzpl_lib optimization flags to avoid ODR/inline mismatches
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+if(NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC" AND CMAKE_BUILD_TYPE STREQUAL "Debug")
     target_compile_options(tzpl_audio_engine_bridge PRIVATE -O1)
 endif()
-if(CMAKE_BUILD_TYPE STREQUAL "Release")
+if(NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC" AND CMAKE_BUILD_TYPE STREQUAL "Release")
     target_compile_options(tzpl_audio_engine_bridge PRIVATE -O2)
 endif()
 
@@ -50,10 +44,10 @@ target_link_libraries(tzpl_clock_bridge
     PUBLIC  audio_engine_lib
 )
 
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+if(NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC" AND CMAKE_BUILD_TYPE STREQUAL "Debug")
     target_compile_options(tzpl_clock_bridge PRIVATE -O1)
 endif()
-if(CMAKE_BUILD_TYPE STREQUAL "Release")
+if(NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC" AND CMAKE_BUILD_TYPE STREQUAL "Release")
     target_compile_options(tzpl_clock_bridge PRIVATE -O2)
 endif()
 
@@ -74,10 +68,10 @@ if(TARGET synthdef_compiler_lib)
         PUBLIC  audio_engine_lib
     )
 
-    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    if(NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC" AND CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_compile_options(tzpl_synthdef_compiler_bridge PRIVATE -O1)
     endif()
-    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    if(NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC" AND CMAKE_BUILD_TYPE STREQUAL "Release")
         target_compile_options(tzpl_synthdef_compiler_bridge PRIVATE -O2)
     endif()
 endif()
@@ -99,10 +93,10 @@ if(TARGET osc_lib)
         PUBLIC  osc_lib
     )
 
-    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    if(NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC" AND CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_compile_options(tzpl_osc_bridge PRIVATE -O1)
     endif()
-    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    if(NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC" AND CMAKE_BUILD_TYPE STREQUAL "Release")
         target_compile_options(tzpl_osc_bridge PRIVATE -O2)
     endif()
 endif()
@@ -124,10 +118,10 @@ if(TARGET nats_lib)
         PUBLIC  nats_lib
     )
 
-    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    if(NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC" AND CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_compile_options(tzpl_nats_bridge PRIVATE -O1)
     endif()
-    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    if(NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC" AND CMAKE_BUILD_TYPE STREQUAL "Release")
         target_compile_options(tzpl_nats_bridge PRIVATE -O2)
     endif()
 endif()

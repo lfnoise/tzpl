@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- Merged by CMake into the default manifest it embeds (which supplies
+     assemblyIdentity and trustInfo). Only the two settings we add live here:
+     the UTF-8 process code page (Windows 10 1903+), so narrow CRT and Win32
+     calls and std::filesystem take the interpreter's UTF-8 strings directly,
+     and per-monitor DPI awareness. -->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
+    </windowsSettings>
+  </application>
+</assembly>

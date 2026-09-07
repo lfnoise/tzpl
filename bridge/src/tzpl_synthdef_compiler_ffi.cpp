@@ -33,7 +33,6 @@
 #include "synthdef_cpp_codegen.hpp"
 #include "synthdef_synth.hpp"
 #include "synthdef_str_util.hpp"
-#include <dlfcn.h>
 #include <memory>
 #include <mutex>
 #include <unordered_map>

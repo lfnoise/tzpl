@@ -3631,7 +3631,7 @@ fn genSwapSampleBankFun(ctx Ctx, name String) String {
 		bi = bi + 1;
 	}
 	s = s $ "\t}\n\treturn old;\n}\n\n";
-	s = s $ "extern \"C\" tzpl_SampleBank* swapSampleBank(tzpl_SynthData* p, int64_t bankID, tzpl_SampleBank* newBank) {\n";
+	s = s $ "extern \"C\" TZPL_PLUGIN_EXPORT tzpl_SampleBank* swapSampleBank(tzpl_SynthData* p, int64_t bankID, tzpl_SampleBank* newBank) {\n";
 	s = s $ "\treturn %^_swapSampleBank((%^*)p, bankID, newBank);\n" fmt(name, name);
 	s = s $ "}\n\n";
 	s
@@ -3657,8 +3657,8 @@ fn _warpStepSize(w ControlWarp) Float {
 fn genLoad(ctx Ctx, name String) String {
 	-- ABI version stamp: the version of tzpl_plugin_abi.h the plugin was
 	-- compiled against. Loaders refuse plugins newer than they understand.
-	var s = "extern \"C\" int64_t tzpl_abi_version = TZPL_PLUGIN_ABI_VERSION;\n\n";
-	s = s $ "extern \"C\" tzpl_SynthDef load() {\n\ttzpl_SynthDef def;\n";
+	var s = "extern \"C\" TZPL_PLUGIN_EXPORT int64_t tzpl_abi_version = TZPL_PLUGIN_ABI_VERSION;\n\n";
+	s = s $ "extern \"C\" TZPL_PLUGIN_EXPORT tzpl_SynthDef load() {\n\ttzpl_SynthDef def;\n";
 	s = s $ "\tdef.name = \"%^\";\n" fmt(name);
 	s = s $ "\tdef.funs = %^_funs;\n" fmt(name);
 	s = s $ "\tdef.num_ins = %^;\n" fmt(ctx.inlets length);
@@ -3717,7 +3717,7 @@ fn genLoadBufferDefs(ctx Ctx) String {
 		}
 		n = n + 1;
 	}
-	var s = "extern \"C\" tzpl_BufferDefList loadBufferDefs() {\n";
+	var s = "extern \"C\" TZPL_PLUGIN_EXPORT tzpl_BufferDefList loadBufferDefs() {\n";
 	s = s $ "\ttzpl_BufferDefList list;\n";
 	s = s $ "\tlist.num_buffers = %^;\n" fmt(ctx.bufSerials length);
 	s = s $ "\tlist.buffers = (tzpl_BufferDef*)calloc(list.num_buffers, sizeof(tzpl_BufferDef));\n";
@@ -3736,7 +3736,7 @@ fn genLoadBufferDefs(ctx Ctx) String {
 -- byte-for-byte.
 fn genLoadSampleBankDefs(ctx Ctx) String {
 	if (ctx.bankSerials length == 0) { return ""; }
-	var s = "extern \"C\" tzpl_SampleBankDefList loadSampleBankDefs() {\n";
+	var s = "extern \"C\" TZPL_PLUGIN_EXPORT tzpl_SampleBankDefList loadSampleBankDefs() {\n";
 	s = s $ "\ttzpl_SampleBankDefList list;\n";
 	s = s $ "\tlist.num_banks = %^;\n" fmt(ctx.bankSerials length);
 	s = s $ "\tlist.banks = (tzpl_SampleBankDef*)calloc(list.num_banks, sizeof(tzpl_SampleBankDef));\n";
@@ -3754,7 +3754,7 @@ fn genLoadSampleBankDefs(ctx Ctx) String {
 -- byte-for-byte.
 fn genLoadTags(ctx Ctx) String {
 	if (ctx.tags length == 0) { return ""; }
-	var s = "extern \"C\" tzpl_TagList loadTags() {\n";
+	var s = "extern \"C\" TZPL_PLUGIN_EXPORT tzpl_TagList loadTags() {\n";
 	s = s $ "\tstatic const char* tags[] = {";
 	var i = 0;
 	for (t : ctx.tags) {
@@ -3839,7 +3839,7 @@ fn genCpp(ctx Ctx, name String, simdWidth Int = 0) String {
 	-- the loader can repoint it at the engine's process-global table.
 	if (ctx _usesSharedInput) {
 		s = s $ "static tzpl_SharedInput tzpl_sharedInputFallback = {};\n";
-		s = s $ "extern \"C\" tzpl_SharedInput const* tzpl_sharedInput = &tzpl_sharedInputFallback;\n\n";
+		s = s $ "extern \"C\" TZPL_PLUGIN_EXPORT tzpl_SharedInput const* tzpl_sharedInput = &tzpl_sharedInputFallback;\n\n";
 	}
 
 	s = s $ "extern tzpl_SynthFuns %^_funs;\n\n" fmt(name);

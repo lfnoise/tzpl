@@ -25,9 +25,24 @@
 #include <fstream>
 #include <sstream>
 #include <cstdlib>
-#include <unistd.h>
+#ifdef _WIN32
+  #include <io.h>
+  #include <fcntl.h>
+  #ifndef WIN32_LEAN_AND_MEAN
+  #define WIN32_LEAN_AND_MEAN
+  #endif
+  #ifndef NOMINMAX
+  #define NOMINMAX
+  #endif
+  #include <windows.h>
+  #define isatty _isatty
+  #define fileno _fileno
+#else
+  #include <unistd.h>
+#endif
 #include "linenoise.h"
 #include "tzpl.hpp"
+#include "tzpl_paths.hpp"
 #include "builtins.hpp"
 #include "nrt_vm.hpp"
 #include "module_compiler.hpp"
@@ -77,20 +92,9 @@ static std::string readFile(const std::string& path) {
     return ss.str();
 }
 
-// Split a colon-separated path string into individual directories
+// Split a PATH-style list (':' on POSIX, ';' on Windows) into directories.
 static std::vector<std::string> splitPaths(const std::string& paths) {
-    std::vector<std::string> result;
-    size_t start = 0;
-    while (start < paths.size()) {
-        size_t end = paths.find(':', start);
-        if (end == std::string::npos) end = paths.size();
-        std::string dir = paths.substr(start, end - start);
-        if (!dir.empty()) {
-            result.push_back(std::move(dir));
-        }
-        start = end + 1;
-    }
-    return result;
+    return tzpl::splitPathList(paths);
 }
 
 // --- REPL ---
@@ -179,9 +183,9 @@ static bool isInputComplete(const std::string& input) {
 
 // Get the history file path (~/.tzpl_history)
 static std::string historyPath() {
-    const char* home = getenv("HOME");
-    if (!home) return "";
-    return std::string(home) + "/.tzpl_history";
+    auto home = tzpl::homeDir();
+    if (home.empty()) return "";
+    return (home / ".tzpl_history").string();
 }
 
 // Read a possibly multi-line REPL input using linenoise
@@ -333,7 +337,29 @@ static void runREPL(VM& vm, Compiler& compiler, const VMTarget& target,
     }
 }
 
+#ifdef _WIN32
+// Console setup: binary stdout/stderr (the golden suite byte-compares LF
+// output; the CRT would otherwise write CRLF), UTF-8 code pages for the
+// interpreter's UTF-8 strings, and VT processing so the ANSI colours in
+// diagnostic.cpp render instead of printing as escape sequences.
+static void setupWindowsConsole() {
+    _setmode(_fileno(stdout), _O_BINARY);
+    _setmode(_fileno(stderr), _O_BINARY);
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+    for (DWORD which : {STD_OUTPUT_HANDLE, STD_ERROR_HANDLE}) {
+        HANDLE h = GetStdHandle(which);
+        DWORD mode = 0;
+        if (h != INVALID_HANDLE_VALUE && GetConsoleMode(h, &mode))
+            SetConsoleMode(h, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+    }
+}
+#endif
+
 int main(int argc, const char* argv[]) {
+#ifdef _WIN32
+    setupWindowsConsole();
+#endif
     try {
         // Create TypeUniverse (system-allocated, shared) and Compiler
         TypeUniverse types;

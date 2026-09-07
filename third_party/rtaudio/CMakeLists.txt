@@ -9,6 +9,13 @@ if(APPLE)
         ${COREAUDIO_FRAMEWORK}
         ${COREFOUNDATION_FRAMEWORK}
     )
+elseif(WIN32)
+    # WASAPI (primary) and DirectSound. ASIO needs Steinberg's SDK, which is
+    # not redistributable, so it is not compiled in.
+    target_compile_definitions(rtaudio PUBLIC __WINDOWS_WASAPI__ __WINDOWS_DS__)
+    target_link_libraries(rtaudio PUBLIC
+        ole32 winmm ksuser mfplat mfuuid wmcodecdspuuid dsound avrt
+    )
 elseif(UNIX AND NOT APPLE)
     target_compile_definitions(rtaudio PUBLIC __LINUX_ALSA__)
     find_package(PkgConfig REQUIRED)

@@ -22,8 +22,9 @@
  *    [real[0], real[1], ..., real[N/2-1],  imag[0], imag[1], ..., imag[N/2-1]]
  *  where real[0] = DC component, imag[0] = Nyquist component.
  *
- *  Backend: vDSP (Accelerate) on Apple, a portable radix-2 fallback
- *  elsewhere. Both produce the identical packed layout described above.
+ *  Backend: a portable radix-2 implementation on every platform (it used to
+ *  be vDSP on Apple; one implementation keeps output bit-identical across
+ *  macOS, Linux, and Windows).
  */
 
 #pragma once
@@ -31,27 +32,20 @@
 #include <cstdlib>
 #include <cmath>
 #include <cassert>
-
+#include <numbers>
 #include <vector>
 
-#ifdef __APPLE__
-#include <Accelerate/Accelerate.h>
-#endif
 
 namespace synthdef {
 
 struct JscsFFTSetup {
     int fftSize;
     int log2n;
-#ifdef __APPLE__
-    FFTSetup vdspSetup;
-#else
     // Precomputed bit-reversal permutation and twiddles for the portable path.
     std::vector<int> rev;
     std::vector<float> cosTab, sinTab;
     // Interleaved complex scratch, so forward/inverse allocate nothing.
     std::vector<float> re, im;
-#endif
 };
 
 inline JscsFFTSetup* tzpl_fft_create(int fftSize) {
@@ -61,9 +55,6 @@ inline JscsFFTSetup* tzpl_fft_create(int fftSize) {
     s->log2n = 0;
     int tmp = fftSize;
     while (tmp > 1) { tmp >>= 1; s->log2n++; }
-#ifdef __APPLE__
-    s->vdspSetup = vDSP_create_fftsetup(s->log2n, FFT_RADIX2);
-#else
     // The real-input transform runs as a complex FFT of length N/2, so all
     // tables are sized for that.
     int const halfN = fftSize / 2;
@@ -77,25 +68,20 @@ inline JscsFFTSetup* tzpl_fft_create(int fftSize) {
     s->cosTab.resize((size_t)halfN);
     s->sinTab.resize((size_t)halfN);
     for (int k = 0; k < halfN; ++k) {
-        double a = -2.0 * M_PI * (double)k / (double)halfN;
+        double a = -2.0 * std::numbers::pi * (double)k / (double)halfN;
         s->cosTab[(size_t)k] = (float)std::cos(a);
         s->sinTab[(size_t)k] = (float)std::sin(a);
     }
     s->re.resize((size_t)halfN);
     s->im.resize((size_t)halfN);
-#endif
     return s;
 }
 
 inline void tzpl_fft_destroy(JscsFFTSetup* s) {
     if (!s) return;
-#ifdef __APPLE__
-    vDSP_destroy_fftsetup(s->vdspSetup);
-#endif
     delete s;
 }
 
-#ifndef __APPLE__
 // In-place complex FFT of length halfN over s->re / s->im. `inverse` conjugates
 // the twiddles; no normalization is applied here (callers scale to match the
 // vDSP conventions documented on each entry point).
@@ -124,7 +110,6 @@ inline void tzpl_fft_complex_(JscsFFTSetup* s, bool inverse) {
         }
     }
 }
-#endif
 
 // Forward real FFT: time-domain (fftSize floats) -> split-complex packed (fftSize floats)
 // The input buffer is not modified. Output is written to 'output'.
@@ -134,24 +119,6 @@ inline void tzpl_fft_forward(JscsFFTSetup* s, const float* input, float* output)
     int N = s->fftSize;
     int halfN = N / 2;
 
-#ifdef __APPLE__
-    // Pack real input into split-complex form for vDSP:
-    // realp[k] = input[2k], imagp[k] = input[2k+1]
-    float* realp = output;
-    float* imagp = output + halfN;
-    for (int k = 0; k < halfN; ++k) {
-        realp[k] = input[2 * k];
-        imagp[k] = input[2 * k + 1];
-    }
-
-    DSPSplitComplex sc = { realp, imagp };
-    vDSP_fft_zrip(s->vdspSetup, &sc, 1, s->log2n, FFT_FORWARD);
-
-    // vDSP forward FFT returns 2x the standard DFT; scale by 0.5
-    float scale = 0.5f;
-    vDSP_vsmul(realp, 1, &scale, realp, 1, halfN);
-    vDSP_vsmul(imagp, 1, &scale, imagp, 1, halfN);
-#else
     // Real-input FFT via a half-length complex FFT: pack the even samples as
     // the real part and the odd samples as the imaginary part, transform, then
     // untangle. Produces exactly the layout vDSP does above, including the
@@ -179,12 +146,11 @@ inline void tzpl_fft_forward(JscsFFTSetup* s, const float* input, float* output)
         float ei = 0.5f * (fi[k] - fi[nk]);
         float or_ = 0.5f * (fi[k] + fi[nk]);
         float oi = -0.5f * (fr[k] - fr[nk]);
-        double a = -2.0 * M_PI * (double)k / (double)N;
+        double a = -2.0 * std::numbers::pi * (double)k / (double)N;
         float wr = (float)std::cos(a), wi = (float)std::sin(a);
         realp[k] = er + (or_ * wr - oi * wi);
         imagp[k] = ei + (or_ * wi + oi * wr);
     }
-#endif
 }
 
 // Inverse real FFT: split-complex packed (fftSize floats) -> time-domain (fftSize floats)
@@ -193,34 +159,6 @@ inline void tzpl_fft_inverse(JscsFFTSetup* s, const float* input, float* output)
     int N = s->fftSize;
     int halfN = N / 2;
 
-#ifdef __APPLE__
-    // Copy input to output buffer (vDSP works in-place on split complex)
-    float* realp = output;
-    float* imagp = output + halfN;
-    for (int k = 0; k < halfN; ++k) {
-        realp[k] = input[k];
-        imagp[k] = input[halfN + k];
-    }
-
-    DSPSplitComplex sc = { realp, imagp };
-    vDSP_fft_zrip(s->vdspSetup, &sc, 1, s->log2n, FFT_INVERSE);
-
-    // Unpack split-complex to interleaved real output
-    // After inverse, realp[k] and imagp[k] represent the even/odd real samples
-    float tmpR[halfN], tmpI[halfN];
-    for (int k = 0; k < halfN; ++k) {
-        tmpR[k] = realp[k];
-        tmpI[k] = imagp[k];
-    }
-    for (int k = 0; k < halfN; ++k) {
-        output[2 * k]     = tmpR[k];
-        output[2 * k + 1] = tmpI[k];
-    }
-
-    // vDSP inverse FFT returns (N/2)x the standard IDFT; scale by 1/(N/2)
-    float scale = 1.0f / (float)halfN;
-    vDSP_vsmul(output, 1, &scale, output, 1, N);
-#else
     // Inverse of the packing above: rebuild the half-length complex spectrum,
     // transform back, and de-interleave. Scaled to match vDSP's convention
     // (its inverse returns halfN x the standard IDFT, which the shared caller
@@ -239,7 +177,7 @@ inline void tzpl_fft_inverse(JscsFFTSetup* s, const float* input, float* output)
         float ei = 0.5f * (imagp[k] - imagp[nk]);
         float xr = 0.5f * (realp[k] - realp[nk]);
         float xi = 0.5f * (imagp[k] + imagp[nk]);
-        double a = 2.0 * M_PI * (double)k / (double)N;
+        double a = 2.0 * std::numbers::pi * (double)k / (double)N;
         float wr = (float)std::cos(a), wi = (float)std::sin(a);
         float or_ = xr * wr - xi * wi;
         float oi = xr * wi + xi * wr;
@@ -257,7 +195,6 @@ inline void tzpl_fft_inverse(JscsFFTSetup* s, const float* input, float* output)
         output[2 * k]     = scale * s->re[(size_t)k];
         output[2 * k + 1] = scale * s->im[(size_t)k];
     }
-#endif
 }
 
 // ===========================================================================
@@ -271,16 +208,9 @@ inline void tzpl_fft_inverse(JscsFFTSetup* s, const float* input, float* output)
 struct JscsFFTSetupD {
     int fftSize;
     int log2n;
-#ifdef __APPLE__
-    FFTSetupD vdspSetup;
-    // Heap scratch for the inverse de-interleave (the float path uses a VLA,
-    // which at wavetable sizes would be an oversized stack allocation).
-    std::vector<double> tmpR, tmpI;
-#else
     std::vector<int> rev;
     std::vector<double> cosTab, sinTab;
     std::vector<double> re, im;
-#endif
 };
 
 inline JscsFFTSetupD* tzpl_fft_create_d(int fftSize) {
@@ -291,11 +221,6 @@ inline JscsFFTSetupD* tzpl_fft_create_d(int fftSize) {
     int tmp = fftSize;
     while (tmp > 1) { tmp >>= 1; s->log2n++; }
     int const halfN = fftSize / 2;
-#ifdef __APPLE__
-    s->vdspSetup = vDSP_create_fftsetupD(s->log2n, FFT_RADIX2);
-    s->tmpR.resize((size_t)halfN);
-    s->tmpI.resize((size_t)halfN);
-#else
     s->rev.resize((size_t)halfN);
     int bits = s->log2n - 1;
     for (int i = 0; i < halfN; ++i) {
@@ -306,25 +231,20 @@ inline JscsFFTSetupD* tzpl_fft_create_d(int fftSize) {
     s->cosTab.resize((size_t)halfN);
     s->sinTab.resize((size_t)halfN);
     for (int k = 0; k < halfN; ++k) {
-        double a = -2.0 * M_PI * (double)k / (double)halfN;
+        double a = -2.0 * std::numbers::pi * (double)k / (double)halfN;
         s->cosTab[(size_t)k] = std::cos(a);
         s->sinTab[(size_t)k] = std::sin(a);
     }
     s->re.resize((size_t)halfN);
     s->im.resize((size_t)halfN);
-#endif
     return s;
 }
 
 inline void tzpl_fft_destroy_d(JscsFFTSetupD* s) {
     if (!s) return;
-#ifdef __APPLE__
-    vDSP_destroy_fftsetupD(s->vdspSetup);
-#endif
     delete s;
 }
 
-#ifndef __APPLE__
 // In-place complex FFT of length halfN over s->re / s->im (double version of
 // tzpl_fft_complex_).
 inline void tzpl_fft_complex_d_(JscsFFTSetupD* s, bool inverse) {
@@ -352,7 +272,6 @@ inline void tzpl_fft_complex_d_(JscsFFTSetupD* s, bool inverse) {
         }
     }
 }
-#endif
 
 // Forward real FFT (double): time-domain (fftSize doubles) -> split-complex
 // packed (fftSize doubles). Same layout and scaling as tzpl_fft_forward.
@@ -360,22 +279,6 @@ inline void tzpl_fft_forward_d(JscsFFTSetupD* s, const double* input, double* ou
     int N = s->fftSize;
     int halfN = N / 2;
 
-#ifdef __APPLE__
-    double* realp = output;
-    double* imagp = output + halfN;
-    for (int k = 0; k < halfN; ++k) {
-        realp[k] = input[2 * k];
-        imagp[k] = input[2 * k + 1];
-    }
-
-    DSPDoubleSplitComplex sc = { realp, imagp };
-    vDSP_fft_zripD(s->vdspSetup, &sc, 1, s->log2n, FFT_FORWARD);
-
-    // vDSP forward FFT returns 2x the standard DFT; scale by 0.5
-    double scale = 0.5;
-    vDSP_vsmulD(realp, 1, &scale, realp, 1, halfN);
-    vDSP_vsmulD(imagp, 1, &scale, imagp, 1, halfN);
-#else
     for (int k = 0; k < halfN; ++k) {
         s->re[(size_t)k] = input[2 * k];
         s->im[(size_t)k] = input[2 * k + 1];
@@ -396,12 +299,11 @@ inline void tzpl_fft_forward_d(JscsFFTSetupD* s, const double* input, double* ou
         double ei = 0.5 * (fi[k] - fi[nk]);
         double or_ = 0.5 * (fi[k] + fi[nk]);
         double oi = -0.5 * (fr[k] - fr[nk]);
-        double a = -2.0 * M_PI * (double)k / (double)N;
+        double a = -2.0 * std::numbers::pi * (double)k / (double)N;
         double wr = std::cos(a), wi = std::sin(a);
         realp[k] = er + (or_ * wr - oi * wi);
         imagp[k] = ei + (or_ * wi + oi * wr);
     }
-#endif
 }
 
 // Inverse real FFT (double): split-complex packed (fftSize doubles) ->
@@ -410,35 +312,6 @@ inline void tzpl_fft_inverse_d(JscsFFTSetupD* s, const double* input, double* ou
     int N = s->fftSize;
     int halfN = N / 2;
 
-#ifdef __APPLE__
-    double* realp = output;
-    double* imagp = output + halfN;
-    for (int k = 0; k < halfN; ++k) {
-        realp[k] = input[k];
-        imagp[k] = input[halfN + k];
-    }
-
-    DSPDoubleSplitComplex sc = { realp, imagp };
-    vDSP_fft_zripD(s->vdspSetup, &sc, 1, s->log2n, FFT_INVERSE);
-
-    // Unpack split-complex to interleaved real output
-    double* tmpR = s->tmpR.data();
-    double* tmpI = s->tmpI.data();
-    for (int k = 0; k < halfN; ++k) {
-        tmpR[k] = realp[k];
-        tmpI[k] = imagp[k];
-    }
-    for (int k = 0; k < halfN; ++k) {
-        output[2 * k]     = tmpR[k];
-        output[2 * k + 1] = tmpI[k];
-    }
-
-    // The raw vDSP inverse of our 0.5-scaled forward is N x the input;
-    // scale by 1/N so tzpl_fft_inverse_d is the exact inverse of
-    // tzpl_fft_forward_d.
-    double scale = 1.0 / (double)N;
-    vDSP_vsmulD(output, 1, &scale, output, 1, N);
-#else
     double const* realp = input;
     double const* imagp = input + halfN;
 
@@ -451,7 +324,7 @@ inline void tzpl_fft_inverse_d(JscsFFTSetupD* s, const double* input, double* ou
         double ei = 0.5 * (imagp[k] - imagp[nk]);
         double xr = 0.5 * (realp[k] - realp[nk]);
         double xi = 0.5 * (imagp[k] + imagp[nk]);
-        double a = 2.0 * M_PI * (double)k / (double)N;
+        double a = 2.0 * std::numbers::pi * (double)k / (double)N;
         double wr = std::cos(a), wi = std::sin(a);
         double or_ = xr * wr - xi * wi;
         double oi = xr * wi + xi * wr;
@@ -468,20 +341,19 @@ inline void tzpl_fft_inverse_d(JscsFFTSetupD* s, const double* input, double* ou
         output[2 * k]     = scale * s->re[(size_t)k];
         output[2 * k + 1] = scale * s->im[(size_t)k];
     }
-#endif
 }
 
 // Generate Hann window coefficients
 inline void tzpl_window_hann(float* buf, int size) {
     for (int i = 0; i < size; ++i) {
-        buf[i] = 0.5f * (1.0f - cosf(2.0f * (float)M_PI * (float)i / (float)size));
+        buf[i] = 0.5f * (1.0f - cosf(2.0f * (float)std::numbers::pi * (float)i / (float)size));
     }
 }
 
 // Generate sqrt-Hann window coefficients (for use as both analysis and synthesis window)
 inline void tzpl_window_sqrt_hann(float* buf, int size) {
     for (int i = 0; i < size; ++i) {
-        buf[i] = sqrtf(0.5f * (1.0f - cosf(2.0f * (float)M_PI * (float)i / (float)size)));
+        buf[i] = sqrtf(0.5f * (1.0f - cosf(2.0f * (float)std::numbers::pi * (float)i / (float)size)));
     }
 }
 

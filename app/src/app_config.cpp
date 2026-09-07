@@ -20,6 +20,7 @@
 //
 
 #include "app_config.hpp"
+#include "tzpl_paths.hpp"
 
 #include <cstdlib>
 #include <filesystem>
@@ -266,19 +267,11 @@ bool saveConfigFile(std::string const& path, AppConfig const& cfg,
 }
 
 std::string userConfigFile() {
-    char const* home = std::getenv("HOME");
-#if defined(__APPLE__)
-    if (home && *home) {
-        return (fs::path(home) / "Library" / "Application Support" / "Tzopilotl"
-                / "tzpl-config").string();
-    }
-#else
-    if (char const* xdg = std::getenv("XDG_CONFIG_HOME"); xdg && *xdg)
-        return (fs::path(xdg) / "tzpl" / "tzpl-config").string();
-    if (home && *home)
-        return (fs::path(home) / ".config" / "tzpl" / "tzpl-config").string();
-#endif
-    return {};
+    // ~/Library/Application Support/Tzopilotl (macOS), $XDG_CONFIG_HOME/tzpl
+    // or ~/.config/tzpl (Linux), %APPDATA%\Tzopilotl (Windows).
+    fs::path dir = tzpl::userConfigDir();
+    if (dir.empty()) return {};
+    return (dir / "tzpl-config").string();
 }
 
 }  // namespace tzplapp

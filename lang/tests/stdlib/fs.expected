@@ -16,7 +16,7 @@ true
 [one, two]
 dflt
 true
-cannot read file: /tmp/tzpl_test_stdlib_fs/nope.txt
+cannot read file: <dir>/nope.txt
 [a.txt, l.txt, nested]
 true
 false

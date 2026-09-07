@@ -28,15 +28,26 @@
 #include "synthdef_cpp_codegen.hpp"
 #include "tzpl_plugin_abi.h"
 #include "synthdef_audio_io.hpp"
-#include <dlfcn.h> // dlopen, dlclose
-#include <unistd.h>
+#include "tzpl_process.hpp"
+#include <chrono>
+#include <thread>
 #include <cmath>    // std::isfinite, std::fabs
 #include <cstdlib>  // getenv
 
+// Overridable from the command line (-DCOMPILE_CODE=0 ...) so a new platform
+// can bring --test up in stages: codegen only, then compile, then load+render.
+#ifndef GENERATE_CODE
 #define GENERATE_CODE 1
+#endif
+#ifndef COMPILE_CODE
 #define COMPILE_CODE 1
+#endif
+#ifndef RUN_INTERNAL_AUDIO_ENGINE
 #define RUN_INTERNAL_AUDIO_ENGINE 1
+#endif
+#ifndef RUN_EXTERNAL_AUDIO_ENGINE
 #define RUN_EXTERNAL_AUDIO_ENGINE 0
+#endif
 
 namespace synthdef {
 
@@ -162,11 +173,11 @@ void runInternalAudioEngine(string dir, string synthName, int seconds) {
             initAudio(&e);
             std::println("NOW PLAYING: {}", synthName);
             startAudio(&e);
-            sleep(seconds);
+            std::this_thread::sleep_for(std::chrono::seconds(seconds));
             stopAudio(&e);
             uninitAudio(&e);
         } else {
-            long nframes = (long)seconds * 48000;
+            i64 nframes = (i64)seconds * 48000;
             double maxAbs = 0.0;
             bool nonFinite = false;
             for (long i = 0; i < nframes; ++i) {
@@ -183,8 +194,8 @@ void runInternalAudioEngine(string dir, string synthName, int seconds) {
             // non-finite or wildly large output means the synth (or this
             // harness's fixed 2-float outlet buffer) is producing garbage.
             const char* warn = (nonFinite || maxAbs > 10.0) ? "  <<< WARNING: garbage output" : "";
-            printf("offline render: %ld frames, maxAbs=%g, finite=%s%s\n",
-                   nframes, maxAbs, nonFinite ? "NO" : "yes", warn);
+            printf("offline render: %lld frames, maxAbs=%g, finite=%s%s\n",
+                   (long long)nframes, maxAbs, nonFinite ? "NO" : "yes", warn);
         }
         free(data->outlets);
         def.funs.free(data);
@@ -242,26 +253,16 @@ void test(string synthName, int seconds, std::function<void()> f)
     try {
     printf("\nbegin run audio engine =====================================================\n");
         char const* enginePath = getenv("TZPL_AUDIOENGINE");
-        string cmd = enginePath ? enginePath : "tzpl_audioengine";
-        cmd += " ";
-        cmd += synthName;
-        cmd += " ";
-        cmd += filepath_dylib;
+        std::vector<string> argv{enginePath ? enginePath : "tzpl_audioengine",
+                                 synthName, filepath_dylib};
         // try to load the dylib into the audio engine
-        printf("RUN: %s\n", cmd.c_str());
-        FILE* pf = popen(cmd.c_str(), "r");
-
-        while(1) {
-            char buffer[2048];
-            char *line = fgets(buffer, sizeof(buffer), pf);
-            if (!line) break;
-            printf("%s", line);
-        }
-        int status = pclose(pf);
+        printf("RUN: %s\n", tzpl::commandLineForDisplay(argv).c_str());
+        int status = tzpl::runProcess(argv, [](std::string_view line) {
+            printf("%.*s\n", (int)line.size(), line.data());
+        });
         if (status) {
             printf("tzpl_audioengine failed: %d\n", status);
             exit(1);
-            //exit(WEXITSTATUS(status));
         }
     printf("\nend run audio engine =====================================================\n");
     } catch (std::exception& err) {

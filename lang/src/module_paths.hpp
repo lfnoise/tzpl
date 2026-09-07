@@ -15,7 +15,7 @@
 
 namespace ts {
 
-// Directories listed in $TZPL_PATH (colon-separated), in order.
+// Directories listed in $TZPL_PATH (":"-separated; ";" on Windows), in order.
 std::vector<std::string> envModulePaths();
 
 // Locate the installed standard-library module directories. Candidates are

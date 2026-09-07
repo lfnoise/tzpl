@@ -5,11 +5,25 @@
 #include "tzpl_app_context.hpp"
 #include "nrt_vm.hpp"
 #include "diagnostic.hpp"
-#include <unistd.h>
-#include <fcntl.h>
-#include <poll.h>
+#include <algorithm>
 #include <cstring>
-#include <pthread.h>
+#ifdef _WIN32
+  #ifndef WIN32_LEAN_AND_MEAN
+  #define WIN32_LEAN_AND_MEAN
+  #endif
+  #ifndef NOMINMAX
+  #define NOMINMAX
+  #endif
+  #include <windows.h>
+  #include <io.h>
+  #include <fcntl.h>
+  #include <process.h>
+#else
+  #include <unistd.h>
+  #include <fcntl.h>
+  #include <poll.h>
+  #include <pthread.h>
+#endif
 
 // ---------------------------------------------------------------------------
 // OutputBuffer
@@ -44,12 +58,31 @@ std::vector<OutputLine> OutputBuffer::drain() {
 // PrintCapture
 // ---------------------------------------------------------------------------
 
+// The VM prints through a FILE* on the write end of a pipe; the GUI thread
+// drains the read end without blocking. POSIX: O_NONBLOCK + poll. Windows:
+// an anonymous pipe cannot be polled or made non-blocking, so the read side
+// asks PeekNamedPipe how much is waiting and reads exactly that.
+#ifdef _WIN32
+static DWORD pendingBytes(int fd) {
+    HANDLE h = (HANDLE)_get_osfhandle(fd);
+    DWORD avail = 0;
+    if (h == INVALID_HANDLE_VALUE || !PeekNamedPipe(h, nullptr, 0, nullptr, &avail, nullptr))
+        return 0;
+    return avail;
+}
+#endif
+
 PrintCapture::PrintCapture() {
+#ifdef _WIN32
+    if (_pipe(pipeFds_, 1 << 16, _O_BINARY | _O_NOINHERIT) == 0) {
+        writeFile_ = _fdopen(pipeFds_[1], "wb");
+#else
     if (pipe(pipeFds_) == 0) {
         // Make read end non-blocking
         fcntl(pipeFds_[0], F_SETFL, O_NONBLOCK);
         // Create FILE* for the write end (unbuffered for immediate output)
         writeFile_ = fdopen(pipeFds_[1], "w");
+#endif
         if (writeFile_) {
             setvbuf(writeFile_, nullptr, _IONBF, 0);
         }
@@ -58,7 +91,11 @@ PrintCapture::PrintCapture() {
 
 PrintCapture::~PrintCapture() {
     if (writeFile_) fclose(writeFile_); // also closes pipeFds_[1]
+#ifdef _WIN32
+    if (pipeFds_[0] >= 0) _close(pipeFds_[0]);
+#else
     if (pipeFds_[0] >= 0) close(pipeFds_[0]);
+#endif
 }
 
 std::vector<std::string> PrintCapture::drainLines() {
@@ -69,7 +106,13 @@ std::vector<std::string> PrintCapture::drainLines() {
     std::string accum;
 
     for (;;) {
+#ifdef _WIN32
+        DWORD avail = pendingBytes(pipeFds_[0]);
+        if (avail == 0) break;
+        int n = _read(pipeFds_[0], tmp, (unsigned)std::min<DWORD>(avail, sizeof(tmp)));
+#else
         ssize_t n = read(pipeFds_[0], tmp, sizeof(tmp));
+#endif
         if (n <= 0) break;
         accum.append(tmp, n);
     }
@@ -91,8 +134,12 @@ std::vector<std::string> PrintCapture::drainLines() {
 
 bool PrintCapture::hasPending() const {
     if (pipeFds_[0] < 0) return false;
+#ifdef _WIN32
+    return pendingBytes(pipeFds_[0]) > 0;
+#else
     struct pollfd pfd = {pipeFds_[0], POLLIN, 0};
     return poll(&pfd, 1, 0) > 0 && (pfd.revents & POLLIN);
+#endif
 }
 
 void PrintCapture::drain(OutputBuffer& buf) {
@@ -122,19 +169,33 @@ void EvalFlash::update(float deltaTime) {
 // AsyncEval
 // ---------------------------------------------------------------------------
 
+// The evaluation thread gets an 8 MB stack: the compiler and VM recurse
+// deeply, and std::thread cannot size a stack, hence pthread_create /
+// _beginthreadex directly.
+static constexpr size_t kEvalStackBytes = 8 * 1024 * 1024;
+
+#ifdef _WIN32
+static void joinThread(std::uintptr_t& h) {
+    WaitForSingleObject((HANDLE)h, INFINITE);
+    CloseHandle((HANDLE)h);
+    h = 0;
+}
+#else
+static void joinThread(pthread_t& t) { pthread_join(t, nullptr); }
+#endif
+
 AsyncEval::~AsyncEval() {
-    if (threadActive_) pthread_join(thread_, nullptr);
+    if (threadActive_) joinThread(thread_);
 }
 
-// Trampoline for pthread_create
+// Trampoline for the thread entry point
 struct EvalArgs {
     AsyncEval* self;
     bridge::AppContext* ctx;
     ts::REPLSession* session;
 };
 
-static void* evalThreadFunc(void* arg) {
-    auto* ea = static_cast<EvalArgs*>(arg);
+static void evalThreadBody(EvalArgs* ea) {
     {
         std::lock_guard<std::mutex> lock(ea->ctx->nrtvm->mtx);
         ea->ctx->nrtvm->vm.makeCurrent();
@@ -144,14 +205,25 @@ static void* evalThreadFunc(void* arg) {
     ea->self->running.store(false);
     if (ea->self->onFinished) ea->self->onFinished(); // wake the GUI loop
     delete ea;
+}
+
+#ifdef _WIN32
+static unsigned __stdcall evalThreadFunc(void* arg) {
+    evalThreadBody(static_cast<EvalArgs*>(arg));
+    return 0;
+}
+#else
+static void* evalThreadFunc(void* arg) {
+    evalThreadBody(static_cast<EvalArgs*>(arg));
     return nullptr;
 }
+#endif
 
 void AsyncEval::launch(const std::string& src, bridge::AppContext& ctx,
                        ts::REPLSession& session, int fs, int fe,
                        std::uint64_t cell) {
     if (running.load()) return;
-    if (threadActive_) { pthread_join(thread_, nullptr); threadActive_ = false; }
+    if (threadActive_) { joinThread(thread_); threadActive_ = false; }
 
     code = src;
     flashStart = fs;
@@ -160,23 +232,27 @@ void AsyncEval::launch(const std::string& src, bridge::AppContext& ctx,
     running.store(true);
 
     auto* args = new EvalArgs{this, &ctx, &session};
+#ifdef _WIN32
+    thread_ = _beginthreadex(nullptr, (unsigned)kEvalStackBytes, evalThreadFunc, args, 0, nullptr);
+#else
     pthread_attr_t attr;
     pthread_attr_init(&attr);
-    pthread_attr_setstacksize(&attr, 8 * 1024 * 1024);  // 8MB stack
+    pthread_attr_setstacksize(&attr, kEvalStackBytes);
     pthread_create(&thread_, &attr, evalThreadFunc, args);
     pthread_attr_destroy(&attr);
+#endif
     threadActive_ = true;
 }
 
 void AsyncEval::join() {
     if (running.load() || !threadActive_) return;
-    pthread_join(thread_, nullptr);
+    joinThread(thread_);
     threadActive_ = false;
 }
 
 bool AsyncEval::collect(GuiState& state) {
     if (running.load() || !threadActive_) return false;
-    pthread_join(thread_, nullptr);
+    joinThread(thread_);
     threadActive_ = false;
 
     // Separator between evaluations

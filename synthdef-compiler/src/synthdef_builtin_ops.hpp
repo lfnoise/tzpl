@@ -23,16 +23,17 @@
 
 #pragma once
 #include "synthdef_value.hpp"
+#include <numbers>
 
 namespace synthdef {
 
-    const f64 pi       = M_PI;
-    const f64 twopi    = 2.*M_PI;
-    const f64 halfSqrt = M_SQRT1_2;        // square root of one half = .7071...
-    const f64 twoSqrt  = M_SQRT2;          // square root of 2
+    const f64 pi       = std::numbers::pi;
+    const f64 twopi    = 2.*std::numbers::pi;
+    const f64 halfSqrt = 1./std::numbers::sqrt2;       // square root of one half = .7071...
+    const f64 twoSqrt  = std::numbers::sqrt2;        // square root of 2
     const f64 phi      = (std::sqrt(5.)+1.)/2.; // golden ratio
-    const f64 halfLog2 = .5 * M_LN2;   // Used for filter coefficients.
-    const f64 e        = M_E;
+    const f64 halfLog2 = .5 * std::numbers::ln2;   // Used for filter coefficients.
+    const f64 e        = std::numbers::e;
     const x64 j        = x64(0,1);
     const x64 log01    = std::log(.01);
     const x64 log001   = std::log(.001);

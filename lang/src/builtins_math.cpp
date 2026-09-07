@@ -19,6 +19,7 @@
 //
 
 #include "builtins_internal.hpp"
+#include "tzpl_sinpi.hpp"
 #include <cmath>
 #include <complex>
 #include <bit>
@@ -158,36 +159,20 @@ static void builtin_abs_float(VM& vm, u16 dst, u16, u16 argBase) {
 
 // sinpi, cospi, tanpi
 static void builtin_sinpi_float(VM& vm, u16 dst, u16, u16 argBase) {
-#if defined(__APPLE__)
-    vm.reg(dst).f = __sinpi(vm.reg(argBase).f);
-#else
-    vm.reg(dst).f = std::sin(vm.reg(argBase).f * M_PI);
-#endif
+    vm.reg(dst).f = synthdef::tzpl_sinpi(vm.reg(argBase).f);
 }
 
 static void builtin_cospi_float(VM& vm, u16 dst, u16, u16 argBase) {
-#if defined(__APPLE__)
-    vm.reg(dst).f = __cospi(vm.reg(argBase).f);
-#else
-    vm.reg(dst).f = std::cos(vm.reg(argBase).f * M_PI);
-#endif
+    vm.reg(dst).f = synthdef::tzpl_cospi(vm.reg(argBase).f);
 }
 
 static void builtin_tanpi_float(VM& vm, u16 dst, u16, u16 argBase) {
-#if defined(__APPLE__)
-    vm.reg(dst).f = __tanpi(vm.reg(argBase).f);
-#else
-    vm.reg(dst).f = std::tan(vm.reg(argBase).f * M_PI);
-#endif
+    vm.reg(dst).f = synthdef::tzpl_tanpi(vm.reg(argBase).f);
 }
 
 // exp10(x)
 static void builtin_exp10_float(VM& vm, u16 dst, u16, u16 argBase) {
-#if defined(__APPLE__)
-    vm.reg(dst).f = __exp10(vm.reg(argBase).f);
-#else
-    vm.reg(dst).f = std::pow(10.0, vm.reg(argBase).f);
-#endif
+    vm.reg(dst).f = synthdef::tzpl_exp10(vm.reg(argBase).f);
 }
 
 // ============================================================================
@@ -693,15 +678,18 @@ static bool parseIntStrict(VMString const& s, int radix, i64& out) {
 static void builtin_parseInt_string(VM& vm, u16 dst, u16, u16 ab) {
     auto* s = static_cast<StringObj*>(vm.reg(ab).o);
     i64 v = 0;
-    writeOptionIntResult(vm, dst, parseIntStrict(s->s, 10, v), v);
+    // Two statements: argument evaluation order is unspecified, and Clang
+    // evaluates right-to-left on the MSVC ABI (v would be read before set).
+    bool ok = parseIntStrict(s->s, 10, v);
+    writeOptionIntResult(vm, dst, ok, v);
 }
 
 // parseInt(String, Int) -> Option<Int> -- radix 2..36.
 static void builtin_parseInt_radix_string(VM& vm, u16 dst, u16, u16 ab) {
     auto* s = static_cast<StringObj*>(vm.reg(ab).o);
     i64 v = 0;
-    writeOptionIntResult(vm, dst,
-        parseIntStrict(s->s, (int)vm.reg(ab + 1).i, v), v);
+    bool ok = parseIntStrict(s->s, (int)vm.reg(ab + 1).i, v);
+    writeOptionIntResult(vm, dst, ok, v);
 }
 
 // parseFloat(String) -> Option<Float> -- strict: the whole string must be a

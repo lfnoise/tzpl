@@ -298,9 +298,11 @@ ModuleInfo* ModuleCompiler::compileModule(
         return nullptr;
     }
 
-    // Compute display path (relative to CWD) for error diagnostics
+    // Compute display path (relative to CWD) for error diagnostics. Generic
+    // form ('/' separators) so diagnostics read the same on every platform
+    // and the golden .expected_err files hold.
     std::string displayPath = std::filesystem::relative(
-        resolvedPath, std::filesystem::canonical(std::filesystem::current_path())).string();
+        resolvedPath, std::filesystem::canonical(std::filesystem::current_path())).generic_string();
 
     // Lex
     Lexer lexer(source, displayPath);

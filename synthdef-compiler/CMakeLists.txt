@@ -37,13 +37,30 @@ set_target_properties(synthdef_compiler_lib PROPERTIES OUTPUT_NAME synthdef_comp
 target_include_directories(synthdef_compiler_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(synthdef_compiler_lib PUBLIC shared)
 
-target_compile_options(synthdef_compiler_lib PRIVATE -ffast-math)
+# -ffast-math also shapes constant folding (synthdef_matrix.cpp), so it is
+# applied under clang-cl too, in its spelling.
+if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+    set(TZPL_FAST_MATH /clang:-ffast-math)
+else()
+    set(TZPL_FAST_MATH -ffast-math)
+endif()
+target_compile_options(synthdef_compiler_lib PRIVATE ${TZPL_FAST_MATH})
 
 # The runtime plugin compiler shells out to a C++ compiler; bake in the one
 # this build was configured with so the PATH lookup is only a fallback
-# ($TZPL_CC still overrides at runtime).
-target_compile_definitions(synthdef_compiler_lib PRIVATE
-    TZPL_PLUGIN_CXX="${CMAKE_CXX_COMPILER}")
+# ($TZPL_CC still overrides at runtime). On Windows the host compiler is
+# clang-cl, which does not take the GNU-style plugin command line; plugins
+# are compiled by the llvm-mingw toolchain instead (TZPL_PLUGIN_TOOLCHAIN_DIR
+# for dev builds, toolchain/ in the distribution folder at runtime).
+if(WIN32)
+    if(TZPL_PLUGIN_TOOLCHAIN_DIR)
+        target_compile_definitions(synthdef_compiler_lib PRIVATE
+            TZPL_PLUGIN_CXX="${TZPL_PLUGIN_TOOLCHAIN_DIR}/bin/clang++.exe")
+    endif()
+else()
+    target_compile_definitions(synthdef_compiler_lib PRIVATE
+        TZPL_PLUGIN_CXX="${CMAKE_CXX_COMPILER}")
+endif()
 
 # --- synthdef-compiler executable (tests, examples, audio playback) ---
 
@@ -58,7 +75,7 @@ set(EXE_SOURCES
 
 add_executable(synthdef-compiler ${EXE_SOURCES})
 target_link_libraries(synthdef-compiler PRIVATE synthdef_compiler_lib rtaudio)
-target_compile_options(synthdef-compiler PRIVATE -ffast-math)
+target_compile_options(synthdef-compiler PRIVATE ${TZPL_FAST_MATH})
 
 # --- install targets ---
 

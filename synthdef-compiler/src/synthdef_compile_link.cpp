@@ -23,10 +23,13 @@
 //
 
 #include "synthdef_compile_link.hpp"
+#include "tzpl_dynlib.hpp"
+#include "tzpl_paths.hpp"
+#include "tzpl_process.hpp"
 #include <algorithm>
-#include <dlfcn.h>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <print>
 #include <unordered_map>
 
@@ -48,25 +51,56 @@ static string synthNameSuffix = "_synth";
 
 // Plugin extension. Must agree with the engine's plugin scanner
 // (kPluginExt in tzpl_client_interface.cpp).
-#ifdef __APPLE__
+#if defined(__APPLE__)
 static constexpr char const kDylibExt[] = ".dylib";
+#elif defined(_WIN32)
+static constexpr char const kDylibExt[] = ".dll";
 #else
 static constexpr char const kDylibExt[] = ".so";
 #endif
 
-// The compiler used for generated plugins: $TZPL_CC overrides everything;
-// otherwise macOS keeps the historical bare "clang", and elsewhere we use
-// the compiler this binary was configured with (baked in by CMake) so the
-// runtime shell-out never depends on what PATH happens to hold.
+// The compiler used for generated plugins, resolved once per process:
+//   1. $TZPL_CC -- explicit override
+//   2. Windows: the llvm-mingw toolchain bundled in the distribution folder
+//      (toolchain/bin/clang++.exe beside modules/), so plugin compilation
+//      works on a machine with no developer tools installed
+//   3. macOS: the historical bare "clang" (Xcode command line tools)
+//   4. the compiler this binary was configured with (baked in by CMake), if
+//      it still exists
+//   5. clang++ from PATH
 static string toolchainCommand() {
-    if (char const* cc = getenv("TZPL_CC"); cc && cc[0]) return cc;
-#ifdef __APPLE__
-    return "clang";
-#elif defined(TZPL_PLUGIN_CXX)
-    return TZPL_PLUGIN_CXX;
-#else
-    return "clang++";
+    static string const resolved = [] {
+        if (char const* cc = getenv("TZPL_CC"); cc && cc[0]) return string(cc);
+#if defined(_WIN32)
+        if (fs::path root = tzpl::distRoot(); !root.empty()) {
+            // llvm-mingw's target-prefixed driver pins the target and runtime
+            // choices; bare clang++.exe relies on the toolchain's defaults.
+            std::error_code ec;
+            for (char const* name : {"x86_64-w64-mingw32-clang++.exe", "clang++.exe"}) {
+                fs::path bundled = root / "toolchain" / "bin" / name;
+                if (fs::is_regular_file(bundled, ec)) return bundled.generic_string();
+            }
+        }
+#elif defined(__APPLE__)
+        return string("clang");
 #endif
+#if defined(TZPL_PLUGIN_CXX)
+        {
+            std::error_code ec;
+            if (fs::is_regular_file(TZPL_PLUGIN_CXX, ec)) return string(TZPL_PLUGIN_CXX);
+        }
+#endif
+        return string("clang++");
+    }();
+    return resolved;
+}
+
+// Run one toolchain step, echoing the command and everything it prints.
+static int runToolchain(char const* label, std::vector<string> const& argv) {
+    printf("%s: %s\n", label, tzpl::commandLineForDisplay(argv).c_str());
+    return tzpl::runProcess(argv, [](std::string_view line) {
+        printf("%.*s\n", (int)line.size(), line.data());
+    });
 }
 
 // Every {name}_synth_rN.dylib in {buildDir}/dylib, as (revision, path).
@@ -136,11 +170,13 @@ static u64 keepRevisions() {
 
 // Drop all but the newest keepRevisions() revisions of a name.
 //
-// Deleting a dylib that is currently dlopen'd is safe: unlink drops the
-// directory entry while the mapping holds the inode, so nodes running that
+// On POSIX, deleting a dylib that is currently dlopen'd is safe: unlink drops
+// the directory entry while the mapping holds the inode, so nodes running that
 // revision keep valid function pointers. What a deletion can break is opening
 // it *again* by path -- which is why callers that cache a dylib path must fall
-// back to recompiling when the load fails.
+// back to recompiling when the load fails. Windows refuses to delete a loaded
+// DLL instead; the remove simply fails (ignored here) and the file is picked
+// up by pruneAllOldRevisions on a later launch, once nothing maps it.
 static void pruneOldRevisions(string const& buildDir, string const& synthName) {
     auto revs = scanRevisions(buildDir, synthName);
     u64 keep = keepRevisions();
@@ -159,40 +195,54 @@ static void pruneOldRevisions(string const& buildDir, string const& synthName) {
         std::println("pruned {} old revision(s) of {}", removed, synthName);
 }
 
+// Once per process: prune every name found in {buildDir}/dylib. Catches the
+// revisions a previous session could not delete because they were still
+// loaded (always the case on Windows) and anything left by a crash.
+static void pruneAllOldRevisions(string const& buildDir) {
+    std::error_code ec;
+    std::vector<string> names;
+    for (auto const& entry : fs::directory_iterator(buildDir + "dylib", ec)) {
+        if (!entry.is_regular_file() || entry.path().extension() != kDylibExt)
+            continue;
+        string stem = entry.path().stem().string();
+        size_t r = stem.rfind("_r");
+        if (r == string::npos || r < synthNameSuffix.size()) continue;
+        string base = stem.substr(0, r);
+        if (!base.ends_with(synthNameSuffix)) continue;
+        string name = base.substr(0, base.size() - synthNameSuffix.size());
+        if (std::find(names.begin(), names.end(), name) == names.end())
+            names.push_back(name);
+    }
+    for (auto const& name : names) pruneOldRevisions(buildDir, name);
+}
+
 static int compile(string const& filepath_c, string const& filepath_o, string const& includeDir)
 {
     printf("\nbegin C compile plugin =====================================================\n");
 
-    string cmd = toolchainCommand();
-#ifdef __APPLE__
-    cmd += " -x c++ -arch arm64 -std=c++23 -stdlib=libc++";
+    std::vector<string> argv{toolchainCommand(), "-x", "c++", "-std=c++23"};
+#if defined(__APPLE__)
+    argv.insert(argv.end(), {"-arch", "arm64", "-stdlib=libc++"});
+#elif defined(_WIN32)
+    // Sleef is linked statically into the plugin; without this its header
+    // declares every function __declspec(dllimport) on Windows.
+    argv.push_back("-DSLEEF_STATIC_LIBS");
 #else
-    cmd += " -x c++ -std=c++23 -fPIC";
+    argv.push_back("-fPIC");
 #endif
-    cmd += " -o " + filepath_o;
-    cmd += " -O3";
+    argv.push_back("-O3");
     // fast-math minus the finite-math assumption: generated event loops can
     // legitimately compute transient Inf (e.g. 1/(freq*decay) with pre-note
     // zeros at control priming), which is UB under -ffinite-math-only -- and
     // x86-64 clang exploits it into a silent render. IEEE Inf handling makes
     // it well-defined (pow(x, inf) = 0, overwritten at noteOn).
-    cmd += " -ffast-math -fno-finite-math-only";
-    cmd += " -I " + includeDir;
-    cmd += " -c " + filepath_c;
+    argv.insert(argv.end(), {"-ffast-math", "-fno-finite-math-only"});
+    argv.insert(argv.end(), {"-I", includeDir, "-c", filepath_c, "-o", filepath_o});
 
-    printf("COMPILE: %s\n", cmd.c_str());
-    FILE* pf = popen(cmd.c_str(), "r");
-
-    while(1) {
-        char buffer[2048];
-        char *line = fgets(buffer, sizeof(buffer), pf);
-        if (!line) break;
-        printf("%s", line);
-    }
-    int status = pclose(pf);
+    int status = runToolchain("COMPILE", argv);
     if (status) {
         printf("error %d compiling '%s'\n", status, filepath_c.c_str());
-        return WEXITSTATUS(status);
+        return status;
     }
     printf("end C compile plugin =====================================================\n");
     return 0;
@@ -201,46 +251,42 @@ static int compile(string const& filepath_c, string const& filepath_o, string co
 static int link(string const& filepath_o, string const& filepath_dylib,
                 string const& buildDir) {
     printf("\nbegin call linker =====================================================\n");
-    string cmd = toolchainCommand();
-#ifdef __APPLE__
+    std::vector<string> argv{toolchainCommand()};
+#if defined(__APPLE__)
     (void)buildDir;
-    cmd += " -arch arm64";
-    cmd += " -dynamiclib";
-    cmd += " -undefined dynamic_lookup";
-    cmd += " -compatibility_version 1 -current_version 1";
-    cmd += " -framework Accelerate";
+    argv.insert(argv.end(), {"-arch", "arm64", "-dynamiclib",
+                             "-undefined", "dynamic_lookup",
+                             "-compatibility_version", "1", "-current_version", "1",
+                             "-o", filepath_dylib, filepath_o});
+#elif defined(_WIN32)
+    // PE has no rpath and resolves every symbol at link time, so the C++
+    // runtime and Sleef (staged as libsleef.a by ensureBuildDirs) are linked
+    // statically: the DLL imports only the system CRT. --exclude-all-symbols
+    // keeps the export table to the TZPL_PLUGIN_EXPORT symbols.
+    argv.insert(argv.end(), {"-shared", "-static", "-Wl,--exclude-all-symbols",
+                             "-o", filepath_dylib, filepath_o,
+                             "-L" + buildDir + "lib", "-lsleef"});
 #else
     // ELF shared objects leave undefined symbols to be resolved from the
     // host at dlopen time by default, which is the -undefined dynamic_lookup
     // behavior the plugin ABI relies on. Sleef is staged into the build dir
     // by ensureBuildDirs(); the rpath keeps the plugin loadable after the
     // CMake build tree is gone.
-    cmd += " -shared -fPIC";
-    cmd += " -L" + buildDir + "lib -lsleef";
-    cmd += " -Wl,-rpath," + buildDir + "lib";
+    argv.insert(argv.end(), {"-shared", "-fPIC", "-o", filepath_dylib, filepath_o,
+                             "-L" + buildDir + "lib", "-lsleef",
+                             "-Wl,-rpath," + buildDir + "lib"});
 #endif
-    cmd += " -o " + filepath_dylib;
-    cmd += " " + filepath_o;
-    printf("LINK: %s\n", cmd.c_str());
-    FILE* pf = popen(cmd.c_str(), "r");
-
-    while(1) {
-        char buffer[2048];
-        char *line = fgets(buffer, sizeof(buffer), pf);
-        if (!line) break;
-        printf("%s", line);
-    }
-    int status = pclose(pf);
+    int status = runToolchain("LINK", argv);
     if (status) {
         printf("link failed: %d\n", status);
-        return WEXITSTATUS(status);
+        return status;
     }
     printf("end call linker =====================================================\n");
     return 0;
 }
 
 static string ensureTrailingSlash(string const& path) {
-    if (path.empty() || path.back() == '/') return path;
+    if (path.empty() || path.back() == '/' || path.back() == '\\') return path;
     return path + '/';
 }
 
@@ -249,12 +295,67 @@ string getBuildDir() {
     if (tzpl_build && tzpl_build[0] != '\0') {
         return ensureTrailingSlash(tzpl_build);
     }
-    const char* homedir = getenv("HOME");
-    if (homedir) {
-        return string(homedir) + "/tzpl-build/";
-    }
-    return "/tmp/tzpl-build/";
+    // ~/tzpl-build (POSIX) or %LOCALAPPDATA%\tzpl-build (Windows). Forward
+    // slashes throughout: every consumer (std::filesystem, the compiler
+    // command line, Win32) accepts them.
+    return ensureTrailingSlash(tzpl::defaultBuildDir().generic_string());
 }
+
+// Where the plugin headers (tzpl_plugin_abi.h and friends) come from, in
+// order: $TZPL_SHARED_INCLUDE; the distribution folder's include/ (installed
+// by the dist component next to modules/); the source tree baked in at
+// configure time (dev builds). Empty if none exists.
+static fs::path sharedHeaderSource() {
+    std::error_code ec;
+    if (char const* p = getenv("TZPL_SHARED_INCLUDE"); p && *p && fs::is_directory(p, ec))
+        return p;
+    if (fs::path root = tzpl::distRoot(); !root.empty() && fs::is_directory(root / "include", ec))
+        return root / "include";
+#ifdef TZPL_SHARED_DIR
+    if (fs::is_directory(TZPL_SHARED_DIR, ec)) return TZPL_SHARED_DIR;
+#endif
+    return {};
+}
+
+#ifndef __APPLE__
+// Stage Sleef next to the shared headers: generated code includes <sleef.h>
+// via tzpl_simd.hpp, and link() resolves -lsleef against {buildDir}/lib.
+// Sources are the CMake build tree (dev builds: TZPL_SLEEF_*, or the
+// plugin-toolchain copy TZPL_PLUGIN_SLEEF_LIB on Windows) and the
+// distribution folder (lib/, or toolchain/tzpl/lib on Windows). Copying
+// every libsleef.so* name (real file, SONAME, linker name) keeps both the
+// link step and the recorded rpath working after the build tree is gone.
+static void stageSleef(string const& buildDir) {
+    fs::create_directories(buildDir + "lib");
+    std::error_code ec;
+    auto copyInto = [&](fs::path const& src, string const& dstDir) {
+        if (fs::is_regular_file(src, ec))
+            fs::copy_file(src, dstDir + src.filename().string(),
+                          fs::copy_options::update_existing, ec);
+    };
+    auto copyLibsFrom = [&](fs::path const& dir) {
+        for (auto const& entry : fs::directory_iterator(dir, ec)) {
+            auto name = entry.path().filename().string();
+            if (name.starts_with("libsleef.so") || name == "libsleef.a")
+                copyInto(entry.path(), buildDir + "lib/");
+        }
+    };
+#if defined(TZPL_SLEEF_INCLUDE_DIR)
+    copyInto(fs::path(TZPL_SLEEF_INCLUDE_DIR) / "sleef.h", buildDir + "include/");
+#endif
+#if defined(TZPL_PLUGIN_SLEEF_LIB)
+    copyLibsFrom(fs::path(TZPL_PLUGIN_SLEEF_LIB).parent_path());
+#elif defined(TZPL_SLEEF_LIB)
+    copyLibsFrom(fs::path(TZPL_SLEEF_LIB).parent_path());
+#endif
+    if (fs::path root = tzpl::distRoot(); !root.empty()) {
+        copyLibsFrom(root / "lib");
+#ifdef _WIN32
+        copyLibsFrom(root / "toolchain" / "tzpl" / "lib");
+#endif
+    }
+}
+#endif
 
 void ensureBuildDirs(string const& buildDir) {
     fs::create_directories(buildDir + "include");
@@ -262,40 +363,33 @@ void ensureBuildDirs(string const& buildDir) {
     fs::create_directories(buildDir + "obj");
     fs::create_directories(buildDir + "dylib");
 
-#ifdef TZPL_SHARED_DIR
-    string srcDir = ensureTrailingSlash(TZPL_SHARED_DIR);
-    string dstDir = buildDir + "include/";
-    for (auto const& entry : fs::directory_iterator(srcDir)) {
-        if (entry.is_regular_file()) {
+    std::error_code ec;
+    if (fs::path srcDir = sharedHeaderSource(); !srcDir.empty()) {
+        string dstDir = buildDir + "include/";
+        for (auto const& entry : fs::directory_iterator(srcDir, ec)) {
+            if (!entry.is_regular_file(ec)) continue;
             auto ext = entry.path().extension().string();
             if (ext == ".h" || ext == ".hpp") {
                 fs::copy_file(entry.path(), dstDir + entry.path().filename().string(),
-                              fs::copy_options::update_existing);
+                              fs::copy_options::update_existing, ec);
             }
         }
+    } else {
+        static std::once_flag warned;
+        std::call_once(warned, [] {
+            std::println(stderr,
+                "warning: cannot find the plugin headers (tzpl_plugin_abi.h): no "
+                "include/ beside modules/ and no source tree; set "
+                "TZPL_SHARED_INCLUDE to the directory containing them");
+        });
     }
+
+#ifndef __APPLE__
+    stageSleef(buildDir);
 #endif
 
-#if !defined(__APPLE__) && defined(TZPL_SLEEF_INCLUDE_DIR) && defined(TZPL_SLEEF_LIB)
-    // Stage Sleef next to the shared headers: generated code includes
-    // <sleef.h> via tzpl_simd.hpp, and link() resolves -lsleef against
-    // {buildDir}/lib. Copying every libsleef.so* name (real file, SONAME,
-    // linker name) keeps both the link step and the recorded rpath working
-    // even after the CMake build tree is deleted.
-    fs::create_directories(buildDir + "lib");
-    std::error_code ec;
-    fs::copy_file(string(TZPL_SLEEF_INCLUDE_DIR) + "/sleef.h",
-                  buildDir + "include/sleef.h",
-                  fs::copy_options::update_existing, ec);
-    fs::path const sleefLib = TZPL_SLEEF_LIB;
-    for (auto const& entry : fs::directory_iterator(sleefLib.parent_path(), ec)) {
-        auto name = entry.path().filename().string();
-        if (name.starts_with("libsleef.so")) {
-            fs::copy_file(entry.path(), buildDir + "lib/" + name,
-                          fs::copy_options::update_existing, ec);
-        }
-    }
-#endif
+    static std::once_flag pruned;
+    std::call_once(pruned, [&] { pruneAllOldRevisions(buildDir); });
 }
 
 void writeCodeToFile(string const& buildDir, string const& synthName, string const& ccode) {
@@ -303,7 +397,7 @@ void writeCodeToFile(string const& buildDir, string const& synthName, string con
     string filepath = buildDir + "cpp/" + filename;
     std::println("writing code to {}", filepath);
 
-    FILE* fp = fopen(filepath.c_str(), "w");
+    FILE* fp = fopen(filepath.c_str(), "wb");  // "b": no CRLF translation on Windows
     if (!fp) {
         throw std::runtime_error(std::format("couldn't open output file '{}'", filepath));
     }
@@ -363,11 +457,12 @@ int compileAndLink(string const& buildDir, string const& synthName) {
 optional<LoadedDef> loadDef(std::string path) {
     const char* path_c = path.c_str();
 
-    void* handle = dlopen(path_c, RTLD_NOW);
+    void* handle = tzpl::dynlibOpen(path_c);
 
     if (!handle) {
-        fprintf(stderr, "*** ERROR: dlopen '%s' err '%s'\n", path_c, dlerror());
-        fprintf(stdout, "*** ERROR: dlopen '%s' err '%s'\n", path_c, dlerror());
+        string err = tzpl::dynlibError();
+        fprintf(stderr, "*** ERROR: dlopen '%s' err '%s'\n", path_c, err.c_str());
+        fprintf(stdout, "*** ERROR: dlopen '%s' err '%s'\n", path_c, err.c_str());
         return {};
     }
 
@@ -376,29 +471,29 @@ optional<LoadedDef> loadDef(std::string path) {
     // refuse it rather than reading its structs. Also refuse anything newer
     // than this header.
     i64 abiVersion = 0;
-    if (void* verPtr = dlsym(handle, "tzpl_abi_version")) {
+    if (void* verPtr = tzpl::dynlibSym(handle, "tzpl_abi_version")) {
         abiVersion = *(int64_t*)verPtr;
     } else {
         fprintf(stderr, "*** ERROR: plugin '%s' predates ABI versioning "
                 "(no tzpl_abi_version symbol) and cannot be loaded safely; "
                 "rebuild it\n", path_c);
-        dlclose(handle);
+        tzpl::dynlibClose(handle);
         return {};
     }
     if (abiVersion > TZPL_PLUGIN_ABI_VERSION) {
         fprintf(stderr, "*** ERROR: plugin '%s' ABI version %lld is newer than "
                 "this compiler supports (%d)\n",
                 path_c, (long long)abiVersion, TZPL_PLUGIN_ABI_VERSION);
-        dlclose(handle);
+        tzpl::dynlibClose(handle);
         return {};
     }
 
     void *ptr;
 
-    ptr = dlsym(handle, "load");
+    ptr = tzpl::dynlibSym(handle, "load");
     if (!ptr) {
-        fprintf(stderr, "*** ERROR: dlsym %s err '%s'\n", "load", dlerror());
-        dlclose(handle);
+        fprintf(stderr, "*** ERROR: dlsym %s err '%s'\n", "load", tzpl::dynlibError().c_str());
+        tzpl::dynlibClose(handle);
         return {};
     }
 
@@ -410,16 +505,16 @@ optional<LoadedDef> loadDef(std::string path) {
 
     // Optional symbols: plugins without sample buffers / tags / sample banks
     // (or compiled before the symbols existed) don't export them.
-    if (void* bufPtr = dlsym(handle, "loadBufferDefs")) {
+    if (void* bufPtr = tzpl::dynlibSym(handle, "loadBufferDefs")) {
         loaded.bufferDefs = (*(tzpl_LoadBufferDefsFun)bufPtr)();
     }
-    if (void* tagPtr = dlsym(handle, "loadTags")) {
+    if (void* tagPtr = tzpl::dynlibSym(handle, "loadTags")) {
         loaded.tagList = (*(tzpl_LoadTagsFun)tagPtr)();
     }
-    if (void* bankPtr = dlsym(handle, "loadSampleBankDefs")) {
+    if (void* bankPtr = tzpl::dynlibSym(handle, "loadSampleBankDefs")) {
         loaded.bankDefs = (*(tzpl_LoadSampleBankDefsFun)bankPtr)();
     }
-    loaded.swapSampleBank = (tzpl_SwapSampleBankFun)dlsym(handle, "swapSampleBank");
+    loaded.swapSampleBank = (tzpl_SwapSampleBankFun)tzpl::dynlibSym(handle, "swapSampleBank");
 
     return loaded;
 }

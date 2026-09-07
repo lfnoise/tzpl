@@ -79,6 +79,25 @@ The script hard-fails if any shipped binary links a non-system dylib
 Smoke-test the DMG: mount it, launch the app, run one example, and check
 `spctl -a -vv` on the app if it was signed.
 
+## 4b. Build the Windows zip (when shipping a Windows binary)
+
+On a Windows machine with the toolchains from `docs/WINDOWS.md`, from an
+x64 developer shell:
+
+    packaging\make_toolchain_subset.ps1 -Source C:\llvm-mingw-<pin>-ucrt-x86_64 -Dest C:\tzpl-toolchain
+    cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ^
+        -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl ^
+        -DTZPL_PLUGIN_TOOLCHAIN_DIR=C:\llvm-mingw-<pin>-ucrt-x86_64 ^
+        -DTZPL_BUNDLE_TOOLCHAIN_DIR=C:\tzpl-toolchain -DTZPL_BUILD_APP_JUCE=ON
+    cmake --build build --target dist
+
+This produces `build\Tzopilotl-X.Y.Z-win64.zip` via
+`packaging/make_dist_win.ps1` (unsigned: there is no Windows certificate;
+the README in the folder explains the SmartScreen prompt). Smoke-test on a
+machine without developer tools: unzip to a path with spaces, run the app,
+compile and play a `defSynth` example. Upload with
+`gh release upload vX.Y.Z build/Tzopilotl-X.Y.Z-win64.zip`.
+
 ## 5. Tag and publish
 
 Annotated tag, then push commit and tag together:

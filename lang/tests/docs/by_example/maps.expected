@@ -1,4 +1,4 @@
-[Bob: 25, Alice: 30, Carol: 35]
+[Alice: 30, Bob: 25, Carol: 35]
 [math: 95, science: 88]
 0
 0
@@ -10,7 +10,7 @@ true
 false
 [a: 1, b: 2]
 [b: 2]
-[x: 1, y: 99, z: 3]
+[y: 99, z: 3, x: 1]
 2
-[x, y]
-[10, 20]
+[y, x]
+[20, 10]

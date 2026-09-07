@@ -2,7 +2,7 @@
 import std.fs.*;
 import std.result.*;
 
-let dir = "/tmp/tzpl_test_async_fileio_try";
+let dir = tempDir() $ "/tzpl_test_async_fileio_try";
 makeDir(dir) println;
 writeFile(dir $ "/ok.txt", "content") println;
 
@@ -16,7 +16,7 @@ async fn readTagged(path String) Result<String, String> {
 fn report(r Result<String, String>) Void {
     match (r) {
         ok(s): println(s);
-        err(m): println(m);
+        err(m): println(m replace(dir, "<dir>"));
     }
 }
 
@@ -25,7 +25,7 @@ report(await readTagged(dir $ "/missing.txt"));
 
 -- writeFileAsyncResult: ok path, then err path (dir does not exist)
 (await writeFileAsyncResult(dir $ "/w.txt", "x")) isOk println;
-(await writeFileAsyncResult(dir $ "/no_such_dir/w.txt", "x")) errOption unwrap println;
+(await writeFileAsyncResult(dir $ "/no_such_dir/w.txt", "x")) errOption unwrap replace(dir, "<dir>") println;
 
 -- cleanup
 removeFile(dir $ "/ok.txt") println;

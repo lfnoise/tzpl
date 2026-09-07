@@ -3747,7 +3747,7 @@ string CppCodeGen::genSwapSampleBankFun() {
     s += "}\n\n";
     // Exported as an optional symbol, NOT a tzpl_SynthFuns member (appending
     // there would relocate every later field in tzpl_SynthDef -- ABI break).
-    s += "extern \"C\" tzpl_SampleBank* swapSampleBank(tzpl_SynthData* p, int64_t bankID, tzpl_SampleBank* newBank) {\n";
+    s += "extern \"C\" TZPL_PLUGIN_EXPORT tzpl_SampleBank* swapSampleBank(tzpl_SynthData* p, int64_t bankID, tzpl_SampleBank* newBank) {\n";
     s += FMT("\treturn {0}_swapSampleBank(({0}*)p, bankID, newBank);\n", synth->name);
     s += "}\n\n";
     return s;
@@ -3757,7 +3757,7 @@ string CppCodeGen::genLoadSampleBankDefs() {
     string s;
     if (synth->sampleBanks.empty()) return s;
     auto banks = sortedBanks(synth->sampleBanks);
-    s += "extern \"C\" tzpl_SampleBankDefList loadSampleBankDefs() {\n";
+    s += "extern \"C\" TZPL_PLUGIN_EXPORT tzpl_SampleBankDefList loadSampleBankDefs() {\n";
     s += "\ttzpl_SampleBankDefList list;\n";
     s += FMT("\tlist.num_banks = {};\n", banks.size());
     s += "\tlist.banks = (tzpl_SampleBankDef*)calloc(list.num_banks, sizeof(tzpl_SampleBankDef));\n";
@@ -4700,7 +4700,7 @@ string CppCodeGen::genClass()
     for (S expr : synth->sorted) {
         if (expr.as<SharedInExpr>()) {
             s += "static tzpl_SharedInput tzpl_sharedInputFallback = {};\n";
-            s += "extern \"C\" tzpl_SharedInput const* tzpl_sharedInput = &tzpl_sharedInputFallback;\n";
+            s += "extern \"C\" TZPL_PLUGIN_EXPORT tzpl_SharedInput const* tzpl_sharedInput = &tzpl_sharedInputFallback;\n";
             s += "\n";
             break;
         }
@@ -4747,8 +4747,8 @@ string CppCodeGen::genClass()
 
     s += genFunPtrs();
     
-    s += "extern \"C\" int64_t tzpl_abi_version = TZPL_PLUGIN_ABI_VERSION;\n\n";
-    s += "extern \"C\" tzpl_SynthDef load() {\n";
+    s += "extern \"C\" TZPL_PLUGIN_EXPORT int64_t tzpl_abi_version = TZPL_PLUGIN_ABI_VERSION;\n\n";
+    s += "extern \"C\" TZPL_PLUGIN_EXPORT tzpl_SynthDef load() {\n";
     s += "\ttzpl_SynthDef def;\n";
     s += "\tdef.name = \"" + name + "\";\n";
     s += "\tdef.funs = " + name + "_funs;\n";
@@ -4810,7 +4810,7 @@ string CppCodeGen::genClass()
         vector<B> bufs(synth->sampleBufs.begin(), synth->sampleBufs.end());
         std::sort(bufs.begin(), bufs.end(),
                   [](B a, B b) { return a->serial < b->serial; });
-        s += "extern \"C\" tzpl_BufferDefList loadBufferDefs() {\n";
+        s += "extern \"C\" TZPL_PLUGIN_EXPORT tzpl_BufferDefList loadBufferDefs() {\n";
         s += "\ttzpl_BufferDefList list;\n";
         s += FMT("\tlist.num_buffers = {};\n", bufs.size());
         s += "\tlist.buffers = (tzpl_BufferDef*)calloc(list.num_buffers, sizeof(tzpl_BufferDef));\n";
@@ -4844,7 +4844,7 @@ string CppCodeGen::genClass()
 
     // Optional companion symbol to load(): the synth's category tags.
     if (!synth->tags.empty()) {
-        s += "extern \"C\" tzpl_TagList loadTags() {\n";
+        s += "extern \"C\" TZPL_PLUGIN_EXPORT tzpl_TagList loadTags() {\n";
         s += "\tstatic const char* tags[] = {";
         for (usize i = 0; string const& tag : synth->tags) {
             if (i++) s += ", ";

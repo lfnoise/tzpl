@@ -11,9 +11,9 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-Platform: macOS (CoreAudio/AudioToolbox frameworks, found automatically by CMake) and Linux (Sleef via the shared target; see `docs/LINUX.md`). Requires C++23 and Clang.
+Platform: macOS (CoreAudio/AudioToolbox frameworks, found automatically by CMake), Linux (Sleef via the shared target; see `docs/LINUX.md`), and Windows (see `docs/WINDOWS.md`). Requires C++23 and Clang.
 
-The compiler itself invokes the C++ compiler as a subprocess to compile generated C++ into `.dylib` (macOS) / `.so` (Linux) plugins. Build output goes to `~/tzpl-build/` or the path in `$TZPL_BUILD`.
+The compiler itself invokes a C++ compiler as a subprocess (`shared/tzpl_process.hpp`, no shell) to compile generated C++ into `.dylib` (macOS) / `.so` (Linux) / `.dll` (Windows, via the bundled llvm-mingw) plugins. Build output goes to `~/tzpl-build/` (`%LOCALAPPDATA%\tzpl-build\` on Windows) or the path in `$TZPL_BUILD`.
 
 ## Usage
 

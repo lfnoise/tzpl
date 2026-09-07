@@ -8,12 +8,14 @@ This folder is self-contained. Keep it anywhere you like (Applications,
 a projects drive, ...) -- just keep the app and its sibling folders
 together, because the app finds them relative to itself:
 
-  Tzopilotl.app    the app
-  bin/tzpl         command-line interpreter and REPL
+  Tzopilotl.app    the app (Tzopilotl.exe on Windows)
+  bin/tzpl         command-line interpreter and REPL (tzpl.exe on Windows)
   modules/         the standard library
   examples/        runnable demos -- open one in the app
   docs/            language and reference documentation (HTML)
   editors/         syntax packages for VS Code, TextMate, tree-sitter
+  include/         plugin headers, used when compiling synth definitions
+  toolchain/       (Windows) the compiler used for synth definitions
 
 New here? Start with docs/Getting_Started.html -- installing,
 environment variables, and project configuration.
@@ -34,5 +36,10 @@ stored inside it.
 
 Requirements
 ------------
-Compiling synth definitions uses the system C++ compiler; install the
-Xcode command line tools if prompted (xcode-select --install).
+macOS: compiling synth definitions uses the system C++ compiler; install
+the Xcode command line tools if prompted (xcode-select --install).
+
+Windows: nothing to install; toolchain/ holds the compiler. The binaries
+are not code signed, so the first launch shows "Windows protected your
+PC": click "More info", then "Run anyway". Unzip the folder anywhere;
+keep it together.

@@ -33,16 +33,17 @@
 #include <limits>
 #include <type_traits>
 
-// Type aliases for standalone use (e.g., generated plugin code).
-// The engine uses `long` for i64 (for SIMD compat), while
-// other contexts may use `int64_t` (long long). We use `long` here
-// to match the engine. To avoid redefinition errors, we only define
-// if the including context hasn't already defined them.
+// Type aliases for standalone use (e.g., generated plugin code). i64 is
+// spelled via <cstdint> so it is the same type as engine::i64 and
+// synthdef::i64 everywhere (`long` is 32 bits on Windows). To avoid
+// redefinition errors, we only define them if the including context has
+// not already done so.
 #ifndef TZPL_VOICER_TYPES_DEFINED
 #define TZPL_VOICER_TYPES_DEFINED
+#include <cstdint>
 using f32 = float;
 using f64 = double;
-using i64 = long;
+using i64 = std::int64_t;
 using u16 = unsigned short;
 using u32 = unsigned int;
 #endif

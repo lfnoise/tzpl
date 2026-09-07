@@ -25,7 +25,11 @@
 #define tzpl_random_h
 
 #include "tzpl_common.hpp"
-#ifndef __APPLE__
+#if defined(_WIN32)
+// See shared/tzpl_random.hpp: declared directly because _CRT_RAND_S has to
+// precede the first <stdlib.h> in the translation unit.
+extern "C" int __cdecl rand_s(unsigned int* randomValue);
+#elif !defined(__APPLE__)
 #include <sys/random.h>
 #endif
 
@@ -104,8 +108,13 @@ inline auto birandf(RandState<Chans>& r) {
 
 template <int Chans>
 void arc4seedrand(RandState<Chans>& r) {
-#ifdef __APPLE__
+#if defined(__APPLE__)
 	arc4random_buf(&r, sizeof(r));
+#elif defined(_WIN32)
+	// rand_s: the CRT's cryptographic RNG (RtlGenRandom), no extra library
+	// -- this header is also compiled into runtime plugins.
+	unsigned int* words = reinterpret_cast<unsigned int*>(&r);
+	for (size_t i = 0; i < sizeof(r) / sizeof(unsigned int); ++i) rand_s(&words[i]);
 #else
 	getrandom(&r, sizeof(r), 0);
 #endif

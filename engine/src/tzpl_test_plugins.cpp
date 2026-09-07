@@ -23,6 +23,7 @@
 
 #include "tzpl_test_plugins.hpp"
 #include <cstring>
+#include <numbers>
 
 using namespace engine;
 
@@ -68,7 +69,7 @@ tzpl_SErr VoicerTest_free(VoicerTest* o) {
 tzpl_SErr VoicerTest_init(VoicerTest* o) {
     printf("VoicerTest_init %p\n", o);
     o->voicer.setParams((f32*)o->params);
-    o->freqmul = 2. * M_PI / o->fs;
+    o->freqmul = 2. * std::numbers::pi / o->fs;
     o->amplag = calcDecay(.01, .01, o->fs);
     return tzpl_errNone;
 }
@@ -357,7 +358,7 @@ tzpl_SErr SinOsc_init(tzpl_SynthData* synth)
 
     getIn<f32>(synth,0)[0] = 261.625565; // freq
     getIn<f32>(synth,1)[0] = 0.25f; // amp
-    o->freqmul = 2. * M_PI / synth->fs;
+    o->freqmul = 2. * std::numbers::pi / synth->fs;
     o->phase = 0.;
 
     return tzpl_errNone;

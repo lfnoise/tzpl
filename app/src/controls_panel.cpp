@@ -124,8 +124,8 @@ void ControlsPanel::draw(bridge::UIState& ui,
 namespace {
 
 struct EngineSend {
-    long nodeID;
-    long controlID;
+    std::int64_t nodeID;
+    std::int64_t controlID;
     int silo;
     std::vector<float> values;  // 1 for scalar widgets; N for multi/matrix
 };

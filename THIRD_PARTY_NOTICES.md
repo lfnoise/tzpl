@@ -26,7 +26,8 @@ corresponding build option is enabled.
 | [JUCE](https://github.com/juce-framework/JUCE) | 8.0.8 | **AGPLv3** (this project does not use the commercial JUCE license) | `TZPL_BUILD_APP_JUCE=ON` (off by default) |
 | [Dear ImGui](https://github.com/ocornut/imgui) | v1.91.0 | MIT | `TZPL_BUILD_APP=ON` (off by default) |
 | [GLFW](https://github.com/glfw/glfw) | 3.4 | zlib/libpng | `TZPL_BUILD_APP=ON` (off by default) |
-| [SLEEF](https://github.com/shibatch/sleef) | 3.7 | Boost Software License 1.0 | Linux builds of the engine (macOS uses Accelerate) |
+| [SLEEF](https://github.com/shibatch/sleef) | 3.7 | Boost Software License 1.0 | Linux and Windows builds (macOS uses `<simd/simd.h>`). On Windows also built with the plugin toolchain and shipped as `lib/libsleef.a` in the distribution folder |
+| [libsndfile](https://github.com/libsndfile/libsndfile) | 1.2.2 | LGPL-2.1-or-later | Windows builds of the engine, statically linked when no CMake package is found (Linux uses the system package) |
 
 ## System / optional dependencies
 
@@ -34,14 +35,17 @@ corresponding build option is enabled.
 |-----------|---------|------|
 | [cnats](https://github.com/nats-io/nats.c) (NATS C client) | Apache-2.0 | `TZPL_BUILD_NATS=ON` (off by default); system/Homebrew install, optionally statically linked |
 | [OpenSSL](https://www.openssl.org/) 3.x | Apache-2.0 | Linked via cnats when NATS support is enabled |
-| Apple system frameworks (CoreAudio, Accelerate, AudioToolbox, Metal, Cocoa) | Proprietary system libraries | macOS builds (GPLv3 System Library exception) |
+| Apple system frameworks (CoreAudio, AudioToolbox, Metal, Cocoa) | Proprietary system libraries | macOS builds (GPLv3 System Library exception) |
+| [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) (LLVM/Clang/lld/libc++/compiler-rt under Apache-2.0 with LLVM exception; mingw-w64 headers and CRT under their permissive/public-domain terms; winpthreads MIT/BSD) | see `toolchain/LICENSE.TXT` in the Windows distribution | Bundled in the Windows distribution folder as `toolchain/` to compile synth definitions at runtime. Not linked into TZPL binaries |
+| Microsoft Visual C++ Redistributable (`vcruntime140.dll`, `vcruntime140_1.dll`, `msvcp140.dll`) | Microsoft redistributable runtime (app-local deployment permitted by its license) | Copied into the Windows distribution folder by `packaging/make_dist_win.ps1` |
 
 ## Distribution note (JUCE app)
 
 Binaries built from the `tzpl_app_juce` target combine GPLv3-covered code with
 AGPLv3-covered JUCE code, as permitted by section 13 of each license. Anyone
 distributing such binaries (e.g. the DMG produced by
-`packaging/make_dist_dmg.sh`) must provide complete corresponding source for
+`packaging/make_dist_dmg.sh` or the zip from `packaging/make_dist_win.ps1`)
+must provide complete corresponding source for
 the whole combination, including the JUCE version used (pinned above), and the
 AGPLv3's network-interaction requirements apply.
 

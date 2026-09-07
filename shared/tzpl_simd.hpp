@@ -25,6 +25,9 @@
 #ifndef tzpl_simd_hpp
 #define tzpl_simd_hpp
 
+#include <cstdint>
+#include "tzpl_sinpi.hpp"  // exact scalar sinpi/cospi/tanpi/exp10, all platforms
+
 #ifdef __APPLE__
 
 // ============================================================================
@@ -76,17 +79,23 @@ inline f64x4 expm1(f64x4 x) { return f64x4{std::expm1(x[0]), std::expm1(x[1]), s
 // SECTION A — Linux/Clang: ext_vector_type (supports .s0, .xy, .xyxy swizzle)
 // ============================================================================
 
-using u64x2 = unsigned long __attribute__((ext_vector_type(2)));
-using u64x4 = unsigned long __attribute__((ext_vector_type(4)));
-using u64x8 = unsigned long __attribute__((ext_vector_type(8)));
+// 64-bit lanes are spelled via <cstdint> rather than `long`: long is 32 bits
+// on Windows (LLP64), which would silently halve every lane.
+using u32x2 = unsigned int  __attribute__((ext_vector_type(2)));
+using u32x4 = unsigned int  __attribute__((ext_vector_type(4)));
+using u32x8 = unsigned int  __attribute__((ext_vector_type(8)));
+
+using u64x2 = std::uint64_t __attribute__((ext_vector_type(2)));
+using u64x4 = std::uint64_t __attribute__((ext_vector_type(4)));
+using u64x8 = std::uint64_t __attribute__((ext_vector_type(8)));
 
 using i32x2 = int           __attribute__((ext_vector_type(2)));
 using i32x4 = int           __attribute__((ext_vector_type(4)));
 using i32x8 = int           __attribute__((ext_vector_type(8)));
 
-using i64x2 = long          __attribute__((ext_vector_type(2)));
-using i64x4 = long          __attribute__((ext_vector_type(4)));
-using i64x8 = long          __attribute__((ext_vector_type(8)));
+using i64x2 = std::int64_t  __attribute__((ext_vector_type(2)));
+using i64x4 = std::int64_t  __attribute__((ext_vector_type(4)));
+using i64x8 = std::int64_t  __attribute__((ext_vector_type(8)));
 
 using f32x2 = float         __attribute__((ext_vector_type(2)));
 using f32x4 = float         __attribute__((ext_vector_type(4)));
@@ -109,7 +118,13 @@ using f64x8 = double        __attribute__((ext_vector_type(8)));
 
 #else // !__APPLE__
 
+// File scope, never inside simd_compat: with the MSVC toolchain <sleef.h>
+// pulls in headers that open `namespace std`, which nested inside
+// simd_compat would shadow ::std for every std:: call below.
 #include <type_traits>
+#include <algorithm>
+#include <cmath>
+#include <sleef.h>
 
 namespace simd_compat {
 
@@ -122,8 +137,8 @@ struct get_traits;
 template <> struct get_traits<float>         { struct type { static constexpr int count = 1; using scalar_t = float; }; };
 template <> struct get_traits<double>        { struct type { static constexpr int count = 1; using scalar_t = double; }; };
 template <> struct get_traits<int>           { struct type { static constexpr int count = 1; using scalar_t = int; }; };
-template <> struct get_traits<long>          { struct type { static constexpr int count = 1; using scalar_t = long; }; };
-template <> struct get_traits<unsigned long> { struct type { static constexpr int count = 1; using scalar_t = unsigned long; }; };
+template <> struct get_traits<std::int64_t>  { struct type { static constexpr int count = 1; using scalar_t = std::int64_t; }; };
+template <> struct get_traits<std::uint64_t> { struct type { static constexpr int count = 1; using scalar_t = std::uint64_t; }; };
 
 // Vector specializations
 template <> struct get_traits<f32x2> { struct type { static constexpr int count = 2; using scalar_t = float; }; };
@@ -180,9 +195,6 @@ template <> struct Vector<unsigned long, 8> { using type = u64x8; };
 // ============================================================================
 // SECTION C — Math wrappers (4-wide only, via Sleef)
 // ============================================================================
-
-#include <sleef.h>
-#include <cmath>
 
 // --- f32x4 math ---
 inline f32x4 sin(f32x4 x)        { return Sleef_sinf4_u10(x); }
@@ -315,9 +327,9 @@ inline f32x2 log1p(f32x2 x)      { return f32x2{std::log1p(x.s0), std::log1p(x.s
 inline f32x2 exp10(f32x2 x)      { return f32x2{std::pow(10.f, x.s0), std::pow(10.f, x.s1)}; }
 inline f32x2 expm1(f32x2 x)      { return f32x2{std::expm1(x.s0), std::expm1(x.s1)}; }
 inline f32x2 fmod(f32x2 x, f32x2 y) { return f32x2{std::fmod(x.s0, y.s0), std::fmod(x.s1, y.s1)}; }
-inline f32x2 sinpi(f32x2 x)      { return f32x2{std::sin(x.s0 * (float)M_PI), std::sin(x.s1 * (float)M_PI)}; }
-inline f32x2 cospi(f32x2 x)      { return f32x2{std::cos(x.s0 * (float)M_PI), std::cos(x.s1 * (float)M_PI)}; }
-inline f32x2 tanpi(f32x2 x)      { return f32x2{std::tan(x.s0 * (float)M_PI), std::tan(x.s1 * (float)M_PI)}; }
+inline f32x2 sinpi(f32x2 x)      { return f32x2{synthdef::tzpl_sinpi(x.s0), synthdef::tzpl_sinpi(x.s1)}; }
+inline f32x2 cospi(f32x2 x)      { return f32x2{synthdef::tzpl_cospi(x.s0), synthdef::tzpl_cospi(x.s1)}; }
+inline f32x2 tanpi(f32x2 x)      { return f32x2{synthdef::tzpl_tanpi(x.s0), synthdef::tzpl_tanpi(x.s1)}; }
 inline f32x2 ceil(f32x2 x)       { return f32x2{std::ceil(x.s0), std::ceil(x.s1)}; }
 inline f32x2 round(f32x2 x)      { return f32x2{std::round(x.s0), std::round(x.s1)}; }
 inline f32x2 trunc(f32x2 x)      { return f32x2{std::trunc(x.s0), std::trunc(x.s1)}; }
@@ -354,9 +366,9 @@ inline f64x2 log1p(f64x2 x)      { return f64x2{std::log1p(x.s0), std::log1p(x.s
 inline f64x2 exp10(f64x2 x)      { return f64x2{std::pow(10., x.s0), std::pow(10., x.s1)}; }
 inline f64x2 expm1(f64x2 x)      { return f64x2{std::expm1(x.s0), std::expm1(x.s1)}; }
 inline f64x2 fmod(f64x2 x, f64x2 y) { return f64x2{std::fmod(x.s0, y.s0), std::fmod(x.s1, y.s1)}; }
-inline f64x2 sinpi(f64x2 x)      { return f64x2{std::sin(x.s0 * M_PI), std::sin(x.s1 * M_PI)}; }
-inline f64x2 cospi(f64x2 x)      { return f64x2{std::cos(x.s0 * M_PI), std::cos(x.s1 * M_PI)}; }
-inline f64x2 tanpi(f64x2 x)      { return f64x2{std::tan(x.s0 * M_PI), std::tan(x.s1 * M_PI)}; }
+inline f64x2 sinpi(f64x2 x)      { return f64x2{synthdef::tzpl_sinpi(x.s0), synthdef::tzpl_sinpi(x.s1)}; }
+inline f64x2 cospi(f64x2 x)      { return f64x2{synthdef::tzpl_cospi(x.s0), synthdef::tzpl_cospi(x.s1)}; }
+inline f64x2 tanpi(f64x2 x)      { return f64x2{synthdef::tzpl_tanpi(x.s0), synthdef::tzpl_tanpi(x.s1)}; }
 inline f64x2 ceil(f64x2 x)       { return f64x2{std::ceil(x.s0), std::ceil(x.s1)}; }
 inline f64x2 round(f64x2 x)      { return f64x2{std::round(x.s0), std::round(x.s1)}; }
 inline f64x2 trunc(f64x2 x)      { return f64x2{std::trunc(x.s0), std::trunc(x.s1)}; }

@@ -26,6 +26,7 @@
 #include "tzpl_clock_ffi.hpp"
 #include "tzpl_nrt_render.hpp"
 #include "tzpl_app_context.hpp"
+#include "test_print_capture.hpp"
 #include "tzpl.hpp"
 #include "module_compiler.hpp"
 #include "tzpl_client_interface.hpp"
@@ -283,10 +284,8 @@ static void test_fill_buffer_args() {
     bridge::AppContext appCtx; appCtx.engine = eng;
     bridge::setAppContextOnVM(&vm, &appCtx);
 
-    char* outBuf = nullptr;
-    size_t outLen = 0;
-    FILE* mem = open_memstream(&outBuf, &outLen);
-    vm.setPrintOutput(mem);
+    TestPrintCapture capture;
+    vm.setPrintOutput(capture.file);
 
     const char* source = R"(
         import audio_engine.*;
@@ -296,11 +295,8 @@ static void test_fill_buffer_args() {
     )";
 
     bool ok = compileAndRun(compiler, vm, source, "fill_buffer_args.x", &moduleCompiler);
-    fflush(mem);
-    fclose(mem);
-    check(ok && outBuf && std::string_view(outBuf) == "true\ntrue\ntrue\n",
+    check(ok && capture.finish() == "true\ntrue\ntrue\n",
           "fillBuffer rejects no-bundle and malformed-shape calls");
-    free(outBuf);
 
     engine::freeEngine(eng);
 }

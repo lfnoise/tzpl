@@ -386,6 +386,11 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
   <a href="#install-linux">&sect;1.5</a>, then rejoin at
   <a href="#first-run">&sect;2</a>. Everything from there on applies to both
   platforms.</li>
+  <li><strong>Windows</strong> &mdash; the port is in progress; building from
+  source is described in <code>docs/WINDOWS.md</code> in the repository. The
+  Windows folder bundles its own compiler for synth definitions, so no
+  developer tools are needed to run it. Keyboard shortcuts written as
+  <kbd>Cmd</kbd> in these guides are <kbd>Ctrl</kbd> on Windows and Linux.</li>
 </ul>
 
 <p>On macOS, Tzopilotl ships as a disk image, <code>Tzopilotl-&lt;version&gt;.dmg</code>. Open it and drag the <strong>Tzopilotl</strong> folder anywhere you like &mdash; <code>/Applications</code>, your home directory, a projects drive. There is no installer and nothing is written outside the folder.</p>
@@ -402,6 +407,7 @@ Tzopilotl/
   examples/          runnable demos -- open one in the app
   docs/              this guide and the reference documentation
   editors/           syntax packages for VS Code, TextMate, tree-sitter
+  include/           plugin headers, used when compiling synth definitions
   README.txt
 </pre></div>
 
