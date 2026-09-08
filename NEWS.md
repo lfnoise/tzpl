@@ -7,6 +7,8 @@ documentation site as the Changelog page.
 
 ## Unreleased
 
+## v0.2.2 (7 September 2026)
+
 **Fixed**
 
 - Widget values set from Tzopilotl code (`setValue`, `setNotes`, a fresh
@@ -27,11 +29,6 @@ documentation site as the Changelog page.
 - Headless `--wait` now waits. It kept the process alive only while a
   message listener was active, so a `--nogui --wait` script driving the
   tempo scheduler exited after the first scheduled callback.
-
-## v0.2.2 (7 September 2026)
-
-**Fixed**
-
 - The release app crashed the moment a synth definition was compiled on
   any machine other than the one it was built on. Compiling a synth stages
   the plugin headers (`tzpl_plugin_abi.h` and friends) into `~/tzpl-build`,
