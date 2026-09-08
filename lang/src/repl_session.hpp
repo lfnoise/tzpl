@@ -78,6 +78,12 @@ public:
     // List all user-defined functions as formatted strings ("fn foo(Int, Int) Int")
     std::vector<std::string> listFunctions() const;
 
+    // True if `name` has a compiled-in builtin overload (println, map, ...)
+    // -- a function with no Tzopilotl source. Host-registered foreign
+    // functions (bridge FFI) do not count; ask the Compiler about those.
+    // Not thread-safe against a concurrent eval: it may run a type query.
+    bool isBuiltinFunction(const std::string& name);
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

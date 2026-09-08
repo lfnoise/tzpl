@@ -332,6 +332,19 @@ std::vector<std::string> REPLSession::listGlobals() const {
     return lines;
 }
 
+bool REPLSession::isBuiltinFunction(const std::string& name) {
+    // The TypeChecker registers builtins lazily, on its first program, so
+    // before any eval the table is empty: prime it with a trivial query
+    // (which also installs the builtins' globals into the VM).
+    if (impl_->typeChecker.functions().empty()) queryType("0");
+    auto& funcs = impl_->typeChecker.functions();
+    auto it = funcs.find(name);
+    if (it == funcs.end()) return false;
+    for (auto& fi : it->second)
+        if (fi.isBuiltin && !fi.isForeign) return true;
+    return false;
+}
+
 std::vector<std::string> REPLSession::listFunctions() const {
     std::vector<std::string> lines;
     auto& funcs = impl_->typeChecker.functions();

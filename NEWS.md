@@ -7,6 +7,30 @@ documentation site as the Changelog page.
 
 ## Unreleased
 
+**App**
+
+- Find in Files (Cmd+Shift+F): the sidebar swaps its file tree for a Find
+  face, Xcode-style, listing every match across the open folders' documents
+  and the editor tabs (unsaved text included), grouped by file with the
+  matched span highlighted. Clicking a hit opens the file and selects it;
+  Escape returns to the file tree. The sidebar column now has Files / Find
+  tabs.
+- Find Definitions (Cmd+Shift+J): every definition of the name at the
+  caret that is in scope -- enclosing blocks first, then the file's top
+  level, then the modules it imports (following `export` re-exports and
+  `as` aliases; `mod.name` looks only in `mod`). Lists overloads,
+  parameters, `let`/`var` bindings, enum cases, and type declarations. A
+  name with no Tzopilotl source is named for what it is: a built-in
+  function, or a foreign function of the bridge's native module.
+- FFI Guide, Audio Engine: a new Buffers & Sample Banks subsection
+  (`resizeBuffer`, `loadBuffer`, `fillBuffer`, `loadSampleBank`,
+  `sampleZone`), the shared-input functions, the `TapMode` enum and the
+  missing `Err` cases, and a function index listing every `audio_engine`
+  function with its section and thread class.
+- The Find bar and Find in Files share a match-mode popup: Contains,
+  Matches Word, Starts With, Ends With, and Regular Expression (with
+  `$1`-style groups in replacements), each with the case toggle.
+
 ## v0.2.1 (4 September 2026)
 
 **App**

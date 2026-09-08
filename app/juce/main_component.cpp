@@ -28,10 +28,14 @@
 #include "repl_session.hpp"
 #include "module_compiler.hpp"
 #include "project_paths.hpp"
+#include "definition_finder.hpp"
+#include "text_search.hpp"
 #include "settings_dialog.hpp"
 #include "language_settings_dialog.hpp"
 #include "tzpl_fonts.hpp"
+#include <algorithm>
 #include <cstdio>
+#include <set>
 #include <cstdlib>
 #include <unistd.h>  // getpid, for the relaunch watcher
 
@@ -53,7 +57,21 @@ MainComponent::MainComponent(bridge::AppContext& appCtx,
     // Folder sidebar: the folders it holds persist across launches, and a
     // click on a file row opens it (openPath switches to the mode that
     // shows the file).
-    addChildComponent(sidebar_);
+    sideTabs_.addTab("Files", juce::Colours::transparentBlack, &sidebar_,
+                     /*deleteComponentWhenNotNeeded=*/false);
+    sideTabs_.addTab("Find", juce::Colours::transparentBlack, &searchPanel_,
+                     /*deleteComponentWhenNotNeeded=*/false);
+    sideTabs_.setOutline(0);
+    sideTabs_.setCurrentTabIndex(sideTabFiles);
+    // With no folders the column exists only for the Find face, so a
+    // switch to Files (or back) can show or hide the whole column.
+    sideTabs_.onTabChanged = [this] { resized(); };
+    addChildComponent(sideTabs_);
+    searchPanel_.onSearch = [this] { runFindInFiles(); };
+    searchPanel_.onOpenHit = [this](SearchFileResult const& r, SearchHit const& h) {
+        openSearchHit(r, h);
+    };
+    searchPanel_.onDismiss = [this] { showSidebarFiles(); };
     sidebar_.onOpenFile = [this](juce::File f) { openPath(f); };
     sidebar_.onFoldersChanged = [this] {
         settings_.setValue("sidebarFolders",
@@ -172,7 +190,7 @@ void MainComponent::resized() {
     if (performView_) {
         // Perform mode is deliberately chromeless.
         statusBar_.setVisible(false);
-        sidebar_.setVisible(false);
+        sideTabs_.setVisible(false);
         sideResizer_->setVisible(false);
         performView_->setBounds(getLocalBounds());
         return;
@@ -185,12 +203,14 @@ void MainComponent::resized() {
     // layout (nullptr): the document/console split below fills it.
     // A file tree is only useful next to the editor tabs it feeds, so the
     // notebook and graph modes get the full width.
-    bool showSide = sidebarVisible_ && sidebar_.hasFolders()
+    bool showSide = sidebarVisible_
+                 && (sidebar_.hasFolders()
+                     || sideTabs_.getCurrentTabIndex() == sideTabFind)
                  && centerMode_ == CenterMode::editor;
-    sidebar_.setVisible(showSide);
+    sideTabs_.setVisible(showSide);
     sideResizer_->setVisible(showSide);
     if (showSide) {
-        juce::Component* sideComps[] = { &sidebar_, sideResizer_.get(),
+        juce::Component* sideComps[] = { &sideTabs_, sideResizer_.get(),
                                          nullptr };
         sideLayout_.layOutComponents(sideComps, 3, area.getX(), area.getY(),
                                      area.getWidth(), area.getHeight(),
@@ -199,7 +219,7 @@ void MainComponent::resized() {
         area.setLeft(sideResizer_->getRight());
         if (getWidth() > 0)
             settings_.setValue("sidebarRatio",
-                               sidebar_.getWidth() / (double)getWidth());
+                               sideTabs_.getWidth() / (double)getWidth());
     }
 
     juce::Component* center =
@@ -461,7 +481,7 @@ void MainComponent::timerCallback() {
             commands_.commandStatusChanged();
         // Same idea for the sidebar: re-list only the open directories whose
         // modification time moved (files added/removed outside the app).
-        if (sidebar_.isVisible()) sidebar_.refreshChangedFolders();
+        if (sidebarShowing()) sidebar_.refreshChangedFolders();
     }
 
     // Mirror unsaved work into the close box (macOS documentEdited dot),
@@ -738,6 +758,287 @@ void MainComponent::setSidebarVisible(bool show) {
     settings_.setValue("sidebarVisible", show);
     resized();
     commands_.commandStatusChanged();
+}
+
+bool MainComponent::sidebarShowing() const {
+    return sideTabs_.isVisible()
+        && sideTabs_.getCurrentTabIndex() == sideTabFiles;
+}
+
+// ---------------------------------------------------------------------------
+// Find in Files / Find Definitions
+// ---------------------------------------------------------------------------
+
+namespace {
+
+std::wstring toWide(String const& s) { return std::wstring(s.toWideCharPointer()); }
+String fromWide(std::wstring const& w) { return String(w.c_str()); }
+
+// Start offsets of every line in `text` (line 0 starts at 0).
+std::vector<int> lineStartsOf(std::wstring const& text) {
+    std::vector<int> starts { 0 };
+    for (int i = 0; i < (int)text.size(); ++i)
+        if (text[(size_t)i] == L'\n') starts.push_back(i + 1);
+    return starts;
+}
+
+// A SearchHit for the span [start, start + length) of `text`: its line,
+// the line's text with leading whitespace stripped, and where the span
+// falls within it.
+SearchHit makeHit(std::wstring const& text, std::vector<int> const& lineStarts,
+                  int start, int length) {
+    SearchHit h;
+    auto it = std::upper_bound(lineStarts.begin(), lineStarts.end(), start);
+    h.line = (int)(it - lineStarts.begin()) - 1;
+    int lineStart = 0;
+    std::wstring line = lineTextAt(text, start, &lineStart);
+    size_t strip = line.find_first_not_of(L" \t");
+    if (strip == std::wstring::npos) strip = 0;
+    h.lineText = fromWide(line.substr(strip));
+    h.start = start;
+    h.length = length;
+    h.hlStart = start - lineStart - (int)strip;
+    h.hlLength = juce::jmin(length, (int)line.size() - (start - lineStart));
+    return h;
+}
+
+}
+
+void MainComponent::showFindInFiles(String const& seed) {
+    if (centerMode_ != CenterMode::editor) setCenterMode(CenterMode::editor);
+    if (!sidebarVisible_) setSidebarVisible(true);
+    sideTabs_.setCurrentTabIndex(sideTabFind);
+    resized();
+    searchPanel_.focusField(seed);
+}
+
+void MainComponent::showSidebarFiles() {
+    sideTabs_.setCurrentTabIndex(sideTabFiles);
+    resized();
+    if (auto* ed = editorPane_.activeEditor()) ed->grabKeyboardFocus();
+}
+
+void MainComponent::runFindInFiles() {
+    String term = searchPanel_.term();
+    if (term.isEmpty()) { searchPanel_.clearResults(); return; }
+    TextMatcher matcher(toWide(term), searchPanel_.mode(),
+                        searchPanel_.caseSensitive());
+    if (!matcher.valid()) {
+        searchPanel_.setResults("invalid regular expression: "
+                                + String(matcher.error()), {});
+        return;
+    }
+
+    // Open tabs are searched as they are on screen, not as saved.
+    std::map<String, int> tabForPath;
+    for (int i = 0; i < editorPane_.tabCount(); ++i)
+        if (editorPane_.tabHasFilePath(i))
+            tabForPath[editorPane_.tabFile(i).getFullPathName()] = i;
+
+    std::vector<SearchFileResult> results;
+    int total = 0, filesHit = 0;
+    auto searchOne = [&](String const& content, SearchFileResult r) {
+        std::wstring text = toWide(content);
+        auto matches = matcher.findAll(text);
+        if (matches.empty()) return;
+        auto lineStarts = lineStartsOf(text);
+        for (auto const& m : matches)
+            r.hits.push_back(makeHit(text, lineStarts, m.start, m.length));
+        total += (int)matches.size();
+        ++filesHit;
+        results.push_back(std::move(r));
+    };
+
+    // Where a hit lives: its directory relative to the sidebar root's
+    // parent ("examples/sub"), unless two roots share a name (the installed
+    // examples/ next to a source tree's), when only the full path tells
+    // them apart.
+    auto roots = sidebar_.folderPaths();
+    auto rootNameIsUnique = [&](juce::File const& root) {
+        int n = 0;
+        for (auto const& rp : roots)
+            if (juce::File(rp).getFileName() == root.getFileName()) ++n;
+        return n == 1;
+    };
+    auto homePath = juce::File::getSpecialLocation(
+        juce::File::userHomeDirectory).getFullPathName();
+    auto abbreviated = [&](juce::File const& dir) {
+        String p = dir.getFullPathName();
+        return p.startsWith(homePath) ? "~" + p.substring(homePath.length()) : p;
+    };
+    auto subtitleFor = [&](juce::File const& f) {
+        for (auto const& rp : roots) {
+            juce::File root(rp);
+            if (!f.isAChildOf(root)) continue;
+            if (rootNameIsUnique(root))
+                return f.getParentDirectory().getRelativePathFrom(root.getParentDirectory());
+            return abbreviated(f.getParentDirectory());
+        }
+        return abbreviated(f.getParentDirectory());
+    };
+
+    std::set<String> seen;
+    for (auto const& f : sidebar_.documentFiles()) {
+        String path = f.getFullPathName();
+        seen.insert(path);
+        SearchFileResult r;
+        r.title = f.getFileName();
+        r.subtitle = subtitleFor(f);
+        r.file = f;
+        auto tab = tabForPath.find(path);
+        String content = tab != tabForPath.end() ? editorPane_.tabText(tab->second)
+                                                 : f.loadFileAsString();
+        searchOne(content, std::move(r));
+    }
+    // Open tabs outside the sidebar folders, and untitled ones.
+    for (int i = 0; i < editorPane_.tabCount(); ++i) {
+        SearchFileResult r;
+        if (editorPane_.tabHasFilePath(i)) {
+            juce::File f = editorPane_.tabFile(i);
+            if (seen.count(f.getFullPathName())) continue;
+            r.title = f.getFileName();
+            r.subtitle = subtitleFor(f);
+            r.file = f;
+        } else {
+            r.title = editorPane_.tabName(i);
+            r.subtitle = "unsaved";
+            r.tabName = r.title;
+        }
+        searchOne(editorPane_.tabText(i), std::move(r));
+    }
+
+    String heading = total == 0
+        ? String("no results")
+        : String(total) + (total == 1 ? " result in " : " results in ")
+          + String(filesHit) + (filesHit == 1 ? " file" : " files");
+    searchPanel_.setResults(heading, std::move(results));
+}
+
+void MainComponent::runFindDefinitions() {
+    if (centerMode_ != CenterMode::editor) setCenterMode(CenterMode::editor);
+    DefinitionQuery q;
+    q.text = toWide(editorPane_.getAllText());
+    if (editorPane_.activeHasFilePath())
+        q.path = editorPane_.activeFile().getFullPathName().toStdString();
+    q.caret = editorPane_.selectionStart();
+    if (appCtx_.moduleCompiler) {
+        q.searchDirs = appCtx_.moduleCompiler->includePaths();
+        for (auto const& p : appCtx_.moduleCompiler->systemPaths())
+            q.searchDirs.push_back(p);
+    }
+    // Modules open in a tab are searched as edited, not as saved.
+    q.readFile = [this](std::string const& path, std::wstring& out) {
+        juce::File f((String(path)));
+        for (int i = 0; i < editorPane_.tabCount(); ++i)
+            if (editorPane_.tabHasFilePath(i) && editorPane_.tabFile(i) == f) {
+                out = toWide(editorPane_.tabText(i));
+                return true;
+            }
+        return readTextFileWide(path, out);
+    };
+
+    DefinitionResult found = findDefinitions(q);
+    if (found.name.empty()) {
+        logLine("Find Definitions: put the caret on a name first");
+        return;
+    }
+    String name = fromWide(found.name);
+    String shown = found.qualifier.empty() ? name
+                                           : fromWide(found.qualifier) + "." + name;
+
+    // Group hits by document, in the order found (this document first,
+    // then imports in import order).
+    std::vector<SearchFileResult> results;
+    std::map<std::string, std::vector<int>> lineStartsCache;
+    std::map<std::string, size_t> indexForPath;
+    for (auto const& hit : found.hits) {
+        auto it = indexForPath.find(hit.path);
+        if (it == indexForPath.end()) {
+            SearchFileResult r;
+            if (hit.path.empty()) {
+                r.title = editorPane_.activeTabName();
+                r.subtitle = "this document";
+                if (editorPane_.activeHasFilePath()) r.file = editorPane_.activeFile();
+                else r.tabName = r.title;
+            } else {
+                r.file = juce::File(String(hit.path));
+                r.title = r.file.getFileName();
+                r.subtitle = fromWide(hit.modulePath);
+            }
+            it = indexForPath.emplace(hit.path, results.size()).first;
+            results.push_back(std::move(r));
+        }
+        SearchHit h;
+        h.line = hit.def.line;
+        h.start = hit.def.start;
+        h.length = hit.def.length;
+        std::wstring line = hit.lineText;
+        size_t strip = line.find_first_not_of(L" \t");
+        if (strip == std::wstring::npos) strip = 0;
+        h.lineText = fromWide(line.substr(strip));
+        h.hlStart = hit.def.column - (int)strip;
+        h.hlLength = hit.def.length;
+        // The kind tag is redundant when the line itself begins with the
+        // keyword ("fn foo" already says fn); it earns its place for
+        // parameters, bindings, `private fn`, and the like.
+        String kind = defKindName(hit.def.kind);
+        if (!h.lineText.startsWith(kind + " ")) h.tag = kind;
+        results[it->second].hits.push_back(std::move(h));
+    }
+    // Functions with no Tzopilotl source: compiled-in builtins (println,
+    // map, ...) and the bridge's foreign functions, which live in foreign
+    // modules that resolve to no file (audio_engine.x re-exports
+    // audio_engine_ffi.*). Name them rather than report a miss.
+    String nativeNote;
+    std::string nameUtf8 = wideToUtf8(found.name);
+    if (appCtx_.moduleCompiler) {
+        auto& compiler = appCtx_.moduleCompiler->compiler();
+        for (auto const& m : found.unresolvedModules) {
+            std::string mod = wideToUtf8(m);
+            auto const* fns = compiler.foreignModuleFunctions(mod);
+            if (fns == nullptr) {
+                logLine("Find Definitions: could not resolve import " + fromWide(m));
+                continue;
+            }
+            for (auto const& f : *fns)
+                if (f.name == nameUtf8 && nativeNote.isEmpty())
+                    nativeNote = name + " is a foreign (native) function of module "
+                               + fromWide(m) + " (see FFI_Guide.html)";
+        }
+        for (auto const& f : compiler.foreignFunctions())
+            if (f.name == nameUtf8 && nativeNote.isEmpty())
+                nativeNote = name + " is a foreign (native) function (see FFI_Guide.html)";
+    }
+    // The builtin query may type-check on the session, so not mid-eval.
+    if (nativeNote.isEmpty() && session_ && !guiState_.asyncEval.busy()
+        && session_->isBuiltinFunction(nameUtf8))
+        nativeNote = name + " is a built-in function (see Builtin_Functions.html)";
+
+    int n = (int)found.hits.size();
+    String heading = n == 0
+        ? (nativeNote.isNotEmpty() ? nativeNote
+                                   : "no definitions of " + shown + " in scope")
+        : String(n) + (n == 1 ? " definition of " : " definitions of ") + shown;
+    if (n > 0 && nativeNote.isNotEmpty()) logLine("Find Definitions: also, " + nativeNote);
+    if (!sidebarVisible_) setSidebarVisible(true);
+    sideTabs_.setCurrentTabIndex(sideTabFind);
+    resized();
+    searchPanel_.setTerm(name);
+    searchPanel_.setResults(heading, std::move(results));
+}
+
+void MainComponent::openSearchHit(SearchFileResult const& result,
+                                  SearchHit const& hit) {
+    if (result.file != juce::File()) {
+        openPath(result.file);
+        // Notebooks open whole; there is no range to select in a cell.
+        if (result.file.hasFileExtension("tzd")) return;
+    } else if (!editorPane_.selectUntitledTab(result.tabName)) {
+        logLine("that tab is closed: " + result.tabName);
+        return;
+    }
+    setCenterMode(CenterMode::editor);
+    editorPane_.revealRange(hit.start, hit.length);
 }
 
 void MainComponent::openPath(juce::File const& file) {
@@ -1385,6 +1686,7 @@ void MainComponent::getAllCommands(juce::Array<juce::CommandID>& ids) {
         cmd::editToggleComment, cmd::editIndent, cmd::editOutdent,
         cmd::findShow, cmd::findNext, cmd::findPrevious,
         cmd::findUseSelection, cmd::findUseSelectionReplace,
+        cmd::findInFiles, cmd::findDefinitions,
         cmd::fontIncrease, cmd::fontDecrease,
         cmd::viewEditor, cmd::viewNotebook, cmd::viewGraph, cmd::viewRotate,
         cmd::toggleSidebar, cmd::togglePerform, cmd::togglePluginBrowser,
@@ -1548,6 +1850,14 @@ void MainComponent::getCommandInfo(juce::CommandID id,
     case cmd::findUseSelectionReplace:
         set("Use Selection for Replace", "Find");
         info.addDefaultKeypress('e', modShift);
+        break;
+    case cmd::findInFiles:
+        set("Find in Files...", "Find");
+        info.addDefaultKeypress('f', modShift);
+        break;
+    case cmd::findDefinitions:
+        set("Find Definitions", "Find");
+        info.addDefaultKeypress('j', modShift);
         break;
 
     case cmd::fontIncrease:
@@ -1790,6 +2100,12 @@ bool MainComponent::perform(InvocationInfo const& info) {
         if (sel.isNotEmpty()) editorPane_.seedReplace(sel);
         return true;
     }
+    case cmd::findInFiles:
+        showFindInFiles(editorPane_.getSelectedText());
+        return true;
+    case cmd::findDefinitions:
+        runFindDefinitions();
+        return true;
 
     // -- View -------------------------------------------------------------
     case cmd::fontIncrease:
@@ -1980,10 +2296,10 @@ void MainComponent::testShowDemo(String const& which) {
         if (dir.isNotEmpty()) addSidebarFolder(juce::File(dir));
         juce::Timer::callAfterDelay(300, [this] {
             juce::File opened = sidebar_.testClickFirstDocument();
-            bool inEditor = sidebar_.isVisible();
+            bool inEditor = sidebarShowing();
             // ...and it must get out of the way of the other center modes.
             setCenterMode(CenterMode::notebook);
-            bool inNotebook = sidebar_.isVisible();
+            bool inNotebook = sidebarShowing();
             setCenterMode(CenterMode::editor);
             bool ok = sidebar_.testRootCount() > 0 && inEditor && !inNotebook
                    && opened != juce::File()
@@ -2039,11 +2355,11 @@ void MainComponent::testShowDemo(String const& which) {
         filesDropped(juce::StringArray(p), 0, 0);
         juce::Timer::callAfterDelay(300, [this, interested] {
             bool ok = interested && sidebar_.testRootCount() > 0
-                   && sidebar_.isVisible();
+                   && sidebarShowing();
             String verdict = String("drop: interested=")
                 + (interested ? "1" : "0")
                 + " roots=" + String(sidebar_.testRootCount())
-                + " visible=" + (sidebar_.isVisible() ? "1" : "0")
+                + " visible=" + (sidebarShowing() ? "1" : "0")
                 + (ok ? " OK" : " FAIL");
             std::fprintf(stderr, "%s\n", verdict.toRawUTF8());
         });
@@ -2060,6 +2376,86 @@ void MainComponent::testShowDemo(String const& which) {
                 + (performed && fileChooser_ != nullptr ? " OK" : " FAIL");
             std::fprintf(stderr, "%s\n", verdict.toRawUTF8());
         });
+    } else if (which.startsWith("search:")) {
+        // "search:<dir>:<term>" -- Find in Files over <dir>: the side column
+        // must show its Find face, and activating the first hit must land
+        // the editor on the term.
+        auto rest = which.fromFirstOccurrenceOf(":", false, false);
+        auto dir = rest.upToLastOccurrenceOf(":", false, false);
+        auto term = rest.fromLastOccurrenceOf(":", false, false);
+        addSidebarFolder(juce::File(dir));
+        showFindInFiles(term);
+        runFindInFiles();
+        juce::Timer::callAfterDelay(300, [this, term] {
+            int hits = searchPanel_.hitCount();
+            bool findFace = sideTabs_.isVisible()
+                         && sideTabs_.getCurrentTabIndex() == sideTabFind;
+            bool clicked = searchPanel_.testClickFirstHit();
+            String sel = editorPane_.getSelectedText();
+            bool ok = hits > 0 && findFace && clicked && sel.equalsIgnoreCase(term);
+            String verdict = String("search: hits=") + String(hits)
+                + " findFace=" + (findFace ? "1" : "0")
+                + " clicked=" + (clicked ? "1" : "0")
+                + " selected=\"" + sel + "\""
+                + " tab=" + editorPane_.activeTabName()
+                + (ok ? " OK" : " FAIL");
+            logLine(verdict);
+            std::fprintf(stderr, "%s\n", verdict.toRawUTF8());
+        });
+    } else if (which == "defs") {
+        // Find Definitions on a call with a local overload shadowing a
+        // top-level one, and on a stdlib function reached through an
+        // import: expects local + file (innermost first), then the module's.
+        editorPane_.newTab("defs.x");
+        String program =
+            "import std.strings.*;\n"
+            "import audio_engine.*;\n"
+            "fn ramp(n Int) Int { n }\n"
+            "fn go() Void {\n"
+            "    fn ramp(x Float) Float { x }\n"
+            "    ramp(1);\n"
+            "    padStart(\"a\", 3);\n"
+            "    fillBuffer(1, 0, 1, [0.0]);\n"
+            "    println(1);\n"
+            "}\n";
+        testTypeIntoEditor(program);
+        editorPane_.revealRange(program.indexOf("ramp(1)") + 1, 0);
+        runFindDefinitions();
+        int rampHits = searchPanel_.hitCount();
+        bool innermostFirst = searchPanel_.testClickFirstHit()
+                           && editorPane_.cursorLine() == 4;
+        editorPane_.revealRange(program.indexOf("padStart(") + 2, 0);
+        runFindDefinitions();
+        int padHits = searchPanel_.hitCount();
+        bool viaImport = searchPanel_.testClickFirstHit()
+                      && editorPane_.activeTabName() == "strings.x"
+                      && editorPane_.getSelectedText() == "padStart";
+        // No source to find: the bridge's foreign fillBuffer (reached via
+        // audio_engine's re-export of the foreign module) and the builtin
+        // println are named as such instead of reported missing.
+        editorPane_.selectUntitledTab("defs.x");
+        editorPane_.revealRange(program.indexOf("fillBuffer(") + 2, 0);
+        runFindDefinitions();
+        bool foreign = searchPanel_.hitCount() == 0
+                    && searchPanel_.heading().contains("foreign")
+                    && searchPanel_.heading().contains("audio_engine_ffi");
+        editorPane_.revealRange(program.indexOf("println(") + 2, 0);
+        runFindDefinitions();
+        bool builtin = searchPanel_.hitCount() == 0
+                    && searchPanel_.heading().contains("built-in");
+        bool ok = rampHits == 2 && innermostFirst && padHits >= 1 && viaImport
+               && foreign && builtin;
+        String verdict = String("defs: ramp=") + String(rampHits)
+            + " innermostFirst=" + (innermostFirst ? "1" : "0")
+            + " padStart=" + String(padHits)
+            + " viaImport=" + (viaImport ? "1" : "0")
+            + " foreign=" + (foreign ? "1" : "0")
+            + " builtin=" + (builtin ? "1" : "0")
+            + " heading=\"" + searchPanel_.heading() + "\""
+            + " tab=" + editorPane_.activeTabName()
+            + (ok ? " OK" : " FAIL");
+        logLine(verdict);
+        std::fprintf(stderr, "%s\n", verdict.toRawUTF8());
     } else if (which == "find") {
         editorPane_.showFind("blip");
     } else if (which == "flash") {
@@ -2228,6 +2624,7 @@ void MainComponent::applyFontIndex(int idx) {
     console_.setFontSize(px);
     if (notebook_) notebook_->setFontSize(px);  // cells + relayout
     sidebar_.setFontSize(px);
+    searchPanel_.setFontSize(px);
     commands_.commandStatusChanged();
 }
 

@@ -64,6 +64,8 @@ enum : juce::CommandID {
     findPrevious,
     findUseSelection,
     findUseSelectionReplace,
+    findInFiles,      // Cmd+Shift+F: search every sidebar document
+    findDefinitions,  // Cmd+Shift+J: definitions of the name at the caret
 
     // View
     fontIncrease,

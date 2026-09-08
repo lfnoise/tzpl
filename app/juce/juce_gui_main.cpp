@@ -126,6 +126,9 @@ public:
             m.addSeparator();
             m.addCommandItem(&commands_, cmd::findUseSelection);
             m.addCommandItem(&commands_, cmd::findUseSelectionReplace);
+            m.addSeparator();
+            m.addCommandItem(&commands_, cmd::findInFiles);
+            m.addCommandItem(&commands_, cmd::findDefinitions);
             break;
         case 3: { // View
             m.addCommandItem(&commands_, cmd::viewEditor);

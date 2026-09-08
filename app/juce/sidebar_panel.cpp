@@ -343,6 +343,22 @@ void SidebarPanel::setFolderPaths(juce::StringArray const& paths) {
     repaint();
 }
 
+juce::Array<juce::File> SidebarPanel::documentFiles() const {
+    juce::Array<juce::File> files;
+    for (auto const& path : folderPaths()) {
+        juce::File root(path);
+        auto found = root.findChildFiles(
+            juce::File::findFiles | juce::File::ignoreHiddenFiles,
+            /*recursive=*/true, "*.x;*.tzd;*.md;*.txt;tzpl-config");
+        for (auto const& f : found)
+            if (f.getSize() <= 4 * 1024 * 1024) files.addIfNotAlreadyThere(f);
+    }
+    std::sort(files.begin(), files.end(), [](juce::File const& a, juce::File const& b) {
+        return a.getFullPathName().compareNatural(b.getFullPathName()) < 0;
+    });
+    return files;
+}
+
 void SidebarPanel::refreshChangedFolders() {
     for (int i = 0; i < root_->getNumSubItems(); ++i)
         if (auto* item = dynamic_cast<FileItem*>(root_->getSubItem(i)))

@@ -144,6 +144,20 @@ bool TzplCodeEditor::keyPressed(juce::KeyPress const& key) {
     return juce::CodeEditorComponent::keyPressed(key);
 }
 
+void TzplCodeEditor::selectAndReveal(int start, int end) {
+    auto& doc = getDocument();
+    CodeDocument::Position from(doc, start), to(doc, end);
+    int line = from.getLineNumber();
+    int first = getFirstLineOnScreen();
+    int onScreen = getNumLinesOnScreen();
+    bool wasVisible = line >= first && line < first + onScreen;
+    // Select end-first so the caret (and any scrolling) lands on the start.
+    moveCaretTo(to, false);
+    moveCaretTo(from, true);
+    if (!wasVisible)
+        scrollToLine(juce::jmax(0, line - onScreen / 2));
+}
+
 void TzplCodeEditor::resized() {
     juce::CodeEditorComponent::resized();
     if (overlay_) overlay_->setBounds(getLocalBounds());
@@ -606,6 +620,40 @@ void EditorPane::findPrevious() { findBar_.findPrevious(); }
 void EditorPane::seedReplace(String const& text) {
     findBar_.seedReplace(text);
     findBar_.show();
+}
+
+// ---------------------------------------------------------------------------
+// Search support
+// ---------------------------------------------------------------------------
+
+String EditorPane::tabText(int index) const {
+    auto* tab = tabAt(index);
+    return tab ? tab->doc->getAllContent() : String();
+}
+
+bool EditorPane::selectUntitledTab(String const& name) {
+    for (int i = 0; i < (int)tabs_.size(); ++i)
+        if (tabs_[i]->file == juce::File() && tabs_[i]->name == name) {
+            tabsUI_.setCurrentTabIndex(i);
+            return true;
+        }
+    return false;
+}
+
+void EditorPane::revealRange(int start, int length) {
+    auto* tab = activeTab();
+    if (!tab) return;
+    int n = tab->doc->getNumCharacters();
+    start = juce::jlimit(0, n, start);
+    int end = juce::jlimit(start, n, start + length);
+    tab->editor->selectAndReveal(start, end);
+    tab->editor->grabKeyboardFocus();
+}
+
+int EditorPane::selectionStart() const {
+    auto* tab = activeTab();
+    if (!tab) return 0;
+    return tab->editor->getHighlightedRegion().getStart();
 }
 
 }

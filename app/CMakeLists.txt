@@ -189,6 +189,17 @@ if(TZPL_BUILD_GUI)
     )
     target_include_directories(tzpl_config_tests PRIVATE src)
 
+    # Editor search core (Find bar modes, Find in Files, Find Definitions):
+    # pattern matcher, definition scanner, import-following finder. Pure
+    # string/file code -- no JUCE, no engine.
+    add_executable(tzpl_search_tests
+        tests/search_test.cpp
+        src/text_search.cpp
+        src/symbol_scanner.cpp
+        src/definition_finder.cpp
+    )
+    target_include_directories(tzpl_search_tests PRIVATE src)
+
     # Headless widget-interaction tests: an ImGui context with no
     # rendering backend, driven by injected IO events (slider drags,
     # fine control, cmd-click text entry, range gestures).
@@ -362,6 +373,10 @@ if(TZPL_BUILD_APP_JUCE)
         juce/output_console.cpp
         juce/perform_view.cpp
         juce/sidebar_panel.cpp
+        juce/search_panel.cpp
+        src/text_search.cpp
+        src/symbol_scanner.cpp
+        src/definition_finder.cpp
         juce/notebook/cell_component.cpp
         juce/notebook/markdown_view.cpp
         vendor/md4c/md4c.c

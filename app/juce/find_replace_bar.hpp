@@ -21,14 +21,18 @@
 //  Find/Replace bar shown at the top of the editor pane. The JUCE port of
 //  find_replace.{hpp,cpp} -- the search logic runs against the active
 //  editor's CodeDocument (via a supplied accessor) instead of the vendored
-//  ImGuiColorTextEdit.
+//  ImGuiColorTextEdit. The term is matched in one of the five Xcode modes
+//  (Contains, Matches Word, Starts With, Ends With, Regular Expression)
+//  chosen from a popup; see text_search.hpp.
 //
 
 #ifndef find_replace_bar_hpp
 #define find_replace_bar_hpp
 
+#include "text_search.hpp"
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <functional>
+#include <vector>
 
 namespace tzplapp {
 
@@ -54,6 +58,10 @@ public:
     void findNext();
     void findPrevious();
 
+    MatchMode mode() const;
+    bool caseSensitive() const { return caseButton_.getToggleState(); }
+    void setMode(MatchMode m);
+
     // Called when the bar's visibility changes so the pane can re-lay out.
     std::function<void()> onVisibilityChanged;
 
@@ -64,8 +72,13 @@ private:
     void replaceCurrent();
     void replaceAll();
     void updateMatchLabel(int matchIndex, int total);
+    // The matcher for the current term/mode/case; matches in `text`.
+    TextMatcher matcher() const;
+    std::vector<TextMatch> matchesIn(juce::String const& text,
+                                     TextMatcher const& m) const;
 
     std::function<TzplCodeEditor*()> activeEditor_;
+    juce::ComboBox modeBox_;
     juce::TextEditor findField_;
     juce::TextEditor replaceField_;
     juce::TextButton prevButton_ { "<" };

@@ -51,6 +51,11 @@ public:
     // Brief highlight of the just-evaluated lines (0-based, inclusive).
     void triggerFlash(int startLine, int endLine);
 
+    // Select [start, end) with the caret at `start`. A match already on
+    // screen just gets selected; one that is not is scrolled to the middle
+    // of the view rather than the edge moveCaretTo would leave it at.
+    void selectAndReveal(int start, int end);
+
     // Error markers: 0-based line -> message. Painted as a red band.
     void setErrorMarkers(std::map<int, juce::String> markers);
     void clearErrorMarkers();
@@ -172,6 +177,17 @@ public:
     void findNext();
     void findPrevious();
     void seedReplace(juce::String const& text);
+
+    // -- Search support (Find in Files / Find Definitions) --
+    juce::String tabText(int index) const;
+    // Select the first tab named `name` that has no file path (an untitled
+    // document a search hit refers to). False if there is none.
+    bool selectUntitledTab(juce::String const& name);
+    // Select [start, start + length) in the active editor (clamped to the
+    // document), scroll it into view and focus the editor.
+    void revealRange(int start, int length);
+    // Offset of the selection start (the caret when nothing is selected).
+    int selectionStart() const;
 
 private:
     struct Tab {

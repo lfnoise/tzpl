@@ -51,6 +51,11 @@ public:
     juce::StringArray folderPaths() const;
     void setFolderPaths(juce::StringArray const& paths);
 
+    // Every document under the open roots, recursively, sorted by path:
+    // the corpus for Find in Files. Text documents only (.x, .tzd, .md,
+    // .txt, tzpl-config); hidden entries are skipped.
+    juce::Array<juce::File> documentFiles() const;
+
     // Re-scan every open directory whose modification time changed since it
     // was listed (files created/deleted/renamed outside the app). Openness,
     // selection and scroll position survive. Cheap enough to poll ~1 Hz.

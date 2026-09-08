@@ -21,6 +21,7 @@
 
 #include "find_replace_bar.hpp"
 #include "editor_pane.hpp"
+#include <algorithm>
 
 namespace tzplapp {
 
@@ -29,21 +30,8 @@ using juce::String;
 
 namespace {
 
-// Offsets of all matches of `needle` in `haystack`. Empty needle -> none.
-std::vector<int> findAllOffsets(String const& haystack, String const& needle,
-                                bool caseSensitive) {
-    std::vector<int> offsets;
-    if (needle.isEmpty()) return offsets;
-    String hay = caseSensitive ? haystack : haystack.toLowerCase();
-    String nee = caseSensitive ? needle : needle.toLowerCase();
-    int from = 0;
-    for (;;) {
-        int idx = hay.indexOf(from, nee);
-        if (idx < 0) break;
-        offsets.push_back(idx);
-        from = idx + nee.length();
-    }
-    return offsets;
+std::wstring toWide(String const& s) {
+    return std::wstring(s.toWideCharPointer());
 }
 
 }
@@ -59,6 +47,15 @@ FindReplaceBar::FindReplaceBar(std::function<TzplCodeEditor*()> activeEditor)
     };
     setupField(findField_, "Find");
     setupField(replaceField_, "Replace");
+
+    // Match mode popup (Xcode's magnifier menu): Contains, Matches Word,
+    // Starts With, Ends With, Regular Expression.
+    for (int i = 0; i < kNumMatchModes; ++i)
+        modeBox_.addItem(kMatchModeNames[i], i + 1);
+    modeBox_.setSelectedId(1, juce::dontSendNotification);
+    modeBox_.setTooltip("How the term is matched");
+    modeBox_.onChange = [this] { search(true, false); };
+    addAndMakeVisible(modeBox_);
 
     // Re-search live as the find term changes.
     findField_.onTextChange = [this] { search(true, false); };
@@ -101,6 +98,10 @@ void FindReplaceBar::resized() {
     nextButton_.setBounds(row.removeFromRight(28));
     prevButton_.setBounds(row.removeFromRight(28));
     row.removeFromRight(6);
+    // The mode popup shrinks first on a narrow pane.
+    int modeW = juce::jlimit(70, 150, row.getWidth() / 5);
+    modeBox_.setBounds(row.removeFromLeft(modeW));
+    row.removeFromLeft(4);
     // Split the remaining width between find and replace fields.
     int half = row.getWidth() / 2;
     findField_.setBounds(row.removeFromLeft(half - 3));
@@ -140,16 +141,40 @@ void FindReplaceBar::seedReplace(String const& text) {
 void FindReplaceBar::findNext()     { search(true, true); }
 void FindReplaceBar::findPrevious() { search(false, false); }
 
+MatchMode FindReplaceBar::mode() const {
+    return (MatchMode)juce::jlimit(0, kNumMatchModes - 1,
+                                   modeBox_.getSelectedId() - 1);
+}
+
+void FindReplaceBar::setMode(MatchMode m) {
+    modeBox_.setSelectedId((int)m + 1, juce::dontSendNotification);
+}
+
+TextMatcher FindReplaceBar::matcher() const {
+    return TextMatcher(toWide(findField_.getText()), mode(),
+                       caseButton_.getToggleState());
+}
+
+std::vector<TextMatch> FindReplaceBar::matchesIn(String const& text,
+                                                 TextMatcher const& m) const {
+    return m.findAll(toWide(text));
+}
+
 void FindReplaceBar::search(bool forward, bool fromSelectionEnd) {
     auto* ed = activeEditor_();
     if (ed == nullptr) return;
-    String term = findField_.getText();
-    if (term.isEmpty()) { updateMatchLabel(-1, 0); return; }
+    TextMatcher m = matcher();
+    if (m.empty()) { updateMatchLabel(-1, 0); return; }
+    if (!m.valid()) {
+        matchLabel_.setText("bad regex", juce::dontSendNotification);
+        matchLabel_.setTooltip(m.error());
+        return;
+    }
+    matchLabel_.setTooltip({});
 
     auto& doc = ed->getDocument();
-    String content = doc.getAllContent();
-    auto offsets = findAllOffsets(content, term, caseButton_.getToggleState());
-    if (offsets.empty()) { updateMatchLabel(-1, 0); return; }
+    auto matches = matchesIn(doc.getAllContent(), m);
+    if (matches.empty()) { updateMatchLabel(-1, 0); return; }
 
     // Search relative to the current selection/caret.
     auto sel = ed->getHighlightedRegion();
@@ -157,41 +182,43 @@ void FindReplaceBar::search(bool forward, bool fromSelectionEnd) {
 
     int chosen = -1;
     if (forward) {
-        for (int i = 0; i < (int)offsets.size(); ++i)
-            if (offsets[i] >= anchor) { chosen = i; break; }
+        for (int i = 0; i < (int)matches.size(); ++i)
+            if (matches[i].start >= anchor) { chosen = i; break; }
         if (chosen < 0) chosen = 0; // wrap to first
     } else {
-        for (int i = (int)offsets.size() - 1; i >= 0; --i)
-            if (offsets[i] < anchor) { chosen = i; break; }
-        if (chosen < 0) chosen = (int)offsets.size() - 1; // wrap to last
+        for (int i = (int)matches.size() - 1; i >= 0; --i)
+            if (matches[i].start < anchor) { chosen = i; break; }
+        if (chosen < 0) chosen = (int)matches.size() - 1; // wrap to last
     }
 
-    int start = offsets[chosen];
-    ed->setHighlightedRegion({ start, start + term.length() });
-    updateMatchLabel(chosen, (int)offsets.size());
+    auto const& hit = matches[(size_t)chosen];
+    ed->selectAndReveal(hit.start, hit.end());
+    updateMatchLabel(chosen, (int)matches.size());
 }
 
 void FindReplaceBar::replaceCurrent() {
     auto* ed = activeEditor_();
     if (ed == nullptr) return;
-    String term = findField_.getText();
-    if (term.isEmpty()) return;
+    TextMatcher m = matcher();
+    if (m.empty() || !m.valid()) return;
 
     auto sel = ed->getHighlightedRegion();
     auto& doc = ed->getDocument();
-    String selText = doc.getTextBetween(
-        CodeDocument::Position(doc, sel.getStart()),
-        CodeDocument::Position(doc, sel.getEnd()));
+    String content = doc.getAllContent();
+    std::wstring wide = toWide(content);
+    auto matches = m.findAll(wide);
 
-    bool selectionIsMatch = caseButton_.getToggleState()
-        ? selText == term
-        : selText.equalsIgnoreCase(term);
-
-    if (selectionIsMatch) {
+    // Replace only when the selection is exactly one of the matches.
+    auto it = std::find_if(matches.begin(), matches.end(), [&](TextMatch const& t) {
+        return t.start == sel.getStart() && t.end() == sel.getEnd();
+    });
+    if (it != matches.end()) {
+        String replacement(m.expandReplacement(wide, *it,
+                                               toWide(replaceField_.getText())).c_str());
         doc.newTransaction();
-        doc.replaceSection(sel.getStart(), sel.getEnd(), replaceField_.getText());
+        doc.replaceSection(sel.getStart(), sel.getEnd(), replacement);
         // Place the caret after the inserted replacement, then advance.
-        int newEnd = sel.getStart() + replaceField_.getText().length();
+        int newEnd = sel.getStart() + replacement.length();
         ed->setHighlightedRegion({ newEnd, newEnd });
     }
     search(true, true);
@@ -200,21 +227,24 @@ void FindReplaceBar::replaceCurrent() {
 void FindReplaceBar::replaceAll() {
     auto* ed = activeEditor_();
     if (ed == nullptr) return;
-    String term = findField_.getText();
-    if (term.isEmpty()) return;
+    TextMatcher m = matcher();
+    if (m.empty() || !m.valid()) return;
 
     auto& doc = ed->getDocument();
-    String content = doc.getAllContent();
-    auto offsets = findAllOffsets(content, term, caseButton_.getToggleState());
-    if (offsets.empty()) { updateMatchLabel(-1, 0); return; }
+    std::wstring wide = toWide(doc.getAllContent());
+    auto matches = m.findAll(wide);
+    if (matches.empty()) { updateMatchLabel(-1, 0); return; }
 
-    String replacement = replaceField_.getText();
+    std::wstring replacement = toWide(replaceField_.getText());
     doc.newTransaction();
     // Replace from the end so earlier offsets stay valid.
-    for (int i = (int)offsets.size() - 1; i >= 0; --i)
-        doc.replaceSection(offsets[i], offsets[i] + term.length(), replacement);
+    for (int i = (int)matches.size() - 1; i >= 0; --i) {
+        auto const& t = matches[(size_t)i];
+        doc.replaceSection(t.start, t.end(),
+                           String(m.expandReplacement(wide, t, replacement).c_str()));
+    }
 
-    matchLabel_.setText(String((int)offsets.size()) + " replaced",
+    matchLabel_.setText(String((int)matches.size()) + " replaced",
                         juce::dontSendNotification);
 }
 

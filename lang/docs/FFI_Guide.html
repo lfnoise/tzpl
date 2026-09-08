@@ -494,10 +494,12 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
         <li><a href="#ae-connections">Connections</a></li>
         <li><a href="#ae-params">Parameter Control</a></li>
         <li><a href="#ae-notes">Note / Voice Management</a></li>
+        <li><a href="#ae-buffers">Buffers &amp; Sample Banks</a></li>
         <li><a href="#ae-taps">Signal Taps</a></li>
         <li><a href="#ae-introspection">Introspection &amp; Utilities</a></li>
         <li><a href="#ae-enums">Enums</a></li>
         <li><a href="#ae-example">Example</a></li>
+        <li><a href="#ae-index">Function Index</a></li>
       </ol>
     </li>
   </ol>
@@ -3521,8 +3523,8 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
 
 <ul>
   <li><strong>Command bundling:</strong> functions that modify the audio graph do not execute immediately &mdash; they are collected into a bundle opened by <code>begin()</code> and submitted atomically by <code>go(silo)</code> / <code>sched(silo, &hellip;)</code>; the target silo is chosen at submit time (&sect;18.4).</li>
-  <li><strong>Error codes:</strong> error-returning functions return <code>Int</code>, where <code>0</code> = success. The codes are the <code>Err</code> enum (&sect;18.10).</li>
-  <li><strong>Enums:</strong> the constants (<code>FadeCurve</code>, <code>SchedPolicy</code>, <code>Err</code>, <code>Enable</code>) are defined in the Tzopilotl wrapper module <code>bridge/modules/audio_engine.x</code>, which re-exports the foreign functions alongside them. Simple enums are implicitly coerced to <code>Int</code> when passed to FFI functions, so you can write <code>connectX(&hellip;, FadeCurve.fadeEqualPower)</code> directly.</li>
+  <li><strong>Error codes:</strong> error-returning functions return <code>Int</code>, where <code>0</code> = success. The codes are the <code>Err</code> enum (&sect;<a href="#ae-enums">18.12</a>). Every function is listed with its section and thread class in &sect;<a href="#ae-index">18.14</a>.</li>
+  <li><strong>Enums:</strong> the constants (<code>FadeCurve</code>, <code>SchedPolicy</code>, <code>Err</code>, <code>Enable</code>, <code>TapMode</code>) are defined in the Tzopilotl wrapper module <code>bridge/modules/audio_engine.x</code>, which re-exports the foreign functions alongside them. Simple enums are implicitly coerced to <code>Int</code> when passed to FFI functions, so you can write <code>connectX(&hellip;, FadeCurve.fadeEqualPower)</code> directly.</li>
   <li><strong>RT safety:</strong> the command-bundling, node, connection, parameter, and note functions are RT-safe (they queue commands through a lock-free FIFO), so they may also be called from silo VM code (&sect;13). Lifecycle, plugin loading, and introspection functions are NRT-only.</li>
 </ul>
 
@@ -3627,7 +3629,7 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
 </table>
 
 <div class="note">
-  <strong>Note:</strong> Connections are validated on the audio thread; a connection that would create a cycle, or whose ports disagree in element type, signal rate, or channel count, is rejected with the corresponding <code>Err</code> code (&sect;18.10).
+  <strong>Note:</strong> Connections are validated on the audio thread; a connection that would create a cycle, or whose ports disagree in element type, signal rate, or channel count, is rejected with the corresponding <code>Err</code> code (&sect;<a href="#ae-enums">18.12</a>).
 </div>
 
 <!-- -------------------------------- -->
@@ -3641,6 +3643,16 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
   <tr><td><code>setInputX(nodeID Int, portIndex Int, value Float, xfade Float, curve Int) Int</code></td><td>Set an input port to a constant value with a crossfade from the current value.</td></tr>
   <tr><td><code>setControl(nodeID Int, controlID Int, value Float) Int</code></td><td>Set a control parameter on a node. Controls are node-specific named parameters distinct from audio-rate input ports.</td></tr>
   <tr><td><code>setControl(nodeID Int, name String, value Float) Int</code></td><td>By-name overload: the engine resolves the control name against the node's def when the bundle is submitted. An unknown name aborts the bundle with <code>errControlNotFound</code>.</td></tr>
+</table>
+
+<h4>Shared inputs</h4>
+
+<p>The process-global <em>shared-input table</em> is a small array of floats that any synth can read at audio rate with the <code>sharedIn(slot)</code> ugen (see <em>Writing SynthDefs</em>). Writes are plain stores &mdash; no bundle, no scheduling &mdash; and take effect within one sample, which makes the table the cheapest way to stream a continuous controller (mouse, sensor, LFO computed in a script) into many nodes at once.</p>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>setSharedInput(slot Int, value Float) Int</code></td><td>Write one slot. Slots <code>0</code>&ndash;<code>2</code> are the mouse (owned by the app's poller); slots <code>3</code> and up are free for user values. RT-safe; needs no open bundle.</td></tr>
+  <tr><td><code>getSharedInput(slot Int) Float</code></td><td>Read one slot (<code>0.0</code> for an out-of-range slot).</td></tr>
 </table>
 
 <!-- -------------------------------- -->
@@ -3661,7 +3673,40 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
 </div>
 
 <!-- -------------------------------- -->
-<h3 id="ae-taps">18.9 Signal Taps</h3>
+<h3 id="ae-buffers">18.9 Buffers &amp; Sample Banks</h3>
+
+<p>A node's plugin exports <em>buffer slots</em> (wavetable banks, sample memory, delay lines to record into) and <em>bank slots</em> (pitch/velocity-mapped sample banks). These functions bind data to them. All are <strong>bundled</strong> commands: call them between <code>begin()</code> and <code>go(silo)</code>. The data is prepared on the calling thread when the bundle is recorded (file reads, array copies, validation), the swap onto the node happens sample-accurately on the audio thread, and the buffer being replaced is freed off the audio thread &mdash; so a bank can be replaced while notes are sounding. Until a slot is bound, reads from it return <code>0</code>. <code>loadBuffer</code>, <code>fillBuffer</code> and <code>loadSampleBank</code> allocate and read files, so they are NRT-only; <code>resizeBuffer</code> is RT-safe.</p>
+
+<table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>resizeBuffer(nodeID Int, bufID Int, numChannels Int, length Int) Int</code></td><td>Give buffer slot <code>bufID</code> an empty buffer of <code>numChannels</code> &times; <code>length</code> frames &mdash; memory for a recording delay line or a table a synth fills itself.</td></tr>
+  <tr><td><code>loadBuffer(nodeID Int, bufID Int, path String) Int</code></td><td>Load an audio file into buffer slot <code>bufID</code>. The file is read when the bundle is submitted, on the calling thread.</td></tr>
+  <tr><td><code>fillBuffer(nodeID Int, bufID Int, numChans Int, data [Float]) Int</code></td><td>Replace buffer slot <code>bufID</code> with computed data. <code>data</code> is channel-concatenated (planar): <code>data[c * frames + i]</code>, with <code>frames = data length / numChans</code>, so a single-channel table is just the sample array. This is how the <code>wavetables</code> module's banks reach an oscillator: <code>fillBuffer(node, 0, 1, sawTables())</code>.</td></tr>
+  <tr><td><code>loadSampleBank(nodeID Int, bankID Int, zones [SampleZone]) Int</code></td><td>Load a pitch/velocity-mapped sample bank into bank slot <code>bankID</code>: one sound file per zone, each covering an inclusive MIDI key and velocity range (defined in <code>audio_engine.x</code> on top of the parallel-array form below). Files load and zones validate at submit, so a missing file or a bad spec &mdash; overlapping tiles, a loop with <code>loopEnd &lt;= loopStart</code> or past the end of the file &mdash; returns <code>errBadSampleBank</code> synchronously.</td></tr>
+  <tr><td><code>loadSampleBank(nodeID Int, bankID Int, paths [String], loKey [Int], hiKey [Int], loVel [Int], hiVel [Int], rootKey [Int], loopStart [Float], loopEnd [Float]) Int</code></td><td>The foreign form: the same bank as parallel arrays, one element per zone.</td></tr>
+  <tr><td><code>sampleZone(path String, loKey Int, hiKey Int = -1, loVel Int = 0, hiVel Int = 127, rootKey Int = -1, loopStart Float = -1.0, loopEnd Float = -1.0) SampleZone</code></td><td>Build one zone with defaults: <code>hiKey</code> defaults to <code>loKey</code> (a single-note zone), the velocity range to all of <code>0</code>&ndash;<code>127</code>. Negative <code>rootKey</code> / <code>loopStart</code> / <code>loopEnd</code> mean &ldquo;take it from the file's instrument metadata&rdquo; (WAV <code>smpl</code> or AIFF <code>INST</code>), falling back to <code>rootKey = loKey</code> and no loop.</td></tr>
+</table>
+
+<p><code>SampleZone</code> is a struct with the same fields (<code>path</code>, <code>loKey</code>, <code>hiKey</code>, <code>loVel</code>, <code>hiVel</code>, <code>rootKey</code>, <code>loopStart</code>, <code>loopEnd</code>). Each zone's (pitch, velocity) rectangle is a tile: no two tiles may cover the same cell, but two zones may share a pitch range if their velocity ranges are disjoint (velocity layering), and vice versa. <code>rootKey</code> is the note at which the sample plays unshifted; <code>loopStart</code>/<code>loopEnd</code> are a sustain loop in frames of the source file (<code>loopEnd</code> exclusive, fractional allowed).</p>
+
+<pre><code><span class="kw">import</span> audio_engine.*;
+<span class="kw">import</span> wavetables.*;
+
+begin();
+newNode(<span class="str">"wtLead"</span>, <span class="num">101</span>);
+fillBuffer(<span class="num">101</span>, <span class="num">0</span>, <span class="num">1</span>, sawTables(<span class="num">1.0</span>));       <span class="cmt">-- the bank the oscillator reads</span>
+newNode(<span class="str">"smpPerc"</span>, <span class="num">102</span>);
+loadSampleBank(<span class="num">102</span>, <span class="num">0</span>, [
+    sampleZone(<span class="str">"kit/kick.wav"</span>, <span class="num">36</span>),
+    sampleZone(<span class="str">"kit/snare_soft.wav"</span>, <span class="num">38</span>, <span class="num">38</span>, <span class="num">0</span>, <span class="num">80</span>),
+    sampleZone(<span class="str">"kit/snare_hard.wav"</span>, <span class="num">38</span>, <span class="num">38</span>, <span class="num">81</span>, <span class="num">127</span>),  <span class="cmt">-- velocity layer</span>
+]);
+go(<span class="num">0</span>);</code></pre>
+
+<p>See <em>Writing SynthDefs</em> for the plugin side &mdash; declaring buffer and bank slots and reading them with the buffer, wavetable and sample-player ugens.</p>
+
+<!-- -------------------------------- -->
+<h3 id="ae-taps">18.10 Signal Taps</h3>
 
 <p>A <em>tap</em> reads a running signal back out of the engine: a node outlet, or the master output bus. It is the engine-level primitive behind the app's meters and scopes, and it needs no GUI &mdash; headless scripts, tests, and silo code all use the same functions.</p>
 
@@ -3716,7 +3761,7 @@ freeVmTaps();</code></pre>
 <p>From a silo, a read resolves through <strong>that silo's own tap table</strong>: no lock and no shared map, because the thread doing the reading is the thread that publishes the values. The cost is scope &mdash; a silo sees only its own taps (silo 0 additionally sees master taps). <strong>Cross-silo reads are not supported</strong>: a tap belonging to another silo reads exactly as an unknown id does, <code>false</code> / <code>0.0</code> / no samples. Read another silo's taps from the main VM instead, where the locking path sees every tap.</p>
 
 <!-- -------------------------------- -->
-<h3 id="ae-introspection">18.10 Introspection &amp; Utilities</h3>
+<h3 id="ae-introspection">18.11 Introspection &amp; Utilities</h3>
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
@@ -3726,7 +3771,7 @@ freeVmTaps();</code></pre>
 </table>
 
 <!-- -------------------------------- -->
-<h3 id="ae-enums">18.11 Enums</h3>
+<h3 id="ae-enums">18.12 Enums</h3>
 
 <p>Defined in the wrapper module <code>bridge/modules/audio_engine.x</code>; <code>import audio_engine.*;</code> brings them in together with the foreign functions. Pass the enum case directly wherever a function takes the corresponding <code>Int</code> parameter.</p>
 
@@ -3779,6 +3824,18 @@ freeVmTaps();</code></pre>
   <tr><td><code>errNotImplemented</code></td><td>Feature not yet implemented</td></tr>
   <tr><td><code>errTooLate</code></td><td>Scheduled event missed its deadline</td></tr>
   <tr><td><code>errClockOutOfRange</code></td><td>TempoClock slot index out of range</td></tr>
+  <tr><td><code>errResourceLimit</code></td><td>A per-silo table is full (e.g. the 128 signal taps)</td></tr>
+  <tr><td><code>errBadSampleBank</code></td><td><code>loadSampleBank</code> rejected the spec: a missing file, overlapping zones, or an invalid loop</td></tr>
+</table>
+
+<h4><code>TapMode</code></h4>
+
+<p>What a signal tap (&sect;<a href="#ae-taps">18.10</a>) captures.</p>
+
+<table>
+  <tr><th>Case</th><th>Description</th></tr>
+  <tr><td><code>tapMeter</code></td><td>Peak and RMS levels only</td></tr>
+  <tr><td><code>tapScope</code></td><td>Levels plus a sample FIFO, drained with <code>tapSamples</code></td></tr>
 </table>
 
 <h4><code>Enable</code></h4>
@@ -3790,7 +3847,7 @@ freeVmTaps();</code></pre>
 </table>
 
 <!-- -------------------------------- -->
-<h3 id="ae-example">18.12 Example</h3>
+<h3 id="ae-example">18.13 Example</h3>
 
 <p>Create a 440&nbsp;Hz sine oscillator, fade it in, hold it, then fade it out:</p>
 
@@ -3815,6 +3872,35 @@ freeVmTaps();</code></pre>
 <span class="fn">engineStop</span>();</code></pre>
 
 <p>For beat-accurate scheduling of bundles instead of sleeping, see the examples in &sect;<a href="#clock-examples">11.9</a>.</p>
+
+<!-- -------------------------------- -->
+<h3 id="ae-index">18.14 Function Index</h3>
+
+<p>Every function that <code>import audio_engine.*;</code> brings in, with where it is described and where it may run. <em>Bundled</em> functions record into the open <code>begin()</code> bundle and are RT-safe; <em>RT-safe</em> functions may be called from silo code as well as the main VM; <em>NRT</em> functions may only be called on the main (non-real-time) VM; <em>silo-only</em> functions need the real-time silo context and are rejected at compile time elsewhere. The functions themselves are registered by the bridge into the foreign module <code>audio_engine_ffi</code>, which <code>audio_engine.x</code> re-exports &mdash; so a search of the module sources finds only the handful defined in Tzopilotl (<code>spawn</code>, <code>sampleZone</code>, the array-of-zones <code>loadSampleBank</code>).</p>
+
+<table>
+  <tr><th>Function</th><th>Section</th><th>Runs</th></tr>
+  <tr><td><code>engineStart</code>, <code>engineStop</code>, <code>isAudioRunning</code>, <code>getStreamTime</code>, <code>masterGain</code>, <code>safetyLimiter</code>, <code>inputChannels</code></td><td>&sect;<a href="#ae-lifecycle">18.2</a> Engine Lifecycle</td><td>NRT</td></tr>
+  <tr><td><code>loadPlugins</code>, <code>loadPlugin</code></td><td>&sect;<a href="#ae-plugins">18.3</a> Plugin Loading</td><td>NRT</td></tr>
+  <tr><td><code>begin</code>, <code>go</code>, <code>sched(silo)</code>, <code>sched(silo, clock, beat)</code>, <code>schedPolicy</code></td><td>&sect;<a href="#ae-bundling">18.4</a> Command Bundling</td><td>RT-safe</td></tr>
+  <tr><td><code>setTempo(clock, bpm)</code>, <code>schedTempoChange(clock, &hellip;)</code>, <code>clockBeats</code>, <code>clockTempo</code></td><td>&sect;<a href="#clock-engine-slots">11.6</a> Engine TempoClock Slots</td><td>RT-safe</td></tr>
+  <tr><td><code>newNode</code>, <code>freeNode</code>, <code>freeAllNodes</code>, <code>channelOffset</code></td><td>&sect;<a href="#ae-nodes">18.5</a> Node Operations</td><td>Bundled</td></tr>
+  <tr><td><code>connect</code>, <code>connectX</code>, <code>disconnectInput</code>, <code>disconnectInputX</code>, <code>disconnectSource</code>, <code>disconnectSourceX</code>, <code>disconnectOutput</code>, <code>disconnectNode</code>, <code>reconnectOutput</code>, <code>replaceNode</code></td><td>&sect;<a href="#ae-connections">18.6</a> Connections</td><td>Bundled</td></tr>
+  <tr><td><code>setInput</code>, <code>setInputX</code>, <code>setControl</code> (by id and by name)</td><td>&sect;<a href="#ae-params">18.7</a> Parameter Control</td><td>Bundled</td></tr>
+  <tr><td><code>setSharedInput</code>, <code>getSharedInput</code></td><td>&sect;<a href="#ae-params">18.7</a> Parameter Control</td><td>RT-safe, no bundle</td></tr>
+  <tr><td><code>noteOn</code>, <code>noteOff</code>, <code>allNotesOff</code>, <code>noteSetParams</code></td><td>&sect;<a href="#ae-notes">18.8</a> Note / Voice Management</td><td>Bundled</td></tr>
+  <tr><td><code>playNote</code>, <code>releaseNote</code></td><td>&sect;<a href="#silo-msg-notes">17.5</a> Silo Messaging</td><td>silo-only</td></tr>
+  <tr><td><code>resizeBuffer</code></td><td>&sect;<a href="#ae-buffers">18.9</a> Buffers &amp; Sample Banks</td><td>Bundled</td></tr>
+  <tr><td><code>loadBuffer</code>, <code>fillBuffer</code>, <code>loadSampleBank</code> (both forms), <code>sampleZone</code></td><td>&sect;<a href="#ae-buffers">18.9</a> Buffers &amp; Sample Banks</td><td>Bundled, NRT</td></tr>
+  <tr><td><code>allocTapID</code>, <code>tapExists</code>, <code>tapPeak</code>, <code>tapRms</code>, <code>tapChans</code>, <code>tapSamples</code>, <code>freeVmTaps</code>, <code>freeAllTaps</code></td><td>&sect;<a href="#ae-taps">18.10</a> Signal Taps</td><td>RT-safe</td></tr>
+  <tr><td><code>tapOutlet</code>, <code>tapMaster</code>, <code>untap</code></td><td>&sect;<a href="#ae-taps">18.10</a> Signal Taps</td><td>Bundled</td></tr>
+  <tr><td><code>listSynthDefs</code>, <code>readFile</code>, <code>sleepMs</code></td><td>&sect;<a href="#ae-introspection">18.11</a> Introspection &amp; Utilities</td><td>NRT</td></tr>
+  <tr><td><code>attachVM</code>, <code>detachVM</code>, <code>siloEval</code>, <code>siloLoad</code>, <code>siloStartAt</code></td><td>&sect;<a href="#silo-vm">13</a> Silo VM</td><td>NRT</td></tr>
+  <tr><td><code>spawn</code>, <code>scheduleTask</code></td><td>&sect;<a href="#clock-silo-tasks">11.8</a> Silo Task Scheduling</td><td>silo-only</td></tr>
+  <tr><td><code>siloDeliverBytes</code>, <code>siloDeliverBytesAt</code>, <code>pumpSiloOutboxes</code>, <code>nrtActorMsgCount</code>, <code>nrtActorMsgName</code>, <code>nrtActorMsgTake</code></td><td>&sect;<a href="#silo-msg">17</a> Silo Messaging</td><td>NRT</td></tr>
+  <tr><td><code>siloOutbox</code></td><td>&sect;<a href="#silo-msg">17</a> Silo Messaging</td><td>silo-only</td></tr>
+  <tr><td><code>renderNRT</code> (both forms), <code>isRenderDone</code>, <code>onRenderDone</code>, <code>renderDone</code>, <code>stopRender</code> (both forms), <code>endRender</code> (both forms)</td><td>&sect;<a href="#nrt-render-ffi">14.2</a> Non-Real-Time Rendering</td><td>NRT</td></tr>
+</table>
 
 </main>
 <script>

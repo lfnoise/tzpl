@@ -37,6 +37,7 @@
 #include "perform_view.hpp"
 #include "graph_view.hpp"
 #include "sidebar_panel.hpp"
+#include "search_panel.hpp"
 #include "status_bar.hpp"
 #include "gui_state.hpp"
 #include "tzpl_look_and_feel.hpp"
@@ -138,6 +139,19 @@ private:
     void openFolderFlow();
     void addSidebarFolder(juce::File const& dir);
     void setSidebarVisible(bool show);
+    // The side column is showing its file tree (vs. hidden or on search).
+    bool sidebarShowing() const;
+    // Find in Files: reveal the side column on its Find face and focus the
+    // field (seeded with `seed` when non-empty). The search itself runs on
+    // Return (runFindInFiles) over every sidebar document and open tab.
+    void showFindInFiles(juce::String const& seed);
+    void runFindInFiles();
+    // Find Definitions: the name at the editor caret, looked up in the
+    // enclosing scopes, the file, and its imports; results on the Find face.
+    void runFindDefinitions();
+    void openSearchHit(SearchFileResult const& result, SearchHit const& hit);
+    // Escape from the Find face: back to the file tree and the editor.
+    void showSidebarFiles();
     void newProjectFlow();
     // Engine Settings window (tzpl-config), and the restart that applies it:
     // asks about unsaved work, spawns a watcher that relaunches once this
@@ -222,7 +236,20 @@ private:
     EditorPane editorPane_;
     // Folder trees to the left of the center pane. Shown only while it holds
     // folders and the View toggle is on; its width persists like splitRatio.
+    // sideTabs_ holds it and the Find face (search results) as two tabs,
+    // the way Xcode's navigator swaps between files and find results.
     SidebarPanel sidebar_;
+    SearchPanel searchPanel_;
+    class SideTabs : public juce::TabbedComponent {
+    public:
+        SideTabs() : juce::TabbedComponent(juce::TabbedButtonBar::TabsAtTop) {}
+        std::function<void()> onTabChanged;
+        void currentTabChanged(int, juce::String const&) override {
+            if (onTabChanged) onTabChanged();
+        }
+    };
+    SideTabs sideTabs_;
+    enum { sideTabFiles = 0, sideTabFind = 1 };
     bool sidebarVisible_ = true;
     juce::StretchableLayoutManager sideLayout_;
     std::unique_ptr<juce::StretchableLayoutResizerBar> sideResizer_;
