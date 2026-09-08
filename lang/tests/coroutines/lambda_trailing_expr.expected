@@ -1,0 +1,11 @@
+Option<Float>.some(0.5)
+Option<Float>.some(0.5)
+Option<Float>.none
+Option<Float>.none
+Option<Int>.some(1)
+Option<Int>.none
+Option<Int>.some(1)
+Option<Int>.none
+Option<Float>.some(7.0)
+Option<Float>.none
+done

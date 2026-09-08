@@ -7,6 +7,16 @@ documentation site as the Changelog page.
 
 ## Unreleased
 
+**Fixed**
+
+- An anonymous coroutine (`coro fn() Float { ... }()`) whose body ended in
+  a trailing expression, if-else, or match crashed the process when it
+  finished -- so a `go` task that ran to completion took the app down with
+  it. The lambda code path compiled the trailing expression as a return,
+  which popped the coroutine's frame and jumped through its null return
+  address; it now falls through to the coroutine's done path, as a named
+  `coro fn` always did.
+
 ## v0.2.2 (7 September 2026)
 
 **Fixed**

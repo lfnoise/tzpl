@@ -10586,9 +10586,16 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
         bool emittedReturn = false;
         for (size_t i = 0; i < block->stmts.size(); ++i) {
             auto* stmt = block->stmts[i].get();
+            // Trailing expression (implicit return). Not for a coroutine
+            // lambda: its declared type is the YIELD type, a trailing
+            // expression cannot be a yield, and op_return would pop the
+            // coroutine's flat frame -- whose returnPC is deliberately null
+            // (yield/done switch contexts by hand) -- and jump through it.
+            // Lower it as a plain statement and let op_coro_done close the
+            // body, as genFunction does for a named coro fn.
             if (stmt->kind == ASTNode::ExprStmt) {
                 auto* exprStmt = static_cast<ExprStmtNode*>(stmt);
-                if (exprStmt->isTrailing) {
+                if (exprStmt->isTrailing && !inCoroutineFn_) {
                     inTailPosition_ = true;
                     u16 resultReg = genExpr(static_cast<Expr*>(exprStmt->expr.get()));
                     inTailPosition_ = false;
@@ -10599,6 +10606,7 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
             }
             // Check for trailing IfStmtNode with else (value-producing if-else)
             if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::IfStmt
+                && !inCoroutineFn_
                 && currentReturnType_ != compiler_.voidType()) {
                 auto* ifStmt = static_cast<IfStmtNode*>(stmt);
                 if (ifStmt->elseBranch) {
@@ -10609,6 +10617,7 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
             }
             // Check for trailing SwitchStmt (value-producing match)
             if (i == block->stmts.size() - 1 && stmt->kind == ASTNode::SwitchStmt
+                && !inCoroutineFn_
                 && currentReturnType_ != compiler_.voidType()) {
                 genSwitchStmtAsReturn(static_cast<SwitchStmtNode*>(stmt));
                 emittedReturn = true;
