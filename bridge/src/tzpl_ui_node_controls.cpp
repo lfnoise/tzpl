@@ -92,6 +92,7 @@ std::uint64_t bindControlWidget(UIState* ui, std::string const& panel,
     w->target = UIEngineTarget{static_cast<long>(nodeID),
                                static_cast<long>(c.controlID), silo};
     w->dirtyEngine = true;  // push current value(s) through the fresh binding
+    if (ui->wake) ui->wake();
     return w->id;
 }
 

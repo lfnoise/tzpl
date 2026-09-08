@@ -440,6 +440,7 @@ static void ffi_uiBindControl(ts::VM& vm, u16 dst, u16, u16 argBase) {
             w->target = target;
             // Push the widget's current value through the new binding.
             w->dirtyEngine = true;
+            if (ui->wake) ui->wake();
         } else {
             err = tzpl_errInternal;
         }
@@ -481,6 +482,7 @@ static void ffi_uiBindControlY(ts::VM& vm, u16 dst, u16, u16 argBase) {
         if (UIWidget* w = ui->findById(id)) {
             w->target2 = target;
             w->dirtyEngine = true;
+            if (ui->wake) ui->wake();
         } else {
             err = tzpl_errInternal;
         }
@@ -534,6 +536,7 @@ static void ffi_uiSetValue(ts::VM& vm, u16, u16, u16 argBase) {
         w->values[0] = w->spec.clamp(v);
         w->dirtyEngine = true;
         w->dirtyCallback = true;
+        if (ui->wake) ui->wake();
     }
 }
 
@@ -550,6 +553,7 @@ static void ffi_uiSetValueXY(ts::VM& vm, u16, u16, u16 argBase) {
         w->values[1] = w->spec2.clamp(y);
         w->dirtyEngine = true;
         w->dirtyCallback = true;
+        if (ui->wake) ui->wake();
     }
 }
 
@@ -569,6 +573,7 @@ static void ffi_uiSetRange(ts::VM& vm, u16, u16, u16 argBase) {
         w->values[1] = hi;
         w->dirtyEngine = true;
         w->dirtyCallback = true;
+        if (ui->wake) ui->wake();
     }
 }
 
@@ -606,6 +611,7 @@ static void ffi_uiSetValues(ts::VM& vm, u16, u16, u16 argBase) {
             w->values[i] = w->spec.clamp(vals[i]);
         w->dirtyEngine = true;
         w->dirtyCallback = true;
+        if (ui->wake) ui->wake();
     }
 }
 
@@ -692,6 +698,7 @@ static void ffi_uiSetNotes(ts::VM& vm, u16, u16, u16 argBase) {
     if (UIWidget* w = ui->findById(id)) {
         w->noteData = std::move(notes);
         w->dirtyCallback = true;
+        if (ui->wake) ui->wake();
     }
 }
 

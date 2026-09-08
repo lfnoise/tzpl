@@ -276,6 +276,17 @@ struct UIState {
     // "" = the default Controls panel.
     std::string currentPanel;
 
+    // Called after Tzopilotl code changes a widget (setValue, setNotes,
+    // a fresh control binding, ...) so a host that only dispatches while
+    // it has work can restart: the JUCE app's ControlsDispatcher stops its
+    // timer when idle and, before this hook, was woken only by GUI events,
+    // leaving a coroutine's setValue calls unsent until the user clicked
+    // something. Invoked with mtx HELD, from whatever thread ran the
+    // Tzopilotl code, so it must be non-blocking and must not take mtx
+    // (the JUCE hook just triggers an async update). Null for hosts that
+    // dispatch every frame (ImGui app) or not at all (headless).
+    std::function<void()> wake;
+
     // Tap ids come from engine::allocTapID() -- process-wide, so widget taps
     // and the graph view's node meters can never collide.
 

@@ -44,9 +44,14 @@ namespace bridge { struct AppContext; }
 
 namespace tzplapp {
 
-class ControlsDispatcher : public juce::Timer {
+class ControlsDispatcher : public juce::Timer,
+                           private juce::AsyncUpdater {
 public:
+    // Installs itself as the registry's wake hook (UIState::wake) so a
+    // Tzopilotl-side setValue/setNotes/binding restarts the timer, and
+    // flushes anything already pending from a startup script.
     explicit ControlsDispatcher(bridge::AppContext& appCtx);
+    ~ControlsDispatcher() override;
 
     // Run one dispatch pass immediately (also invoked by the timer). Repaints
     // tap-backed widgets via the repaint hook.
@@ -75,6 +80,9 @@ private:
     // True if any widget still has a pending engine/callback event or a
     // visible tap -- keeps the timer alive; false lets it stop.
     bool hasWork();
+
+    // UIState::wake lands here on the message thread.
+    void handleAsyncUpdate() override { ensureRunning(); }
 
     bridge::AppContext& appCtx_;
     std::vector<std::string> pendingClosedPanels_;

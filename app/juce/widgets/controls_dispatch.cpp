@@ -65,7 +65,31 @@ constexpr int kIdleTailTicks = 15;
 }
 
 ControlsDispatcher::ControlsDispatcher(bridge::AppContext& appCtx)
-    : appCtx_(appCtx) {}
+    : appCtx_(appCtx)
+{
+    if (auto* ui = appCtx_.uiState) {
+        {
+            std::lock_guard<std::mutex> lock(ui->mtx);
+            // Runs with ui->mtx held on the VM's thread: only queue a
+            // message-thread callback, never touch the timer here.
+            ui->wake = [this] { triggerAsyncUpdate(); };
+        }
+        // A .x given on the command line was evaluated before the GUI
+        // existed; whatever it left dirty (bindings, a coroutine's first
+        // setValue) is flushed now rather than on the first click.
+        ensureRunning();
+    }
+}
+
+ControlsDispatcher::~ControlsDispatcher() {
+    // Clearing under the lock guarantees no wake call is in flight on
+    // another thread once we return, since the hook runs with mtx held.
+    if (auto* ui = appCtx_.uiState) {
+        std::lock_guard<std::mutex> lock(ui->mtx);
+        ui->wake = nullptr;
+    }
+    cancelPendingUpdate();
+}
 
 void ControlsDispatcher::ensureRunning() {
     idleTicks_ = 0;
