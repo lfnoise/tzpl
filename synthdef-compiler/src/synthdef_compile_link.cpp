@@ -24,11 +24,17 @@
 
 #include "synthdef_compile_link.hpp"
 #include <algorithm>
+#include <cstring>
 #include <dlfcn.h>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <print>
 #include <unordered_map>
+
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -256,25 +262,102 @@ string getBuildDir() {
     return "/tmp/tzpl-build/";
 }
 
-void ensureBuildDirs(string const& buildDir) {
-    fs::create_directories(buildDir + "include");
-    fs::create_directories(buildDir + "cpp");
-    fs::create_directories(buildDir + "obj");
-    fs::create_directories(buildDir + "dylib");
+// Absolute path of the running executable with symlinks resolved. Empty on
+// failure. (Same walk as ts::executablePath in lang/src/module_paths.cpp;
+// duplicated because the compiler library does not depend on lang.)
+static fs::path executablePath() {
+    std::error_code ec;
+#ifdef __APPLE__
+    uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    string buf(size, '\0');
+    if (_NSGetExecutablePath(buf.data(), &size) != 0) return {};
+    buf.resize(std::strlen(buf.c_str()));
+    fs::path exe = fs::canonical(buf, ec);
+#else
+    fs::path exe = fs::canonical("/proc/self/exe", ec);
+#endif
+    return ec ? fs::path{} : exe;
+}
 
-#ifdef TZPL_SHARED_DIR
-    string srcDir = ensureTrailingSlash(TZPL_SHARED_DIR);
-    string dstDir = buildDir + "include/";
-    for (auto const& entry : fs::directory_iterator(srcDir)) {
-        if (entry.is_regular_file()) {
-            auto ext = entry.path().extension().string();
-            if (ext == ".h" || ext == ".hpp") {
-                fs::copy_file(entry.path(), dstDir + entry.path().filename().string(),
-                              fs::copy_options::update_existing);
-            }
+// The directory holding the plugin headers generated code includes
+// (tzpl_plugin_abi.h, tzpl_random.hpp, ...). Checked in order, mirroring the
+// stdlib discovery in ts::defaultModulePaths:
+//
+//   1. $TZPL_HOME/include -- explicit override
+//   2. the include/ folder of the nearest ancestor of the running executable
+//      that has one -- the distribution folder (Tzopilotl/include next to
+//      Tzopilotl.app and bin/tzpl)
+//   3. the shared/ source directory baked in at build time -- dev builds,
+//      whose build directory has no include/ ancestor
+//
+// Only a directory that actually holds tzpl_plugin_abi.h counts, so an
+// unrelated include/ up the tree is never mistaken for ours. Empty if none
+// is found -- which is what happens when a release binary runs on a machine
+// without the source tree and without the distribution's include/ folder.
+static fs::path sharedHeaderDir() {
+    std::error_code ec;
+    auto hasAbiHeader = [&](fs::path const& dir) {
+        return fs::is_regular_file(dir / "tzpl_plugin_abi.h", ec);
+    };
+    if (char const* home = getenv("TZPL_HOME"); home && *home) {
+        if (fs::path p = fs::path(home) / "include"; hasAbiHeader(p)) return p;
+    }
+    if (fs::path exe = executablePath(); !exe.empty()) {
+        fs::path dir = exe.parent_path();
+        for (int depth = 0;
+             depth < 6 && !dir.empty() && dir != dir.root_path();
+             ++depth, dir = dir.parent_path()) {
+            if (fs::path p = dir / "include"; hasAbiHeader(p)) return p;
         }
     }
+#ifdef TZPL_SHARED_DIR
+    if (fs::path p = TZPL_SHARED_DIR; hasAbiHeader(p)) return p;
 #endif
+    return {};
+}
+
+std::expected<void, string> ensureBuildDirs(string const& buildDir) {
+    // Everything here goes through the error_code overloads: this runs on
+    // the async compile worker, where an escaping filesystem_error would
+    // take the whole process down instead of failing one synthdef.
+    std::error_code ec;
+    for (char const* sub : {"include", "cpp", "obj", "dylib"}) {
+        fs::create_directories(buildDir + sub, ec);
+        if (ec) {
+            return std::unexpected(std::format(
+                "cannot create build directory '{}{}': {}", buildDir, sub, ec.message()));
+        }
+    }
+
+    fs::path srcDir = sharedHeaderDir();
+    if (srcDir.empty()) {
+        return std::unexpected(
+            "cannot find the plugin headers (tzpl_plugin_abi.h): keep "
+            "Tzopilotl.app and bin/tzpl inside the distribution folder next to "
+            "its include/ directory, or set TZPL_HOME to a distribution root");
+    }
+    string dstDir = buildDir + "include/";
+    fs::directory_iterator it(srcDir, ec);
+    for (; !ec && it != fs::directory_iterator(); it.increment(ec)) {
+        auto const& entry = *it;
+        // Per-entry stat failures (a dangling symlink) skip that entry; only
+        // iteration errors are fatal, so they get their own code.
+        std::error_code entryEc;
+        if (!entry.is_regular_file(entryEc)) continue;
+        auto ext = entry.path().extension().string();
+        if (ext != ".h" && ext != ".hpp") continue;
+        string dst = dstDir + entry.path().filename().string();
+        fs::copy_file(entry.path(), dst, fs::copy_options::update_existing, ec);
+        if (ec) {
+            return std::unexpected(std::format(
+                "cannot copy '{}' to '{}': {}", entry.path().string(), dst, ec.message()));
+        }
+    }
+    if (ec) {
+        return std::unexpected(std::format(
+            "cannot read plugin headers in '{}': {}", srcDir.string(), ec.message()));
+    }
 
 #if !defined(__APPLE__) && defined(TZPL_SLEEF_INCLUDE_DIR) && defined(TZPL_SLEEF_LIB)
     // Stage Sleef next to the shared headers: generated code includes
@@ -296,6 +379,7 @@ void ensureBuildDirs(string const& buildDir) {
         }
     }
 #endif
+    return {};
 }
 
 void writeCodeToFile(string const& buildDir, string const& synthName, string const& ccode) {
@@ -331,7 +415,10 @@ int compileAndLink(string const& buildDir, string const& synthName) {
     // Refresh the build dir's header copies (update_existing) so generated
     // code never compiles against a stale plugin ABI, whichever entry point
     // (CLI, --test, bridge) got here.
-    ensureBuildDirs(buildDir);
+    if (auto ok = ensureBuildDirs(buildDir); !ok) {
+        std::println("{}", ok.error());
+        return 1;
+    }
 
     // Bump revision so this compilation produces a unique dylib path.
     // Old dylibs stay on disk (and in memory via dlopen) so that

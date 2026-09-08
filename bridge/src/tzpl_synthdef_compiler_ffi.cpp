@@ -154,7 +154,9 @@ static std::string compileSynthDefPipeline(std::string const& sexpr,
 
     // Write generated code to file
     std::string dir = synthdef::getBuildDir();
-    synthdef::ensureBuildDirs(dir);
+    if (auto ok = synthdef::ensureBuildDirs(dir); !ok) {
+        return "build dir error: " + ok.error();
+    }
     try {
         synthdef::writeCodeToFile(dir, synthName, cppCode);
     } catch (std::exception const& e) {
@@ -291,7 +293,10 @@ static void ffi_writeAndCompileCpp(ts::VM& vm, u16 dst, u16, u16 argBase) {
     std::lock_guard<std::mutex> lock(compileMtx());
 
     std::string dir = synthdef::getBuildDir();
-    synthdef::ensureBuildDirs(dir);
+    if (auto ok = synthdef::ensureBuildDirs(dir); !ok) {
+        returnErrString(vm, dst, "error: build dir: " + ok.error(), __func__);
+        return;
+    }
     try {
         synthdef::writeCodeToFile(dir, name, cppCode);
     } catch (std::exception const& e) {
@@ -405,8 +410,14 @@ static void ffi_compileSynthDefAndLoadAsync(ts::VM& vm, u16 dst, u16, u16 argBas
     }
 
     ts::AsyncIOJob job;
+    // Nothing above the executor catches: an exception escaping `work`
+    // terminates the process, so the whole step is fenced here.
     job.work = [st] {
-        st->error = compileSynthDefPipeline(st->sexpr, st->name, st->dylibPath);
+        try {
+            st->error = compileSynthDefPipeline(st->sexpr, st->name, st->dylibPath);
+        } catch (std::exception const& e) {
+            st->error = std::string("compile failed: ") + e.what();
+        }
     };
     job.complete = [st, fut](ts::VM& v) {
         if (st->error.empty()) {
@@ -433,8 +444,13 @@ static void ffi_writeCompileAndLoadAsync(ts::VM& vm, u16 dst, u16, u16 argBase) 
     job.work = [st] {
         std::lock_guard<std::mutex> lock(compileMtx());
         std::string dir = synthdef::getBuildDir();
-        synthdef::ensureBuildDirs(dir);
+        // One try around the whole step: an exception escaping `work`
+        // terminates the process (nothing above the executor catches).
         try {
+            if (auto ok = synthdef::ensureBuildDirs(dir); !ok) {
+                st->error = "build dir error: " + ok.error();
+                return;
+            }
             synthdef::writeCodeToFile(dir, st->name, st->cpp);
         } catch (std::exception const& e) {
             st->error = std::string("write failed: ") + e.what();

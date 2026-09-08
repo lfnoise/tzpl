@@ -7,6 +7,18 @@ documentation site as the Changelog page.
 
 ## Unreleased
 
+**Fixed**
+
+- The release app crashed the moment a synth definition was compiled on
+  any machine other than the one it was built on. Compiling a synth stages
+  the plugin headers (`tzpl_plugin_abi.h` and friends) into `~/tzpl-build`,
+  and the release build took them from the build machine's source tree;
+  when that path did not exist the filesystem error escaped the compile
+  worker thread and aborted the process. The distribution folder now ships
+  those headers in `include/`, found relative to the app like `modules/`
+  (or via `TZPL_HOME`), and a missing header directory is reported as a
+  compile error for that synthdef instead of a crash.
+
 **App**
 
 - Find in Files (Cmd+Shift+F): the sidebar swaps its file tree for a Find

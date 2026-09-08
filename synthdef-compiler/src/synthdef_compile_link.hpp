@@ -27,6 +27,8 @@
 #include "synthdef_types2.hpp"
 #include "tzpl_plugin_abi.h"
 
+#include <expected>
+
 namespace synthdef {
 
 // Get the base build directory for compiled plugins.
@@ -34,8 +36,12 @@ namespace synthdef {
 string getBuildDir();
 
 // Ensure the build directory subdirectories (include/, cpp/, dylib/) exist
-// and copy shared headers into include/. Call once before compile workflows.
-void ensureBuildDirs(string const& buildDir);
+// and copy the plugin headers into include/. The headers come from
+// $TZPL_HOME/include, the distribution folder's include/ (found relative to
+// the executable), or the source tree for dev builds. Never throws: the
+// error names what is missing. compileAndLink calls this itself, so callers
+// that only want a diagnostic before writing code may ignore the result.
+std::expected<void, string> ensureBuildDirs(string const& buildDir);
 
 // Write generated C++ code to {buildDir}/cpp/{synthName}_synth.cpp.
 void writeCodeToFile(string const& buildDir, string const& synthName, string const& ccode);

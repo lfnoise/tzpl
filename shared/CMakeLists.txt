@@ -33,6 +33,17 @@ endif()
 
 include(GNUInstallDirs)
 
+# The distribution folder's include/: every header generated plugin code can
+# include (synthdef_compile_link.cpp copies *.h/*.hpp from here into the
+# user's plugin build dir at runtime, found relative to the executable).
+# Without this a release binary only works on a machine that has the source
+# tree at the path it was built from.
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/
+    DESTINATION include
+    COMPONENT dist
+    FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
+)
+
 install(FILES
     tzpl_plugin_abi.h
     tempo_ramp.hpp

@@ -535,7 +535,7 @@ $ tzpl -I ~/mylibs script.x   <span class="cmt"># add module search paths</span>
 <table>
   <tr><th>Variable</th><th>Meaning</th></tr>
   <tr><td><code>TZPL_PATH</code></td><td>Colon-separated list of extra module directories, searched before the standard library. Use it for personal libraries you want available in every script: <code>export TZPL_PATH="$HOME/tzpl-libs"</code></td></tr>
-  <tr><td><code>TZPL_HOME</code></td><td>Explicit path to a distribution root (a folder containing <code>modules/</code>). Overrides the executable-relative discovery. Rarely needed &mdash; only when you want a binary to use a stdlib <em>other</em> than the one it shipped with, e.g. pointing a dev build at an installed distribution or vice versa.</td></tr>
+  <tr><td><code>TZPL_HOME</code></td><td>Explicit path to a distribution root (a folder containing <code>modules/</code> and <code>include/</code>). Overrides the executable-relative discovery for both the standard library and the headers synth definitions are compiled against. Rarely needed &mdash; only when you want a binary to use a stdlib <em>other</em> than the one it shipped with, e.g. pointing a dev build at an installed distribution or vice versa.</td></tr>
 </table>
 
 <h3 id="env-search">4.1 Import search order</h3>
@@ -648,8 +648,8 @@ inputChannels = 2</code></pre>
 <h4>No sound</h4>
 <p>Check that the <code>device</code> in your project's <code>tzpl-config</code> names an existing output (or leave it at <code>"default"</code>), and remember engine settings apply at launch (<a href="#config-when">&sect;5.3</a>). The console reports the device and sample rate the engine actually opened.</p>
 
-<h4>The app can't find the standard library</h4>
-<p><code>Tzopilotl.app</code> or <code>bin/tzpl</code> was separated from the distribution folder. Put it back next to <code>modules/</code>, or set <code>TZPL_HOME</code> to a distribution root (<a href="#env">&sect;4</a>).</p>
+<h4>The app can't find the standard library, or starting a synth reports missing plugin headers</h4>
+<p><code>Tzopilotl.app</code> or <code>bin/tzpl</code> was separated from the distribution folder. Put it back next to <code>modules/</code> and <code>include/</code>, or set <code>TZPL_HOME</code> to a distribution root (<a href="#env">&sect;4</a>).</p>
 
 </main>
 <script>

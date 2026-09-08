@@ -10,6 +10,7 @@ together, because the app finds them relative to itself:
 
   Tzopilotl.app    the app
   bin/tzpl         command-line interpreter and REPL
+  include/         headers the compiled synth definitions are built against
   modules/         the standard library
   examples/        runnable demos -- open one in the app
   docs/            language and reference documentation (HTML)

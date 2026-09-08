@@ -166,6 +166,7 @@ install(FILES packaging/README.txt
 #     Tzopilotl/            <- the unit users install and updates replace
 #       Tzopilotl.app         (finds ../modules via the executable walk-up)
 #       bin/tzpl
+#       include/              (plugin headers, staged into ~/tzpl-build)
 #       modules/  examples/  docs/  editors/  README.txt
 #
 # from the COMPONENT dist install rules, then wraps it in a compressed DMG.
