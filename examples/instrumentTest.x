@@ -6,8 +6,10 @@
 --   2. trigger a 4-note arpeggio with noteOn / noteOff
 --   3. let the tail ring out, then free the node
 --
--- Run from tzpl_app:
---     ./build/app/tzpl_app --nogui examples/instrumentTest.x
+-- Run in the app (evaluate the file), or headless -- `--wait` keeps the
+-- process alive while the tempo scheduler plays the phrase:
+--     Tzopilotl.app/Contents/MacOS/Tzopilotl --nogui --wait \
+--         -I examples examples/instrumentTest.x
 
 import synthdef.*;
 import audio_engine as ae;

@@ -28,7 +28,7 @@ fn beep() S {
 	freq sinosc(0) mul(amp) outlet
 }
 
-beep defSynthX("beep");
+beep defSynthX("beep") await;
 masterGain(0.2);
 let node = play("beep");
 

@@ -1124,8 +1124,10 @@ int main(int argc, const char* argv[]) {
                     replPaths.insert(replPaths.end(), systemPaths.begin(),
                                      systemPaths.end());
                     runREPL(nrtvm.vm, compiler, target, std::move(replPaths));
-                } else if (stayAlive && hasActiveListeners) {
-                    // Non-interactive but listeners active: wait for messages
+                } else if (stayAlive) {
+                    // Non-interactive with --wait or listeners active: keep
+                    // the process (and so the tempo scheduler and any
+                    // message listeners) running until Ctrl-C.
                     std::cout << "Running headless. Press Ctrl-C to stop.\n";
                     while (!gShouldQuit) {
                         usleep(100000); // 100ms

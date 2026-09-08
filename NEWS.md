@@ -7,6 +7,27 @@ documentation site as the Changelog page.
 
 ## Unreleased
 
+**Fixed**
+
+- Widget values set from Tzopilotl code (`setValue`, `setNotes`, a fresh
+  `control(node, ...)` binding) reached the engine only after the next
+  click or drag in the app. The dispatcher that forwards widget values
+  stops its timer when idle and was woken only by GUI events, so a
+  sequencer coroutine driving a synth through its control widgets stayed
+  silent until the user touched something. Code-side changes now wake
+  it.
+- The examples await their synthdef compiles. `ui_piano_roll.x` played
+  before its def existed and was silent, with "errNodeDefNotFound" in
+  the console; `instrument_synthdefs.x`, `effect_synthdefs.x`, and
+  `note_synthdefs.x` returned from import while their defs were still
+  compiling, so `instrumentTest.x` lost its first instrument the same
+  way. Every `defSynthX` in those files now carries the `await` the docs
+  prescribe; a single worker compiles the defs in order either way, so
+  nothing gets slower.
+- Headless `--wait` now waits. It kept the process alive only while a
+  message listener was active, so a `--nogui --wait` script driving the
+  tempo scheduler exited after the first scheduled callback.
+
 ## v0.2.2 (7 September 2026)
 
 **Fixed**
