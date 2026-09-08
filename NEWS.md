@@ -18,6 +18,8 @@ documentation site as the Changelog page.
   those headers in `include/`, found relative to the app like `modules/`
   (or via `TZPL_HOME`), and a missing header directory is reported as a
   compile error for that synthdef instead of a crash.
+- Inline REPL results are boxed correctly: a `Complex` value no longer
+  prints as nil, and a `Fraction` value no longer crashes the REPL.
 
 **App**
 
