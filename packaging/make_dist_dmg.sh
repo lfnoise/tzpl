@@ -65,8 +65,26 @@ else
     echo "dist: TZPL_CODESIGN_IDENTITY not set; leaving ad-hoc signatures"
 fi
 
-hdiutil create -volname "Tzopilotl" -srcfolder "$STAGE" -ov -format UDZO \
-    -quiet "$DMG"
+# Build the image through a read/write scratch image attached at a private
+# mountpoint, then compress it. `hdiutil create -srcfolder` would mount its
+# scratch volume under /Volumes named after the image; with a Tzopilotl DMG
+# already mounted there (the previous draft, opened for testing) that
+# becomes "/Volumes/Tzopilotl 1" and macOS refuses to write into it, so the
+# dist target failed with a bare "Error 1" whenever a draft was being tried.
+RW_DMG="$(dirname "$DMG")/dist-rw.dmg"
+MNT="$(dirname "$DMG")/dist-mnt"
+rm -f "$RW_DMG"
+mkdir -p "$MNT"
+# Size: the staged folder plus headroom for the filesystem.
+STAGE_KB=$(du -sk "$STAGE" | awk '{print $1}')
+hdiutil create -size "$((STAGE_KB / 1024 + 64))m" -fs HFS+ -volname "Tzopilotl" \
+    -layout NONE -ov -quiet "$RW_DMG"
+hdiutil attach -nobrowse -mountpoint "$MNT" -quiet "$RW_DMG"
+cp -R "$STAGE"/. "$MNT"/
+hdiutil detach -quiet "$MNT"
+hdiutil convert "$RW_DMG" -format UDZO -ov -quiet -o "$DMG"
+rm -f "$RW_DMG"
+rmdir "$MNT"
 
 if [[ -n "$IDENTITY" && "$IDENTITY" != "-" ]]; then
     codesign --force --timestamp -s "$IDENTITY" "$DMG"
