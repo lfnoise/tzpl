@@ -7,6 +7,14 @@ documentation site as the Changelog page.
 
 ## Unreleased
 
+**App**
+
+- Sidebar roots that share a name are told apart: each shows the shortest
+  run of parent directories that differs, dimmed after the name
+  ("modules  .../tzpl_1/tzpl/lang" next to "modules  .../tzpl_2/tzpl/lang"),
+  so a source tree's stdlib and an installed distribution's no longer look
+  identical.
+
 ## v0.2.2 (7 September 2026)
 
 **Fixed**

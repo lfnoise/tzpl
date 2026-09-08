@@ -186,6 +186,7 @@ if(TZPL_BUILD_GUI)
     add_executable(tzpl_config_tests
         tests/app_config_test.cpp
         src/app_config.cpp
+        src/project_paths.cpp
     )
     target_include_directories(tzpl_config_tests PRIVATE src)
 

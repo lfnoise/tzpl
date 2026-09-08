@@ -24,6 +24,7 @@
 //
 
 #include "app_config.hpp"
+#include "project_paths.hpp"
 
 #include <cstdio>
 #include <filesystem>
@@ -212,7 +213,38 @@ static void test_layering() {
     check(c.inputChannels == 2, "user setting survives where the project is silent");
 }
 
+static void test_root_qualifiers() {
+    std::print("Test: sidebar root qualifiers\n");
+    using V = std::vector<std::string>;
+    auto q = [](V paths, std::string home = {}) {
+        return rootQualifiers(paths, home);
+    };
+
+    check(q({"/a/modules", "/a/examples"}) == V{"", ""},
+          "unique names get no qualifier");
+    check(q({"/Users/j/Dropbox/tzpl_1/tzpl/lang/modules",
+             "/Users/j/Dropbox/tzpl_2/tzpl/lang/modules",
+             "/Applications/Tzopilotl/examples",
+             "/Users/j/Dropbox/tzpl_1/tzpl/examples"})
+              == V{"\u2026/tzpl_1/tzpl/lang", "\u2026/tzpl_2/tzpl/lang",
+                   "\u2026/Tzopilotl", "\u2026/tzpl"},
+          "same-named roots get the shortest distinguishing parent run");
+    check(q({"/x/a/modules", "/y/a/modules", "/z/b/modules"})
+              == V{"/x/a", "/y/a", "/z/b"},
+          "one depth for the whole group, so the labels line up");
+    check(q({"/Users/j/modules", "/opt/modules"}) == V{"\u2026/j", "/opt"},
+          "a run that reaches the root shows the whole parent path");
+    check(q({"/Users/j/modules", "/Users/modules"}, "/Users")
+              == V{"\u2026/j", "~"},
+          "a whole parent path under home is abbreviated with ~");
+    check(q({"/a/b/modules/", "/c/b/modules"}) == V{"/a/b", "/c/b"},
+          "a trailing slash does not change the leaf");
+    check(q({"/a/modules", "/a/modules"}) == V{"/a", "/a"},
+          "identical paths get identical qualifiers rather than looping");
+}
+
 int main() {
+    test_root_qualifiers();
     std::print("=== App config tests ===\n\n");
     test_load();
     test_save_preserves_file();

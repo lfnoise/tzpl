@@ -12,6 +12,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 namespace tzplapp {
 
@@ -23,5 +24,17 @@ std::string findProjectRoot(std::string const& filePath);
 // The config file inside a project root: <root>/tzpl-config if it exists,
 // else "".
 std::string projectConfigFile(std::string const& projectRoot);
+
+// Qualifiers that tell apart same-named folders in a list of roots (the
+// sidebar shows a root by its leaf name, so two modules/ folders are
+// indistinguishable without one). Returns one entry per input path: "" for
+// a root whose leaf name is unique in the list, otherwise the shortest run
+// of trailing parent directories that differs among the same-named roots,
+// written "\u2026/tzpl_1/tzpl/lang". All roots of one name get the same
+// depth so they line up. When the run reaches the filesystem root the
+// whole parent path is shown instead (with `home` abbreviated to "~").
+// Identical paths get identical qualifiers; dedupe belongs to the caller.
+std::vector<std::string> rootQualifiers(std::vector<std::string> const& paths,
+                                        std::string const& home = {});
 
 }  // namespace tzplapp

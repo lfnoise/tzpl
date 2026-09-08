@@ -21,6 +21,7 @@
 
 #include "sidebar_panel.hpp"
 #include "tzpl_fonts.hpp"
+#include "project_paths.hpp"
 #include <algorithm>
 
 namespace tzplapp {
@@ -64,6 +65,14 @@ public:
 
     juce::File const& file() const { return file_; }
 
+    // Dimmed text drawn after a root's name when another root has the
+    // same name ("\u2026/tzpl_1/tzpl/lang"); empty for a unique name.
+    void setQualifier(juce::String q) {
+        if (qualifier_ == q) return;
+        qualifier_ = std::move(q);
+        repaintItem();
+    }
+
     bool mightContainSubItems() override { return isDir_; }
     // Openness state is keyed on this, so it must survive a re-scan.
     juce::String getUniqueName() const override {
@@ -91,8 +100,25 @@ public:
         if (!isDir_ && !isDocumentFile(file_))
             text = text.withMultipliedAlpha(0.55f);
         g.setColour(text);
-        g.setFont(owner_.rowFont(isRoot_));
-        g.drawText(file_.getFileName(), 2, 0, width - 4, height,
+        auto const& font = owner_.rowFont(isRoot_);
+        g.setFont(font);
+        juce::String name = file_.getFileName();
+        if (qualifier_.isEmpty()) {
+            g.drawText(name, 2, 0, width - 4, height,
+                       juce::Justification::centredLeft, true);
+            return;
+        }
+        // Name at full weight, then the qualifier dimmed in the plain font,
+        // so "modules  \u2026/tzpl_1/tzpl/lang" reads as name plus location.
+        int nameW = juce::GlyphArrangement::getStringWidthInt(font, name);
+        int gap = juce::roundToInt(font.getHeight() * 0.6f);
+        g.drawText(name, 2, 0, juce::jmin(nameW, width - 4), height,
+                   juce::Justification::centredLeft, true);
+        int qx = 2 + nameW + gap;
+        if (qx >= width - 4) return;
+        g.setColour(text.withMultipliedAlpha(0.55f));
+        g.setFont(owner_.rowFont(false));
+        g.drawText(qualifier_, qx, 0, width - 2 - qx, height,
                    juce::Justification::centredLeft, true);
     }
 
@@ -168,6 +194,7 @@ private:
 
     SidebarPanel& owner_;
     juce::File file_;
+    juce::String qualifier_;
     bool isRoot_ = false;
     bool isDir_ = false;
     // Modification time of the directory when its children were listed.
@@ -306,6 +333,7 @@ void SidebarPanel::addFolder(juce::File const& dir) {
     auto* item = new FileItem(*this, dir, /*isRoot=*/true);
     root_->addSubItem(item);
     item->setOpen(true);
+    updateRootQualifiers();
     repaint();
     if (onFoldersChanged) onFoldersChanged();
 }
@@ -313,9 +341,25 @@ void SidebarPanel::addFolder(juce::File const& dir) {
 void SidebarPanel::removeFolder(juce::File const& dir) {
     if (auto* item = folderItem(dir)) {
         root_->removeSubItem(item->getIndexInParent());
+        updateRootQualifiers();
         repaint();
         if (onFoldersChanged) onFoldersChanged();
     }
+}
+
+void SidebarPanel::updateRootQualifiers() {
+    std::vector<std::string> paths;
+    std::vector<FileItem*> items;
+    for (int i = 0; i < root_->getNumSubItems(); ++i)
+        if (auto* item = dynamic_cast<FileItem*>(root_->getSubItem(i))) {
+            paths.push_back(item->file().getFullPathName().toStdString());
+            items.push_back(item);
+        }
+    auto home = juce::File::getSpecialLocation(juce::File::userHomeDirectory)
+                    .getFullPathName().toStdString();
+    auto quals = rootQualifiers(paths, home);
+    for (size_t i = 0; i < items.size(); ++i)
+        items[i]->setQualifier(juce::String::fromUTF8(quals[i].c_str()));
 }
 
 bool SidebarPanel::hasFolders() const {
@@ -340,6 +384,7 @@ void SidebarPanel::setFolderPaths(juce::StringArray const& paths) {
         root_->addSubItem(item);
         item->setOpen(true);
     }
+    updateRootQualifiers();
     repaint();
 }
 

@@ -102,6 +102,10 @@ private:
     void openFile(juce::File const& file);
 
     void rebuildFonts();
+    // Recompute the parent-path qualifier shown after each root's name
+    // when two roots share one (see rootQualifiers). Call whenever the
+    // root list changes.
+    void updateRootQualifiers();
 
     std::unique_ptr<FileTree> tree_;
     std::unique_ptr<RootHolder> root_;   // hidden holder for the roots
