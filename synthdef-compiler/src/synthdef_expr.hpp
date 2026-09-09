@@ -94,6 +94,12 @@ namespace synthdef {
         virtual bool input_must_be_separate_loop(usize input) const { return gets_own_loop(); }
         virtual bool output_must_be_separate_loop() const { return gets_own_loop(); } 
         virtual bool is_control_flow() const { return false; }
+        // True for a control-flow node (if_/switch/for) that guards a
+        // side-effecting write (e.g. a delayVar write) in one of its
+        // subgraphs, even when the node's own result value is unused.
+        // Such a node must survive dead-code elimination and be walked by
+        // codegen so the guarded write still executes -- see is_sink().
+        virtual bool has_side_effect_subgraph() const { return false; }
         virtual bool needs_input_temp_var(usize input) const { return false; }
         virtual bool should_hash_cons() const { return true; }
         
@@ -683,6 +689,7 @@ namespace synthdef {
     struct ControlFlowExpr : Expr {
         using Expr::Expr;
         bool is_control_flow() const override { return true; }
+        bool has_side_effect_subgraph() const override;
         virtual void insertPhiNodes(ExprWorkList& worklist) = 0;
     };
     

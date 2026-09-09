@@ -544,6 +544,15 @@ namespace synthdef {
             propagate_types(worklist);
         }
     }
+    bool ControlFlowExpr::has_side_effect_subgraph() const {
+        for (usize i = 0; i < num_subgraphs(); ++i) {
+            for (S e : get_subgraph(i)->graph->exprs) {
+                if (e->is_sink() || e->has_side_effect_subgraph()) return true;
+            }
+        }
+        return false;
+    }
+
     void IfElseExpr::update_type(ExprWorkList& worklist) {
         // The test input-type constraint (any_int) is an invariant; apply it on
         // every visit, not only when this node's type narrows. Otherwise the

@@ -553,7 +553,12 @@ fn findGraphCuts(ctx Ctx) Void {
 				_setCut(ctx, n, GraphCut.sink);
 			} else if (ctx.kind[n] isPhiKind) {
 				_setCut(ctx, n, GraphCut.phi);
-			} else if (ctx.consumers[n] length == 0) {
+			} else if (ctx.consumers[n] length == 0
+				&& !(ctx.kind[n] isControlFlowKind && ctx hasSideEffectSubgraph(n))) {
+				-- A control-flow node with an unconsumed result still needs a
+				-- ControlFlow cut (not Unused) when one of its branches
+				-- guards a side effect (see hasSideEffectSubgraph, ir.x) --
+				-- falls through to the isControlFlowKind case below.
 				_setCut(ctx, n, GraphCut.unused);
 			} else if (ctx.consumers[n] length > 1) {
 				_setCut(ctx, n, GraphCut.fanOut);

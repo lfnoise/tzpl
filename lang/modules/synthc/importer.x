@@ -314,6 +314,13 @@ fn _addCFNode(kind NodeKind, ins [Int], subs [Int], r Rate, t NumType, ch Int) I
 	let idx = _addExprNode(kind, ins, r, t, ch);
 	var ctx Ctx = `scCtx;
 	ctx.subs[idx] = subs;
+	-- A branch/body that writes to a delay (or other sink) purely for its
+	-- side effect -- e.g. `if_(trig, fn(){ y <- white(chans) })` used as a
+	-- statement -- leaves this node with no consumers of its own. Without
+	-- this it would never be visited by the sinks-rooted topological walk
+	-- (topologicalSortExprs) and the guarded write would silently never
+	-- execute. See hasSideEffectSubgraph (ir.x).
+	if (ctx hasSideEffectSubgraph(idx)) { ctx.sinks push!(idx); }
 	idx
 }
 

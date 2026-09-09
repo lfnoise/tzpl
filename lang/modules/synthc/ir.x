@@ -516,6 +516,34 @@ fn newCtx(name String) Ctx {
 
 fn numNodes(ctx Ctx) Int = ctx.kind length;
 
+-- True if the control-flow node `n` (if/switch/for/voicer/spectralChain)
+-- guards a side-effecting write (delayWrite, bufWrite, outlet, ...) in one of
+-- its branch/body subgraphs, even when the node's own result value has no
+-- consumers. Mirrors ControlFlowExpr::has_side_effect_subgraph in
+-- synthdef_expr.cpp (the C++ synthdef-compiler). Used by _addCFNode
+-- (importer.x) to keep such a node reachable from the sinks-rooted
+-- topological walk, and by findGraphCuts (passes.x) to keep it from being
+-- marked Unused and swept away -- otherwise a write like `y <- white(chans)`
+-- used only as a statement (if_'s own result discarded) silently never runs.
+fn hasSideEffectSubgraph(ctx Ctx, n NIdx) Bool {
+	for (phi : ctx.subs[n]) {
+		if (ctx _graphHasSideEffect(ctx.graphOf[phi])) { return true; }
+	}
+	false
+}
+
+fn _graphHasSideEffect(ctx Ctx, g Int) Bool {
+	var i = 0;
+	while (i < ctx numNodes) {
+		if (ctx.graphOf[i] == g) {
+			if (ctx.kind[i] isSinkKind) { return true; }
+			if (ctx.kind[i] isControlFlowKind && ctx hasSideEffectSubgraph(i)) { return true; }
+		}
+		i = i + 1;
+	}
+	false
+}
+
 ---------------------------------------------------------------------------
 -- Number formatting (mirrors synthdef_str_util.cpp ftos)
 

@@ -330,6 +330,17 @@ fn _consumedInLoop(ctx Ctx, treeIdx Int) Bool {
 	-- ExprTree::is_consumed_in_loop guard; without it a control read emitted as
 	-- `p->vN` would be wrongly given a local-decl type prefix (`f32 p->vN`).
 	if (!(ctx.cut[root] isTempVarCut)) { return false; }
+	if (ctx.consumers[root] length == 0) {
+		-- Vacuous truth over an empty consumer set used to be harmless: a
+		-- zero-consumer temp-var-cut root was always Unused and removed by
+		-- removeDeadCode, so this case was unreachable. hasSideEffectSubgraph
+		-- (ir.x) now keeps a side-effect-guarding ControlFlow node alive with
+		-- zero consumers; treating it as "trivially consumed in its own loop"
+		-- would wrongly skip its up-front declaration (below) and make
+		-- _varRef emit an unindexed scalar reference for a multichannel phi
+		-- write. Require the ordinary declaration instead.
+		return false;
+	}
 	let loop = ctx.trees[treeIdx].loopOf;
 	for (c : ctx.consumers[root]) {
 		let ct = ctx.treeOf[c];

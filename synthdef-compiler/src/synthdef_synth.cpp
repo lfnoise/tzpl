@@ -107,7 +107,14 @@ namespace synthdef {
         gSynth->exprs.push_back(expr);
         if (expr->is_sink()) {
             gSynth->sinks.push_back(expr);
-        }    
+        } else if (expr->has_side_effect_subgraph()) {
+            // A control-flow node (if_/switch/for) whose branch contains a
+            // side-effecting write (e.g. a delayVar write) must be reachable
+            // from the sinks-rooted topological walk even when its own
+            // result value has no consumers -- otherwise the write's guard
+            // is never emitted and the write silently never runs.
+            gSynth->sinks.push_back(expr);
+        }
         if (expr.as<Inlet>()) {
             gSynth->inlets.push_back(expr);
         } else if (expr.as<Outlet>()) {
