@@ -409,10 +409,13 @@ beep defSynthX(<span class="hl-str">"beep"</span>) await;      <span class="cmt"
 
             <p>The compile itself runs in the background, so any music already playing keeps
             running while clang works. The <code>await</code> waits until the def is loaded into
-            the engine &mdash; needed here because the next line plays it. When you re-evaluate a
-            <code>defSynthX</code> call for a def that is already playing you can drop the
-            <code>await</code>: players keep using the old version and switch to the new one the
-            moment it finishes loading.</p>
+            the engine. <code>play</code> waits on its own for a compile of that name still in
+            flight, so the example would work without it; the <code>await</code> is what
+            makes a following <code>newNode</code> in a hand-built bundle, or a
+            <code>ui.control(node, ...)</code>, safe as well, and it surfaces a failed compile
+            where you can see it. When you re-evaluate a <code>defSynthX</code> call for a def
+            that is already playing you can drop the <code>await</code>: players keep using
+            the old version and switch to the new one the moment it finishes loading.</p>
 
             <p>Synthdef code leans on two pieces of Tzopilotl syntax used heavily below: the
             space-separated pipeline (<code>x sinosc sq</code> is <code>sq(sinosc(x))</code>) and the

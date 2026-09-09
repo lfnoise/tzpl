@@ -9,6 +9,13 @@ documentation site as the Changelog page.
 
 **Fixed**
 
+- `play` on a def whose `defSynth`/`defSynthX` is still compiling waits for
+  it instead of creating a node against a def that does not exist yet
+  (silence, plus a bare "errNodeDefNotFound" in the console). The compile
+  FFI tracks in-flight compiles by def name and `play` awaits the one for
+  its def, if any; `synthDefReady(name)` exposes the same future. A
+  `newNode` for a def that is not loaded at all now says so by name, with
+  the usual cause.
 - An anonymous coroutine (`coro fn() Float { ... }()`) whose body ended in
   a trailing expression, if-else, or match crashed the process when it
   finished -- so a `go` task that ran to completion took the app down with

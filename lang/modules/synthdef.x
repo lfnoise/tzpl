@@ -1419,7 +1419,7 @@ async fn defSynthChecked(synthFun GraphFn, synthName String, tags [String]) Resu
 	let sexprString = graph
 		toSynthSexpr(synthName, mergeSynthTags(tags, defaultSynthTags()));
 
-	let err = sexprString compileSynthDefAndLoadAsync await;
+	let err = compileSynthDefAndLoadAsync(sexprString, synthName) await;
 	if (err length > 0) {
 		return Result<String, String>.err("compiling " $ synthName $ " failed: " $ err);
 	}
@@ -1434,6 +1434,11 @@ import audio_engine as ae;
 var _nextNodeID = 1000;
 
 fn play(defName String, nodeID Int) Int {
+	-- A defSynth/defSynthX of this name still compiling in the background
+	-- (its Future not awaited) is waited for here, so the node is created
+	-- against a def that exists rather than failing with errNodeDefNotFound.
+	-- Already-loaded or never-compiled defs pass straight through.
+	synthDefReady(defName) await;
 	ae.begin();
 	ae.newNode(defName, nodeID);
 	ae.connect(nodeID, 0, 0, 0);

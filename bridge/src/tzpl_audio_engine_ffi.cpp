@@ -283,6 +283,18 @@ static void ffi_clockTempo(ts::VM& vm, u16 dst, u16, u16 argBase) {
 static void ffi_newNode(ts::VM& vm, u16 dst, u16, u16 argBase) {
     const char* defName = regString(vm, argBase);
     auto nodeID = static_cast<engine::i64>(vm.reg(argBase + 1).i);
+    // The bundle is validated at submit, where the failure surfaces as a bare
+    // "sched_immediate: errNodeDefNotFound" with no def name. Name it here,
+    // with the usual cause -- the def's compile was started but not awaited.
+    if (engine::Engine* eng = getEngine(vm)) {
+        std::vector<engine::ControlDesc> unused;
+        if (!engine::listDefControls(eng, defName, unused)) {
+            std::fprintf(stderr,
+                "audio_engine.newNode: no synthdef named \"%s\" is loaded "
+                "(still compiling? `defSynthX(...) await`, or use `play`, "
+                "which waits for an in-flight compile)\n", defName);
+        }
+    }
     tzpl_SErr err = engine::newNode(defName, nodeID);
     // Record nodeID -> def name for the live engine so ui.control(node, name)
     // can look up the def's control specs. (Bundles are validated at submit,

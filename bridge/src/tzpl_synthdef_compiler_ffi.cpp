@@ -354,6 +354,31 @@ static ts::Future* makePendingStringFuture(ts::VM& vm) {
     return fut;
 }
 
+// Def name -> the Future of its compile currently in flight, so `play` (via
+// synthDefReady) can wait for a def whose defSynth/defSynthX was not awaited
+// instead of failing with errNodeDefNotFound. Only touched with the host
+// mutex held (FFI entry and the executor's complete step), so no lock of
+// its own. A future in here is rooted by the VM's external-future list for
+// as long as it is pending; the entry is erased before it resolves, so the
+// map never holds a pointer to a collectable object.
+static std::unordered_map<std::string, ts::Future*>& pendingDefCompiles() {
+    static std::unordered_map<std::string, ts::Future*> m;
+    return m;
+}
+
+static void notePendingCompile(std::string const& name, ts::Future* fut) {
+    if (!name.empty()) pendingDefCompiles()[name] = fut;
+}
+
+// Drop the entry only if it still refers to this future: a newer compile of
+// the same name may have replaced it, and that one is what `play` should wait
+// for.
+static void forgetPendingCompile(std::string const& name, ts::Future* fut) {
+    auto& m = pendingDefCompiles();
+    auto it = m.find(name);
+    if (it != m.end() && it->second == fut) m.erase(it);
+}
+
 // Submit to the host executor. Runs the job inline instead when (a) an NRT
 // render is in progress -- currentRenderContext() is thread-local and the def
 // must land in the per-render engine before the script continues -- or (b)
@@ -378,17 +403,21 @@ static void finishAsyncCompile(ts::VM& vm,
     if (!err.empty()) {
         std::fprintf(stderr, "synthdef.%s: %s\n", fnName, err.c_str());
     }
+    forgetPendingCompile(st->name, fut);
     ts::Word w;
     w.o = new ts::StringObj(err);
     vm.resolveExternalFuture(fut, &w, 1);
 }
 
-// fn compileSynthDefAndLoadAsync(sexpr String) Future<String>
+// fn compileSynthDefAndLoadAsync(sexpr String, name String) Future<String>
 // Async backend of defSynth: the full C++ pipeline (parse, analysis, codegen,
-// clang) runs on the worker thread. Resolves to "" on success.
+// clang) runs on the worker thread. Resolves to "" on success. `name` is the
+// def name the sexpr declares, passed up front so the compile can be found
+// by name (synthDefReady) before the worker has parsed it.
 static void ffi_compileSynthDefAndLoadAsync(ts::VM& vm, u16 dst, u16, u16 argBase) {
     auto st = std::make_shared<AsyncCompileState>();
     st->sexpr = regString(vm, argBase);
+    st->name = regString(vm, argBase + 1);
 
     ts::Future* fut = makePendingStringFuture(vm);
     vm.reg(dst).o = fut;
@@ -408,6 +437,7 @@ static void ffi_compileSynthDefAndLoadAsync(ts::VM& vm, u16 dst, u16, u16 argBas
         }
         compilationCache().erase(it);
     }
+    notePendingCompile(st->name, fut);
 
     ts::AsyncIOJob job;
     // Nothing above the executor catches: an exception escaping `work`
@@ -439,6 +469,7 @@ static void ffi_writeCompileAndLoadAsync(ts::VM& vm, u16 dst, u16, u16 argBase) 
 
     ts::Future* fut = makePendingStringFuture(vm);
     vm.reg(dst).o = fut;
+    notePendingCompile(st->name, fut);
 
     ts::AsyncIOJob job;
     job.work = [st] {
@@ -467,6 +498,26 @@ static void ffi_writeCompileAndLoadAsync(ts::VM& vm, u16 dst, u16, u16 argBase) 
         finishAsyncCompile(v, st, fut, "writeCompileAndLoadAsync");
     };
     submitOrRunInline(vm, std::move(job));
+}
+
+// fn synthDefReady(name String) Future<String>
+// The future of the compile in flight for `name`, or an already-resolved
+// future ("") when none is. `play` awaits this before newNode, so a def
+// whose defSynth/defSynthX was not awaited is waited for at its first play
+// instead of the node silently failing with errNodeDefNotFound. Says nothing
+// about defs that were never compiled: those still fail at the bundle.
+static void ffi_synthDefReady(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    std::string name = regString(vm, argBase);
+    auto& m = pendingDefCompiles();
+    if (auto it = m.find(name); it != m.end()) {
+        vm.reg(dst).o = it->second;
+        return;
+    }
+    ts::Type* strT = vm.stringType();
+    auto* fut = ts::Future::create(vm.typeUniverse().futureType(strT), strT, 1);
+    fut->value_[0].o = new ts::StringObj("");
+    fut->state_ = ts::Future::Resolved;
+    vm.reg(dst).o = fut;
 }
 
 // fn synthdefGenCppFromSexpr(sexpr String, maxSimdWidth Int, applyRewrites Bool) String
@@ -630,10 +681,12 @@ void registerSynthdefCompilerFFI(ts::Compiler& compiler) {
 
     // Async backends of defSynth / defSynthX: the compile runs on the host's
     // async I/O worker so the NRT scheduler keeps dispatching while clang runs.
-    reg("compileSynthDefAndLoadAsync", FutureString, {String},
+    reg("compileSynthDefAndLoadAsync", FutureString, {String, String},
         ffi_compileSynthDefAndLoadAsync);
     reg("writeCompileAndLoadAsync",    FutureString, {String, String},
         ffi_writeCompileAndLoadAsync);
+    // The in-flight compile of a def by name (or a ready future); play awaits it.
+    reg("synthDefReady",               FutureString, {String}, ffi_synthDefReady);
 
     // Low-level functions for the Tzopilotl-hosted compiler (synthc modules)
     // and its differential test harness.

@@ -535,9 +535,11 @@ need a working <code>clang</code> toolchain on <code>PATH</code> &mdash; they em
 C++, compile it to a <code>.dylib</code>, and <code>dlopen</code> it. Both are
 <strong>async</strong>: the clang step runs in the background so music that is
 already playing never pauses. Write <code>mySynth defSynthX(<span
-class="str">"mySynth"</span>) await;</code> when the next line needs the def (its
-first play); when redefining a def that is already playing, drop the
-<code>await</code> &mdash; players hot-swap to the new version when it loads.</div>
+class="str">"mySynth"</span>) await;</code> when the next line needs the def
+(<code>play</code> itself waits for a compile of that name still in flight, but a
+hand-built bundle's <code>newNode</code> does not); when redefining a def that is
+already playing, drop the <code>await</code> &mdash; players hot-swap to the new
+version when it loads.</div>
 
 <h3 id="synthdef-freerun">2.2 A free-running synth</h3>
 <p>The simplest kind of synth is free-running: it sounds continuously from the

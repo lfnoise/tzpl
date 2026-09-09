@@ -1026,6 +1026,25 @@ static void test_synthc_compile_and_load() {
           && desc.tags.size() == 1 && desc.tags[0] == "test",
           "defSynthX applied the TZPL_DEFAULT_TAGS session tag via synthc");
 
+    // synthDefReady: an already-resolved future for a name with no compile in
+    // flight -- both a loaded def and one that never existed -- so `play` on
+    // either passes straight through. (This harness has no async executor, so
+    // compiles run inline and nothing is ever pending here; the pending path
+    // is exercised by the app.)
+    const char* readySource = R"LANG(
+        import synthdef.*;
+        let r1 = synthDefReady("synthc_integ") await;
+        let r2 = synthDefReady("no_such_def_ever") await;
+        if (r1 length != 0 || r2 length != 0) {
+            panic("synthDefReady should resolve to an empty string");
+        }
+        let node = play("synthc_integ");
+        if (node < 1000) { panic("play should allocate a node id"); }
+    )LANG";
+    ok = compileAndRun(compiler, vm, readySource, "synthdef_ready.x", &moduleCompiler);
+    check(ok && !vm.isErrorHalted(),
+          "synthDefReady resolves at once for loaded and unknown defs; play proceeds");
+
     fclose(devnull);
     engine::freeEngine(eng);
 }
