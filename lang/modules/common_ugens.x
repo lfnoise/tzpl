@@ -144,6 +144,12 @@ fn uni(x) = 0.5 + 0.5 * x;
 -- unipolar to bipolar
 fn bi(x) = 2 * x - 1;
 
+-- reverse bipolar (i.e. -1 to 1) to unipolar
+fn univ(x) = 0.5 - 0.5 * x;
+
+-- reverse unipolar (i.e. 1 to 0) to bipolar
+fn biv(x) = 1 - 2 * x;
+
 -- the line formula, m*x + b
 fn lin(x, m, b) = m * x + b;
 
@@ -408,7 +414,7 @@ fn eoc(x S) = abs(x - x z1) > 0.5;
 fn init() S {
 	let d = delayVar() init(1, 1);
 	d <- 0;
-	d read(1)
+	d(1)
 }
 
 fn sampleAndHold(x S, t S) S {
@@ -416,6 +422,7 @@ fn sampleAndHold(x S, t S) S {
 	y <- select2(t > 0, x, y(1))
 }
 
+-- the first trigger moves the function from zero to one. OUtputs one from then on.
 fn once(x S) S {
 	let y = delayVar();
 	y <- select2(x > 0, 1, y(1))
@@ -472,6 +479,26 @@ fn oneshot(trig S, dur) S {
 	(x != 0) * (1 - x)
 }
 
+-- oneshot1 but cannot be retriggered while running.
+fn oneshot1b(trig S, dur) S { 
+	let dt = 1 / (fs() * dur);
+	let y = delayVar();
+	y <- select2((y(1) == 0) * (trig > 0), 1, max(0, y(1) - dt))
+}
+
+-- oneshot but cannot be retriggered while running.
+fn oneshotb(trig S, dur) S { 
+	let x = oneshot1b(trig, dur);
+	(x != 0) * (1 - x)
+}
+
+
+-- triggerable parabolic, 4th order, and 8th order envelopes.
+fn parenv(trig S, dur) S = 1.0 - trig oneshot1b(dur) bi sq;
+fn quadenv(trig S, dur) S = 1.0 - trig oneshot1b(dur) bi sq sq;
+fn octenv(trig S, dur) S = 1.0 - trig oneshot1b(dur) bi sq sq sq;
+fn fsinenv(trig S, dur) S = trig oneshot1b(dur) * 0.5 |> fsin;
+fn fsin2env(trig S, dur) S = trig oneshot1b(dur) fsinx sq;
 
 fn timedGate(trig S, dur) S = oneshot1(trig, dur) != 0;
 
@@ -516,8 +543,8 @@ fn susrel(gate S, s, r) S {
 
 -- Csound-style linen, gated: linear (not exponential) segments, so times
 -- are true segment lengths. Rises from 0 toward 1 over `rise` seconds while
--- the gate is high, holds at 1, then decays to 0 over `dec` seconds at
--- gate-off. `dec` is the full-scale (1 -> 0) time; the slopes are constant,
+-- the gate is high, holds at 1, then decays to 0 over `fall` seconds at
+-- gate-off. `fall` is the full-scale (1 -> 0) time; the slopes are constant,
 -- so releasing mid-rise decays immediately from the current amplitude and
 -- reaches 0 proportionally sooner.
 -- Common idioms: 
@@ -525,9 +552,9 @@ fn susrel(gate S, s, r) S {
 --    equal power: linen(..) rpanfun;
 --    cubed:       linen(..) cb;
 
-fn linen(gate S, rise, dec) S {
+fn linen(gate S, rise, fall) S {
 	let up = 1 / (fs() * max(rise, 1e-6));
-	let dn = 1 / (fs() * max(dec, 1e-6));
+	let dn = 1 / (fs() * max(fall, 1e-6));
 	let y = delayVar();
 	y <- select2(gate > 0, min(1, y(1) + up), max(0, y(1) - dn))
 }
@@ -719,6 +746,30 @@ fn fadeout(x, sustainTime, fadeoutTime) S {
     let y = delayVar();
     let t = min(end, dt + y(1)) f64 write(y);
     (end - t) uclip f32 cb * x
+}
+
+fn lfnoise0(freq S, chans Int) S {
+	let p = freq lfimp;
+	let y = delayVar();
+	if_(p, fn(){ y <- white(chans) }, fn(){ y(1) })
+}
+
+fn lfnoise1(freq S, chans Int) S {
+	let p = freq phasor;
+	let y = delayVar(2);
+	if_(p eoc, fn(){ 
+		y <- white(chans)
+	});
+	y(2-z1(p), Interpolation.linear)
+}
+
+fn lfnoise3(freq S, chans Int) S {
+	let p = freq phasor;
+	let y = delayVar(4);
+	if_(p eoc, fn(){ 
+		y <- white(chans)
+	});
+	y(4-z1(p), Interpolation.cubic)
 }
 
 fn pinkingFilter(x S) S {
