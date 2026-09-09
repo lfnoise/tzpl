@@ -878,7 +878,7 @@ fn write(d DelayVar, s AsSignal) S {
 fn write(s AsSignal, d DelayVar) S = d write(s);
 
 fn call(d DelayVar, index Int = 0) S = d read(index);
-fn call(d DelayVar, index S, interp Interpolation = Interpolation.cubic) S = d vread(index);
+fn call(d DelayVar, index S, interp Interpolation = Interpolation.cubic) S = d vread(index, interp);
 
 fn <- (d DelayVar, s AsSignal) S = d write(s asSignal);
 fn -> (s AsSignal, d DelayVar) S = s asSignal write(d);
