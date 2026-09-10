@@ -1,4 +1,14 @@
 cmake_minimum_required(VERSION 3.21)
+
+# Must be set before project() -- CMake reads it when it initializes the
+# Apple platform/compiler. Without it, CMake defaults to the deployment
+# machine's running OS version, which is not a real floor. 13.3 (not lower)
+# because lang/src/base_types.hpp's formatFloat uses floating-point
+# std::to_chars, which Apple's libc++ only makes available at 13.3+.
+if(APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "13.3" CACHE STRING "Minimum macOS deployment target" FORCE)
+endif()
+
 project(tzpl VERSION 0.2.2 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 23)
