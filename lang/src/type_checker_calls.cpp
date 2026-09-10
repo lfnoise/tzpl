@@ -429,6 +429,13 @@ Type* TypeChecker::detectStructLiteralAutoMap(StructLiteralExpr* lit, StructType
     bool anyAutoMap = false;
     std::vector<AutoMapArg> autoMap(lit->fields.size());
 
+    // Tracks which declared fields (by index into stype->fields_) have been
+    // supplied so far, so a repeated field name and a field left uncovered
+    // (both of which the field-count check above cannot catch on their own,
+    // e.g. `S{a: x, a: y}` for a 2-field struct) are reported instead of
+    // silently leaving the uncovered field's register null-initialized.
+    std::vector<bool> covered(stype->fields_.size(), false);
+
     // The declared type of a field, by name -- nullptr if the struct has no
     // such field (reported as an unknown field below).
     auto declaredFieldType = [&](std::string const& name) -> Type* {
@@ -458,6 +465,11 @@ Type* TypeChecker::detectStructLiteralAutoMap(StructLiteralExpr* lit, StructType
         for (size_t j = 0; j < stype->fields_.size(); ++j) {
             if (stype->fields_[j].name->str() == lit->fields[i].name) {
                 found = true;
+                if (covered[j]) {
+                    error(lit->fields[i].loc, "Duplicate field '" + lit->fields[i].name +
+                          "' in struct literal for '" + lit->structName + "'");
+                }
+                covered[j] = true;
                 Type* declType = stype->fields_[j].type;
 
                 if (explicitAM.depth > 0) {
@@ -501,6 +513,19 @@ Type* TypeChecker::detectStructLiteralAutoMap(StructLiteralExpr* lit, StructType
         if (!found) {
             error(lit->fields[i].loc, "Unknown field '" + lit->fields[i].name +
                   "' in struct '" + lit->structName + "'");
+        }
+    }
+
+    // Without a spread, every declared field must be covered -- a duplicate
+    // field name above can otherwise satisfy the field-count check while
+    // leaving a different declared field unassigned, which codegen would
+    // silently fill with a null word regardless of that field's repr_.
+    if (!lit->spreadExpr) {
+        for (size_t j = 0; j < stype->fields_.size(); ++j) {
+            if (!covered[j]) {
+                error(lit->loc, "Missing field '" + std::string(stype->fields_[j].name->str()) +
+                      "' in struct literal for '" + lit->structName + "'");
+            }
         }
     }
 
