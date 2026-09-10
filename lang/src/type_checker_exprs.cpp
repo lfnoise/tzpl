@@ -1252,6 +1252,14 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
 }
 
 Type* TypeChecker::inferUnaryOp(UnaryOpExpr* expr) {
+    // A template fn body is shared AST re-checked once per monomorphization
+    // (recheckTemplateBody); clear any operator-overload resolution left on
+    // this node by an earlier instantiation before re-deciding, since the
+    // native-operand fast paths below return without touching these fields.
+    expr->resolvedFuncGlobalIndex = -1;
+    expr->isBuiltinCall = false;
+    expr->builtinAcceptsInlineArgs = false;
+
     Type* operandType = inferExpr(static_cast<Expr*>(expr->operand.get()));
     if (!operandType) return compiler_.intType();
 
