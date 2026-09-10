@@ -1358,6 +1358,34 @@ Type* TypeChecker::inferCall(CallExpr_* expr) {
     expr->autoMapArgs.clear();
     expr->innerAutoMapArgs.clear();
 
+    // Clear every other resolution flag a previous monomorphization of the
+    // enclosing template may have left set. finalizeResolvedCall and the
+    // special-cased branches below only ever set these `true`/non-default on
+    // the path they take; none of them reset a flag from a DIFFERENT prior
+    // resolution (e.g. isCoroCall left true after a call that used to resolve
+    // to a coro fn overload now resolves to a plain one). Codegen branches on
+    // these directly, so a stale flag picks the wrong bytecode shape entirely
+    // rather than just mistyping a value -- same hazard as UnaryOpExpr's
+    // resolvedFuncGlobalIndex leaking across monomorphizations.
+    expr->resolvedFuncGlobalIndex = -1;
+    expr->isBuiltinCall = false;
+    expr->builtinAcceptsInlineArgs = false;
+    expr->isCoroCall = false;
+    expr->isCoroResume = false;
+    expr->isCoroYield = false;
+    expr->isCoroYieldAll = false;
+    expr->isAsyncAwait = false;
+    expr->isAwaitBlocking = false;
+    expr->isAsyncCall = false;
+    expr->isFutureReady = false;
+    expr->isFutureDelay = false;
+    expr->variadicPackStart = -1;
+    expr->variadicPackType = nullptr;
+    expr->resolvedTemplateLambdaType = nullptr;
+    expr->isWitnessDispatch = false;
+    expr->witnessMethodSlot = -1;
+    expr->witnessMapKinds.clear();
+
     // Resolve explicit call-site type args (f<T>(x)) fresh per instantiation.
     expr->resolvedTypeArgs.clear();
     expr->typeArgsUsed = false;
