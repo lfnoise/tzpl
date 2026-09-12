@@ -3,16 +3,16 @@
 -- synthc does Faust-style delay-line sharing: it keys delay allocation on the
 -- WRITTEN SIGNAL (+ graph + init + max-delay bound), so two delays fed the same
 -- hash-consed signal with the same init collapse to one ring buffer with multiple
--- read taps (sized to the max offset). This diverges from the C++ compiler, which
--- keys the merge on the buffer object and so never merges (a no-op).
+-- read taps (sized to the max offset). The C++ compiler's mergeDelays keyed on
+-- the writer NODE (distinct per buffer) and so never merged; it now uses the
+-- same written-signal key, so both compilers share delay lines identically.
 --
 -- This test pins both halves:
 --  * NON-merge cases (distinct signals, distinct inits, feedback) must still
 --    byte-match the C++ generator -- the share must NOT over-fire.
 --  * MERGE cases must actually collapse in synthc (fewer delay buffers). Their
---    behavioural equivalence to the C++ two-buffer build is checked by the
---    Tier-3 render A/B (run_synthc_render_ab.sh, the `merge` case): a merged synth
---    renders bit-identically to its unmerged C++ build.
+--    behavioural correctness is checked by the Tier-3 render A/B
+--    (run_synthc_render_ab.sh, the `merge` case).
 
 import synthdef.*;
 import common_ugens.*;

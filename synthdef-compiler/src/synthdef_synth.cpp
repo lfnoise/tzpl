@@ -57,7 +57,18 @@ namespace synthdef {
         
         // if it is not a temp var then it cannot be consumed in this loop.
         if (!is_temp_var(root->cut)) { is_consumed_in_loop_ = false; return false; }
-        
+
+        // Vacuous truth over an empty consumer set used to be harmless: a
+        // zero-consumer temp-var-cut root was always Unused and removed by
+        // removeDeadCode, so this case was unreachable. findGraphCuts now
+        // keeps a side-effect-guarding ControlFlow node alive with zero
+        // consumers; treating it as "trivially consumed in its own loop"
+        // would skip its up-front declaration and leave the phi writes
+        // (`vN = ...` in each branch) assigning to an undeclared name.
+        // Require the ordinary declaration instead. Mirrors _consumedInLoop
+        // in synthc/codegen.x.
+        if (root->consumers.total() == 0) { is_consumed_in_loop_ = false; return false; }
+
         // for all consumers of this tree
         for (S consumer : root->consumers.exprs()) {
             // if the consumer is not in the same loop, 
@@ -301,7 +312,15 @@ namespace synthdef {
                 setGraphCut(expr, GraphCut::Sink);
             } else if (expr.as<PhiNodeExpr>() != nullptr) {
                 setGraphCut(expr, GraphCut::Phi);
-            } else if (expr->consumers.total() == 0) {
+            } else if (expr->consumers.total() == 0
+                       && !(expr->is_control_flow() && expr->has_side_effect_subgraph())) {
+                // A control-flow node with an unconsumed result still needs
+                // a ControlFlow cut (not Unused) when one of its branches
+                // guards a side effect -- otherwise removeDeadCode drops the
+                // whole tree and the guarded write (e.g. `y <- white(1)`
+                // inside a bare if_) silently never runs. Falls through to
+                // the is_control_flow case below. Mirrors findGraphCuts in
+                // synthc/passes.x.
                 setGraphCut(expr, GraphCut::Unused);
             } else if (expr->consumers.total() > 1) {
                 setGraphCut(expr, GraphCut::FanOut);
@@ -389,9 +408,9 @@ namespace synthdef {
     }
     
     void replaceExpr(S oldExpr, S newExpr, vector<S>& exprs) {
-        removeExpr(oldExpr, exprs);      
+        removeExpr(oldExpr, exprs);
         for (S& expr : exprs) {
-            for (S input : expr->inputs) {
+            for (S& input : expr->inputs) {
                 if (input.identical(oldExpr)) {
                     input = newExpr;
                 }
@@ -1116,65 +1135,74 @@ namespace synthdef {
         printf("%s", dumpToString().c_str());
     }
     
-    void mergeFixReaders(vector<D>& delays, vector<S>& exprs) {
-        D primary = delays[0];
-        unordered_map<S, S, ExprIdentityHasher, ExprIdentical> d;
-        for (S u : primary->fixReaders) {
-            DelayFixRead* r = u.as<DelayFixRead>();
-            d[r->in0()] = u;
-        }
-        for (D delay : delays | stdv::drop(1)) {
-            for (S u : delay->fixReaders) {
-                DelayFixRead* r = u.as<DelayFixRead>();
-                auto key = r->in0();
-                if (!d.contains(key)) {
-                    r->delayBuf = primary;
-                    primary->fixReaders.push_back(r);
-                    d[r->in0()] = r;
-                } else {
-                    replaceExpr(r, d[key], exprs);
-                }
+    // Delay merging (Faust-style; mirrors mergeDelays in synthc/passes.x).
+    // Two delays are one delay when their writers write the same signal in
+    // the same graph, they share the same max-delay bound, and they have the
+    // same init set (offset + init value). Readers of the merged-away delay
+    // are repointed at the primary, or replaced by the primary's reader with
+    // the same signature (fixed: delay length; variable: delay input and
+    // interpolation). The merged-away writer and initters leave the
+    // sinks-rooted topological walk, so the delay and its nodes drop out of
+    // the sort. The primary is the lowest serial, so buffer names stay
+    // stable and match synthc's, which keeps serials on compaction.
+
+    static void removeFromSynth(Synth* synth, S expr) {
+        removeExpr(expr, synth->exprs);
+        removeExpr(expr, synth->sinks);
+        if (expr->graph) removeExpr(expr, expr->graph->exprs);
+    }
+
+    static void mergeFixReaders(Synth* synth, D primary, D other) {
+        for (S u : other->fixReaders) {
+            auto* r = u.as<DelayFixRead>();
+            S dup;
+            for (S p : primary->fixReaders) {
+                if (p.as<DelayFixRead>()->delay_samples == r->delay_samples) { dup = p; break; }
+            }
+            if (dup.isNull()) {
+                r->delayBuf = primary;
+                primary->fixReaders.push_back(u);
+            } else {
+                replaceExpr(u, dup, synth->exprs);
+                removeFromSynth(synth, u);
             }
         }
+        other->fixReaders.clear();
     }
-    
-    
-    void mergeVarReaders(vector<D>& delays, vector<S>& exprs) {
-        D primary = delays[0];
-        unordered_map<S, S, ExprIdentityHasher, ExprIdentical> d;
-        for (S u : primary->varReaders) {
-            DelayFixRead* r = u.as<DelayFixRead>();
-            d[r->in0()] = u;
-        }
-        for (D delay : delays | stdv::drop(1)) {
-            for (S u : delay->varReaders) {
-                DelayFixRead* r = u.as<DelayFixRead>();
-                auto key = r->in0();
-                if (!d.contains(key)) {
-                    r->delayBuf = primary;
-                    primary->fixReaders.push_back(r);
-                    d[r->in0()] = r;
-                } else {
-                    replaceExpr(r, d[key], exprs);
-                }
+
+    static void mergeVarReaders(Synth* synth, D primary, D other) {
+        for (S u : other->varReaders) {
+            auto* r = u.as<DelayVarRead>();
+            S dup;
+            for (S p : primary->varReaders) {
+                auto* q = p.as<DelayVarRead>();
+                if (q->interp == r->interp && q->in0().identical(r->in0())) { dup = p; break; }
+            }
+            if (dup.isNull()) {
+                r->delayBuf = primary;
+                primary->varReaders.push_back(u);
+            } else {
+                replaceExpr(u, dup, synth->exprs);
+                removeFromSynth(synth, u);
             }
         }
+        other->varReaders.clear();
     }
-    
-    D mergeDelays_(vector<D>& delays, vector<S>& exprs) {
+
+    static void mergeDelayGroup(Synth* synth, vector<D> const& delays) {
         D primary = delays[0];
-        if (delays.size() == 1) return primary;
-        mergeFixReaders(delays, exprs);
-        mergeVarReaders(delays, exprs);
-        
-        for (auto delay : delays | stdv::drop(1)) { 
-            removeExpr(delay->writer, exprs);
-        }                
-        return primary;
+        for (D other : delays | stdv::drop(1)) {
+            mergeFixReaders(synth, primary, other);
+            mergeVarReaders(synth, primary, other);
+            removeFromSynth(synth, other->writer);
+            for (S init : other->initters) removeFromSynth(synth, init);
+            if (other->maxDelay.notNull()) removeFromSynth(synth, other->maxDelay);
+            synth->delayBufs.erase(other);
+            if (other->graph) other->graph->delayBufs.erase(other);
+        }
     }
-    
+
     void Synth::mergeDelays() {
-        // If two delays have the same initialization and writers, the they can be merged into a single delay.
         struct InitMergeHasher {
             std::size_t operator()(S const& u) const {
                 DelayInit* init = u.as<DelayInit>();
@@ -1189,13 +1217,23 @@ namespace synthdef {
             }
         };
         using DelayInitSet = unordered_set<S, InitMergeHasher, InitMergeEquals>;
+        // Keyed on the written SIGNAL (the writer's value input), not the
+        // writer node: every DelayWrite is a distinct node that compares by
+        // its buffer, so keying on the writer could never match. The signal
+        // graph is hash-consed, so equal signals are the same node and
+        // structural identity is pointer identity. The max-delay bound is a
+        // per-buffer MaxDelay node, so only unbounded delays (null bound)
+        // can share a key -- the same rule synthc applies.
         struct DelayMergeKey {
             DelayInitSet initters;
-            S writer;
+            S written;
+            S maxDelay;
             Graph* graph;
-            
+
             bool operator==(DelayMergeKey const& other) const {
-                if (!(writer.equals(other.writer) && graph == other.graph)) return false;
+                if (!written.identical(other.written)) return false;
+                if (!maxDelay.identical(other.maxDelay)) return false;
+                if (graph != other.graph) return false;
                 if (initters.size() != other.initters.size()) return false;
                 for (S x : initters) {
                     if (!other.initters.contains(x)) return false;
@@ -1210,29 +1248,34 @@ namespace synthdef {
                     // xor because order doesn't matter
                     initter_hash ^= hash64(u64(x.get()));
                 }
-                return hash_combine(initter_hash, u64(key.writer.get()), u64(key.graph));
+                return hash_combine(initter_hash, u64(key.written.get()),
+                                    u64(key.maxDelay.get()), u64(key.graph));
             }
         };
-        
-        unordered_map<DelayMergeKey, vector<D>, DelayMergeKeyHasher> d;
-        for (D delay : delayBufs) {
+
+        // delayBufs is an unordered_set: walk it in serial order so groups
+        // form deterministically and the lowest serial is each primary.
+        vector<D> ordered(delayBufs.begin(), delayBufs.end());
+        std::sort(ordered.begin(), ordered.end(),
+                  [](D const& a, D const& b) { return a->serial < b->serial; });
+
+        vector<vector<D>> groups;
+        unordered_map<DelayMergeKey, usize, DelayMergeKeyHasher> index;
+        for (D delay : ordered) {
             if (delay->writer.isNull()) {
                 throw std::runtime_error(std::format("Delay buffer {:p} has no writer", (void*)delay.get()));
             }
             DelayInitSet initters(delay->initters.begin(), delay->initters.end());
-//            printf("delay %p\n", delay.get());
-//            printf("writer %p\n", delay->writer.get());
-//            printf("num readers fix %zu var %zu\n", delay->fixReaders.size(), delay->varReaders.size());
-            DelayMergeKey key = {initters, delay->writer, delay->writer->graph};
-            d[key].push_back(delay);
+            DelayMergeKey key = {initters, delay->writer->in0(), delay->maxDelay, delay->writer->graph};
+            auto [it, inserted] = index.try_emplace(key, groups.size());
+            if (inserted) groups.emplace_back();
+            groups[it->second].push_back(delay);
         }
-        
-        vector<D> merged;
-        for (auto [key, delays] : d) {
-            merged.push_back(mergeDelays_(delays, exprs));
+        for (auto const& group : groups) {
+            if (group.size() > 1) mergeDelayGroup(this, group);
         }
     }
-    
+
     //void Synth::calcDelayLengths() {}
     
     void Synth::graphAnalysis() {

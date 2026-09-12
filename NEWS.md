@@ -9,6 +9,19 @@ documentation site as the Changelog page.
 
 **Fixed**
 
+- The C++ synthdef compiler silently dropped a delay write that lived only
+  inside a bare `if_` (`if_(trig, fn(){ y <- white(1) })`, the lfnoise
+  shape): the control-flow node had no consumers, so `findGraphCuts` marked
+  it Unused and dead-code removal swept the whole branch, ring buffer
+  write included. The synthc port had the fix; the C++ side now keeps such
+  a node as a ControlFlow cut, declares its phi result up front (it was
+  assigned but never declared), advances a ring buffer's write head where
+  the write runs rather than where the buffer was declared (so a
+  conditionally written buffer holds the last N written values, as the
+  lfnoise generators need), and shares delay lines fed the same signal the
+  way synthc always has (its merge pass had keyed on the writer node and
+  never fired). The `nestedDelayVoicer` codegen validity case, left failing
+  on purpose, now passes byte parity on both compilers.
 - Building from source on Linux failed since v0.2.2 with "redefinition of
   'ec'" in `synthdef_compile_link.cpp`: the Linux-only Sleef staging block
   redeclared a variable that the v0.2.2 error-handling rework had hoisted

@@ -3883,10 +3883,27 @@ string CppCodeGen::genHandleEventsFun() {
     return s;
 }
 
+// Advance the write positions of the audio-rate ring buffers WRITTEN in
+// `graph`, at the end of that graph's block. A delay declared in one graph
+// but written inside a nested branch (`if_(trig, fn(){ y <- white(1) })`)
+// advances only when the write runs, so the ring holds the last N written
+// values and a read from the declaring graph sees them as a register --
+// the shape the lfnoise generators are built on. Keying on the declaring
+// graph instead (graph->delayBufs) would advance the head every sample and
+// leave the unwritten slots stale. Mirrors genDelayAdvance / _delayGraph in
+// synthc/codegen.x.
 string CppCodeGen::genDelayAdvance(Graph* graph) {
     string s;
+    auto writtenIn = [&](Graph* g) {
+        vector<D> v;
+        for (D delay : sortedDelays(synth->delayBufs)) {
+            Graph* dg = delay->writer.notNull() ? delay->writer->graph : delay->graph;
+            if (dg == g) v.push_back(delay);
+        }
+        return v;
+    };
     if (inFlatVoiceMode) {
-        for (D delay : sortedDelays(graph->delayBufs)) {
+        for (D delay : writtenIn(graph)) {
             if (delay->allocSize != 1) {
                 if (delay->writer.notNull() && delay->writer->rate == eventSignalRate) {
                     continue;
@@ -3898,7 +3915,7 @@ string CppCodeGen::genDelayAdvance(Graph* graph) {
         }
     } else {
         string dp = inVoiceLoop ? "vs." : "p->";
-        for (D delay : sortedDelays(graph->delayBufs)) {
+        for (D delay : writtenIn(graph)) {
             if (delay->allocSize != 1) {
                 // Skip event-rate delays — they are advanced in processEvents
                 if (delay->writer.notNull() && delay->writer->rate == eventSignalRate) {

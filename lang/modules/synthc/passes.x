@@ -161,7 +161,8 @@ fn _mergeReaders(ctx Ctx, primary Int, other Int, isVar Bool) Void {
 }
 
 -- Merge a group of delays (all sharing a merge key) into grp[0]. Returns true if
--- any delay was removed. Unreachable on the current front end (singletons).
+-- any delay was removed. Fires whenever two delays are fed the same signal --
+-- e.g. `p eoc` and an explicit `z1(p)` both create a 1-sample delay of p.
 fn _mergeDelayGroup(ctx Ctx, grp [Int], removed [Bool]) Bool {
 	let primary = grp[0];
 	var changed = false;
