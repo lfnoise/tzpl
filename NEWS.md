@@ -9,6 +9,14 @@ documentation site as the Changelog page.
 
 **Fixed**
 
+- A plain lambda written inside a `coro fn` lost its trailing-expression
+  return since the v0.2.2 anonymous-coroutine fix: the "no implicit return
+  in a coroutine body" rule keyed on the enclosing function rather than
+  the lambda itself, so every `fn() T { expr }` nested in a coroutine
+  returned nothing. A live session's `define(px, fn() S { ... })` graph
+  functions hit this -- the defs rendered silence and a voicer def
+  reported no noteParams. `async fn` lambdas already keyed on their own
+  flag; coroutine lambdas now do too.
 - The C++ synthdef compiler silently dropped a delay write that lived only
   inside a bare `if_` (`if_(trig, fn(){ y <- white(1) })`, the lfnoise
   shape): the control-flow node had no consumers, so `findGraphCuts` marked

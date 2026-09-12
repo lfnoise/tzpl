@@ -1,0 +1,10 @@
+42
+3.0
+Option<Int>.some(1)
+7
+10
+Option<Int>.some(2)
+Option<Int>.some(99)
+Option<Int>.some(3)
+Option<Int>.none
+done

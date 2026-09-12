@@ -10539,8 +10539,13 @@ u16 CodeGen::genLambdaExpr(LambdaExprNode* expr) {
         }
     }
 
+    // Same for coroutines: a plain lambda nested inside a `coro fn` (the
+    // `fn() S { ... }` graph functions a live session hands to define) must
+    // not inherit inCoroutineFn_, or its trailing expression is lowered as
+    // a statement instead of its return value -- a graph function that
+    // returns nothing gives a silent def.
+    inCoroutineFn_ = expr->isCoroutine;
     if (expr->isCoroutine) {
-        inCoroutineFn_ = true;
         currentYieldCount_ = 0;
     }
 
