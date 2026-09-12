@@ -1107,6 +1107,14 @@ struct ExprCodegenVisitor : ExprVisitor {
     }
 //    void visit(MatMulExpr* p) override { fixme(p); }
     void visit(ReduceExpr* p) override {
+        // One row (input chans == cols, e.g. a sum over a 1-channel signal)
+        // is the identity: re-emit the input at this channel, as the vec ops
+        // do. reduce_rows takes a pointer and a 1-channel materialized input
+        // is scalar storage, so the call would not compile.
+        if (p->inputs[0]->chans == p->cols) {
+            s += g.genExpr(p->in0(), cel);
+            return;
+        }
         string lambdaStr = FMT("[]({0} z, {0} x){{ return {1}; }}",
             p->type.str(), genBinopExprString(p->op, p->type, "z", "x"));
         s += FMT("reduce_rows<{}, {}>({}, {}, {})",

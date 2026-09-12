@@ -146,10 +146,13 @@ fn peakEQCoeffs(fc AsSignal, db AsSignal, bw AsSignal) BiquadCoeffs {
 }
 
 -- lowpass filter coefficients (default rq = sqrt(0.5))
-fn lpfCoeffs(fc AsSignal) BiquadCoeffs = rlpfCoeffs(fc, 0.5 sqrt);
+-- Butterworth (maximally flat): Q = 1/sqrt(2), and rlpfCoeffs takes rq = 1/Q,
+-- so the argument is sqrt(2). (0.5 sqrt here was Q = sqrt(2): a +3 dB peak
+-- at the cutoff, enough to push a 0.98 feedback loop past unity.)
+fn lpfCoeffs(fc AsSignal) BiquadCoeffs = rlpfCoeffs(fc, 2.0 sqrt);
 
 -- highpass filter coefficients (default rq = sqrt(0.5))
-fn hpfCoeffs(fc AsSignal) BiquadCoeffs = rhpfCoeffs(fc, 0.5 sqrt);
+fn hpfCoeffs(fc AsSignal) BiquadCoeffs = rhpfCoeffs(fc, 2.0 sqrt);
 
 -- ============================================================
 -- Biquad filter (Transposed Direct Form II)

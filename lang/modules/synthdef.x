@@ -610,12 +610,17 @@ fn debug(input S, label String = "debug", period Int = 4096, consecutive Int = 1
 ---------------------------------------------------------------------------
 -- Random numbers
 
-fn frand(lo Float, hi Float, chans Chans = 1, rate Rate = Rate.audio) S {
-    SignalExprKind.random(RandOp.frand(lo, hi), rate, chans asChans) _newSignalExpr
-}
-fn irand(lo Int, hi Int, chans Chans = 1, rate Rate = Rate.audio) S {
-    SignalExprKind.random(RandOp.irand(lo, hi), rate, chans asChans) _newSignalExpr
-}
+-- Expressed via urand rather than SignalExprKind.random(RandOp.frand(...))
+-- directly: the synthc importer has no lowering for RandOp.frand/irand (see
+-- lang/modules/synthc/importer.x, "FRand/IRand is not supported by the
+-- synthdef compiler") and urand's lowering is already exercised end-to-end.
+fn frand(lo Float, hi Float, chans Chans = 1, rate Rate = Rate.audio) S =
+    lo + (hi - lo) * urand(chans, rate);
+-- Uniform integer in [lo, hi] inclusive. Same urand-based construction as
+-- frand above, for the same reason (no synthc lowering for RandOp.irand);
+-- the min() guards the one-in-2^24 f32 case where u*(n) rounds up to n.
+fn irand(lo Int, hi Int, chans Chans = 1, rate Rate = Rate.audio) S =
+    (lo + min(hi - lo, (urand(chans, rate) * (hi - lo + 1)) floor)) i32;
 fn urand(chans Chans = 1, rate Rate = Rate.audio) S {
     SignalExprKind.random(RandOp.unipolar, rate, chans asChans) _newSignalExpr
 }

@@ -732,11 +732,21 @@ fn nochange(x S) S = x == x z1;
 fn localmax(x S) S = (x < x z1) * (x z1 > x z2);
 fn localmin(x S) S = (x > x z1) * (x z1 < x z2);
 
-fn fadein(x, fadeinTime) S {
-    let dt = 1 / (fadeinTime * fs());
+-- one-time linear ramp from 0 to 1 over dur seconds, then holds at 1.
+fn ramp(dur) S {
+    -- T() (the sample period) rather than 1 / fs(): the f64 accumulator's
+    -- type flows back into dt, and the rewriter folds `1 / (dur * fs())`
+    -- into an f32 reciprocal constant over `fs`, which type inference then
+    -- rejects ("/ intersected to empty" in BOTH compilers -- a rewriter
+    -- bug; it only surfaces under some graph shapes, e.g. this ramp inside
+    -- an if_ branch in a voicer).
+    let dt = (T() / dur) f64;
     let y = delayVar();
-    min(1, dt + y(1)) f64 write(y) f32 cb * x
+    min(1, dt + y(1)) f64 write(y) f32
 }
+
+-- fades x in from silence over fadeinTime seconds with a cubed ramp.
+fn fadein(x, fadeinTime) S = fadeinTime ramp cb * x;
 
 -- full level for sustainTime seconds, then fades to silence over
 -- fadeoutTime (the same cubed ramp as fadein).
@@ -748,28 +758,83 @@ fn fadeout(x, sustainTime, fadeoutTime) S {
     (end - t) uclip f32 cb * x
 }
 
+-- one-time linear ramp from lo to hi over dur seconds, then holds at hi
+-- (SC Line.kr equivalent).
+fn line(lo, hi, dur) S = lo + (hi - lo) * ramp(dur);
+
+-- one-time exponential ramp from lo to hi over dur seconds, then holds at hi
+-- (SC XLine.kr equivalent). lo and hi must be nonzero and share a sign.
+fn xline(lo, hi, dur) S = lo * (hi / lo) pow(ramp(dur));
+
+-- Low-frequency noise: a new random value per period of `freq`, held
+-- (lfnoise0), linearly interpolated (lfnoise1) or cubically interpolated
+-- (lfnoise3, one period of latency so the curve has a point ahead of it).
+--
+-- `if_` is a real branch whose test is a per-sample SCALAR decision, so with
+-- a multichannel `freq` an `if_(p eoc, ...)` write keys on channel 0 only:
+-- every other channel gets its new value at channel 0's wrap (a mid-segment
+-- jump) and nothing at its own (a read-index jump). So the branch is taken
+-- when ANY channel wraps, and inside it per-channel `select2`s advance only
+-- the channels that did; the common no-wrap sample costs just the phasor,
+-- the test and the interpolation. The history registers are seeded at
+-- Rate.init so the first period is already a valid segment, not zero.
+-- Reads outside the branch are emitted before the branch's writes, so at a
+-- wrap sample they still see the old segment: interpolating at z1(p)
+-- (~1 there, ~0 the sample after, once the registers have shifted) keeps
+-- the output continuous -- the same trick the original delay-indexed
+-- version used.
+
 fn lfnoise0(freq S, chans Int) S {
-	let p = freq lfimp;
-	let y = delayVar();
-	if_(p, fn(){ y <- white(chans) }, fn(){ y(1) })
+	let trig = freq phasor eoc;
+	let y = delayVar() init(1, birand(chans, Rate.init));
+	if_((trig sum) > 0, fn(){ y <- select2(trig, white(chans), y(1)) });
+	y(1)
 }
 
 fn lfnoise1(freq S, chans Int) S {
 	let p = freq phasor;
-	let y = delayVar(2);
-	if_(p eoc, fn(){ 
-		y <- white(chans)
+	let trig = p eoc;
+	let a = delayVar() init(1, birand(chans, Rate.init));  -- segment start
+	let b = delayVar() init(1, birand(chans, Rate.init));  -- segment end
+	if_((trig sum) > 0, fn(){
+		let b1 = b(1);
+		a <- select2(trig, b1, a(1));
+		b <- select2(trig, white(chans), b1)
 	});
-	y(2-z1(p), Interpolation.linear)
+	let q = z1(p);
+	let a1 = a(1);
+	a1 + (b(1) - a1) * q
 }
 
+-- Cubic (Catmull-Rom) noise, one period of latency so the curve has a point
+-- ahead of it. Stands in for SC's LFNoise2 (parabolic) when translating SC
+-- examples, since only the cubic variant is available here.
 fn lfnoise3(freq S, chans Int) S {
 	let p = freq phasor;
-	let y = delayVar(4);
-	if_(p eoc, fn(){ 
-		y <- white(chans)
+	let trig = p eoc;
+	let y0 = delayVar() init(1, birand(chans, Rate.init));  -- newest
+	let y1 = delayVar() init(1, birand(chans, Rate.init));
+	let y2 = delayVar() init(1, birand(chans, Rate.init));
+	let y3 = delayVar() init(1, birand(chans, Rate.init));  -- oldest
+	if_((trig sum) > 0, fn(){
+		let v0 = y0(1);
+		let v1 = y1(1);
+		let v2 = y2(1);
+		y3 <- select2(trig, v2, y3(1));
+		y2 <- select2(trig, v1, v2);
+		y1 <- select2(trig, v0, v1);
+		y0 <- select2(trig, white(chans), v0)
 	});
-	y(4-z1(p), Interpolation.cubic)
+	let q = z1(p);
+	let n0 = y0(1);
+	let n1 = y1(1);
+	let n2 = y2(1);
+	let n3 = y3(1);
+	-- Catmull-Rom from n2 (q = 0) to n1 (q = 1), neighbours n3 and n0.
+	let c1 = 0.5 * (n1 - n3);
+	let c2 = n3 - 2.5 * n2 + 2 * n1 - 0.5 * n0;
+	let c3 = 0.5 * (n0 - n3) + 1.5 * (n2 - n1);
+	((c3 * q + c2) * q + c1) * q + n2
 }
 
 fn pinkingFilter(x S) S {
@@ -1277,6 +1342,22 @@ fn combl(x S, delayTime AsSignal, maxDelayTime AsSignal, decayTime AsSignal) S {
 -- cubic no interpolation comb delay
 fn combc(x S, delayTime AsSignal, maxDelayTime AsSignal, decayTime AsSignal) S {
 	x comb(delayTime, maxDelayTime, decayTime, Interpolation.cubic)
+}
+
+
+-- plain (no feedback) delay lines -- SC's DelayN/DelayC.
+fn delayn(x S, delayTime AsSignal, maxDelayTime AsSignal) S {
+	let maxDelaySamples = maxDelayTime * fs();
+	let y = delayVar(maxDelaySamples);
+	y <- x;
+	y(delayTime * fs(), Interpolation.none)
+}
+
+fn delayc(x S, delayTime AsSignal, maxDelayTime AsSignal) S {
+	let maxDelaySamples = maxDelayTime * fs();
+	let y = delayVar(maxDelaySamples);
+	y <- x;
+	y(delayTime * fs(), Interpolation.cubic)
 }
 
 

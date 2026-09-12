@@ -525,6 +525,11 @@ fn _inlineExpr(ctx Ctx, n NIdx, cel String) String {
 fn _genReduce(ctx Ctx, n NIdx, op BinaryOp, cols Int, cel String) String {
 	let inp = ctx.ins[n][0];
 	let rows = ctx.chans[inp] // cols;
+	-- One row (input chans == output chans, e.g. `sum` of a 1-channel
+	-- signal) is the identity: re-emit the input at this channel, as the vec
+	-- ops do. reduce_rows wants a pointer, and a 1-channel materialized
+	-- input is scalar storage (`vs.vN`), so the call would not compile.
+	if (rows == 1) { return genExpr(ctx, inp, cel); }
 	let ty = cppType(ctx.typ[n]);
 	let body = genBinopStr(op, ctx.typ[n] _isF32, "z", "x");
 	let lambda = "[](%^ z, %^ x){ return %^; }" fmt(ty, ty, body);
@@ -2683,6 +2688,12 @@ fn genDelayAlloc(ctx Ctx) String {
 	var `cgInInit Bool = true;
 	for (d : ctx.delays) {
 		-- Per-voice delays set up their state per voice (M4.2 for ring buffers).
+		-- In AoS mode that includes delays nested in a control-flow subgraph of
+		-- the voice body (e.g. a delayVar written inside an if_ branch), which
+		-- are declared as vs. members: the deep check mirrors genDelayInit and
+		-- _genVoicerDelayInitAoS. Without it such a delay was also emitted here
+		-- as p->dN, which the struct never declares.
+		if (!`cgFlatVoice && ctx _isVoiceGraphDeep(ctx _delayGraph(d))) { continue; }
 		if (ctx _isVoiceGraph(ctx _delayGraph(d))) { continue; }
 		if (d.allocSize != 1) { s = s $ "\tp->d%^_wrpos = 0;\n" fmt(d.serial); }
 		if (d.allocSize >= 1) {

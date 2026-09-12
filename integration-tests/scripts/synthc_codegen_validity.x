@@ -13,6 +13,12 @@
 --    referenced the constant by its var name (p->cN), which is never
 --    declared for scalar constants. Fixed by emitting the literal in the
 --    put/join emitters.
+--  * per-voice ring buffer written inside a control-flow branch (synthc
+--    only; the C++ side was right, so this one also failed byte parity): a
+--    delayVar nested in an if_ subgraph of an AoS voice body is declared as
+--    a vs. member, but synthc's top-level genDelayAlloc used the shallow
+--    voice-graph test and ALSO allocated it as p->dN -- undeclared. Fixed by
+--    using the deep (parent-chain) test there, as genDelayInit/uninit do.
 
 import synthdef.*;
 import common_ugens.*;
@@ -51,6 +57,35 @@ fn putConst() S {
 	sig put(1 asSignal, 0.5 asSignal) |> outlet
 }
 
+-- AoS voicer whose body holds a runtime ring buffer written only inside an
+-- if_ branch (the original lfnoise3 shape: `if_(p eoc, fn(){ y <- white })`
+-- over a delayVar(4) with a cubic variable read). The if_ forces AoS mode and
+-- nests the delay one graph below the voice body.
+fn nestedDelayVoicer() S {
+	voicer(2, fn() {
+		let p = (30 asSignal) phasor;
+		let y = delayVar(4);
+		if_(p eoc, fn(){ y <- white(1) });
+		y(4 - z1(p), Interpolation.cubic) * gate()
+	}) sum outlet
+}
+
+-- `sum` over a 1-channel signal (rows == 1): both compilers emitted
+-- reduce_rows<1,1>(cel, vN, ..) on scalar storage, which clang rejects
+-- ("no matching function"). Now the identity (re-emits the input). The
+-- voicer variant is the AoS `vs.vN` case that surfaced it (lfnoise1's
+-- any-channel-wrapped test with chans = 1).
+fn sumOne() S {
+	let t = (30 asSignal) phasor eoc;
+	((t sum) > 0) f32 * 0.1 |> outlet
+}
+fn sumOneVoicer() S {
+	voicer(2, fn() {
+		let t = (30 asSignal) phasor eoc;
+		((t sum) > 0) f32 * gate() * 0.1
+	}) sum outlet
+}
+
 fn checkParity(name String, synthFn GraphFn, rewrites Bool, w Int) Void {
 	let g = makeGraph(synthFn);
 	let theirs = synthdefGenCppFromSexpr(g toSynthSexpr(name), w, rewrites);
@@ -83,7 +118,16 @@ checkParity("joinConst", joinConst, true, 4);
 checkParity("joinConst_norw", joinConst, false, 0);
 checkParity("putConst", putConst, true, 4);
 checkParity("putConst_norw", putConst, false, 0);
+checkParity("nestedDelayVoicer", nestedDelayVoicer, true, 4);
+checkParity("nestedDelayVoicer_norw", nestedDelayVoicer, false, 4);
+checkParity("sumOne", sumOne, true, 4);
+checkParity("sumOne_norw", sumOne, false, 0);
+checkParity("sumOneVoicer", sumOneVoicer, true, 4);
+checkParity("sumOneVoicer_norw", sumOneVoicer, false, 4);
 checkCompiles("fsdivVoicer", fsdivVoicer) await;
 checkCompiles("joinConst", joinConst) await;
 checkCompiles("putConst", putConst) await;
+checkCompiles("nestedDelayVoicer", nestedDelayVoicer) await;
+checkCompiles("sumOne", sumOne) await;
+checkCompiles("sumOneVoicer", sumOneVoicer) await;
 println(*fails == 0 ? "CODEGEN VALIDITY PASS" : "CODEGEN VALIDITY FAIL: %^" fmt(*fails));
