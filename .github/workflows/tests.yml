@@ -69,10 +69,9 @@ jobs:
           grep -q "SELFTEST OK" st.txt
 
       # The device-free integration scripts (the ones that drive tzpl_app
-      # with --no-audio). Informational for now; promote once proven stable
-      # on runners.
+      # with --no-audio). Required: a codegen parity or render A/B
+      # regression fails the workflow.
       - name: Integration tests (headless)
-        continue-on-error: true
         run: |
           for t in run_codegen_validity_test.sh run_fx_compile_test.sh \
                    run_fill_buffer_test.sh run_bitops_d0_test.sh \
@@ -125,10 +124,7 @@ jobs:
       - name: Synthdef compiler tests
         run: ./build/synthdef-compiler/synthdef-compiler --test
 
-      # Informational, same as the macOS job: the codegen validity suite
-      # carries a deliberately failing parity case (nestedDelayVoicer).
       - name: Integration tests (headless)
-        continue-on-error: true
         run: |
           for t in run_codegen_validity_test.sh run_fx_compile_test.sh \
                    run_fill_buffer_test.sh run_bitops_d0_test.sh \
