@@ -84,11 +84,10 @@ jobs:
 
   # Linux core: interpreter, engine, synthdef compiler (including the runtime
   # clang -> .so -> dlopen plugin pipeline), bridge, headless tzpl_app.
-  # Informational until it has a green streak on main; then drop
-  # continue-on-error and make it required.
+  # Required: a Linux-only compile error sat unnoticed for three days while
+  # this job was continue-on-error (issue #11).
   linux-core:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -136,11 +135,10 @@ jobs:
             bash "integration-tests/$t"
           done
 
-  # Linux JUCE app: build + headless self-test under xvfb. Informational
-  # until it has a green streak on main; then drop continue-on-error.
+  # Linux JUCE app: build + headless self-test under xvfb. Required, same
+  # reason as linux-core.
   app-juce-linux:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 

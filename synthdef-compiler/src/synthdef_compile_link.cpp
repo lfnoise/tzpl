@@ -365,18 +365,34 @@ std::expected<void, string> ensureBuildDirs(string const& buildDir) {
     // {buildDir}/lib. Copying every libsleef.so* name (real file, SONAME,
     // linker name) keeps both the link step and the recorded rpath working
     // even after the CMake build tree is deleted.
-    fs::create_directories(buildDir + "lib");
-    std::error_code ec;
-    fs::copy_file(string(TZPL_SLEEF_INCLUDE_DIR) + "/sleef.h",
-                  buildDir + "include/sleef.h",
+    fs::create_directories(buildDir + "lib", ec);
+    if (ec) {
+        return std::unexpected(std::format(
+            "cannot create build directory '{}lib': {}", buildDir, ec.message()));
+    }
+    string sleefHdr = string(TZPL_SLEEF_INCLUDE_DIR) + "/sleef.h";
+    fs::copy_file(sleefHdr, buildDir + "include/sleef.h",
                   fs::copy_options::update_existing, ec);
-    fs::path const sleefLib = TZPL_SLEEF_LIB;
-    for (auto const& entry : fs::directory_iterator(sleefLib.parent_path(), ec)) {
+    if (ec) {
+        return std::unexpected(std::format(
+            "cannot copy '{}' to '{}include/sleef.h': {}", sleefHdr, buildDir, ec.message()));
+    }
+    fs::path const sleefLibDir = fs::path(TZPL_SLEEF_LIB).parent_path();
+    fs::directory_iterator libIt(sleefLibDir, ec);
+    for (; !ec && libIt != fs::directory_iterator(); libIt.increment(ec)) {
+        auto const& entry = *libIt;
         auto name = entry.path().filename().string();
-        if (name.starts_with("libsleef.so")) {
-            fs::copy_file(entry.path(), buildDir + "lib/" + name,
-                          fs::copy_options::update_existing, ec);
+        if (!name.starts_with("libsleef.so")) continue;
+        string dst = buildDir + "lib/" + name;
+        fs::copy_file(entry.path(), dst, fs::copy_options::update_existing, ec);
+        if (ec) {
+            return std::unexpected(std::format(
+                "cannot copy '{}' to '{}': {}", entry.path().string(), dst, ec.message()));
         }
+    }
+    if (ec) {
+        return std::unexpected(std::format(
+            "cannot read the Sleef library directory '{}': {}", sleefLibDir.string(), ec.message()));
     }
 #endif
     return {};

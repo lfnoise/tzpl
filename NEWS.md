@@ -9,6 +9,14 @@ documentation site as the Changelog page.
 
 **Fixed**
 
+- Building from source on Linux failed since v0.2.2 with "redefinition of
+  'ec'" in `synthdef_compile_link.cpp`: the Linux-only Sleef staging block
+  redeclared a variable that the v0.2.2 error-handling rework had hoisted
+  to function scope. The block now shares that variable and reports a
+  failed Sleef header or library copy as a proper error instead of
+  ignoring it. The Linux CI jobs are now required, so a Linux-only build
+  break fails the workflow instead of hiding behind a green badge
+  (issue #11).
 - `play` on a def whose `defSynth`/`defSynthX` is still compiling waits for
   it instead of creating a node against a def that does not exist yet
   (silence, plus a bare "errNodeDefNotFound" in the console). The compile
