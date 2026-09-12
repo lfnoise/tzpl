@@ -27,6 +27,21 @@ evaluate it (Cmd+Return), or paste it into a notebook code cell.
 - `instrumentTest.x` -- plays a short arpeggio phrase through every
   instrument in `instrument_synthdefs.x` in sequence. Run with audio on
   (needs `examples/` on the module path).
+- `sc_conversions/` -- Tzopilotl translations of the SuperCollider 2
+  example corpus in `sc-examples/SC2-examples/` (`examples-1.txt` through
+  `examples-12.txt`), one file per source file (`sc2_examples_1.x` ...
+  `sc2_examples_12.x`; ~140 examples). Each file's header comment tracks
+  which of its source examples are ported and how, and notes the few that
+  are skipped (they need MIDI input or sound files). Audio-input examples
+  (file 5) come in a `...Live` variant on the audio input and a `...Demo`
+  variant on a synthetic source.
+  `sc2_common.x` holds the shared machinery: SC's `Spawn`/`OverlapTexture`/
+  `XFadeTexture` become a voicer plus a script-driven spawn loop (the
+  timing model is documented there), and SC2 UGens with no Tzopilotl
+  counterpart (Klank, Klang, Resonz, Crackle) are built from `ring`,
+  `fsinxosc`, `bpf`. Each file ends with a `playAllScN()` / `renderScN()`
+  driver. Run with audio on (needs `examples/` and `examples/sc_conversions/`
+  on the module path).
 - `rosetta.x` -- programming examples from Rosetta Code written in
   idiomatic Tzopilotl: pipeline syntax, auto-mapping, lazy lists, no
   explicit loops. Needs no audio.
