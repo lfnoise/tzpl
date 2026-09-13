@@ -101,9 +101,13 @@ fi
 # already mounted there (the previous draft, opened for testing) that
 # becomes "/Volumes/Tzopilotl 1" and macOS refuses to write into it, so the
 # dist target failed with a bare "Error 1" whenever a draft was being tried.
-RW_DMG="$(dirname "$DMG")/dist-rw.dmg"
-MNT="$(dirname "$DMG")/dist-mnt"
-rm -f "$RW_DMG"
+# Scratch image and mountpoint live in the system temp dir, not next to
+# the DMG: a build tree under Dropbox gets the fresh volume's .fseventsd
+# held open by the Dropbox daemon, and the detach below then fails with
+# "Resource busy" indefinitely.
+SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/tzpl-dist.XXXXXX")"
+RW_DMG="$SCRATCH/dist-rw.dmg"
+MNT="$SCRATCH/mnt"
 mkdir -p "$MNT"
 # Size: the staged folder plus headroom for the filesystem.
 STAGE_KB=$(du -sk "$STAGE" | awk '{print $1}')
@@ -111,10 +115,19 @@ hdiutil create -size "$((STAGE_KB / 1024 + 64))m" -fs HFS+ -volname "Tzopilotl" 
     -layout NONE -ov -quiet "$RW_DMG"
 hdiutil attach -nobrowse -mountpoint "$MNT" -quiet "$RW_DMG"
 cp -R "$STAGE"/. "$MNT"/
-hdiutil detach -quiet "$MNT"
+# Detach can still fail with "Resource busy" (exit 16) right after the
+# copy if Spotlight is indexing the fresh volume. Retry before giving up.
+for attempt in 1 2 3; do
+    if hdiutil detach -quiet "$MNT"; then break; fi
+    if [[ $attempt -eq 3 ]]; then
+        echo "dist: ERROR: could not detach $MNT (still busy)" >&2
+        exit 1
+    fi
+    echo "dist: $MNT busy, retrying detach ($attempt)..."
+    sleep 2
+done
 hdiutil convert "$RW_DMG" -format UDZO -ov -quiet -o "$DMG"
-rm -f "$RW_DMG"
-rmdir "$MNT"
+rm -rf "$SCRATCH"
 
 if [[ -n "$IDENTITY" && "$IDENTITY" != "-" ]]; then
     codesign --force --timestamp -s "$IDENTITY" "$DMG"
