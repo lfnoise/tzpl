@@ -5,10 +5,20 @@ in [git](https://github.com/lfnoise/tzpl/commits/main); this file records
 the changes worth knowing about as a user of the platform. Rendered on the
 documentation site as the Changelog page.
 
-## v0.2.3 (12 September 2026)
+## v0.2.3 (13 September 2026)
 
 **Fixed**
 
+- A distribution example's imports of its sibling modules failed in the
+  app: opening `examples/sc_conversions/sc2_examples_1.x` and running it
+  stopped at `import sc2_common.*;` with "Cannot find module". Examples
+  open as unsaved copies so an edit is never saved back into the
+  distribution folder, and a copy had no path for document-relative
+  imports to anchor to. A copy (editor tab or detached notebook) now
+  anchors to the example it was opened from, while Save still asks for a
+  location. The CLI had the same gap for a bare filename: `tzpl foo.x` run
+  from inside foo's directory skipped the sibling lookup because the path
+  had no directory component; it is made absolute first now.
 - A plain lambda written inside a `coro fn` lost its trailing-expression
   return since the v0.2.2 anonymous-coroutine fix: the "no implicit return
   in a coroutine body" rule keyed on the enclosing function rather than

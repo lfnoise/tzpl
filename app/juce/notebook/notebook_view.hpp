@@ -64,6 +64,10 @@ public:
     // Drop the file association: the open document becomes an untitled copy
     // and saving prompts for a new location. Used for distribution examples.
     void detachFile();
+    // The file whose directory anchors document-relative imports: the
+    // document's own path, or for a detached copy the file it was opened
+    // from (its sibling modules must still resolve). Invalid if neither.
+    juce::File importAnchorFile() const;
     bool isModified() const;
 
     // -- Cell operations --
@@ -183,6 +187,9 @@ private:
     TzplTokeniser tokeniser_;
 
     doc::DocumentStore store_;
+    // Where a detached copy came from (see detachFile); cleared whenever the
+    // document gets a path of its own or is replaced.
+    juce::File detachedSource_;
     juce::Component toolbar_;
     juce::TextButton addCodeButton_ { "+ Code" };
     juce::TextButton addProseButton_ { "+ Prose" };

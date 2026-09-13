@@ -85,6 +85,7 @@ void NotebookView::resized() {
 
 void NotebookView::newDocument() {
     store_.reset(std::make_shared<doc::DocSnapshot const>(), "");
+    detachedSource_ = juce::File();
     cells_.clear();
     runQueue_.clear();
     pendingEdits_.clear();
@@ -105,6 +106,7 @@ bool NotebookView::openFile(juce::File const& file, String& err) {
                                   errStr, &store_.interns(), &hist);
     if (!snap) { err = errStr; return false; }
     store_.reset(std::move(snap), file.getFullPathName().toStdString());
+    detachedSource_ = juce::File();
     cells_.clear();
     runQueue_.clear();
     pendingEdits_.clear();
@@ -137,6 +139,7 @@ bool NotebookView::saveToFile(juce::File const& file, String& err) {
         return false;
     }
     store_.setFilePath(file.getFullPathName().toStdString());
+    detachedSource_ = juce::File();
     store_.clearModified();
     return true;
 }
@@ -147,7 +150,13 @@ juce::File NotebookView::currentFile() const {
 }
 
 void NotebookView::detachFile() {
+    detachedSource_ = currentFile();
     store_.setFilePath("");
+}
+
+juce::File NotebookView::importAnchorFile() const {
+    juce::File f = currentFile();
+    return f != juce::File() ? f : detachedSource_;
 }
 
 bool NotebookView::isModified() const {

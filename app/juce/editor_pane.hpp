@@ -109,10 +109,18 @@ public:
     bool tabModified(int index) const;
     bool tabHasFilePath(int index) const;
     juce::File tabFile(int index) const;  // invalid File if no path yet
+    // The file whose directory anchors document-relative imports: the
+    // tab's own path, or for an unsaved copy of a distribution example the
+    // file it was copied from (its sibling modules must still resolve).
+    // Invalid File for an untitled tab.
+    juce::File tabImportAnchor(int index) const;
 
     bool activeHasFilePath() const { return tabHasFilePath(activeTabIndex()); }
     juce::String activeTabName() const { return tabName(activeTabIndex()); }
     juce::File activeFile() const { return tabFile(activeTabIndex()); }
+    juce::File activeImportAnchor() const {
+        return tabImportAnchor(activeTabIndex());
+    }
 
     // -- Revert / external-change detection --
     // Reload a tab's content from its file on disk, discarding in-memory

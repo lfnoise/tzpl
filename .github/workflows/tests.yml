@@ -77,6 +77,20 @@ jobs:
           TZPL_JUCE_SELFTEST=1 "$BIN" -I bridge/modules:lang/modules | tee st.txt
           grep -q "SELFTEST OK" st.txt
 
+      # A distribution example opens as an unsaved copy with no path of its
+      # own; an import of a sibling module must still resolve (broken in
+      # v0.2.0-v0.2.3). Stages the distribution folder the DMG ships and
+      # points TZPL_HOME at it so the example counts as one.
+      - name: JUCE example-import check
+        run: |
+          cmake --install build --component dist --prefix build/dist-stage/Tzopilotl > /dev/null
+          BIN=./build/app/tzpl_app_juce_artefacts/Release/Tzopilotl.app/Contents/MacOS/Tzopilotl
+          DIST=$PWD/build/dist-stage/Tzopilotl
+          TZPL_HOME=$DIST \
+          TZPL_JUCE_DEMO="example-import:$DIST/examples/sc_conversions/sc2_examples_1.x;sc2_common" \
+            "$BIN" --no-audio 2>&1 | tee ei.txt
+          grep -q "example-import: .* OK" ei.txt
+
       # The device-free integration scripts (the ones that drive tzpl_app
       # with --no-audio). Required: a codegen parity or render A/B
       # regression fails the workflow.

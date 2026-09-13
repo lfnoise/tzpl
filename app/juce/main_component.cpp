@@ -1442,8 +1442,11 @@ void MainComponent::launchEval(String const& code, int flashStart, int flashEnd)
 
 // Anchor document-relative imports to the visible document: evaluated code
 // can import a .x file sitting next to the notebook/tab it came from, with
-// no project setup. An unsaved document has no path, so it clears the anchor
-// (imports then use the search paths only).
+// no project setup. An unsaved copy of a distribution example anchors to
+// the example it was copied from, so `import sc2_common.*` in a copy of
+// examples/sc_conversions/sc2_examples_1.x still finds its sibling. A
+// document with no path at all clears the anchor (imports then use the
+// search paths only).
 void MainComponent::updateSessionDocumentPath() {
     if (!session_) return;
     // Never touch the session/TypeChecker while a background eval owns it
@@ -1451,8 +1454,8 @@ void MainComponent::updateSessionDocumentPath() {
     // eval also means no new eval will launch, so skipping is safe -- the
     // next successful launch re-anchors.
     if (guiState_.asyncEval.busy()) return;
-    juce::File doc = docModeIsNotebook() ? notebook_->currentFile()
-                                      : editorPane_.activeFile();
+    juce::File doc = docModeIsNotebook() ? notebook_->importAnchorFile()
+                                      : editorPane_.activeImportAnchor();
     session_->setDocumentPath(
         doc == juce::File() ? std::string{}
                             : doc.getFullPathName().toStdString());
@@ -2363,6 +2366,38 @@ void MainComponent::testShowDemo(String const& which) {
                 + (ok ? " OK" : " FAIL");
             std::fprintf(stderr, "%s\n", verdict.toRawUTF8());
         });
+    } else if (which.startsWith("example-import:")) {
+        // "example-import:<file>;<module>" -- open a distribution example
+        // (which opens as an unsaved copy, no path of its own) and evaluate
+        // an import of one of its sibling modules: the copy must anchor
+        // imports to the example's directory. Needs TZPL_HOME pointing at a
+        // distribution folder so <file> counts as an example.
+        auto arg = which.fromFirstOccurrenceOf(":", false, false);
+        juce::File file(arg.upToFirstOccurrenceOf(";", false, false));
+        String module = arg.fromFirstOccurrenceOf(";", false, false);
+        openPath(file);
+        bool isCopy = editorPane_.activeFile() == juce::File()
+                   && editorPane_.activeImportAnchor() == file;
+        launchEval("import " + module + ".*;", 0, 0);
+        auto poll = std::make_shared<std::function<void(int)>>();
+        *poll = [this, poll, isCopy](int triesLeft) {
+            if (guiState_.asyncEval.busy() && triesLeft > 0) {
+                juce::Timer::callAfterDelay(
+                    200, [poll, triesLeft] { (*poll)(triesLeft - 1); });
+                return;
+            }
+            String eval = testLastEvalSummary();
+            bool ok = isCopy && !eval.startsWith("errors:");
+            String verdict = String("example-import: copy=")
+                + (isCopy ? "1" : "0") + " eval=" + eval
+                + (ok ? " OK" : " FAIL");
+            logLine(verdict);
+            std::fprintf(stderr, "%s\n", verdict.toRawUTF8());
+            // Unattended (CI): the verdict is the whole point, and the
+            // unedited copy has nothing to prompt about.
+            juce::JUCEApplicationBase::getInstance()->quit();
+        };
+        (*poll)(100);
     } else if (which == "open-folder") {
         // File > Open Folder... must reach openFolderFlow and put a folder
         // chooser up (the panel itself is native, so this is as far as a

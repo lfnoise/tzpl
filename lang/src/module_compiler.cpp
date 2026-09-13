@@ -167,10 +167,15 @@ ModuleInfo* ModuleCompiler::compileModule(
         sweepStaleModules();
     }
 
-    // Determine importing file's directory
+    // Determine importing file's directory. Absolute first: a bare
+    // `tzpl foo.x` names the file with no directory component, and its
+    // empty parent_path() would skip the sibling lookup entirely.
     std::string importingDir;
     if (!importingFilePath.empty()) {
-        importingDir = std::filesystem::path(importingFilePath).parent_path().string();
+        std::error_code ec;
+        auto abs = std::filesystem::absolute(importingFilePath, ec);
+        if (ec) abs = importingFilePath;
+        importingDir = abs.parent_path().string();
     }
 
     // Check for host-registered foreign module functions

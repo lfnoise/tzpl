@@ -328,6 +328,12 @@ juce::File EditorPane::tabFile(int index) const {
     return tab ? tab->file : juce::File();
 }
 
+juce::File EditorPane::tabImportAnchor(int index) const {
+    auto* tab = tabAt(index);
+    if (!tab) return juce::File();
+    return tab->file != juce::File() ? tab->file : tab->sourceFile;
+}
+
 bool EditorPane::saveTab(int index) {
     auto* tab = tabAt(index);
     if (!tab || tab->file == juce::File()) return false;
