@@ -26,6 +26,7 @@
 #include "builtins.hpp"
 #include "value.hpp"
 #include "diagnostic.hpp"
+#include <climits>
 
 namespace ts {
 
