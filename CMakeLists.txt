@@ -5,11 +5,20 @@ cmake_minimum_required(VERSION 3.21)
 # machine's running OS version, which is not a real floor. 13.3 (not lower)
 # because lang/src/base_types.hpp's formatFloat uses floating-point
 # std::to_chars, which Apple's libc++ only makes available at 13.3+.
-if(APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
-    set(CMAKE_OSX_DEPLOYMENT_TARGET "13.3" CACHE STRING "Minimum macOS deployment target" FORCE)
+#
+# Always FORCEd from TZPL_MACOS_DEPLOYMENT_TARGET: a build directory
+# configured before this pin existed has the host's OS version cached in
+# CMAKE_OSX_DEPLOYMENT_TARGET, and a guarded set() left that in place --
+# v0.2.0 through v0.2.3 shipped requiring macOS 15.6 that way. Override
+# with -DTZPL_MACOS_DEPLOYMENT_TARGET=<ver>, not CMAKE_OSX_DEPLOYMENT_TARGET.
+if(APPLE)
+    set(TZPL_MACOS_DEPLOYMENT_TARGET "13.3" CACHE STRING
+        "Minimum macOS version the built binaries run on")
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "${TZPL_MACOS_DEPLOYMENT_TARGET}" CACHE STRING
+        "Minimum macOS deployment target (set from TZPL_MACOS_DEPLOYMENT_TARGET)" FORCE)
 endif()
 
-project(tzpl VERSION 0.2.3 LANGUAGES C CXX)
+project(tzpl VERSION 0.2.4 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -195,6 +204,7 @@ if(APPLE AND TZPL_BUILD_APP_JUCE)
                 "${TZPL_DIST_STAGE}"
                 "${CMAKE_BINARY_DIR}/Tzopilotl-${PROJECT_VERSION}.dmg"
                 "${CMAKE_SOURCE_DIR}/packaging/entitlements.plist"
+                "${CMAKE_OSX_DEPLOYMENT_TARGET}"
         DEPENDS tzpl tzpl_app_juce
         COMMENT "Assembling distribution folder and DMG"
         VERBATIM

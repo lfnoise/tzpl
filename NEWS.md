@@ -5,7 +5,20 @@ in [git](https://github.com/lfnoise/tzpl/commits/main); this file records
 the changes worth knowing about as a user of the platform. Rendered on the
 documentation site as the Changelog page.
 
-## Unreleased
+## v0.2.4 (13 September 2026)
+
+**Fixed**
+
+- The macOS builds shipped in v0.2.0 through v0.2.3 required macOS 15.6
+  (the machine they were built on) rather than the intended macOS 13.3
+  floor, so the app refused to launch on Ventura, Sonoma, and early
+  Sequoia. The 13.3 pin in `CMakeLists.txt` was guarded by "unless already
+  set", and a build directory configured before the pin existed had the
+  host's version cached, which silently won. The deployment target is now
+  forced from `TZPL_MACOS_DEPLOYMENT_TARGET` (default 13.3) on every
+  configure, and `make_dist_dmg.sh` refuses to package a binary whose
+  Mach-O `minos` is above the configured floor. The DMG is Apple Silicon
+  only, as before.
 
 ## v0.2.3 (13 September 2026)
 

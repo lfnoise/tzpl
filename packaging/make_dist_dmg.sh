@@ -2,7 +2,12 @@
 # Sign (optionally), package, and notarize (optionally) the distribution DMG.
 # Called by the `dist` CMake target after the stage directory is populated.
 #
-#   make_dist_dmg.sh <stage-dir> <dmg-path> <entitlements-plist>
+#   make_dist_dmg.sh <stage-dir> <dmg-path> <entitlements-plist> [min-macos]
+#
+# <min-macos> is the deployment target the binaries are supposed to carry
+# (CMAKE_OSX_DEPLOYMENT_TARGET); the script refuses to package a binary
+# whose Mach-O minos is higher, so a stale cache or a dependency built for
+# a newer macOS cannot silently raise the floor of a shipped DMG.
 #
 # Controlled by environment variables so one pipeline serves everyone:
 #
@@ -25,6 +30,7 @@ set -euo pipefail
 STAGE="$1"      # .../dist-stage (contains Tzopilotl/)
 DMG="$2"
 ENTITLEMENTS="$3"
+MIN_MACOS="${4:-}"
 
 APP="$STAGE/Tzopilotl/Tzopilotl.app"
 CLI="$STAGE/Tzopilotl/bin/tzpl"
@@ -49,6 +55,30 @@ check_no_external_dylibs() {
 }
 check_no_external_dylibs "$CLI"
 check_no_external_dylibs "$APP/Contents/MacOS/Tzopilotl"
+
+# The floor a binary actually declares (LC_BUILD_VERSION minos) must not
+# exceed the configured deployment target. Checked per architecture slice.
+check_min_macos() {
+    local bin="$1" minos
+    [[ -z "$MIN_MACOS" ]] && return 0
+    minos=$(vtool -show-build "$bin" | awk '$1 == "minos" {print $2}')
+    if [[ -z "$minos" ]]; then
+        echo "dist: ERROR: $bin has no LC_BUILD_VERSION minos" >&2
+        exit 1
+    fi
+    local v
+    for v in $minos; do
+        # highest of (v, MIN_MACOS) must be MIN_MACOS itself
+        if [[ "$(printf '%s\n%s\n' "$v" "$MIN_MACOS" | sort -V | tail -1)" != "$MIN_MACOS" ]]; then
+            echo "dist: ERROR: $bin requires macOS $v, above the configured minimum $MIN_MACOS" >&2
+            echo "dist: (reconfigure: CMAKE_OSX_DEPLOYMENT_TARGET is FORCEd from TZPL_MACOS_DEPLOYMENT_TARGET)" >&2
+            exit 1
+        fi
+    done
+    echo "dist: $bin: minimum macOS $minos"
+}
+check_min_macos "$CLI"
+check_min_macos "$APP/Contents/MacOS/Tzopilotl"
 
 if [[ -n "$IDENTITY" ]]; then
     SIGN_FLAGS=(--force --options runtime --entitlements "$ENTITLEMENTS")
