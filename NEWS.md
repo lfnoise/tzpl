@@ -7,6 +7,15 @@ documentation site as the Changelog page.
 
 ## Unreleased
 
+**Fixed**
+
+- The source tree failed to compile on Fedora (reported by a user): a
+  newer libstdc++ no longer pulls in `<climits>` or `<unistd.h>`
+  transitively, so `INT_MAX` in the type checker's "did you mean" typo
+  suggestions and `usleep` in the NRT `_sleepMs` bridge were undeclared.
+  The missing `<climits>` includes are added, and `usleep` is replaced
+  with the standard `std::this_thread::sleep_for`.
+
 ## v0.2.4 (13 September 2026)
 
 **Fixed**
