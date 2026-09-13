@@ -41,6 +41,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # run_pink_test.sh needs a python3 with numpy for its spectral check;
+      # the macOS runner image ships none, so the script failed on every
+      # macOS run until the integration step became required.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install numpy (pink spectral check)
+        run: python3 -m pip install numpy
+
       - name: Configure (both apps)
         run: >
           cmake -B build -DCMAKE_BUILD_TYPE=Release

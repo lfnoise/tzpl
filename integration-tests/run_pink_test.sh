@@ -24,6 +24,13 @@ for cand in python3 python3.12 python3.11; do
 done
 [ -n "$PY" ] || { echo "FAIL: no python3 with numpy found (needed for the spectral check)"; exit 1; }
 
+# Deterministic RNG (see shared/tzpl_random.hpp, as run_synthc_render_ab.sh
+# does): an entropy-seeded 30 s render puts +-0.3..0.5 dB of run-to-run
+# spread on the 100 Hz spot alone, which against the +-0.6 dB bounds made
+# this a coin-flip on CI (a -0.95 dB pinkf outlier on Linux, 12 Sept 2026).
+# With a fixed seed the render is reproducible per platform, so a failure
+# means the DSP changed, not the dice.
+export TZPL_RNG_SEED=0x5eed
 OUT="$("$APP" --nogui --no-audio "${MODS[@]}" "$SCRIPTS/pink_check.x" 2>/dev/null | grep -E '^(PASS|FAIL|RENDERED|PINK)')"
 echo "$OUT"
 echo "$OUT" | grep -q "PINK COMPILE ALL PASS" || { echo "FAIL: pink family compile"; exit 1; }

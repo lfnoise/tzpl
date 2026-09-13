@@ -77,6 +77,13 @@ def check(name, path, spots):
     # dev is already relative to 1/f, so its residual slope must be ~0
     sel = (fc >= 30) & (fc <= 18000)
     slope = np.polyfit(np.log2(fc[sel]), dev[sel], 1)[0]
+    # Always print the numbers behind the verdict, so a CI failure can be
+    # read without re-rendering: the render length, and the deviation at
+    # each spot frequency (plus the octave below the lowest spot).
+    fs, x = read_wav(path)
+    table = ' '.join(f'{freq}Hz:{at(fc, dev, freq):+.2f}'
+                     for freq in [spots[0][0] // 2] + [s[0] for s in spots])
+    print(f'INFO {name}: {len(x) / fs:.1f} s @ {fs} Hz, dev vs 1/f: {table}')
     ok = True
     if abs(slope) > 0.35:
         print(f'FAIL {name}: residual slope {slope:+.2f} dB/octave vs 1/f')
