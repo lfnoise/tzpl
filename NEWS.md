@@ -24,8 +24,9 @@ documentation site as the Changelog page.
   headers plus the standard headers), which was most of the cost of a
   compile: a typical synthdef now takes ~60 ms of clang instead of ~500 ms.
   The PCH lives in `~/tzpl-build/pch/`, keyed by a hash of the headers,
-  flags and compiler version so it rebuilds itself after any of those
-  change, and a compile that fails with it is retried without it. Net
+  flags, compiler version and the headers' modification times so it
+  rebuilds itself after any of those change, and a compile that fails with
+  it is retried without it. Net
   effect for `live`: a redefine lands in roughly 200 ms, of which about
   100 ms is macOS's Gatekeeper assessment of the freshly written dylib
   (`syspolicyd` scans every new Mach-O and consults Apple's notarization

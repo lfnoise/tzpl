@@ -310,6 +310,12 @@ static string ensurePluginPCH(string const& buildDir, string const& includeDir) 
             h = fnv1a(h, hp.filename().string());
             h = fnv1a(h, bytes);
         }
+        // The stat signature is part of the key too: clang validates a PCH
+        // against the headers' mtimes, so a refresh that rewrote a header
+        // with identical content (another tzpl build staging its copy)
+        // would otherwise be rejected on every compile until the content
+        // changed.
+        h = fnv1a(h, sig);
         h = fnv1a(h, kPluginPreamble);
         h = fnv1a(h, compileFlags());
         h = fnv1a(h, compilerVersion());
