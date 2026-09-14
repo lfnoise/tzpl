@@ -386,6 +386,15 @@ public:
                     else cell << line << "\n";
                 }
                 if (cell.trim().isNotEmpty()) cells_.add(cell);
+                // TZPL_JUCE_EVAL_CELLS_NOTEBOOK=1: run them as notebook
+                // cells (a fresh document, one code cell per chunk) instead
+                // of editor evals.
+                cellsInNotebook_ = std::getenv("TZPL_JUCE_EVAL_CELLS_NOTEBOOK") != nullptr;
+                if (cellsInNotebook_) {
+                    auto* mc = window_->mainComponent();
+                    mc->testShowNotebook(true);
+                    mc->testNotebook().newDocument();
+                }
                 juce::Timer::callAfterDelay(300, [this] { evalNextCell(); });
             }
         }
@@ -598,13 +607,29 @@ public:
             std::fflush(stdout);
         }
         if (cellIndex_ >= cells_.size()) {
-            std::printf("JUCE CELLS DONE\n");
-            std::fflush(stdout);
+            // Report the engine's own master meter (post-limiter, what the
+            // device plays) from C++ -- no lang code runs to observe it, so
+            // a test can check that sound arrived without any script-side
+            // await pumping the async machinery.
+            juce::Timer::callAfterDelay(std::max(cellGapMs_, 3000), [this] {
+                float pk = engine::masterPeakHold(gAppContext->engine, -1);
+                std::printf("JUCE CELLS DONE master peak %.4f\n", pk);
+                std::fflush(stdout);
+            });
             return;
         }
         auto code = cells_[cellIndex_++];
-        juce::Timer::callAfterDelay(cellGapMs_, [this, code] {
-            window_->mainComponent()->testLaunchEval(code);
+        bool first = cellIndex_ == 1;
+        juce::Timer::callAfterDelay(cellGapMs_, [this, code, first] {
+            auto* mc = window_->mainComponent();
+            if (cellsInNotebook_) {
+                auto& nb = mc->testNotebook();
+                if (!first) nb.addCell(doc::CellKind::Code);
+                nb.testTypeIntoFocusedCell(code);
+                nb.runFocusedCell();
+            } else {
+                mc->testLaunchEval(code);
+            }
             juce::Timer::callAfterDelay(50, [this] { evalNextCell(); });
         });
     }
@@ -731,6 +756,7 @@ private:
     juce::StringArray cells_;      // TZPL_JUCE_EVAL_CELLS chunks
     int cellIndex_ = 0;
     int cellGapMs_ = 0;
+    bool cellsInNotebook_ = false;
     std::unique_ptr<TzplLookAndFeel> lookAndFeel_;
     std::unique_ptr<AppMenuModel> menuModel_;
     std::unique_ptr<MainWindow> window_;
