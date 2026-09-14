@@ -67,6 +67,10 @@ void AsyncIOExecutor::run() {
             std::lock_guard<std::mutex> lk(hostMtx_);
             vm_.makeCurrent();
             job.complete(vm_);
+            // Run whatever the completion made ready: with no thread parked
+            // in a top-level await (the app between cell evaluations) nobody
+            // else would.
+            vm_.runReadyAsyncIfIdle();
             // No gcHeartbeat here: same rationale as the render-done
             // resolver -- a parked awaiter has its context snapshot-rooted,
             // and GC resumes when the owning thread next runs.

@@ -33,6 +33,15 @@ documentation site as the Changelog page.
 
 **Fixed**
 
+- Evaluating `drone <- ...; drone play;` (Cookbook §12.1) produced no sound
+  unless the cell also contained an `await`. A fire-and-forget async call --
+  which is what `<-` and `play` are -- resolves its background compile on
+  the I/O worker thread, but resolving a future only moves its waiters to
+  the ready queue; with no top-level `await` anywhere, nothing drained that
+  queue, so the continuation that swaps the compiled source into the proxy
+  never ran. Cross-thread resolvers (the async I/O worker, the tempo
+  scheduler) and each REPL/cell evaluation now drain ready continuations
+  when no evaluation is on the stack to do it.
 - A call in return position inside an `async fn` -- `return f(x);`, or a
   trailing `f(x)` -- was compiled as a tail call, which replaced the async
   frame; when `f` returned it jumped to that frame's null return address

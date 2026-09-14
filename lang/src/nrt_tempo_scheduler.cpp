@@ -387,6 +387,7 @@ void NRTTempoScheduler::tickTo(f64 seconds) {
             std::lock_guard vmLock(vm_->mtx);
             vm_->vm.makeCurrent();
             vm_->vm.resolveExternalFuture(wallFut);
+            vm_->vm.runReadyAsyncIfIdle();
             vm_->cv.notify_all();
             continue;
         }
@@ -401,6 +402,7 @@ void NRTTempoScheduler::tickTo(f64 seconds) {
                 std::lock_guard vmLock(vm_->mtx);
                 vm_->vm.makeCurrent();
                 vm_->vm.resolveExternalFuture(next.resolveFut);
+                vm_->vm.runReadyAsyncIfIdle();
                 vm_->cv.notify_all();
             }
             std::lock_guard lock2(schedMtx_);
@@ -511,6 +513,7 @@ void NRTTempoScheduler::run() {
             std::lock_guard vmLock(vm_->mtx);
             vm_->vm.makeCurrent();
             vm_->vm.resolveExternalFuture(fut);
+            vm_->vm.runReadyAsyncIfIdle();
             vm_->cv.notify_all();
             continue;
         }
@@ -533,6 +536,7 @@ void NRTTempoScheduler::run() {
                 std::lock_guard vmLock(vm_->mtx);
                 vm_->vm.makeCurrent();
                 vm_->vm.resolveExternalFuture(next.resolveFut);
+                vm_->vm.runReadyAsyncIfIdle();
                 vm_->cv.notify_all();
             }
             std::lock_guard lock2(schedMtx_);

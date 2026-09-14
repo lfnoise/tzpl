@@ -342,6 +342,7 @@ private:
     struct AsyncTimer { double beat; Future* fut; };
     Vec<AsyncTimer>     asyncTimers_;       // pending delay() timers
     Vec<CoroutineObj*>  asyncReady_;        // coroutines ready to resume
+    bool topLevelActive_ = false;          // a VM::execute() is on the stack
     double              asyncBeat_ = 0.0;   // current virtual beat
 
     // Externally-resolved futures (Phase C): e.g. renderNRT completion fired
@@ -637,6 +638,27 @@ public:
     // actors are clocked -- `await delay(n)` resolves when the audio beat reaches
     // it. No host allocation beyond the VM's TLSF heap; safe on the RT thread.
     void tickActors(double beat, int budget);
+
+    // Resume every ready async continuation, provided no lang code is active
+    // on this VM. For cross-thread resolvers -- an async I/O job's complete
+    // step, a scheduler timer firing delayReal/delayBeats -- to call right
+    // after resolveExternalFuture, with the host mutex held and the VM current.
+    //
+    // resolveExternalFuture only moves a future's waiters to asyncReady_. A
+    // thread parked in a top-level await drains that queue when it wakes, and
+    // a running evaluation drains it at its next await; but a host with
+    // neither -- the app between two cell evaluations -- would leave the
+    // continuations sitting there until the next top-level await anywhere.
+    // (A live proxy's compile finished and its swap never ran.)
+    //
+    // Guarded on topLevelActive_ (set for the span of VM::execute, including
+    // while it is parked in a top-level await): those cases drain the queue
+    // themselves, and draining from under them would corrupt their frames.
+    // op_halt does not pop execute's main-block frame, so frameCount_ is 1
+    // (not 0) when idle -- resumeAsync nests correctly above that dormant
+    // frame and restores frameCount_ on return. Callers hold the host mutex,
+    // so a concurrently running execute on another thread cannot be reached.
+    void runReadyAsyncIfIdle();
 
     // Cross-thread future support (Phase C). The host registers a blocking-wait
     // callback that releases its mutex and parks until the predicate holds.

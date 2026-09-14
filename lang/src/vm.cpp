@@ -676,6 +676,7 @@ Word VM::execute(CodeBlock* block) {
     frameCount_ = 0;
     baseReg_ = 0;
     currentRegs_ = regs_;
+    topLevelActive_ = true;
 
     // Zero the registers for the initial frame
     std::memset(regs_, 0, block->numRegs * sizeof(Word));
@@ -692,6 +693,7 @@ Word VM::execute(CodeBlock* block) {
     entry->op(*this, entry);
 
     // When HALT runs, it returns here
+    topLevelActive_ = false;
     return reg(0);
 }
 
@@ -902,6 +904,24 @@ void VM::serveActorLoop() {
         hostBlockingWait_([this]() { return !asyncReady_.empty(); });
         awaitSnapshots_.pop_back();
         restoreExecSnapshot(snap);
+    }
+}
+
+void VM::runReadyAsyncIfIdle() {
+    // Only when no top-level evaluation is on the stack. When one is running
+    // (or parked in a top-level await, which released the host mutex so this
+    // thread could get here) IT drains the queue -- draining from under it
+    // would corrupt its frames. resumeAsync nests correctly above the dormant
+    // main-block frame op_halt leaves behind, restoring frameCount_ on return.
+    if (topLevelActive_ || asyncReady_.empty()) return;
+    // Bounded: a continuation that keeps re-enqueueing itself must not pin
+    // the resolver thread; whatever is left runs at the next opportunity.
+    int n = 0;
+    while (!topLevelActive_ && !asyncReady_.empty() && n < 4096) {
+        CoroutineObj* coro = asyncReady_.front();
+        asyncReady_.erase(asyncReady_.begin());
+        resumeAsync(coro);
+        ++n;
     }
 }
 

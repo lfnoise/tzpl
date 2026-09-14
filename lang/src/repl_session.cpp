@@ -245,6 +245,10 @@ REPLSession::EvalResult REPLSession::eval(const std::string& input) {
     // Execute
     try {
         Word value = impl_->vm.execute(block);
+        // Continuations the cell made ready without awaiting them (an async
+        // fn resumed by a future an FFI resolved inline) would otherwise wait
+        // for the next top-level await in some later cell.
+        impl_->vm.runReadyAsyncIfIdle();
         result.success = true;
         if (lastIsExpr) {
             result.hasValue = true;
