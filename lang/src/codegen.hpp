@@ -848,6 +848,14 @@ private:
     // Used to decide whether to box a multi-word inline value before op_return.
     Type* currentReturnType_ = nullptr;
 
+    // Whether a call in return position may become a tail call. Never inside
+    // an async fn: a tail call replaces the current frame, and an async frame
+    // has no caller to return into -- its result has to go through
+    // op_async_return to resolve the Future. Letting `return f(x);` (or a
+    // trailing `f(x)`) tail-call there made the callee's op_return jump to the
+    // async frame's null returnPC.
+    bool tailCallsAllowed() const { return !inAsyncFn_; }
+
     // Phase 4d: op_return is natively multi-word. Encode source register and
     // slot size; the handler copies nWords from src into the caller's result
     // slot. No boxing involved.

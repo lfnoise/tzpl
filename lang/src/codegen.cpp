@@ -1253,7 +1253,7 @@ void CodeGen::genFnDecl(FnDeclNode* decl) {
             if (stmt->kind == ASTNode::ExprStmt) {
                 auto* exprStmt = static_cast<ExprStmtNode*>(stmt);
                 if (exprStmt->isTrailing && !inCoroutineFn_) {
-                    inTailPosition_ = true;
+                    inTailPosition_ = tailCallsAllowed();
                     u16 resultReg = genExpr(static_cast<Expr*>(exprStmt->expr.get()));
                     inTailPosition_ = false;
                     emitReturn(resultReg);
@@ -1469,7 +1469,7 @@ void CodeGen::genMonoInstance(FuncInfo& monoInfo) {
             if (stmt->kind == ASTNode::ExprStmt) {
                 auto* exprStmt = static_cast<ExprStmtNode*>(stmt);
                 if (exprStmt->isTrailing) {
-                    inTailPosition_ = true;
+                    inTailPosition_ = tailCallsAllowed();
                     u16 resultReg = genExpr(static_cast<Expr*>(exprStmt->expr.get()));
                     inTailPosition_ = false;
                     emitReturn(resultReg);
@@ -2763,7 +2763,7 @@ void CodeGen::genPatternMatch(Pattern* pat, u16 subjReg, Type* subjType,
 
 void CodeGen::genReturnStmt(ReturnStmtNode* stmt) {
     if (stmt->value) {
-        inTailPosition_ = true;
+        inTailPosition_ = tailCallsAllowed();
         u16 resultReg = genExpr(static_cast<Expr*>(stmt->value.get()));
         inTailPosition_ = false;
         emitReturn(resultReg);  // async-aware (op_async_return inside an async fn)

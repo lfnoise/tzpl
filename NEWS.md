@@ -33,6 +33,13 @@ documentation site as the Changelog page.
 
 **Fixed**
 
+- A call in return position inside an `async fn` -- `return f(x);`, or a
+  trailing `f(x)` -- was compiled as a tail call, which replaced the async
+  frame; when `f` returned it jumped to that frame's null return address
+  and the process crashed. Tail calls are no longer emitted inside async
+  fns (their result must go through the Future). In the app this was
+  `drone play` evaluated a second time while already playing: the "adjust
+  the volume" branch of `play` is exactly such a return.
 - `play(proxy, events)` issued while the proxy's definition was still
   compiling -- Cookbook §12.4 run as a single cell -- read an empty
   parameter list, warned that the proxy had no noteParams, and then played
