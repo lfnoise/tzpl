@@ -25,6 +25,7 @@ set(LIB_SOURCES
     src/tzpl_mixer.cpp
     src/tzpl_chanadapt.cpp
     src/tzpl_test_plugins.cpp
+    src/tzpl_builtin_defs.cpp
     src/tzpl_audio_file_writer.cpp
 )
 
@@ -76,6 +77,7 @@ install(FILES
     src/tzpl_xfader.hpp
     src/tzpl_mixer.hpp
     src/tzpl_test_plugins.hpp
+    src/tzpl_builtin_defs.hpp
     src/tzpl_audio_file_writer.hpp
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/tzpl
 )

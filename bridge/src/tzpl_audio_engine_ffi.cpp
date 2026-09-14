@@ -31,6 +31,7 @@
 #include "value.hpp"
 #include "tzpl_client_interface.hpp"
 #include "tzpl_engine.hpp"
+#include "tzpl_builtin_defs.hpp"
 #include "tzpl_sample_bank.hpp"
 #include "tzpl_vm_commands.hpp"
 #include "nrt_vm.hpp"
@@ -193,6 +194,29 @@ static void ffi_inputChannels(ts::VM& vm, u16 dst, u16, u16) {
     engine::Engine* eng = getEngine(vm);
     // Access streamParams_ directly -- it's set at init time, safe to read.
     vm.reg(dst).i = eng ? eng->streamParams_.inputChannels : 0;
+}
+
+// fn wireDef(chans Int) -> String
+// fn gainDef(chans Int) -> String
+// Name of the engine's native N-channel pass-through / gain def, registering
+// it on the current engine (live or per-render) if this is the first use of
+// that width. No plugin compile is involved; the name is usable in newNode
+// as soon as the call returns. Empty string when there is no engine or chans
+// is out of range.
+static void ffi_wireDef(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    engine::Engine* eng = getEngine(vm);
+    auto chans = vm.reg(argBase).i;
+    char const* name = (eng && chans >= 1 && chans <= 1024)
+        ? engine::ensureWireDef(eng, (int)chans) : "";
+    vm.reg(dst).o = new ts::StringObj(name);
+}
+
+static void ffi_gainDef(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    engine::Engine* eng = getEngine(vm);
+    auto chans = vm.reg(argBase).i;
+    char const* name = (eng && chans >= 1 && chans <= 1024)
+        ? engine::ensureGainDef(eng, (int)chans) : "";
+    vm.reg(dst).o = new ts::StringObj(name);
 }
 
 // ---------------------------------------------------------------------------
@@ -1742,6 +1766,8 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     reg("masterGain",       Void, {Float},         ffi_masterGain);
     reg("safetyLimiter",    Void, {Bool},          ffi_safetyLimiter);
     reg("inputChannels",    Int, {},               ffi_inputChannels);
+    reg("wireDef",          String, {Int},         ffi_wireDef);
+    reg("gainDef",          String, {Int},         ffi_gainDef);
     // NRT-render FFI is registered separately by the bridge::registerNRTRenderFFI
     // entry point (see bridge/include/tzpl_nrt_render.hpp). It defines:
     //   renderNRT(path, setup), renderNRT(path, duration, setup),

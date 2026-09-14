@@ -3561,6 +3561,8 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
   <tr><th>Function</th><th>Description</th></tr>
   <tr><td><code>loadPlugins(path String) Bool</code></td><td>Load all plugin definitions found in the directory at <code>path</code>. Returns <code>true</code> on success.</td></tr>
   <tr><td><code>loadPlugin(path String, name String) Bool</code></td><td>Load a single plugin definition from the shared library at <code>path</code> under the given <code>name</code>. Returns <code>true</code> on success.</td></tr>
+  <tr><td><code>wireDef(chans Int) String</code></td><td>Name of the engine's native <code>chans</code>-channel pass-through def (<code>_wire2</code>, <code>_wire4</code>, &hellip;: <code>out = in</code>), registering it on the current engine on first use. No plugin compile; usable in <code>newNode</code> as soon as it returns. Empty string if there is no engine.</td></tr>
+  <tr><td><code>gainDef(chans Int) String</code></td><td>Name of the engine's native <code>chans</code>-channel gain def (<code>_gain2</code>, &hellip;: <code>out = in * vol</code>, inlet 0 = <code>in</code>, inlet 1 = <code>vol</code>, one channel, so it can be set with <code>setInput</code> or ramped with <code>setInputX</code>). Registered on first use, never compiled. The <code>live</code> module builds every proxy's anchor and monitor from these two.</td></tr>
 </table>
 
 <!-- -------------------------------- -->

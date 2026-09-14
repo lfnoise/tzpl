@@ -7,6 +7,19 @@ documentation site as the Changelog page.
 
 ## Unreleased
 
+**Changed**
+
+- Live-coding proxies no longer wait on a compile for anything but your
+  own definition. A proxy's anchor (its stable summing point) and monitor
+  (its fadeable path to Audio Out) used to be generated synthdefs, each run
+  through clang, the linker and `dlopen` once per channel count per
+  session -- and the anchor was built three times over by `<-`, `play` and
+  `meter` racing into it -- so the first sound from `drone <- ...; drone
+  play` arrived some four seconds after the cell. They are now the engine's
+  native `_wire<N>` / `_gain<N>` node defs (`audio_engine.wireDef` /
+  `gainDef`), registered on first use at any width, so the only thing that
+  compiles is the definition you wrote.
+
 **Fixed**
 
 - A synthdef could delete its own freshly built dylib before loading it

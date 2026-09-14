@@ -101,8 +101,6 @@ fn _takeSerial() Int {
 
 var _defaults [Int: Ref<SiloDefaults>] = [:];  -- silo -> defaults, put! in place
 var _registry = [Proxy]();                     -- every live proxy, in place
-var _anchorDefsReady [Int: Bool] = [:];        -- chans -> anchor def loaded
-var _monDefsReady [Int: Bool] = [:];           -- chans -> monitor def loaded
 
 fn _siloDefaults(silo Int) Ref<SiloDefaults> {
     match (_defaults[silo]) {
@@ -381,7 +379,7 @@ async fn _playAsync(p Proxy, vol Float) Int {
     var mon = s.monitor;
     var e = 0;
     if (mon == 0) {
-        if (!(_ensureMonDef(s.chans) await)) { return -1; }
+        if (!(_ensureMonDef(s.chans))) { return -1; }
         mon = _takeNodeID();
         e = _runOps(playOps(monitorDefName(s.chans), mon, (*p.state).anchor,
                             vol, _fade(p)), p.silo, d);
@@ -452,11 +450,11 @@ async fn _reshapeAsync(p Proxy, chans Int) Int {
         p.state <- ProxyState { ...(*p.state), chans: newChans };
         return 0;
     }
-    if (!(_ensureAnchorDef(newChans) await)) { return -1; }
+    if (!(_ensureAnchorDef(newChans))) { return -1; }
     var monDef = "";
     var newMon = 0;
     if (s.playing && s.monitor != 0) {
-        if (!(_ensureMonDef(newChans) await)) { return -1; }
+        if (!(_ensureMonDef(newChans))) { return -1; }
         monDef = monitorDefName(newChans);
         newMon = _takeNodeID();
     }
@@ -639,36 +637,24 @@ fn dump(silo Int = 0) String {
 ---------------------------------------------------------------------------
 -- Internals: def caching, op lowering, timed cleanup
 
--- Compile-and-load the shared anchor def for a channel count, once per
--- session. (Two proxies racing on the same count just compile it twice;
--- the second load supersedes the first, harmlessly.)
-async fn _ensureAnchorDef(chans Int) Bool {
-    if (get(_anchorDefsReady, chans, false)) { return true; }
-    let g = makeGraph(fn() S { inlet(FLOAT32, chans, "in") outlet });
-    match (defSynthGraphChecked(g, anchorDefName(chans), ["proxy"]) await) {
-        err(msg): {
-            println("live: anchor def failed: " $ msg);
-            return false;
-        }
-        ok(cpp): 0;
+-- The anchor and monitor defs are the engine's native _wire<N> / _gain<N>
+-- (engine/src/tzpl_builtin_defs.cpp): registered on first use of a width,
+-- no plugin compile, so a proxy's plumbing is ready the instant it is
+-- asked for. Only the user's own definition ever goes through clang.
+-- These fail only when there is no engine at all.
+fn _ensureAnchorDef(chans Int) Bool {
+    if (wireDef(chans) == "") {
+        println("live: no engine for anchor def (" $ chans toString $ " ch)");
+        return false;
     }
-    _anchorDefsReady[chans] = true;
     true
 }
 
-async fn _ensureMonDef(chans Int) Bool {
-    if (get(_monDefsReady, chans, false)) { return true; }
-    let g = makeGraph(fn() S {
-        (inlet(FLOAT32, chans, "in") * inlet(FLOAT32, 1, "vol")) outlet
-    });
-    match (defSynthGraphChecked(g, monitorDefName(chans), ["proxy"]) await) {
-        err(msg): {
-            println("live: monitor def failed: " $ msg);
-            return false;
-        }
-        ok(cpp): 0;
+fn _ensureMonDef(chans Int) Bool {
+    if (gainDef(chans) == "") {
+        println("live: no engine for monitor def (" $ chans toString $ " ch)");
+        return false;
     }
-    _monDefsReady[chans] = true;
     true
 }
 
@@ -676,8 +662,7 @@ async fn _ensureMonDef(chans Int) Bool {
 async fn _ensureAnchor(p Proxy) Bool {
     if ((*p.state).anchor != 0) { return true; }
     let chans = (*p.state).chans;
-    if (!(_ensureAnchorDef(chans) await)) { return false; }
-    if ((*p.state).anchor != 0) { return true; }   -- raced with another op
+    if (!(_ensureAnchorDef(chans))) { return false; }
     let a = _takeNodeID();
     let e = bundle() newNode(anchorDefName(chans), a) go(p.silo);
     if (e != 0) {

@@ -111,6 +111,9 @@ struct NodeDef {
 
 void addNodeDef(Engine* e, NodeDefInfo const& info, void* dlHandle = nullptr);
 void releaseNodeDef(Engine* e, NodeDef* def);
+// Newest def registered under `name` (superseded ones are behind it in the
+// chain), or nullptr. Takes nrt_lock_.
+NodeDef* getNodeDef(Engine* e, char const* name);
 
 //=============================================================================================
 #pragma mark PORT, CONTROL

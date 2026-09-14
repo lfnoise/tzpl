@@ -10,8 +10,8 @@ import live.plan.*;
 ---------------------------------------------------------------------------
 -- Def-name mangling
 
-assertEq(anchorDefName(2), "_pxA2", "anchor def name");
-assertEq(monitorDefName(4), "_pxM4", "monitor def name");
+assertEq(anchorDefName(2), "_wire2", "anchor def name");
+assertEq(monitorDefName(4), "_gain4", "monitor def name");
 assertEq(pxDefName(0, 17), "_px0_17", "source def name");
 assertEq(pxRefName(1), "pxref1", "ref inlet name");
 assertTrue(isPxRefName("pxref0"), "pxref name detected");
@@ -139,9 +139,9 @@ assertEq(firstSwap opsToString,
     "connectX(1000012, 0, 1000001, 0, 0.02)\n",
     "first-define op order");
 
-let playSeq = playOps("_pxM2", 1000013, 1000001, 0.8, 1.0);
+let playSeq = playOps("_gain2", 1000013, 1000001, 0.8, 1.0);
 assertEq(playSeq opsToString,
-    "newNode(_pxM2, 1000013)\n" $
+    "newNode(_gain2, 1000013)\n" $
     "setInput(1000013, 1, 0.8)\n" $
     "connect(1000001, 0, 1000013, 0)\n" $
     "connectX(1000013, 0, 0, 0, 1.0)\n",
@@ -154,14 +154,14 @@ assertEq(silenceOps(1000007, 1000001, 1.0) opsToString,
 
 -- reshape: new anchor first, source feeds it, each dependent and the
 -- monitor crossfade over (connect strictly before disconnect throughout)
-let rs = reshapeOps("_pxA4", 1000020, 1000001, 1000007,
-                    [(1000011, 1)], "_pxM4", 1000021, 1000013, 0.8, 1.0);
+let rs = reshapeOps("_wire4", 1000020, 1000001, 1000007,
+                    [(1000011, 1)], "_gain4", 1000021, 1000013, 0.8, 1.0);
 assertEq(rs opsToString,
-    "newNode(_pxA4, 1000020)\n" $
+    "newNode(_wire4, 1000020)\n" $
     "connect(1000007, 0, 1000020, 0)\n" $
     "connectX(1000020, 0, 1000011, 1, 1.0)\n" $
     "disconnectSourceX(1000001, 0, 1000011, 1, 1.0)\n" $
-    "newNode(_pxM4, 1000021)\n" $
+    "newNode(_gain4, 1000021)\n" $
     "setInput(1000021, 1, 0.8)\n" $
     "connect(1000020, 0, 1000021, 0)\n" $
     "connectX(1000021, 0, 0, 0, 1.0)\n" $
@@ -169,9 +169,9 @@ assertEq(rs opsToString,
     "reshape op order");
 
 -- silent, unplayed proxy: only the anchor swap and source rewire
-let rs2 = reshapeOps("_pxA4", 1000020, 1000001, 0,
+let rs2 = reshapeOps("_wire4", 1000020, 1000001, 0,
                      [(Int, Int)](), "", 0, 0, 1.0, 1.0);
-assertEq(rs2 opsToString, "newNode(_pxA4, 1000020)\n",
+assertEq(rs2 opsToString, "newNode(_wire4, 1000020)\n",
     "reshape of an empty proxy is just the new anchor");
 
 ---------------------------------------------------------------------------

@@ -16,11 +16,13 @@ import synthdef.*;
 -- Def-name mangling. Proxy defs are internal: the user never sees them.
 
 -- Anchor: passthrough node whose inlet is the proxy's summing point and
--- whose outlet is its stable output. One shared def per channel count.
-fn anchorDefName(chans Int) String = "_pxA" $ chans toString;
+-- whose outlet is its stable output. The engine's native _wire<N> def
+-- (audio_engine.wireDef), one per channel count, never compiled.
+fn anchorDefName(chans Int) String = "_wire" $ chans toString;
 
 -- Monitor: anchor -> monitor -> Audio Out, with volume as a fadeable inlet.
-fn monitorDefName(chans Int) String = "_pxM" $ chans toString;
+-- The engine's native _gain<N> def (audio_engine.gainDef).
+fn monitorDefName(chans Int) String = "_gain" $ chans toString;
 
 -- Source wrapper: one def name per proxy, hot-reloaded on every redefine.
 fn pxDefName(silo Int, serial Int) String =
