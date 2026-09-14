@@ -37,7 +37,7 @@ let es = List(event(0.0, 0.5, degree(0)),
 
 let pl = play(keys, es);
 assertFalse((*pl.state).stopped, "player running");
-assertEq(pl.voice.names length, 2, "voice derived from proxy");
+assertEq((*pl.voice).names length, 2, "voice derived from proxy");
 
 pl enqueue(es);
 assertEq((*pl.state).queue length, 1, "enqueue queued a score");

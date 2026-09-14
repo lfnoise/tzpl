@@ -1777,8 +1777,10 @@ drone &lt;- [<span class="str">"freq"</span>: <span class="num">220.0</span>];  
 <p>A proxy whose definition uses <code>voicer</code> and <code>noteParam</code> is
 a note target. <code>play(proxy, events)</code> derives the parameter list from
 the definition itself (each <code>noteParam</code>'s name and default, in
-declaration order) and schedules the events sample-accurately; redefining the
-proxy mid-pattern retargets the notes to the new sound at the crossfade:</p>
+declaration order &mdash; waiting for the definition if it is still compiling,
+so the whole cell below can be run as one) and schedules the events
+sample-accurately; redefining the proxy mid-pattern retargets the notes to the
+new sound at the crossfade:</p>
 <pre><code><span class="kw">import</span> music.pat.*;
 
 <span class="kw">let</span> keys = ndef(<span class="num">2</span>);

@@ -33,6 +33,13 @@ documentation site as the Changelog page.
 
 **Fixed**
 
+- `play(proxy, events)` issued while the proxy's definition was still
+  compiling -- Cookbook §12.4 run as a single cell -- read an empty
+  parameter list, warned that the proxy had no noteParams, and then played
+  every note at the spec defaults (all 440 Hz) once the sound existed. The
+  player now parks the sequence and derives its Voice the moment the
+  definition lands, so the pattern starts as written; `replace` and
+  `enqueue` during that window park likewise.
 - A synthdef could delete its own freshly built dylib before loading it
   (reported on the forum and reproduced locally as a silent live-coding
   session: `live: anchor def failed: ... failed to load plugin`). The
