@@ -9,6 +9,16 @@ documentation site as the Changelog page.
 
 **Fixed**
 
+- A synthdef could delete its own freshly built dylib before loading it
+  (reported on the forum and reproduced locally as a silent live-coding
+  session: `live: anchor def failed: ... failed to load plugin`). The
+  build revision counter was seeded from disk once per process; if another
+  tzpl process (a second app instance, a CLI render, a test run) sharing
+  `~/tzpl-build` had since written higher-numbered revisions of the same
+  def, the new build was numbered below them and the keep-three-newest
+  prune removed it a moment before `dlopen`. The counter is now re-synced
+  with the disk before every build and the prune never touches the
+  revision just built.
 - The source tree failed to compile on Fedora (reported by a user): a
   newer libstdc++ no longer pulls in `<climits>` or `<unistd.h>`
   transitively, so `INT_MAX` in the type checker's "did you mean" typo

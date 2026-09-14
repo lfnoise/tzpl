@@ -104,26 +104,28 @@ scanRevisions(string const& buildDir, string const& synthName) {
     return revs;
 }
 
-// Seed a name's counter from the dylibs already on disk, so revisions keep
-// increasing across process restarts.
+// Raise a name's counter to the highest revision on disk, so the next build
+// is numbered above every dylib that exists -- whoever wrote it.
 //
-// The counter is process-lifetime state. Without seeding, every launch starts
+// The counter is process-lifetime state. Without this, every launch starts
 // at 0 and the first compile of a name rewrites {name}_synth_r1.dylib -- so a
 // higher revision left by an earlier session outlives the build that replaced
 // it, and anything that reads the revision as "newest" (the plugin browser)
-// resolves to the stale file. Seeding also restores the invariant that a
-// compile never overwrites a dylib some node may still be running.
+// resolves to the stale file. It also keeps the invariant that a compile
+// never overwrites a dylib some node may still be running.
 //
-// No-ops once the name has a counter, so it costs one directory scan per name
-// per process.
-static void seedRevisionFromDisk(string const& buildDir, string const& synthName) {
-    auto& counters = revisionCounters();
-    if (counters.find(synthName) != counters.end()) return;
-
+// Runs before EVERY build, not just the first per name: the build dir is
+// shared by every tzpl process on the machine (the app, a CLI render, a
+// second app instance), and another process can push the disk past a
+// counter this one seeded earlier. A build numbered below the newest
+// revisions on disk is exactly what pruneOldRevisions deletes -- so it would
+// erase its own output before loadDef opened it.
+static void syncRevisionFromDisk(string const& buildDir, string const& synthName) {
     u64 maxRev = 0;
     for (auto const& [rev, path] : scanRevisions(buildDir, synthName))
         if (rev > maxRev) maxRev = rev;
-    counters[synthName] = maxRev;
+    auto& counter = revisionCounters()[synthName];
+    if (maxRev > counter) counter = maxRev;
 }
 
 // How many revisions of a name to keep on disk. $TZPL_KEEP_REVISIONS, else 3.
@@ -140,14 +142,18 @@ static u64 keepRevisions() {
     return keep;
 }
 
-// Drop all but the newest keepRevisions() revisions of a name.
+// Drop all but the newest keepRevisions() revisions of a name. `current` is
+// the revision just built: it is never removed, even if another process has
+// meanwhile written higher-numbered revisions -- the caller is about to
+// dlopen it.
 //
 // Deleting a dylib that is currently dlopen'd is safe: unlink drops the
 // directory entry while the mapping holds the inode, so nodes running that
 // revision keep valid function pointers. What a deletion can break is opening
 // it *again* by path -- which is why callers that cache a dylib path must fall
 // back to recompiling when the load fails.
-static void pruneOldRevisions(string const& buildDir, string const& synthName) {
+static void pruneOldRevisions(string const& buildDir, string const& synthName,
+                              u64 current) {
     auto revs = scanRevisions(buildDir, synthName);
     u64 keep = keepRevisions();
     if (revs.size() <= keep) return;
@@ -158,6 +164,7 @@ static void pruneOldRevisions(string const& buildDir, string const& synthName) {
 
     usize removed = 0;
     for (usize i = keep; i < revs.size(); ++i) {
+        if (revs[i].first == current) continue;
         std::error_code ec;
         if (fs::remove(revs[i].second, ec) && !ec) ++removed;
     }
@@ -439,9 +446,10 @@ int compileAndLink(string const& buildDir, string const& synthName) {
     // Bump revision so this compilation produces a unique dylib path.
     // Old dylibs stay on disk (and in memory via dlopen) so that
     // nodes still running the previous version keep valid function pointers.
-    // Seeding first makes that hold across restarts too, not just within a run.
-    seedRevisionFromDisk(buildDir, synthName);
-    revisionCounters()[synthName]++;
+    // Syncing first makes that hold across restarts and across concurrent
+    // processes too, not just within a run.
+    syncRevisionFromDisk(buildDir, synthName);
+    u64 const rev = ++revisionCounters()[synthName];
 
     string filename = synthName + synthNameSuffix;
     string filepath_c = buildDir + "cpp/" + filename + ".cpp";
@@ -458,7 +466,7 @@ int compileAndLink(string const& buildDir, string const& synthName) {
     // Bound the cache here rather than at shutdown: this runs whatever way the
     // process exits, and it keeps a long live-coding session from growing
     // without limit instead of only cleaning up on the next launch.
-    pruneOldRevisions(buildDir, synthName);
+    pruneOldRevisions(buildDir, synthName, rev);
 
     return 0;
 }
