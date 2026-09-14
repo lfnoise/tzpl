@@ -30,7 +30,10 @@
 #include <format>
 #include <fstream>
 #include <print>
+#include <string_view>
+#include <unistd.h>
 #include <unordered_map>
+#include <vector>
 
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
@@ -172,37 +175,215 @@ static void pruneOldRevisions(string const& buildDir, string const& synthName,
         std::println("pruned {} old revision(s) of {}", removed, synthName);
 }
 
-static int compile(string const& filepath_c, string const& filepath_o, string const& includeDir)
-{
-    printf("\nbegin C compile plugin =====================================================\n");
-
-    string cmd = toolchainCommand();
+// The flags every plugin compile uses. Shared with the precompiled header
+// (a PCH is only accepted by a compile whose language/target options match
+// the ones it was built with), so this is the single place they live.
+static string compileFlags() {
+    string f;
 #ifdef __APPLE__
-    cmd += " -x c++ -arch arm64 -std=c++23 -stdlib=libc++";
+    f += " -arch arm64 -std=c++23 -stdlib=libc++";
 #else
-    cmd += " -x c++ -std=c++23 -fPIC";
+    f += " -std=c++23 -fPIC";
 #endif
-    cmd += " -o " + filepath_o;
-    cmd += " -O3";
+    f += " -O3";
     // fast-math minus the finite-math assumption: generated event loops can
     // legitimately compute transient Inf (e.g. 1/(freq*decay) with pre-note
     // zeros at control priming), which is UB under -ffinite-math-only -- and
     // x86-64 clang exploits it into a silent render. IEEE Inf handling makes
     // it well-defined (pow(x, inf) = 0, overwritten at noteOn).
-    cmd += " -ffast-math -fno-finite-math-only";
-    cmd += " -I " + includeDir;
-    cmd += " -c " + filepath_c;
+    f += " -ffast-math -fno-finite-math-only";
+    return f;
+}
 
-    printf("COMPILE: %s\n", cmd.c_str());
+// Run a toolchain command, echoing its output. Returns the exit status.
+static int runTool(string const& cmd) {
     FILE* pf = popen(cmd.c_str(), "r");
-
-    while(1) {
+    if (!pf) return -1;
+    while (1) {
         char buffer[2048];
-        char *line = fgets(buffer, sizeof(buffer), pf);
+        char* line = fgets(buffer, sizeof(buffer), pf);
         if (!line) break;
         printf("%s", line);
     }
-    int status = pclose(pf);
+    return pclose(pf);
+}
+
+// ---------------------------------------------------------------------------
+// Precompiled header
+//
+// Almost all of a plugin compile is the front end chewing through the fixed
+// preamble every generated file starts with (the plugin ABI, matrix, random
+// and delay headers, and five standard headers): on an M-series Mac a
+// 100-line pass-through takes ~0.4 s and an empty file with the same
+// includes ~0.5 s. A precompiled header of that preamble brings a typical
+// synthdef down to ~0.06 s -- the difference between a live redefine that
+// feels instant and one that does not.
+//
+// The PCH is keyed by a hash of the staged headers, the compile flags and
+// the compiler's version string, so a header refresh (ensureBuildDirs
+// copies newer headers in), a toolchain upgrade or a flag change simply
+// builds a new one; stale ones are pruned. It is written to a temp path and
+// renamed, so another tzpl process sharing the build dir never sees a
+// partial file. Generated files keep their own #include lines: with the PCH
+// injected first those are no-ops behind the include guards, and a file
+// that needs more (tzpl_fft.hpp, tzpl_voicer.hpp) just compiles the extra
+// headers as before. If a PCH-assisted compile fails for any reason the
+// file is compiled once more without it, so the worst case is the old
+// speed, never a lost build.
+// ---------------------------------------------------------------------------
+
+// The preamble both code generators emit (synthdef_cpp_codegen.cpp and
+// lang/modules/synthc/codegen.x). Keep in sync: a header missing here is
+// merely not precompiled; one listed here that generated code does not
+// include is harmless.
+static char const* const kPluginPreamble =
+    "#include \"tzpl_plugin_abi.h\"\n"
+    "#include \"tzpl_matrix_transform.hpp\"\n"
+    "#include \"tzpl_random.hpp\"\n"
+    "#include \"tzpl_delay_interp.hpp\"\n"
+    "#include <cmath>\n"
+    "#include <cstdio>\n"
+    "#include <cstring>\n"
+    "#include <cstdlib>\n"
+    "#include <array>\n";
+
+static u64 fnv1a(u64 h, std::string_view bytes) {
+    for (unsigned char c : bytes) {
+        h ^= c;
+        h *= 0x100000001b3ull;
+    }
+    return h;
+}
+
+// `<compiler> --version`, first line, fetched once per process.
+static string const& compilerVersion() {
+    static string const v = [] {
+        string out;
+        if (FILE* pf = popen((toolchainCommand() + " --version 2>/dev/null").c_str(), "r")) {
+            char buffer[512];
+            if (fgets(buffer, sizeof(buffer), pf)) out = buffer;
+            pclose(pf);
+        }
+        return out;
+    }();
+    return v;
+}
+
+// Path of the PCH matching the current headers/flags/compiler, building it if
+// it does not exist yet. Empty string when it cannot be built -- the caller
+// then compiles without one, as before.
+static string ensurePluginPCH(string const& buildDir, string const& includeDir) {
+    std::error_code ec;
+
+    // Hash the staged headers in name order, then flags and compiler. The
+    // content hash is cached per process behind a cheap stat signature
+    // (names, sizes, mtimes): headers change only when ensureBuildDirs
+    // refreshes them, and reading them on every compile costs ~20 ms.
+    std::vector<fs::path> headers;
+    string sig;
+    fs::directory_iterator it(includeDir, ec);
+    for (; !ec && it != fs::directory_iterator(); it.increment(ec)) {
+        std::error_code entryEc;
+        if (!it->is_regular_file(entryEc)) continue;
+        auto ext = it->path().extension().string();
+        if (ext == ".h" || ext == ".hpp") headers.push_back(it->path());
+    }
+    if (ec) return "";
+    std::sort(headers.begin(), headers.end());
+    for (auto const& hp : headers) {
+        auto size = fs::file_size(hp, ec);
+        auto mtime = fs::last_write_time(hp, ec).time_since_epoch().count();
+        if (ec) return "";
+        sig += std::format("{}:{}:{};", hp.filename().string(), size, mtime);
+    }
+    static string cachedSig;
+    static u64 cachedHash = 0;
+    u64 h;
+    if (!cachedSig.empty() && sig == cachedSig) {
+        h = cachedHash;
+    } else {
+        h = 0xcbf29ce484222325ull;
+        for (auto const& hp : headers) {
+            std::ifstream in(hp, std::ios::binary);
+            if (!in) return "";
+            string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+            h = fnv1a(h, hp.filename().string());
+            h = fnv1a(h, bytes);
+        }
+        h = fnv1a(h, kPluginPreamble);
+        h = fnv1a(h, compileFlags());
+        h = fnv1a(h, compilerVersion());
+        cachedSig = sig;
+        cachedHash = h;
+    }
+
+    string pchDir = buildDir + "pch/";
+    fs::create_directories(pchDir, ec);
+    if (ec) return "";
+    string pchPath = pchDir + std::format("tzpl_plugin_{:016x}.pch", h);
+    if (fs::is_regular_file(pchPath, ec)) return pchPath;
+
+    // Build it: write the preamble, precompile to a temp name, rename.
+    string hdrPath = pchDir + "tzpl_plugin_preamble.hpp";
+    {
+        std::ofstream out(hdrPath, std::ios::binary | std::ios::trunc);
+        if (!out) return "";
+        out << kPluginPreamble;
+    }
+    string tmpPath = pchPath + std::format(".{}.tmp", (long)getpid());
+    string cmd = toolchainCommand() + " -x c++-header" + compileFlags()
+               + " -I " + includeDir + " -o " + tmpPath + " " + hdrPath;
+    printf("PCH: %s\n", cmd.c_str());
+    if (runTool(cmd) != 0) {
+        fs::remove(tmpPath, ec);
+        return "";
+    }
+    fs::rename(tmpPath, pchPath, ec);
+    if (ec) {
+        fs::remove(tmpPath, ec);
+        return "";
+    }
+
+    // Drop PCHs for headers/flags that no longer exist.
+    fs::directory_iterator old(pchDir, ec);
+    for (; !ec && old != fs::directory_iterator(); old.increment(ec)) {
+        auto name = old->path().filename().string();
+        if (name.starts_with("tzpl_plugin_") && name.ends_with(".pch")
+            && old->path().string() != pchPath) {
+            std::error_code rmEc;
+            fs::remove(old->path(), rmEc);
+        }
+    }
+    return pchPath;
+}
+
+static int compile(string const& filepath_c, string const& filepath_o,
+                   string const& includeDir, string const& pchPath)
+{
+    printf("\nbegin C compile plugin =====================================================\n");
+
+    auto command = [&](bool withPCH) {
+        string cmd = toolchainCommand() + " -x c++" + compileFlags();
+        if (withPCH) cmd += " -include-pch " + pchPath;
+        cmd += " -I " + includeDir;
+        cmd += " -o " + filepath_o;
+        cmd += " -c " + filepath_c;
+        return cmd;
+    };
+
+    bool withPCH = !pchPath.empty();
+    string cmd = command(withPCH);
+    printf("COMPILE: %s\n", cmd.c_str());
+    int status = runTool(cmd);
+    if (status && withPCH) {
+        // Whatever went wrong (a PCH another process is mid-way through
+        // replacing, a compiler that will not accept it), the plain compile
+        // is the ground truth: retry without it before reporting.
+        printf("retrying without precompiled header\n");
+        cmd = command(false);
+        printf("COMPILE: %s\n", cmd.c_str());
+        status = runTool(cmd);
+    }
     if (status) {
         printf("error %d compiling '%s'\n", status, filepath_c.c_str());
         return WEXITSTATUS(status);
@@ -457,7 +638,8 @@ int compileAndLink(string const& buildDir, string const& synthName) {
     string filepath_dylib = dylibPath(buildDir, synthName);
     string includeDir = buildDir + "include";
 
-    int err = compile(filepath_c, filepath_o, includeDir);
+    int err = compile(filepath_c, filepath_o, includeDir,
+                      ensurePluginPCH(buildDir, includeDir));
     if (err) return err;
 
     err = link(filepath_o, filepath_dylib, buildDir);

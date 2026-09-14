@@ -1720,6 +1720,21 @@ drone &lt;- <span class="kw">fn</span>() <span class="typ">S</span> {
     sinosc([<span class="num">1.0</span>, <span class="num">1.003</span>] * f) * <span class="num">0.2</span>
 };
 drone play;                      <span class="cmt">-- fade onto the speakers</span></code></pre>
+<div class="note"><strong>What to expect</strong>
+Evaluating that cell prints <code>&rarr; [Future] : Future&lt;Int&gt;</code>
+&mdash; the value of <code>drone play</code>, which returns at once (there is
+nothing to await and no clock to wait for). The sound follows a moment later:
+<code>&lt;-</code> compiles the definition with <code>clang</code> in the
+background (a few hundred milliseconds; the very first compile on a machine
+also builds a precompiled header, so allow a second for that one), then the
+monitor fades in over <code>fadeTime</code> (1&nbsp;s by default). The
+proxy's own plumbing &mdash; anchor and monitor &mdash; are native engine
+nodes and never compile. If it stays silent, look at the lines that arrive
+<em>after</em> the <code>&rarr;</code> echo: a definition that fails to build
+prints <code>live: redefine failed: &hellip;</code>, and a missing toolchain
+(on macOS, the Xcode Command Line Tools) shows up there as a compile/link
+failure. <code>drone meter; drone peak println</code> (&sect;12.6) reads the
+proxy's output level directly.</div>
 <pre><code>fadeTime(<span class="num">4.0</span>);                   <span class="cmt">-- slow morphs from here on</span>
 drone &lt;- <span class="kw">fn</span>() <span class="typ">S</span> {
     (sinosc([<span class="num">1.0</span>, <span class="num">1.5</span>, <span class="num">2.01</span>, <span class="num">3.0</span>] * <span class="num">110.0</span>) sum(<span class="num">2</span>)) * <span class="num">0.12</span>
