@@ -113,6 +113,8 @@ public:
         else editorPane_.openFile(f);
     }
     EditorPane& testEditorPane() { return editorPane_; }
+    // Evaluate `code` as one editor eval (TZPL_JUCE_EVAL_CELLS driver).
+    void testLaunchEval(juce::String const& code) { launchEval(code, -1, -1); }
     void testShowDemo(juce::String const& which);
     void testShowNotebook(bool show) { showNotebook(show); }
     NotebookView& testNotebook() { return *notebook_; }

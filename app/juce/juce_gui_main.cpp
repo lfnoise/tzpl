@@ -369,6 +369,25 @@ public:
                 juce::Timer::callAfterDelay(300, [this] {
                     commands_.invokeDirectly(cmd::evalFile, false);
                 });
+            // TZPL_JUCE_EVAL_CELLS=<ms>: evaluate the just-opened file one
+            // chunk at a time, split on lines containing only "%%", each
+            // through the editor's real eval path (its own REPLSession
+            // eval on the eval thread), waiting for the previous eval to be
+            // collected plus <ms> before the next -- the GUI counterpart of
+            // main.cpp's headless TZPL_EVAL_CELLS, for reproducing bugs
+            // that only appear across separate Cmd+Enter evaluations.
+            if (auto* ms = std::getenv("TZPL_JUCE_EVAL_CELLS")) {
+                cellGapMs_ = std::max(0, atoi(ms));
+                juce::StringArray lines;
+                juce::File(juce::String(p)).readLines(lines);
+                juce::String cell;
+                for (auto const& line : lines) {
+                    if (line.trim() == "%%") { cells_.add(cell); cell.clear(); }
+                    else cell << line << "\n";
+                }
+                if (cell.trim().isNotEmpty()) cells_.add(cell);
+                juce::Timer::callAfterDelay(300, [this] { evalNextCell(); });
+            }
         }
 
         // TZPL_JUCE_DEMO=find|flash|graph|settings|history|perform|quit-dirty:
@@ -565,6 +584,31 @@ public:
         juce::Timer::callAfterDelay(100, [this] { pollEvalThenQuit(); });
     }
 
+    // TZPL_JUCE_EVAL_CELLS driver: launch the next cell once the previous
+    // eval has been collected and the gap has elapsed.
+    void evalNextCell() {
+        auto* main = window_->mainComponent();
+        if (!main->testEvalCollected()) {
+            juce::Timer::callAfterDelay(50, [this] { evalNextCell(); });
+            return;
+        }
+        if (cellIndex_ > 0) {
+            std::printf("JUCE CELL %d: %s\n", cellIndex_,
+                        main->testLastEvalSummary().toRawUTF8());
+            std::fflush(stdout);
+        }
+        if (cellIndex_ >= cells_.size()) {
+            std::printf("JUCE CELLS DONE\n");
+            std::fflush(stdout);
+            return;
+        }
+        auto code = cells_[cellIndex_++];
+        juce::Timer::callAfterDelay(cellGapMs_, [this, code] {
+            window_->mainComponent()->testLaunchEval(code);
+            juce::Timer::callAfterDelay(50, [this] { evalNextCell(); });
+        });
+    }
+
     void runFindReplaceSelfTest() {
         // Fresh tab, known content; find "foo" and confirm the selection
         // landed on a real occurrence.
@@ -684,6 +728,9 @@ private:
     juce::ApplicationProperties appProperties_;
     int evalPollsLeft_ = 0;
     int evalPhase_ = 0;
+    juce::StringArray cells_;      // TZPL_JUCE_EVAL_CELLS chunks
+    int cellIndex_ = 0;
+    int cellGapMs_ = 0;
     std::unique_ptr<TzplLookAndFeel> lookAndFeel_;
     std::unique_ptr<AppMenuModel> menuModel_;
     std::unique_ptr<MainWindow> window_;
