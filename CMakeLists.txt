@@ -18,7 +18,7 @@ if(APPLE)
         "Minimum macOS deployment target (set from TZPL_MACOS_DEPLOYMENT_TARGET)" FORCE)
 endif()
 
-project(tzpl VERSION 0.2.4 LANGUAGES C CXX)
+project(tzpl VERSION 0.2.5 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

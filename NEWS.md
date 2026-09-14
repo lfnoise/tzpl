@@ -5,7 +5,7 @@ in [git](https://github.com/lfnoise/tzpl/commits/main); this file records
 the changes worth knowing about as a user of the platform. Rendered on the
 documentation site as the Changelog page.
 
-## Unreleased
+## v0.2.5 (14 September 2026)
 
 **Changed**
 
@@ -41,8 +41,9 @@ documentation site as the Changelog page.
   definition lands, so the pattern starts as written; `replace` and
   `enqueue` during that window park likewise.
 - A synthdef could delete its own freshly built dylib before loading it
-  (reported on the forum and reproduced locally as a silent live-coding
-  session: `live: anchor def failed: ... failed to load plugin`). The
+  (reproduced locally as a silent live-coding session: `live: anchor def
+  failed: ... failed to load plugin`; the likely cause of one reported on
+  the forum). The
   build revision counter was seeded from disk once per process; if another
   tzpl process (a second app instance, a CLI render, a test run) sharing
   `~/tzpl-build` had since written higher-numbered revisions of the same
