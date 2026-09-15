@@ -71,10 +71,38 @@ struct RenderJob {
     std::atomic<double>                      tailOverride{0.0};
     std::mutex                               cbMtx;
     std::vector<std::function<void()>>       onDoneCallbacks;
+
+    // Render-loop state, shared between the main loop and the setup-phase
+    // pump (a top-level `await delayReal`/`delayBeats` in the setup script
+    // drives the clock through renderOneBlock so its future can resolve --
+    // see renderPumpDuringSetup). All touched only on the render thread.
+    engine::WavWriter*                       writer = nullptr;
+    std::vector<engine::f32>                 blockBuf;
+    int                                      sampleRate = 0;
+    int                                      channels = 0;
+    int                                      bufferFrames = 0;
+    int64_t                                  maxFrames = 0;
+    int64_t                                  framesRendered = 0;
     // The std::thread itself is stored in a separate global vector so that
     // its move-assignment can't race with the thread already running and
     // touching RenderJob fields.
 };
+
+// Render one block: advance the manual scheduler to the block's logical time
+// (firing any handlers/wall deadlines due), render it, and write it. Returns
+// false once the frame budget is spent. No tail/stop bookkeeping -- the main
+// loop owns that; this is the shared primitive both it and the setup pump use.
+static bool renderOneBlock(RenderJob* job) {
+    if (job->framesRendered >= job->maxFrames) return false;
+    double logicalSeconds = double(job->framesRendered) / job->sampleRate;
+    job->sched->tickTo(logicalSeconds);
+    engine::renderNRTBlock(job->eng.get(), job->blockBuf.data());
+    int64_t remaining = job->maxFrames - job->framesRendered;
+    int framesThisBlock = int(std::min<int64_t>(job->bufferFrames, remaining));
+    engine::wavWrite(job->writer, job->blockBuf.data(), framesThisBlock);
+    job->framesRendered += framesThisBlock;
+    return true;
+}
 
 // ---------------------------------------------------------------------------
 // Registry
@@ -107,23 +135,13 @@ static RenderJob* lookup(int64_t handle) {
 static void runRenderThread(RenderJob* job) {
     ScopedRenderContext scope(&job->ctx);
 
-    // Run the setup callback on this render thread so we can call into the
-    // VM via callCallable without clobbering whatever the script's own VM
-    // execution is doing on the main thread. callCallable resets the VM's
-    // frame state, so it cannot be invoked from inside another running VM
-    // execution -- but it is fine to run it on a thread that has nothing
-    // else going on, under the NRTVM mutex.
-    if (job->setup) {
-        job->setup();
-        job->setup = nullptr; // release the std::function (and any retained Tzpl handler)
-    }
+    job->sampleRate   = int(job->eng->streamParams_.sampleRate);
+    job->channels     = job->eng->streamParams_.channels;
+    job->bufferFrames = job->eng->streamParams_.bufferFrames;
 
-    int sampleRate   = int(job->eng->streamParams_.sampleRate);
-    int channels     = job->eng->streamParams_.channels;
-    int bufferFrames = job->eng->streamParams_.bufferFrames;
-
-    auto* writer = engine::wavOpen(job->opts.path.c_str(), sampleRate, channels);
-    if (!writer) {
+    job->writer = engine::wavOpen(job->opts.path.c_str(),
+                                  job->sampleRate, job->channels);
+    if (!job->writer) {
         // Mark done so isRenderDone returns true and onDone callbacks can fire.
         std::vector<std::function<void()>> cbs;
         {
@@ -137,29 +155,61 @@ static void runRenderThread(RenderJob* job) {
 
     bool hasFixedDuration = job->opts.durationSeconds > 0.0;
     int64_t durationFrames = hasFixedDuration
-        ? int64_t(job->opts.durationSeconds * sampleRate + 0.5) : 0;
-    int64_t safetyCapFrames = int64_t(job->opts.safetyCapSeconds * sampleRate + 0.5);
-    int64_t maxFrames = hasFixedDuration ? durationFrames : safetyCapFrames;
-    int64_t defaultTailFrames = int64_t(job->opts.tailSeconds * sampleRate + 0.5);
+        ? int64_t(job->opts.durationSeconds * job->sampleRate + 0.5) : 0;
+    int64_t safetyCapFrames = int64_t(job->opts.safetyCapSeconds * job->sampleRate + 0.5);
+    job->maxFrames = hasFixedDuration ? durationFrames : safetyCapFrames;
+    int64_t defaultTailFrames = int64_t(job->opts.tailSeconds * job->sampleRate + 0.5);
 
-    std::vector<engine::f32> blockBuf(size_t(bufferFrames) * size_t(channels));
+    job->blockBuf.assign(size_t(job->bufferFrames) * size_t(job->channels), 0.f);
 
-    int64_t framesRendered = 0;
+    // Run the setup callback on this render thread so we can call into the
+    // VM via callCallable without clobbering whatever the script's own VM
+    // execution is doing on the main thread. callCallable resets the VM's
+    // frame state, so it cannot be invoked from inside another running VM
+    // execution -- but it is fine to run it on a thread that has nothing
+    // else going on, under the NRTVM mutex.
+    //
+    // A top-level `await delayReal`/`delayBeats` inside setup parks the VM
+    // waiting for the render clock to advance -- but the clock is driven by
+    // this thread, which is inside setup(), so it would deadlock. For the
+    // span of setup, swap in a host-wait hook that DRIVES the render (rendering
+    // and writing blocks) until the awaited future resolves, so logical time
+    // advances and delayReal resolves "at logical render time" as documented.
+    // The blocks it writes are the same output the main loop would have
+    // written; the loop below simply continues from job->framesRendered.
+    if (job->setup) {
+        ts::VM& vm = job->appCtx->nrtvm->vm;
+        auto savedHook = vm.hostBlockingWait();
+        std::mutex& vmMtx = job->appCtx->nrtvm->mtx;
+        vm.setHostBlockingWait([job, &vmMtx, savedHook](
+                                   std::function<bool()> const& ready) {
+            if (ready()) return;
+            // Enter with vmMtx held (adopted from the parked await). Release it
+            // so renderOneBlock's tickTo can take it, drive blocks until the
+            // future resolves, then reacquire for the caller's lock_guard.
+            vmMtx.unlock();
+            while (!ready() && renderOneBlock(job)) {}
+            if (!ready()) {
+                // Ran out of frame budget with the await still pending (the
+                // script asked to wait past the render duration). Fire every
+                // remaining wall/beat delay so the script unblocks and can
+                // finish; the render is ending regardless.
+                std::lock_guard<std::mutex> lk(vmMtx);
+                job->sched->resolvePendingDelays();
+            }
+            vmMtx.lock();
+            (void)savedHook;
+        });
+        job->setup();
+        job->setup = nullptr; // release the std::function (and any retained Tzpl handler)
+        vm.setHostBlockingWait(savedHook);
+    }
+
     int64_t tailStartedAt = -1;
     int64_t tailFrames = defaultTailFrames;
 
-    while (framesRendered < maxFrames) {
-        // Tick the per-render tempo scheduler to current logical time so
-        // handlers fire BEFORE this block runs and can queue commands that
-        // the silos will pick up via processRTCommands.
-        double logicalSeconds = double(framesRendered) / sampleRate;
-        job->sched->tickTo(logicalSeconds);
-
-        engine::renderNRTBlock(job->eng.get(), blockBuf.data());
-        int64_t remaining = maxFrames - framesRendered;
-        int framesThisBlock = int(std::min<int64_t>(bufferFrames, remaining));
-        engine::wavWrite(writer, blockBuf.data(), framesThisBlock);
-        framesRendered += framesThisBlock;
+    while (job->framesRendered < job->maxFrames) {
+        if (!renderOneBlock(job)) break;
 
         if (tailStartedAt < 0) {
             bool stopReq = job->stopRequested.load();
@@ -167,25 +217,27 @@ static void runRenderThread(RenderJob* job) {
             if (stopReq || autoStop) {
                 double explicitTail = job->tailOverride.load();
                 if (explicitTail > 0.0) {
-                    tailFrames = int64_t(explicitTail * sampleRate + 0.5);
+                    tailFrames = int64_t(explicitTail * job->sampleRate + 0.5);
                 }
-                tailStartedAt = framesRendered;
+                tailStartedAt = job->framesRendered;
             }
         }
 
-        if (tailStartedAt >= 0 && (framesRendered - tailStartedAt) >= tailFrames) {
+        if (tailStartedAt >= 0 && (job->framesRendered - tailStartedAt) >= tailFrames) {
             break;
         }
     }
 
-    if (!hasFixedDuration && tailStartedAt < 0) {
+    if (!hasFixedDuration && tailStartedAt < 0
+        && job->framesRendered >= job->maxFrames) {
         std::cerr << "renderNRT[" << job->handle
                   << "]: hit safety cap of " << job->opts.safetyCapSeconds
                   << "s without a stop signal -- script never called endRender()/"
                      "stopRender(), and tempo scheduler never went idle.\n";
     }
 
-    engine::wavClose(writer);
+    engine::wavClose(job->writer);
+    job->writer = nullptr;
 
     std::vector<std::function<void()>> cbs;
     {

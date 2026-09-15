@@ -34,6 +34,15 @@ documentation site as the Changelog page.
 
 **Fixed**
 
+- A top-level `await delayReal` / `await delayBeats` in an offline (`--nrt`)
+  render script hung forever. The render clock is driven by the render
+  thread only after the setup script returns, but the await parked that
+  script waiting for the clock to advance -- a deadlock. The render now
+  drives its clock (rendering and writing output blocks) while the setup
+  script is parked in such an await, so the delay resolves at logical
+  render time as documented; an await whose deadline falls past the render
+  duration is released when the render ends. (The idiomatic pattern -- a
+  render-clock-driven `coro fn ... yield` -- was unaffected.)
 - Evaluating `drone <- ...; drone play;` (Cookbook §12.1) produced no sound
   unless the cell also contained an `await`. A fire-and-forget async call --
   which is what `<-` and `play` are -- resolves its background compile on

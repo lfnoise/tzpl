@@ -668,6 +668,11 @@ public:
     void setHostBlockingWait(std::function<void(std::function<bool()> const&)> fn) {
         hostBlockingWait_ = std::move(fn);
     }
+    // A copy of the current hook, so a caller can install a temporary one
+    // (e.g. the NRT render pump during setup) and restore this afterwards.
+    std::function<void(std::function<bool()> const&)> hostBlockingWait() const {
+        return hostBlockingWait_;
+    }
     // Install / use the host async-I/O executor. submitAsyncIO returns false
     // -- with the job untouched, so the caller may still run it inline --
     // when no host installed an executor.

@@ -305,6 +305,31 @@ bool NRTTempoScheduler::isIdle() const {
     return queue_.empty() && wallQueue_.empty();
 }
 
+void NRTTempoScheduler::resolvePendingDelays() {
+    // Resolve every awaitable delay (delayReal wall entries and delayBeats
+    // beat entries) regardless of deadline, so a script parked in such an
+    // await unblocks. Used when a manual-mode render ends before an await's
+    // deadline is reached -- the render is over, so waiting further is moot.
+    // Caller holds the VM mutex; resolveExternalFuture only touches VM state.
+    std::vector<Future*> toResolve;
+    {
+        std::lock_guard lock(schedMtx_);
+        for (auto const& w : wallQueue_) toResolve.push_back(w.fut);
+        wallQueue_.clear();
+        std::vector<Entry> keep;
+        for (Entry& e : queue_) {
+            if (e.resolveFut) toResolve.push_back(e.resolveFut);
+            else keep.push_back(e);
+        }
+        queue_ = std::move(keep);
+    }
+    for (Future* f : toResolve) {
+        vm_->vm.makeCurrent();
+        vm_->vm.resolveExternalFuture(f);
+    }
+    vm_->vm.runReadyAsyncIfIdle();
+}
+
 void NRTTempoScheduler::tickTo(f64 seconds) {
     if (!manualMode_) return;
     firingThread_.store(std::this_thread::get_id(), std::memory_order_relaxed);

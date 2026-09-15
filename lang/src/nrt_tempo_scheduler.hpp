@@ -184,6 +184,11 @@ public:
     // NRT renderer to detect "no more work to drive" idle conditions.
     bool isIdle() const;
 
+    // Resolve every pending awaitable delay (delayReal + delayBeats) now,
+    // ignoring deadlines, so a script parked in such an await unblocks when a
+    // manual-mode render ends first. Caller holds the VM mutex.
+    void resolvePendingDelays();
+
 private:
     void run();
 
