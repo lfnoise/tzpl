@@ -3550,6 +3550,7 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
   <tr><td><code>masterGain(gain Float) Void</code></td><td>Set the master output gain. <code>1.0</code> = unity, <code>0.0</code> = silence. When the safety limiter is enabled, the master gain can reduce the limiter's gain but never increase it &mdash; it will not fight the limiter. When audio is below the limit, the master gain applies freely. When the limiter is disabled, the master gain is a simple multiply.</td></tr>
   <tr><td><code>safetyLimiter(on Bool) Void</code></td><td>Enable or disable the safety limiter on the master output. When enabled, output is hard-limited to prevent clipping/damage.</td></tr>
   <tr><td><code>inputChannels() Int</code></td><td>Number of active hardware input channels (<code>0</code> if audio input is disabled).</td></tr>
+  <tr><td><code>panicSchedulers() Int</code></td><td>Emergency stop for scheduling (the app's &ldquo;clear schedulers&rdquo; panic button, scriptable). Clears the NRT tempo scheduler, every silo&rsquo;s pending beat-scheduled bundles, and every silo&rsquo;s tasks <em>and</em> delay-driven actors (a <code>spawn</code>ed actor looping on <code>await delay</code> stops). Awaitable top-level delays are kept. Returns the NRT scheduler&rsquo;s dropped-handler count.</td></tr>
 </table>
 
 <!-- -------------------------------- -->

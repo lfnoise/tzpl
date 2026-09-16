@@ -639,6 +639,20 @@ public:
     // it. No host allocation beyond the VM's TLSF heap; safe on the RT thread.
     void tickActors(double beat, int budget);
 
+    // Panic: drop every pending delay() timer and every ready-to-resume
+    // coroutine, halting all delay-driven silo activity (a generative actor's
+    // `await delay(n)` loop). The actors themselves stay in liveActors_ --
+    // frozen on a timer that will never fire, but still able to receive a
+    // message -- so this stops the scheduling without tearing down actor
+    // identity. Pool/vector storage only; safe on the RT thread. Returns the
+    // number of entries dropped.
+    int clearAsyncTimers() {
+        int n = (int)asyncTimers_.size() + (int)asyncReady_.size();
+        asyncTimers_.clear();
+        asyncReady_.clear();
+        return n;
+    }
+
     // Resume every ready async continuation, provided no lang code is active
     // on this VM. For cross-thread resolvers -- an async I/O job's complete
     // step, a scheduler timer firing delayReal/delayBeats -- to call right

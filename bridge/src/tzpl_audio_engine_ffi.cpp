@@ -196,6 +196,16 @@ static void ffi_inputChannels(ts::VM& vm, u16 dst, u16, u16) {
     vm.reg(dst).i = eng ? eng->streamParams_.inputChannels : 0;
 }
 
+// fn panicSchedulers() -> Int
+// The scripting/REPL equivalent of the app's "clear schedulers" panic button:
+// clear the NRT tempo scheduler, every silo's pending beat-scheduled bundles,
+// and every silo's tasks AND delay-driven actors. Returns the NRT scheduler's
+// dropped-handler count. Awaitable top-level delays are kept (see clearAll).
+static void ffi_panicSchedulers(ts::VM& vm, u16 dst, u16, u16) {
+    auto* ctx = getAppContext(vm);
+    vm.reg(dst).i = ctx ? bridge::panicClearSchedulers(*ctx) : 0;
+}
+
 // fn wireDef(chans Int) -> String
 // fn gainDef(chans Int) -> String
 // Name of the engine's native N-channel pass-through / gain def, registering
@@ -1000,7 +1010,14 @@ struct SiloRunStartCmd : engine::Command {
 // getting woken; their coroutines become garbage for the silo VM's GC).
 struct ClearSiloTasksCmd : engine::Command {
     void doRT(engine::Silo* s) override {
-        if (s->taskSched_) static_cast<SiloTaskScheduler*>(s->taskSched_)->clearAll();
+        if (s->taskSched_) {
+            auto* ts = static_cast<SiloTaskScheduler*>(s->taskSched_);
+            ts->clearAll();                 // sched()/spawn(coroutine) tasks
+            // Also halt delay-driven actors (spawn(behavior, msg)): their
+            // `await delay(n)` loops live in the silo VM's async timers, not
+            // the task scheduler, so clearAll() above would leave them running.
+            if (ts->vm_) ts->vm_->clearAsyncTimers();
+        }
     }
     bool doNRT(engine::Silo*) override { return true; }
 };
@@ -1775,6 +1792,7 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     reg("masterGain",       Void, {Float},         ffi_masterGain);
     reg("safetyLimiter",    Void, {Bool},          ffi_safetyLimiter);
     reg("inputChannels",    Int, {},               ffi_inputChannels);
+    reg("panicSchedulers",  Int, {},               ffi_panicSchedulers);
     reg("wireDef",          String, {Int},         ffi_wireDef);
     reg("gainDef",          String, {Int},         ffi_gainDef);
     // NRT-render FFI is registered separately by the bridge::registerNRTRenderFFI

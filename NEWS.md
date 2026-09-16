@@ -32,6 +32,14 @@ documentation site as the Changelog page.
   (`syspolicyd` scans every new Mach-O and consults Apple's notarization
   service) rather than anything under our control.
 
+**Changed**
+
+- The scheduling panic (the status bar’s “clear schedulers” button)
+  now also stops delay-driven silo actors -- a `spawn`ed actor looping on
+  `await delay` (the generative-sequence pattern in Cookbook §7) was left
+  running because its timers live in the silo VM’s async queue, not the
+  task scheduler. It is also scriptable now as `panicSchedulers()`.
+
 **Fixed**
 
 - A silo module (siloLoad / siloEval) that did `import audio_engine.*`
