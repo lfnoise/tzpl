@@ -538,8 +538,11 @@ already playing never pauses. Write <code>mySynth defSynthX(<span
 class="str">"mySynth"</span>) await;</code> when the next line needs the def
 (<code>play</code> itself waits for a compile of that name still in flight, but a
 hand-built bundle's <code>newNode</code> does not); when redefining a def that is
-already playing, drop the <code>await</code> &mdash; players hot-swap to the new
-version when it loads.</div>
+already playing, drop the <code>await</code>. A redefinition never changes nodes
+already running the def &mdash; they keep the code they were created with &mdash;
+only nodes created after the new build loads (the next <code>play</code>, a
+sequence player's next note) use it. To crossfade a running sound into a new
+definition, use a proxy (<a href="#liveproxies">&sect;12</a>).</div>
 
 <h3 id="synthdef-freerun">2.2 A free-running synth</h3>
 <p>The simplest kind of synth is free-running: it sounds continuously from the

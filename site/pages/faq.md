@@ -38,12 +38,16 @@ Synthdef compilation emits C++ and compiles it with the system toolchain,
 so a working `clang` must be on `PATH`. On macOS:
 `xcode-select --install`.
 
-**I redefined a synth while it was playing -- why didn't the sound change
-immediately?**
-Compilation is asynchronous: the clang step runs in the background so music
-that is already playing never pauses. Players hot-swap to the new version
-when it finishes loading. Use `await` only when the *next* line needs the
-def (its first play).
+**I redefined a synth while it was playing -- why didn't the sound change?**
+Two reasons. Compilation is asynchronous: the clang step runs in the
+background so music that is already playing never pauses, and the new
+build is only available once it finishes loading (use `await` when the
+*next* line needs the def, i.e. its first play). And a redefinition never
+changes nodes that are already running: they keep the code they were
+created with, and only nodes created afterwards -- the next `play`, the
+next note from a sequence player -- use the new version. A running sound
+changes only when you tell it to; to crossfade a live sound into a new
+definition, use a proxy (`ndef` / `<-` from `live.*`).
 
 **Do the different engines/silos stay in sync?**
 Engines and silos have independent tempos by design -- nothing assumes or

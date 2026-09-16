@@ -61,9 +61,11 @@ fn compileAndLoadGraph(g SignalGraph, name String) String {
 -- Async: the graph analysis and C++ generation run here (fast), but the clang
 -- compile + dylib load run on a worker thread so playing sequences keep
 -- running. Await the returned future before the def's FIRST play; when
--- redefining a def that is already playing, fire-and-forget is fine -- players
--- keep the old def and hot-swap when the new one loads. (Inside an NRT render
--- the compile runs synchronously, so the future is already resolved.)
+-- redefining a def that is already playing, fire-and-forget is fine. Nodes
+-- already running the def keep their old code (the engine refcounts the
+-- superseded def); only nodes created after the new build loads use it.
+-- (Inside an NRT render the compile runs synchronously, so the future is
+-- already resolved.)
 --
 -- A failed compile PANICS (prints the error and halts) -- a script must not
 -- sail past a def that never loaded. Harnesses that need to tolerate and

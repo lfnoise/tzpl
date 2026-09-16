@@ -1233,9 +1233,14 @@ noteOff(<span class="hl-num">100</span>, <span class="hl-num">1</span>);</code><
                 <li><strong>First definition:</strong> <code>await</code> before playing the def
                 &mdash; <code>mySynth defSynthX(<span class="hl-str">"mySynth"</span>) await;</code> &mdash;
                 so the def exists when the first note asks for it.</li>
-                <li><strong>Redefinition:</strong> just call it, no <code>await</code>. Players keep
-                the old version of the def and hot-swap to the new one when it loads &mdash; live
-                iteration on a synth never interrupts the music.</li>
+                <li><strong>Redefinition:</strong> just call it, no <code>await</code>. Nodes
+                already running the def keep the code they were created with (the engine keeps
+                the superseded build loaded until its last node is freed); nodes created after
+                the new build loads &mdash; the next <code>play</code>, a sequence player's next
+                note &mdash; use the new version. Live iteration on a synth never interrupts the
+                music, and a running sound changes only when you tell it to: use a
+                <code>live.proxy</code> (<code>ndef</code> / <code>&lt;-</code>) to crossfade a
+                running node into a new definition.</li>
             </ul>
 
             <p>Inside a non-real-time render script the compile runs synchronously (the render

@@ -80,11 +80,26 @@ Start it again (`let id2 = play("bubbles");`), then edit the definition --
 change `combn(0.2, 4)` to `combn(0.4, 8)` for a slower, longer echo, or
 `* 0.04` to `* 0.08` for louder -- and re-evaluate the `fn bubbles` block
 *and* the `defSynthX` line (without the `await` this time). Compilation
-runs in the background; the playing node hot-swaps to the new version the
-moment it finishes loading. The music never pauses. This
-define-listen-redefine loop is the core of live coding in Tzopilotl.
+runs in the background, so the music never pauses. Then start another:
 
-When you're done: `stop(id2);`
+```
+let id3 = play("bubbles");
+```
+
+The new node uses the new definition and you hear both versions at once.
+Redefining a def never touches nodes that are already running it: they keep
+the code they were created with (the engine keeps the old build loaded
+until its last node is freed), and only nodes created after the new build
+loads pick it up. This is deliberate -- a running sound changes only when
+you tell it to. Stop the old one to hear the new alone: `stop(id2);`
+
+This define-listen-redefine loop is the core of live coding in Tzopilotl.
+For a *running* sound that crossfades into its new definition instead of
+needing a stop and a fresh `play`, use a proxy (`ndef` and `<-` from
+`live.*`) -- see [Live coding with proxies](Tzopilotl_Music_Cookbook.html#liveproxies)
+in the cookbook.
+
+When you're done: `stop(id3);`
 
 ## 5. Where to go next
 
