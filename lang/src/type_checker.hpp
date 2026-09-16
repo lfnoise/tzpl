@@ -162,6 +162,12 @@ public:
     // Set the source file path (for module resolution and error reporting)
     void setSourceFilePath(const std::string& path) { sourceFilePath_ = path; }
     void setSourceText(const std::string& src) { sourceText_ = src; }
+    // rtRestricted_ is captured from the compiler's current target at
+    // construction. A persistent checker (IncrementalCompiler) is built before
+    // its target is made current, so it must set this explicitly from the
+    // target it will actually compile for -- otherwise silo (RT) code is
+    // checked as non-RT and its non-RT-safe calls slip through.
+    void setRTRestricted(bool on) { rtRestricted_ = on; }
 
     // Error access
     void clearErrors() { errors_.clear(); }
@@ -401,6 +407,24 @@ private:
     // (lambdas, local fns, on-demand inference) accumulate into the outermost.
     int  fnBodyDepth_ = 0;
     bool bodySawRTOnly_ = false;
+    // Symmetric to bodySawRTOnly_ but for the RT-restricted direction: a
+    // function body that calls a non-RT-safe function is not itself an error
+    // when compiling for a silo VM -- it just makes the enclosing function
+    // non-RT-safe, so importing a module full of NRT wrappers (audio_engine's
+    // loadSampleBank, say) into a silo is fine; only an actual RT-reachable
+    // call to such a wrapper is rejected. Applied ONLY to imported dependency
+    // modules (isDependencyModule_): the primary silo unit's own code still
+    // errors on a non-RT-safe call, since its top-level functions are the RT
+    // entry points the runtime dispatches (spawn/siloStart) and are never
+    // reached through a statically-checked call site.
+    bool bodySawUnsafe_ = false;
+
+    // True when this checker is compiling an imported dependency module rather
+    // than the primary translation unit (set by ModuleCompiler::compileModule).
+    bool isDependencyModule_ = false;
+public:
+    void setDependencyModule(bool on) { isDependencyModule_ = on; }
+private:
     bool checkRTSafety(const FuncInfo* func, const std::string& name, SourceRange loc);
 
     // Synthetic Option<T> template declaration (built-in, not from source)

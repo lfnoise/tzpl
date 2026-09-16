@@ -112,6 +112,16 @@ TypeChecker::ImportedModuleScopeGuard::~ImportedModuleScopeGuard() {
 
 bool TypeChecker::checkRTSafety(const FuncInfo* func, const std::string& name, SourceRange loc) {
     if (rtRestricted_ && func && !func->rtSafe) {
+        if (fnBodyDepth_ > 0 && isDependencyModule_) {
+            // Inside a function body: defining a wrapper around a non-RT-safe
+            // function is legal in any module -- taint the enclosing function
+            // (it becomes non-RT-safe too); the error fires at its own
+            // RT-reachable call sites instead. Mirrors the rtOnly branch below,
+            // and lets a silo module `import audio_engine.*` (which defines
+            // loadSampleBank and other NRT wrappers) without a spurious error.
+            bodySawUnsafe_ = true;
+            return true;
+        }
         error(loc, "Function '" + name + "' is not real-time safe and cannot be "
                    "called when compiling for a real-time VM");
         return false;

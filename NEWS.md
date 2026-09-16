@@ -34,6 +34,22 @@ documentation site as the Changelog page.
 
 **Fixed**
 
+- A silo module (siloLoad / siloEval) that did `import audio_engine.*`
+  failed to compile with `siloLoad: compile error` -- the same for
+  `import std.fs.*` and other modules that define NRT wrappers. Importing
+  such a module type-checked every wrapper body against the silo's
+  real-time restriction, so a wrapper the silo never calls (e.g.
+  `loadSampleBank`) failed the whole load. A non-RT-safe function may now
+  be *defined* in an imported module compiled for a silo; only an actual
+  call to one from silo code is rejected. A companion bug is fixed too: a
+  silo's own top-level code was not being RT-checked at all (the persistent
+  incremental checker captured its real-time flag before its target was
+  current), so a silo that called a non-RT-safe function slipped through --
+  it is now correctly rejected.
+- `siloLoad` / `siloEval` compile errors are returned in full through the
+  result Future, not just printed to the console, so the app's output panel
+  shows the actual error (with its source line) instead of a bare
+  `siloLoad: compile error`.
 - A top-level `await delayReal` / `await delayBeats` in an offline (`--nrt`)
   render script hung forever. The render clock is driven by the render
   thread only after the setup script returns, but the await parked that

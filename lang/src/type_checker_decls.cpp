@@ -715,7 +715,8 @@ void TypeChecker::inferFunctionReturnType(FnDeclNode* fn, FuncInfo* fi, bool isL
     fi->bodyChecked = true;
     fi->inferring = false;
     fi->rtOnly = fi->rtOnly || bodySawRTOnly_;
-    if (fnBodyDepth_ == 0) bodySawRTOnly_ = false;
+    if (bodySawUnsafe_) fi->rtSafe = false;
+    if (fnBodyDepth_ == 0) { bodySawRTOnly_ = false; bodySawUnsafe_ = false; }
     fn->resolvedType = resultType;
 
     // Restore state
@@ -935,19 +936,20 @@ void TypeChecker::checkFnDecl(FnDeclNode* decl) {
 
     // Write rtOnly taint from the body check. funcPtr may have been
     // invalidated -- re-find the entry by globalIndex.
-    if (bodySawRTOnly_) {
+    if (bodySawRTOnly_ || bodySawUnsafe_) {
         auto itT = functions_.find(decl->name);
         if (itT != functions_.end()) {
             for (auto& fiT : itT->second) {
                 if (fiT.canonicalFunc) continue;
                 if ((i32)fiT.globalIndex == decl->resolvedFuncGlobalIndex) {
-                    fiT.rtOnly = true;
+                    if (bodySawRTOnly_) fiT.rtOnly = true;
+                    if (bodySawUnsafe_) fiT.rtSafe = false;
                     break;
                 }
             }
         }
     }
-    if (fnBodyDepth_ == 0) bodySawRTOnly_ = false;
+    if (fnBodyDepth_ == 0) { bodySawRTOnly_ = false; bodySawUnsafe_ = false; }
 
     // Validate body against declared return type (non-coroutine, non-void functions).
     // Coroutines yield values rather than returning them through the block's trailing

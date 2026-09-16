@@ -327,6 +327,10 @@ ModuleInfo* ModuleCompiler::compileModule(
     TypeChecker typeChecker(compiler_, this);
     typeChecker.setSourceFilePath(displayPath);
     typeChecker.setSourceText(source);
+    // This checker compiles an imported dependency, not the primary unit --
+    // so under RT restriction its NRT wrapper definitions taint rather than
+    // error (see TypeChecker::checkRTSafety / bodySawUnsafe_).
+    typeChecker.setDependencyModule(true);
 
     typeChecker.check(program);
 

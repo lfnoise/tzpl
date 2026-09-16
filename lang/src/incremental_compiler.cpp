@@ -41,7 +41,13 @@ struct IncrementalCompiler::Impl {
 
     Impl(Compiler& c, const VMTarget& t, ModuleCompiler& mc)
         : compiler(c), target(t), moduleCompiler(mc),
-          typeChecker(c, &moduleCompiler) {}
+          typeChecker(c, &moduleCompiler) {
+        // The checker captured rtRestricted from whatever target was current
+        // when it was built (usually the NRT target); align it with the target
+        // this compiler actually compiles for, so a silo (RT) target's own
+        // source is RT-checked.
+        if (t) typeChecker.setRTRestricted(t->rtRestricted);
+    }
 };
 
 IncrementalCompiler::IncrementalCompiler(Compiler& compiler, const VMTarget& target,
