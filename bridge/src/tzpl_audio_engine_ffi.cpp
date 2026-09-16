@@ -1253,8 +1253,17 @@ static void ffi_siloLoad(ts::VM& vm, u16 dst, u16, u16 argBase) {
     // thread would hit null.
     vm.makeCurrent();
     if (!compiled.success) {
+        // Print the full diagnostics to the console (colorized) AND fold them
+        // into the returned error string, so a GUI caller that only sees the
+        // Future's value still gets the actual compile error rather than a
+        // bare "compile error". The messages carry their own source-context
+        // snippet, so the offending line is visible even though its number is
+        // relative to the injected preamble (a few lines above the user code).
         ts::printDiagnostics(compiled.errors, source, "<siloLoad>", std::cerr, true);
-        resolveNow("siloLoad: compile error");
+        std::string msg = "siloLoad: compile error";
+        for (auto& ln : ts::formatErrorsPlain(compiled.errors, source, "<siloLoad>"))
+            { msg += "\n"; msg += ln; }
+        resolveNow(msg);
         return;
     }
 
