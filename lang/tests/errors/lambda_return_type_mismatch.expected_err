@@ -1,0 +1,17 @@
+Type error [tests/errors/lambda_return_type_mismatch.x:7:10]
+  |
+7 | let mk = fn() Point { 140.0 };
+  |          ^^
+  Lambda declared to return 'Point' but body yields 'Float'
+
+Type error [tests/errors/lambda_return_type_mismatch.x:15:5]
+   |
+15 |     mkT(1) println;
+   |     ^^^
+   Template lambda declared to return 'Point' but body yields 'Float'
+
+Type error [tests/errors/lambda_return_type_mismatch.x:11:1]
+   |
+11 | fn mkTemplate<T>(seed T) Point { 140.0 }
+   | ^^
+   Function 'mkTemplate' declared to return 'Point' but body yields 'Float'

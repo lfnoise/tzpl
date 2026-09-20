@@ -161,6 +161,11 @@ Type* TypeChecker::inferLambdaExpr(LambdaExprNode* expr) {
     // Set up for capture detection
     currentCaptures_ = &expr->captures;
 
+    // The type the body must yield, when the lambda declares one. Coroutine
+    // lambdas yield rather than return, so they're exempt; async lambdas
+    // declare T but wrap it in Future<T>, so the body yields T.
+    Type* bodyReturnType = nullptr;
+
     // Handle coroutine lambdas: declared return type is yield type,
     // wrapped in Coroutine<T> (same convention as coro fn declarations)
     if (expr->isCoroutine && retType) {
@@ -174,6 +179,7 @@ Type* TypeChecker::inferLambdaExpr(LambdaExprNode* expr) {
         inAsyncBody_ = true;
         currentAsyncValueType_ = retType;
         currentReturnType_ = retType;
+        bodyReturnType = retType;
         retType = compiler_.futureType(retType);
     } else if (inferLambdaReturn) {
         inferringReturnType_ = true;
@@ -181,6 +187,7 @@ Type* TypeChecker::inferLambdaExpr(LambdaExprNode* expr) {
         inferredReturnType_ = nullptr;
     } else {
         currentReturnType_ = retType;
+        bodyReturnType = retType;
     }
 
     // Push scope and set boundary
@@ -194,6 +201,12 @@ Type* TypeChecker::inferLambdaExpr(LambdaExprNode* expr) {
 
     // Check body
     checkNode(expr->body.get());
+
+    // Validate the body against an explicitly declared return type -- the same
+    // rule checkFnDecl applies to `fn` declarations. Without it a lambda like
+    // `fn() S { 140.0 }` type-checks and hands back the raw Float bits as a
+    // struct reference, which segfaults on the first field read.
+    checkDeclaredReturnType(expr->body.get(), bodyReturnType, "Lambda", expr->loc);
 
     // If inferring, extract the return type
     if (inferLambdaReturn) {
@@ -599,6 +612,13 @@ LambdaType* TypeChecker::monomorphizeTemplateLambda(TemplateLambdaType* tmplType
 
     // Check body
     checkNode(expr->body.get());
+
+    // A declared return type binds each instantiation just as it binds a plain
+    // lambda; without this the body's value is reinterpreted as the declared
+    // type at runtime.
+    if (!inferReturn) {
+        checkDeclaredReturnType(expr->body.get(), retType, "Template lambda", loc);
+    }
 
     // Extract return type if inferring
     if (inferReturn) {

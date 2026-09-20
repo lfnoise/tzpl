@@ -78,7 +78,7 @@ static bool nodeYieldsValue(ASTNode* node) {
 // Recursively scan a function body for any ReturnStmt. Does NOT descend into
 // nested function declarations or lambda bodies, since returns there target
 // their enclosing function.
-static bool bodyHasReturnStmt(ASTNode* node) {
+bool bodyHasReturnStmt(ASTNode* node) {
     if (!node) return false;
     switch (node->kind) {
         case ASTNode::ReturnStmt:
@@ -565,6 +565,23 @@ void TypeChecker::checkConstDecl(ConstDeclNode* decl) {
     declareVar(decl->name, varType, false);
 }
 
+void TypeChecker::checkDeclaredReturnType(ASTNode* body, Type* bodyReturnType,
+                                          std::string const& what, SourceRange loc) {
+    if (!body || !bodyReturnType || bodyReturnType == compiler_.voidType()) return;
+    Type* trailingType = getBlockTrailingType(body);
+    if (trailingType) {
+        if (!isAssignable(trailingType, bodyReturnType)) {
+            error(loc, what + " declared to return '" +
+                  std::string(bodyReturnType->str()) + "' but body yields '" +
+                  std::string(trailingType->str()) + "'");
+        }
+    } else if (!bodyHasReturnStmt(body)) {
+        error(loc, what + " declared to return '" +
+              std::string(bodyReturnType->str()) +
+              "' but body has no trailing expression or return statement");
+    }
+}
+
 Type* TypeChecker::getBlockTrailingType(ASTNode* node) {
     if (!node || node->kind != ASTNode::Block) return nullptr;
     auto* block = static_cast<BlockStmt*>(node);
@@ -955,19 +972,9 @@ void TypeChecker::checkFnDecl(FnDeclNode* decl) {
     // Coroutines yield values rather than returning them through the block's trailing
     // expression, so they're exempt. Void functions don't require a value either.
     // For async fns, bodyReturnType is the unwrapped value type T.
-    if (!decl->isCoroutine && bodyReturnType && bodyReturnType != compiler_.voidType()) {
-        Type* trailingType = getBlockTrailingType(decl->body.get());
-        if (trailingType) {
-            if (!isAssignable(trailingType, bodyReturnType)) {
-                error(decl->loc, "Function '" + decl->name + "' declared to return '" +
-                      std::string(bodyReturnType->str()) + "' but body yields '" +
-                      std::string(trailingType->str()) + "'");
-            }
-        } else if (!bodyHasReturnStmt(decl->body.get())) {
-            error(decl->loc, "Function '" + decl->name + "' declared to return '" +
-                  std::string(bodyReturnType->str()) +
-                  "' but body has no trailing expression or return statement");
-        }
+    if (!decl->isCoroutine) {
+        checkDeclaredReturnType(decl->body.get(), bodyReturnType,
+                                "Function '" + decl->name + "'", decl->loc);
     }
 
     currentReturnType_ = savedReturnType;

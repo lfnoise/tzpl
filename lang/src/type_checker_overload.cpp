@@ -1344,6 +1344,10 @@ FuncInfo* TypeChecker::monomorphize(FuncInfo& templateFI,
         bool savedInAsync = inAsyncBody_;
         Type* savedAsyncValueType = currentAsyncValueType_;
 
+        // The type this instantiation's body must yield. Coroutines yield
+        // rather than return, so they leave it null and are not checked.
+        Type* bodyReturnType = nullptr;
+
         if (decl->isCoroutine) {
             auto* coroType = dynamic_cast<CoroutineType*>(retType);
             if (coroType) {
@@ -1357,12 +1361,21 @@ FuncInfo* TypeChecker::monomorphize(FuncInfo& templateFI,
                 inAsyncBody_ = true;
                 currentAsyncValueType_ = ft->valueType_;
                 currentReturnType_ = ft->valueType_;
+                bodyReturnType = ft->valueType_;
             }
         } else {
             currentReturnType_ = retType;
+            bodyReturnType = retType;
         }
 
         checkNode(decl->body.get());
+
+        // checkFnDecl skips the declared-return-type check for templates (the
+        // return type may name unbound type params there), so each
+        // monomorphization has to make it with concrete types.
+        checkDeclaredReturnType(decl->body.get(), bodyReturnType,
+                                "Function '" + decl->name + "'", decl->loc);
+
         currentReturnType_ = savedReturnType;
         inCoroutineBody_ = savedInCoro;
         currentYieldType_ = savedYieldType;

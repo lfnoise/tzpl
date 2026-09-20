@@ -149,6 +149,13 @@ struct FuncInfo {
     bool reExported = false;
 };
 
+// Recursively scan a function or lambda body for any ReturnStmt. Pure AST
+// shape -- does not descend into nested function declarations or lambda
+// bodies, whose returns target their own enclosing function. Defined in
+// type_checker_decls.cpp; shared by the declared-return-type checks for
+// `fn` declarations and lambda expressions.
+bool bodyHasReturnStmt(ASTNode* node);
+
 class TypeChecker {
 public:
     TypeChecker(Compiler& compiler, ModuleCompiler* mc = nullptr);
@@ -531,6 +538,15 @@ private:
                                             const std::vector<Type*>& argTypes,
                                             SourceRange loc);
     void discoverCaptures(LambdaExprNode* expr);
+
+    // Validate a function/lambda body against an EXPLICITLY declared return
+    // type: the body must either yield an assignable trailing value or return
+    // one. `what` names the construct in the diagnostic ("Function 'foo'",
+    // "Lambda"). bodyReturnType is the type the BODY must produce -- for async
+    // that is T, not Future<T>; coroutines yield instead of returning and pass
+    // nullptr. A null or Void bodyReturnType checks nothing.
+    void checkDeclaredReturnType(ASTNode* body, Type* bodyReturnType,
+                                 std::string const& what, SourceRange loc);
 
     // Return type inference helpers
     Type* getBlockTrailingType(ASTNode* node);
