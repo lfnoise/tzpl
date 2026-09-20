@@ -675,12 +675,24 @@ fn _importExpr(e SignalExpr) Void {
 			_mapId(e.id, _addExprNode(NodeKind.inletK(name, sn), [Int](),
 				Rate.audio, typ, chans));
 		}
+		-- An outlet is a port the engine patches into the audio graph, and
+		-- Silo::connect demands the two ends' rates match exactly -- it does no
+		-- conversion. Const/init/reset sources hold one value for the whole
+		-- block, so declaring the port audio rate is exact, and it is the only
+		-- way a graph like `140 scalar outlet` can be connected at all (it
+		-- otherwise yields a constRate port and every connect fails with
+		-- errRateMismatch). inlet above hardcodes Rate.audio for the same
+		-- reason. Event rate is deliberately NOT promoted: crossing that
+		-- boundary is what the explicit eventToAudio node is for.
+		-- Mirrors Outlet::Outlet in synthdef-compiler/src/synthdef_expr.cpp.
 		outlet(name): {
 			let sn Int = `scOutletSerials;
 			`scOutletSerials = sn + 1;
 			let ins = e _resolveIns;
+			let inRate = ctx.nrate[ins[0]];
+			let outRate = inRate < Rate.event ? Rate.audio : inRate;
 			_mapId(e.id, _addExprNode(NodeKind.outletK(name, sn), ins,
-				ctx.nrate[ins[0]], ANY_NUM, ctx.chans[ins[0]]));
+				outRate, ANY_NUM, ctx.chans[ins[0]]));
 		}
 		unop(op): {
 			if (!(op _unopSupported)) {

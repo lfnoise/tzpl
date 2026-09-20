@@ -68,8 +68,18 @@ namespace synthdef {
         chans = ichans;
     }
  
+    // A synthdef's outlet is a port the engine patches into the audio graph,
+    // and Silo::connect requires the two ends' rates to match exactly -- it
+    // does no conversion. Const/Init/Reset sources hold one value for the whole
+    // block, so declaring the port audio rate and writing it every frame is
+    // exact, and it is the only way a graph like `140 scalar outlet` can be
+    // connected at all (it otherwise yields a constRate port and every connect
+    // fails with errRateMismatch). Inlet hardcodes audioSignalRate for the same
+    // reason. Event rate is deliberately NOT promoted: crossing that boundary
+    // is what the explicit EventToAudio node is for.
     Outlet::Outlet(S value, string name)
-        : Expr(value->rate, {value}), serial(nextOutletSerialNo()), name(name)
+        : Expr(value->rate < eventSignalRate ? audioSignalRate : value->rate, {value}),
+          serial(nextOutletSerialNo()), name(name)
     {}
 
     DebugExpr::DebugExpr(S input, string label, i64 period, i64 consecutive)
