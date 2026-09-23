@@ -776,6 +776,42 @@ static std::string refMismatchNote(Type* held, Type* assigned) {
     return "";
 }
 
+// Message for an arrow operator ('<-' / '->') whose operands matched neither
+// the built-in Ref form nor any user-defined overload. Both arrows are
+// ordinary overloadable operators, so the error names the operand types and
+// lists the candidates instead of claiming only Ref is supported.
+static std::string arrowNoMatchMsg(
+        std::string const& opName, Type* leftType, Type* rightType,
+        std::unordered_map<std::string, std::deque<FuncInfo>> const& functions) {
+    std::string msg = "No matching overload for '" + opName + "'\n  Supplied types: (";
+    msg += leftType ? leftType->str() : "?";
+    msg += ", ";
+    msg += rightType ? rightType->str() : "?";
+    msg += ")\n  Built-in form: ";
+    msg += (opName == "<-") ? "Ref<T> <- T" : "T -> Ref<T>";
+    auto it = functions.find(opName);
+    if (it != functions.end() && !it->second.empty()) {
+        msg += "\n  Available overloads:";
+        for (auto& fi : it->second) {
+            if (fi.isTemplate) {
+                msg += "\n    " + opName + "(<template>)";
+                continue;
+            }
+            msg += "\n    " + opName + "(";
+            for (size_t i = 0; i < fi.paramTypes.size(); ++i) {
+                if (i > 0) msg += ", ";
+                msg += fi.paramTypes[i] ? fi.paramTypes[i]->str() : "?";
+            }
+            msg += ") -> ";
+            msg += fi.returnType ? fi.returnType->str() : "?";
+        }
+    } else {
+        msg += "\n  No '" + opName + "' overload is declared; "
+               "declare one as 'fn " + opName + "(a A, b B) R { ... }'";
+    }
+    return msg;
+}
+
 Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
     // Check for explicit @ on operands
     AutoMapArg leftAM = extractAutoMapAnnotation(static_cast<Expr*>(expr->left.get()));
@@ -1262,10 +1298,10 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
             error(expr->loc, "Bitwise operators require integer operands");
             return compiler_.intType();
         case BinaryOpExpr::LeftArrow:
-            error(expr->loc, "'<-' requires a Ref on the left side");
+            error(expr->loc, arrowNoMatchMsg("<-", leftType, rightType, functions_));
             return compiler_.intType();
         case BinaryOpExpr::RightArrow:
-            error(expr->loc, "'->' requires a Ref on the right side");
+            error(expr->loc, arrowNoMatchMsg("->", leftType, rightType, functions_));
             return compiler_.intType();
         default:
             return compiler_.intType();
