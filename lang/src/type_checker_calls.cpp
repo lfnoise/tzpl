@@ -1026,7 +1026,10 @@ Type* TypeChecker::inferIndirectCall(CallExpr_* expr) {
     }
     // Not a function type -- try callable object via `call` function
     if (functions_.find("call") == functions_.end()) {
-        error(expr->callee->loc, "Expression is not callable");
+        std::vector<Type*> argTypes;
+        for (auto& arg : expr->args)
+            argTypes.push_back(inferExpr(static_cast<Expr*>(arg.get())));
+        error(expr->callee->loc, callValueMismatchMsg(calleeType, argTypes));
         return compiler_.intType();
     }
     // Rewrite: expr(args...) -> call(expr, args...)

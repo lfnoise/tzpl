@@ -621,7 +621,10 @@ void TypeChecker::checkIndexAssignStmt(IndexAssignStmtNode* stmt) {
         return;
     }
 
-    error(stmt->loc, "Left side of indexed assignment must be an Array or Map");
+    Type* idxType = inferExpr(static_cast<Expr*>(stmt->index.get()));
+    Type* valType = inferExpr(static_cast<Expr*>(stmt->value.get()));
+    error(stmt->loc, overloadMismatchMsg("put!", {objType, idxType, valType},
+        "indexed assignment x[i] = v", "[T][Int] = T, [K:V][K] = V", true));
 }
 
 void TypeChecker::checkExprStmt(ExprStmtNode* stmt) {

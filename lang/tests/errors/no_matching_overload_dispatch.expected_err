@@ -1,0 +1,123 @@
+Type error [tests/errors/no_matching_overload_dispatch.x:14:11]
+   |
+14 | println(p + q);
+   |           ^
+   No matching overload for '+'
+     Supplied types: (P, Q)
+     Built-in forms: numeric operands, element-wise over collections and tuples
+     Available overloads:
+       +(P, P) -> P
+     To support these types, declare: fn +(a P, b Q) R { ... }
+
+Type error [tests/errors/no_matching_overload_dispatch.x:15:9]
+   |
+15 | println(-q);
+   |         ^
+   No matching overload for '-'
+     Supplied types: (Q)
+     Built-in forms: -numeric, element-wise over collections
+     Available overloads:
+       -(P) -> P
+     To support these types, declare: fn -(a Q) R { ... }
+
+Type error [tests/errors/no_matching_overload_dispatch.x:16:11]
+   |
+16 | println(p < 3);
+   |           ^
+   No matching overload for '<'
+     Supplied types: (P, Int)
+     Built-in forms: numeric operands (element-wise over collections); String with String
+     Available overloads:
+       <(P, P) -> Bool
+     To support these types, declare: fn <(a P, b Int) R { ... }
+
+Type error [tests/errors/no_matching_overload_dispatch.x:17:11]
+   |
+17 | println(p == q);
+   |           ^^
+   No matching overload for '=='
+     Supplied types: (P, Q)
+     Built-in forms: T == T for any T; numeric == numeric
+     To support these types, declare: fn ==(a P, b Q) R { ... }
+
+Type error [tests/errors/no_matching_overload_dispatch.x:18:11]
+   |
+18 | println(q % 2);
+   |           ^
+   No matching overload for '%'
+     Supplied types: (Q, Int)
+     Built-in forms: Int % Int
+     To support these types, declare: fn %(a Q, b Int) R { ... }
+
+Type error [tests/errors/no_matching_overload_dispatch.x:19:11]
+   |
+19 | println(q & 1);
+   |           ^
+   No matching overload for '&'
+     Supplied types: (Q, Int)
+     Built-in forms: Int operands, element-wise over collections
+     To support these types, declare: fn &(a Q, b Int) R { ... }
+
+Type error [tests/errors/no_matching_overload_dispatch.x:20:11]
+   |
+20 | println(q $ 1);
+   |           ^
+   No matching overload for '$'
+     Supplied types: (Q, Int)
+     Built-in forms: String $ String; array $ array; tuple $ tuple
+     To support these types, declare: fn $(a Q, b Int) R { ... }
+
+Type error [tests/errors/no_matching_overload_dispatch.x:21:3]
+   |
+21 | r <- q;
+   |   ^^
+   Type mismatch in '<-': Ref holds 'P' but assigned 'Q'
+
+Type error [tests/errors/no_matching_overload_dispatch.x:22:3]
+   |
+22 | p <- q;
+   |   ^^
+   No matching overload for '<-'
+     Supplied types: (P, Q)
+     Built-in forms: Ref<T> <- T
+     To support these types, declare: fn <-(a P, b Q) R { ... }
+
+Type error [tests/errors/no_matching_overload_dispatch.x:23:9]
+   |
+23 | println(q[0]);
+   |         ^
+   No matching overload for 'at' (indexing x[i])
+     Supplied types: (Q, Int)
+     Built-in forms: [T][Int], [K:V][K], String[Int], Range[Int], #[T][Int], #[K:V][K]
+     Available overloads:
+       at(<builtin template>)
+     To support these types, declare: fn at(a Q, b Int) R { ... }
+
+Type error [tests/errors/no_matching_overload_dispatch.x:25:1]
+   |
+25 | qq[0] = 1.0;
+   | ^^
+   No matching overload for 'put!' (indexed assignment x[i] = v)
+     Supplied types: (Q, Int, Float)
+     Built-in forms: [T][Int] = T, [K:V][K] = V
+     Available overloads:
+       put!(<builtin template>)
+     To support these types, declare: fn put!(a Q, b Int, c Float) R { ... }
+
+Type error [tests/errors/no_matching_overload_dispatch.x:26:9]
+   |
+26 | println(q(1));
+   |         ^
+   No matching overload for 'call' (calling a value f(args))
+     Supplied types: (Q, Int)
+     Built-in forms: functions and lambdas
+     To support these types, declare: fn call(a Q, b Int) R { ... }
+
+Type error [tests/errors/no_matching_overload_dispatch.x:27:9]
+   |
+27 | println(Q { y: 1.0 }(1));
+   |         ^
+   No matching overload for 'call' (calling a value f(args))
+     Supplied types: (Q, Int)
+     Built-in forms: functions and lambdas
+     To support these types, declare: fn call(a Q, b Int) R { ... }

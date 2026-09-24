@@ -23,6 +23,7 @@
 
 #include "type_checker.hpp"
 #include "module_compiler.hpp"
+#include <format>
 #include "builtins.hpp"
 #include "value.hpp"
 #include "diagnostic.hpp"
@@ -432,11 +433,90 @@ FuncInfo* TypeChecker::tryResolveOverload(const std::string& name,
     return nullptr;
 }
 
+// "No matching overload" message shared by explicit calls and by syntax that
+// dispatches to an overloadable function (operators, x[i] -> at, x[i] = v ->
+// put!, value(args) -> call). `context` names that syntax, `builtinForms`
+// lists what the language handles without an overload, and `suggestDecl`
+// appends the declaration that would make the failing use type-check.
+std::string TypeChecker::overloadMismatchMsg(std::string const& name,
+                                             std::vector<Type*> const& argTypes,
+                                             std::string_view context,
+                                             std::string_view builtinForms,
+                                             bool suggestDecl) const {
+    std::string msg = "No matching overload for '" + name + "'";
+    if (!context.empty()) msg += std::format(" ({})", context);
+    msg += "\n  Supplied types: (";
+    for (size_t i = 0; i < argTypes.size(); ++i) {
+        if (i > 0) msg += ", ";
+        msg += argTypes[i] ? argTypes[i]->str() : "?";
+    }
+    msg += ")";
+    if (!builtinForms.empty()) msg += std::format("\n  Built-in forms: {}", builtinForms);
+    auto it = functions_.find(name);
+    if (it != functions_.end() && !it->second.empty()) {
+        msg += "\n  Available overloads:";
+        for (auto& fi : it->second) {
+            if (fi.isTemplate) {
+                if (fi.builtinTemplate) {
+                    msg += "\n    " + name + "(<builtin template>)";
+                } else if (fi.declNode) {
+                    msg += "\n    " + name + "<";
+                    for (size_t i = 0; i < fi.typeParams.size(); ++i) {
+                        if (i > 0) msg += ",";
+                        msg += fi.typeParams[i];
+                    }
+                    msg += ">(";
+                    for (size_t i = 0; i < fi.declNode->params.size(); ++i) {
+                        if (i > 0) msg += ", ";
+                        msg += fi.declNode->params[i].name;
+                        if (fi.declNode->params[i].typeExpr)
+                            msg += " : <type>";
+                    }
+                    msg += ")";
+                }
+            } else {
+                msg += "\n    " + name + "(";
+                for (size_t i = 0; i < fi.paramTypes.size(); ++i) {
+                    if (i > 0) msg += ", ";
+                    msg += fi.paramTypes[i] ? fi.paramTypes[i]->str() : "?";
+                }
+                msg += ") -> " + (fi.returnType ? fi.returnType->str() : "?");
+            }
+        }
+    }
+    if (suggestDecl) {
+        msg += "\n  To support these types, declare: fn " + name + "(";
+        for (size_t i = 0; i < argTypes.size(); ++i) {
+            if (i > 0) msg += ", ";
+            msg += char('a' + i % 26);
+            msg += ' ';
+            if (argTypes[i]) msg += argTypes[i]->str();
+            else msg += 'T';
+        }
+        msg += ") R { ... }";
+    }
+    return msg;
+}
+
+// value(args) on a non-function value dispatches to `call(value, args...)`.
+std::string TypeChecker::callValueMismatchMsg(Type* calleeType,
+                                              std::vector<Type*> const& argTypes) const {
+    std::vector<Type*> callTypes{calleeType};
+    callTypes.insert(callTypes.end(), argTypes.begin(), argTypes.end());
+    return overloadMismatchMsg("call", callTypes, "calling a value f(args)",
+                               "functions and lambdas", true);
+}
+
 FuncInfo* TypeChecker::resolveOverload(const std::string& name,
                                         const std::vector<Type*>& argTypes,
                                         SourceRange loc) {
     auto it = functions_.find(name);
     if (it == functions_.end()) {
+        // A non-function variable called with no `call` overload declared.
+        if (VarInfo* vi = lookupVar(name); vi && vi->type) {
+            error(loc, callValueMismatchMsg(vi->type, argTypes));
+            return nullptr;
+        }
         std::vector<std::string> candidates;
         for (auto& [fname, _] : functions_) candidates.push_back(fname);
         std::string msg = "Undeclared function '" + name + "'";
@@ -534,41 +614,7 @@ FuncInfo* TypeChecker::resolveOverload(const std::string& name,
     }
 
     // 4. No match — build informative error message
-    std::string msg = "No matching overload for '" + name + "'\n  Supplied types: (";
-    for (size_t i = 0; i < argTypes.size(); ++i) {
-        if (i > 0) msg += ", ";
-        msg += argTypes[i] ? argTypes[i]->str() : "?";
-    }
-    msg += ")\n  Available overloads:";
-    for (auto& fi : overloads) {
-        if (fi.isTemplate) {
-            if (fi.builtinTemplate) {
-                msg += "\n    " + name + "(<builtin template>)";
-            } else if (fi.declNode) {
-                msg += "\n    " + name + "<";
-                for (size_t i = 0; i < fi.typeParams.size(); ++i) {
-                    if (i > 0) msg += ",";
-                    msg += fi.typeParams[i];
-                }
-                msg += ">(";
-                for (size_t i = 0; i < fi.declNode->params.size(); ++i) {
-                    if (i > 0) msg += ", ";
-                    msg += fi.declNode->params[i].name;
-                    if (fi.declNode->params[i].typeExpr)
-                        msg += " : <type>";
-                }
-                msg += ")";
-            }
-        } else {
-            msg += "\n    " + name + "(";
-            for (size_t i = 0; i < fi.paramTypes.size(); ++i) {
-                if (i > 0) msg += ", ";
-                msg += fi.paramTypes[i] ? fi.paramTypes[i]->str() : "?";
-            }
-            msg += ") -> " + (fi.returnType ? fi.returnType->str() : "?");
-        }
-    }
-    error(loc, msg);
+    error(loc, overloadMismatchMsg(name, argTypes));
     return nullptr;
 }
 

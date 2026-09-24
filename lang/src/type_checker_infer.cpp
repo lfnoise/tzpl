@@ -1309,6 +1309,12 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                 Type* t = inferExpr(static_cast<Expr*>(ie->atRewrite.get()), expectedType);
                 return t ? t : compiler_.intType();
             };
+            // Object type has no built-in indexing and no user `at` exists.
+            auto reportNoIndexing = [&]() -> Type* {
+                error(expr->loc, overloadMismatchMsg("at", {objType, idxType}, "indexing x[i]",
+                    "[T][Int], [K:V][K], String[Int], Range[Int], #[T][Int], #[K:V][K]", true));
+                return compiler_.intType();
+            };
 
             // A. Explicit @ on object: arr @ [i] or arr @ [[i1,i2,...]]
             if (objAutoMap) {
@@ -1452,8 +1458,7 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                 } else if (Type* atType = tryAtRewrite()) {
                     result = atType;
                 } else {
-                    error(expr->loc, "Indexing requires an Array, Map, String, or Range type");
-                    result = compiler_.intType();
+                    result = reportNoIndexing();
                 }
                 break;
             }
@@ -1488,8 +1493,7 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                 } else if (Type* atType = tryAtRewrite()) {
                     result = atType;
                 } else {
-                    error(expr->loc, "Indexing requires an Array, Map, String, or Range type");
-                    result = compiler_.intType();
+                    result = reportNoIndexing();
                 }
                 break;
             }
@@ -1536,8 +1540,7 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
             } else if (Type* atType = tryAtRewrite()) {
                 result = atType;
             } else {
-                error(expr->loc, "Indexing requires an Array, Map, String, or Range type");
-                result = compiler_.intType();
+                result = reportNoIndexing();
             }
             break;
         }

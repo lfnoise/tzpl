@@ -32,6 +32,7 @@
 #include <deque>
 #include <functional>
 #include <set>
+#include <string_view>
 
 namespace ts {
 
@@ -568,6 +569,11 @@ private:
     // Overload resolution
     FuncInfo* resolveOverload(const std::string& name, const std::vector<Type*>& argTypes, SourceRange loc);
     FuncInfo* tryResolveOverload(const std::string& name, const std::vector<Type*>& argTypes);
+    std::string overloadMismatchMsg(std::string const& name, std::vector<Type*> const& argTypes,
+                                    std::string_view context = {},
+                                    std::string_view builtinForms = {},
+                                    bool suggestDecl = false) const;
+    std::string callValueMismatchMsg(Type* calleeType, std::vector<Type*> const& argTypes) const;
     bool isAssignable(Type* from, Type* to) const;
 
     // Template function support

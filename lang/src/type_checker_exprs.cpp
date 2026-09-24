@@ -776,40 +776,50 @@ static std::string refMismatchNote(Type* held, Type* assigned) {
     return "";
 }
 
-// Message for an arrow operator ('<-' / '->') whose operands matched neither
-// the built-in Ref form nor any user-defined overload. Both arrows are
-// ordinary overloadable operators, so the error names the operand types and
-// lists the candidates instead of claiming only Ref is supported.
-static std::string arrowNoMatchMsg(
-        std::string const& opName, Type* leftType, Type* rightType,
-        std::unordered_map<std::string, std::deque<FuncInfo>> const& functions) {
-    std::string msg = "No matching overload for '" + opName + "'\n  Supplied types: (";
-    msg += leftType ? leftType->str() : "?";
-    msg += ", ";
-    msg += rightType ? rightType->str() : "?";
-    msg += ")\n  Built-in form: ";
-    msg += (opName == "<-") ? "Ref<T> <- T" : "T -> Ref<T>";
-    auto it = functions.find(opName);
-    if (it != functions.end() && !it->second.empty()) {
-        msg += "\n  Available overloads:";
-        for (auto& fi : it->second) {
-            if (fi.isTemplate) {
-                msg += "\n    " + opName + "(<template>)";
-                continue;
-            }
-            msg += "\n    " + opName + "(";
-            for (size_t i = 0; i < fi.paramTypes.size(); ++i) {
-                if (i > 0) msg += ", ";
-                msg += fi.paramTypes[i] ? fi.paramTypes[i]->str() : "?";
-            }
-            msg += ") -> ";
-            msg += fi.returnType ? fi.returnType->str() : "?";
-        }
-    } else {
-        msg += "\n  No '" + opName + "' overload is declared; "
-               "declare one as 'fn " + opName + "(a A, b B) R { ... }'";
+// What each overloadable operator accepts without a user overload, shown in
+// the "No matching overload" message when neither matched.
+static std::string_view binaryBuiltinForms(BinaryOpExpr::Op op) {
+    switch (op) {
+        case BinaryOpExpr::Add:
+        case BinaryOpExpr::Sub:
+        case BinaryOpExpr::Mul:
+        case BinaryOpExpr::Div:
+            return "numeric operands, element-wise over collections and tuples";
+        case BinaryOpExpr::Mod:
+            return "Int % Int";
+        case BinaryOpExpr::Eq:
+        case BinaryOpExpr::Ne:
+            return "T == T for any T; numeric == numeric";
+        case BinaryOpExpr::Lt:
+        case BinaryOpExpr::Le:
+        case BinaryOpExpr::Gt:
+        case BinaryOpExpr::Ge:
+            return "numeric operands (element-wise over collections); String with String";
+        case BinaryOpExpr::BitAnd:
+        case BinaryOpExpr::BitOr:
+        case BinaryOpExpr::BitXor:
+        case BinaryOpExpr::ShiftL:
+        case BinaryOpExpr::ShiftR:
+        case BinaryOpExpr::UShiftR:
+            return "Int operands, element-wise over collections";
+        case BinaryOpExpr::Concat:
+            return "String $ String; array $ array; tuple $ tuple";
+        case BinaryOpExpr::LeftArrow:
+            return "Ref<T> <- T";
+        case BinaryOpExpr::RightArrow:
+            return "T -> Ref<T>";
+        default:
+            return {};
     }
-    return msg;
+}
+
+static std::string_view unaryBuiltinForms(UnaryOpExpr::Op op) {
+    switch (op) {
+        case UnaryOpExpr::Neg:    return "-numeric, element-wise over collections";
+        case UnaryOpExpr::Not:    return "!Bool, element-wise over collections";
+        case UnaryOpExpr::BitNot: return "~Int, element-wise over collections";
+        default:                  return {};
+    }
 }
 
 Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
@@ -1261,48 +1271,16 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
         }
     }
 
-    // No overload found — report built-in error
+    // Neither a built-in rule nor any overload matched.
+    if (const char* opName = opToFuncName(expr->op)) {
+        error(expr->loc, overloadMismatchMsg(opName, {leftType, rightType}, {},
+                                             binaryBuiltinForms(expr->op), true));
+    }
     switch (expr->op) {
-        case BinaryOpExpr::Add:
-            error(expr->loc, "'+' requires numeric operands");
-            return compiler_.intType();
-        case BinaryOpExpr::Concat:
-            error(expr->loc, "'$' requires string, array, or tuple operands");
-            return compiler_.intType();
-        case BinaryOpExpr::Sub:
-        case BinaryOpExpr::Mul:
-            error(expr->loc, "Arithmetic operators require numeric operands");
-            return compiler_.intType();
-        case BinaryOpExpr::Div:
-            error(expr->loc, "'/' requires numeric operands");
-            return compiler_.intType();
-        case BinaryOpExpr::Mod:
-            error(expr->loc, "'%' requires integer operands");
-            return compiler_.intType();
-        case BinaryOpExpr::Eq:
-        case BinaryOpExpr::Ne:
-            error(expr->loc, "Equality operators require matching operand types");
+        case BinaryOpExpr::Eq: case BinaryOpExpr::Ne:
+        case BinaryOpExpr::Lt: case BinaryOpExpr::Le:
+        case BinaryOpExpr::Gt: case BinaryOpExpr::Ge:
             return compiler_.boolType();
-        case BinaryOpExpr::Lt:
-        case BinaryOpExpr::Le:
-        case BinaryOpExpr::Gt:
-        case BinaryOpExpr::Ge:
-            error(expr->loc, "Comparison operators require numeric operands");
-            return compiler_.boolType();
-        case BinaryOpExpr::BitAnd:
-        case BinaryOpExpr::BitOr:
-        case BinaryOpExpr::BitXor:
-        case BinaryOpExpr::ShiftL:
-        case BinaryOpExpr::ShiftR:
-        case BinaryOpExpr::UShiftR:
-            error(expr->loc, "Bitwise operators require integer operands");
-            return compiler_.intType();
-        case BinaryOpExpr::LeftArrow:
-            error(expr->loc, arrowNoMatchMsg("<-", leftType, rightType, functions_));
-            return compiler_.intType();
-        case BinaryOpExpr::RightArrow:
-            error(expr->loc, arrowNoMatchMsg("->", leftType, rightType, functions_));
-            return compiler_.intType();
         default:
             return compiler_.intType();
     }
@@ -1394,19 +1372,10 @@ Type* TypeChecker::inferUnaryOp(UnaryOpExpr* expr) {
         }
     }
 
-    // No overload found — report built-in error
-    switch (expr->op) {
-        case UnaryOpExpr::Neg:
-            error(expr->loc, "Negation requires numeric operand");
-            break;
-        case UnaryOpExpr::Not:
-            error(expr->loc, "Logical not requires boolean operand");
-            break;
-        case UnaryOpExpr::BitNot:
-            error(expr->loc, "Bitwise not requires integer operand");
-            break;
-        default:
-            break;
+    // Neither a built-in rule nor any overload matched.
+    if (const char* opName = unaryOpToFuncName(expr->op)) {
+        error(expr->loc, overloadMismatchMsg(opName, {operandType}, {},
+                                             unaryBuiltinForms(expr->op), true));
     }
     return compiler_.intType();
 }
