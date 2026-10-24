@@ -1,5 +1,5 @@
-Type error [tests/errors/circular_import.x:1:1]
+Type error [errors/_lib/circ_b.x:1:1]
   |
 1 | import circ_a;
   | ^----^
-  Circular import detected for module 'tests/errors/_lib/circ_a.x'
+  Circular import detected for module 'circ_a' (tests/errors/_lib/circ_a.x): it is imported again while it is still being compiled

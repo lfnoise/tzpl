@@ -31,6 +31,7 @@
 #include "codegen.hpp"
 #include <algorithm>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <sstream>
 #include <cstdlib>
@@ -106,6 +107,69 @@ std::string ModuleCompiler::resolveModulePath(
     return "";  // not found
 }
 
+// Error text for an import of a module that is still being compiled. The
+// common case is a file importing itself: the importing file's directory is
+// searched first, so a file named after a library module (a notebook saved as
+// live.x that does `import live.*`) resolves the import to itself and hides
+// the library module. Say so, and name the module it is shadowing.
+std::string ModuleCompiler::circularImportMsg(
+    const std::vector<std::string>& modulePath,
+    const std::string& resolvedPath,
+    const std::string& importingFilePath) const
+{
+    std::string dotName;
+    for (size_t i = 0; i < modulePath.size(); ++i) {
+        if (i > 0) dotName += '.';
+        dotName += modulePath[i];
+    }
+
+    std::error_code ec;
+    bool selfImport = !importingFilePath.empty()
+        && std::filesystem::equivalent(importingFilePath, resolvedPath, ec);
+    if (!selfImport) {
+        return std::format("Circular import detected for module '{}' ({}): it is "
+                           "imported again while it is still being compiled",
+                           dotName, resolvedPath);
+    }
+
+    std::string msg = std::format("'{}' imports module '{}', which resolves to "
+                                  "that same file", resolvedPath, dotName);
+    // What the import would have found had this file not been in the way: the
+    // first other file of that name on the search path (the same file may also
+    // be reachable through an include path, so skip it rather than stop there).
+    std::string shadowed;
+    {
+        std::string relPath;
+        for (size_t i = 0; i < modulePath.size(); ++i) {
+            if (i > 0) relPath += '/';
+            relPath += modulePath[i];
+        }
+        relPath += ".x";
+        std::lock_guard<std::mutex> lock(pathsMtx_);
+        for (const auto* paths : {&includePaths_, &systemPaths_}) {
+            for (const auto& dir : *paths) {
+                auto candidate = std::filesystem::path(dir) / relPath;
+                std::error_code ec2;
+                if (std::filesystem::exists(candidate, ec2)
+                    && !std::filesystem::equivalent(candidate, resolvedPath, ec2)) {
+                    shadowed = std::filesystem::canonical(candidate, ec2).string();
+                    break;
+                }
+            }
+            if (!shadowed.empty()) break;
+        }
+    }
+    if (!shadowed.empty()) {
+        msg += std::format("\n  A module in the importing file's own directory takes "
+                           "precedence, so this file hides the library module '{}' ({})."
+                           "\n  Rename the file to import the library module.",
+                           dotName, shadowed);
+    } else {
+        msg += "\n  A file cannot import itself.";
+    }
+    return msg;
+}
+
 // Read entire file into string (compile-time only, system allocator OK)
 static std::string readModuleFile(const std::string& path) {
     std::ifstream file(path);
@@ -178,6 +242,18 @@ ModuleInfo* ModuleCompiler::compileModule(
         importingDir = abs.parent_path().string();
     }
 
+    // Errors raised here point at the `import` in the importing file. For a
+    // nested import that file is a module read from disk, not the top-level
+    // unit the diagnostic printer would otherwise show, so attach it. (At the
+    // top level the importing file can be a notebook whose cell text is not
+    // what is on disk, so leave the printer's own source in place there.)
+    auto importSiteError = [&](std::string msg) {
+        if (compileDepth_ > 1 && !importingFilePath.empty())
+            return CompileError(CompileError::TypeError, loc, std::move(msg),
+                                importingFilePath, readModuleFile(importingFilePath));
+        return CompileError(CompileError::TypeError, loc, std::move(msg));
+    };
+
     // Check for host-registered foreign module functions
     std::string modName = modulePath.back();
     const auto* foreignFuncs = compiler_.foreignModuleFunctions(modName);
@@ -191,7 +267,7 @@ ModuleInfo* ModuleCompiler::compileModule(
             if (i > 0) dotName += '.';
             dotName += modulePath[i];
         }
-        errors.push_back(CompileError(CompileError::TypeError, loc,
+        errors.push_back(importSiteError(
             "Cannot find module '" + dotName + "'"));
         return nullptr;
     }
@@ -200,7 +276,7 @@ ModuleInfo* ModuleCompiler::compileModule(
     // The supported pattern is to register the FFI under `name_ffi` and have a
     // script wrapper `name.x` re-export it with `export name_ffi.*;`.
     if (!resolvedPath.empty() && foreignFuncs) {
-        errors.push_back(CompileError(CompileError::TypeError, loc,
+        errors.push_back(importSiteError(
             "Module name collision: both a script module ('" + resolvedPath +
             "') and a foreign (FFI) module are registered as '" + modName +
             "'. Rename the FFI registration (e.g. '" + modName +
@@ -233,15 +309,15 @@ ModuleInfo* ModuleCompiler::compileModule(
         if (it != modules_.end()) {
             ModuleInfo* mod = it->second.get();
             if (mod->compiling) {
-                errors.push_back(CompileError(CompileError::TypeError, loc,
-                    "Circular import detected for module '" + cacheKey + "'"));
+                errors.push_back(importSiteError(
+                    circularImportMsg(modulePath, resolvedPath, importingFilePath)));
                 return nullptr;
             }
             if (mod->failed) {
                 for (const auto& err : mod->compilationErrors) {
                     errors.push_back(err);
                 }
-                errors.push_back(CompileError(CompileError::TypeError, loc,
+                errors.push_back(importSiteError(
                     "Module '" + modName + "' had compilation errors"));
                 return nullptr;
             }

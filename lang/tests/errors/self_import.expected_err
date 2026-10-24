@@ -1,0 +1,6 @@
+Type error [errors/_lib/self_import_lib.x:2:1]
+  |
+2 | import self_import_lib;
+  | ^----^
+  'tests/errors/_lib/self_import_lib.x' imports module 'self_import_lib', which resolves to that same file
+    A file cannot import itself.

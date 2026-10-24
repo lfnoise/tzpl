@@ -1,0 +1,7 @@
+Type error [errors/_lib/dsp_math.x:3:1]
+  |
+3 | import dsp_math.*;
+  | ^----^
+  'tests/errors/_lib/dsp_math.x' imports module 'dsp_math', which resolves to that same file
+    A module in the importing file's own directory takes precedence, so this file hides the library module 'dsp_math' (modules/dsp_math.x).
+    Rename the file to import the library module.

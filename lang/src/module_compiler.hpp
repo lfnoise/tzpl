@@ -155,6 +155,12 @@ private:
     // Resolve a module path to a filesystem path. Returns empty string on failure.
     std::string resolveModulePath(const std::vector<std::string>& modulePath,
                                    const std::string& importingDir) const;
+
+    // Error text for importing a module that is still being compiled; names
+    // the library module a self-importing file shadows.
+    std::string circularImportMsg(const std::vector<std::string>& modulePath,
+                                  const std::string& resolvedPath,
+                                  const std::string& importingFilePath) const;
 };
 
 } // namespace ts
