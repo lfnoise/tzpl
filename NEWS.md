@@ -5,7 +5,44 @@ in [git](https://github.com/lfnoise/tzpl/commits/main); this file records
 the changes worth knowing about as a user of the platform. Rendered on the
 documentation site as the Changelog page.
 
-## Unreleased
+## v0.2.6 (24 October 2026)
+
+**Fixed**
+
+- Integer-only operators (`%`, `//`, `&`, `|`, `^`, `<<`, `>>`, `>>>`)
+  applied element-wise over arrays, lists, pvecs and tuples silently
+  computed `+` instead: `[5, 6] & 3` gave `[8, 9]`. They now apply the
+  real operator at any nesting depth, with implicit or explicit `@`
+  auto-mapping. Float, Complex or Fraction elements are now a type error
+  rather than reaching integer arithmetic, and `//` can be overloaded for
+  your own types like the other operators.
+- A lambda's declared return type was never checked against its body:
+  `fn() S { 140 }` crashed with no diagnostic. It is now a type error,
+  for plain and template lambdas and template functions alike, matching
+  named functions.
+- A synthdef whose output is a constant (`fn() S { 140 scalar }`) could
+  not be played or patched -- `play` failed with "engine error 20", and a
+  live proxy with "swap bundle rejected". Such outputs are now audio rate
+  in both synthdef compilers.
+
+**Changed**
+
+- "No matching overload" errors now cover every piece of syntax that
+  dispatches to an overloadable function: binary and unary operators,
+  `x[i]`, `x[i] = v`, calling a value, and `<-` / `->`. The message names
+  the supplied types, the built-in forms, the overloads you have declared,
+  and the declaration that would make the code type-check. Previously some
+  of these reported only the built-in form (e.g. "'<-' requires a Ref on
+  the left side") even when the real problem was an unmatched overload.
+
+**Docs & Examples**
+
+- The tutorial, FAQ, cookbook and SynthDef guide no longer claim that a
+  playing node hot-swaps to a redefined def. Redefining affects only nodes
+  started afterwards; use a live proxy (`ndef` / `<-`) to crossfade a
+  running sound into a new definition.
+- The SynthDefs example notebook gains a mouse-swept noise cell
+  (`sweepyNoise`), ported from a sapf one-liner.
 
 ## v0.2.5 (14 September 2026)
 
