@@ -31,7 +31,7 @@ The build directory is `build/` at the project root. Key targets: `tzpl`, `tzpl_
 
     cd lang/tests && bash run_tests.sh
 
-Flags: `-v` (verbose), `-f "pattern"` (filter), `-u` (update golden files), `-x` (stop on failure).
+Flags: `--verbose`, `--filter <pattern>` (substring match on test path), `--update` (update golden files), `--stop-on-fail`.
 
 Synthdef compiler tests:
 
