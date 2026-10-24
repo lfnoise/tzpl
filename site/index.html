@@ -188,6 +188,7 @@ in the assembled site. Run <code>python3 site/build.py</code> and open
     <p class="runs-on">Runs natively on macOS and Linux.</p>
     <div class="hero-actions">
       <a class="primary" href="Getting_Started.html">Get Started</a>
+      <a class="secondary" href="https://github.com/lfnoise/tzpl/releases/latest">Download</a>
       <a class="secondary" href="Tzopilotl_by_Example.html">By Example</a>
       <a class="secondary" href="Tzopilotl_Music_Cookbook.html">Music Cookbook</a>
       <a class="secondary" href="Gallery.html">Audio Gallery</a>
@@ -233,8 +234,9 @@ bubbles <span class="fnm">defSynthX</span>(<span class="str">"bubbles"</span>) <
         <p>Signal graphs written in Tzopilotl compile to optimized native
         plugins: ~200 unit generators, a 14-pass analysis pipeline, an
         algebraic rewrite engine, and SIMD C++ code generation.</p>
-        <p>Compilation is asynchronous — redefine a synth and players hot-swap
-        to the new version when it loads.</p>
+        <p>Compilation is asynchronous — redefine a synth and anything you
+        play once the new version loads uses it, while sounds already playing
+        carry on undisturbed.</p>
       </div>
       <div class="pillar">
         <h3>The engine</h3>
@@ -253,9 +255,15 @@ bubbles <span class="fnm">defSynthX</span>(<span class="str">"bubbles"</span>) <
   </section>
 
   <section class="install">
-    <h2>Build from source</h2>
-    <p>TZPL runs on macOS (CoreAudio) and Linux (ALSA/JACK/PulseAudio). Build
-    from a checkout:</p>
+    <h2>Download or build</h2>
+    <p>On a Mac with Apple Silicon, download the signed disk image,
+    <code>Tzopilotl-&lt;version&gt;.dmg</code>, from the
+    <a href="https://github.com/lfnoise/tzpl/releases/latest">latest release</a>
+    (<a href="https://github.com/lfnoise/tzpl/releases">all releases</a>), open
+    it, and drag the <strong>Tzopilotl</strong> folder anywhere you like.
+    <a href="Downloads.html">Download &amp; Install</a> has the details.</p>
+    <p>TZPL runs on macOS (CoreAudio) and Linux (ALSA/JACK/PulseAudio). To
+    build from a checkout:</p>
 <pre><code>git clone https://github.com/lfnoise/tzpl.git
 cd tzpl
 ./build.sh              <span class="cmt"># Release build, all cores</span>

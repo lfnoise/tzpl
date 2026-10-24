@@ -1,7 +1,7 @@
 # Download & Install
 
-TZPL currently runs on **macOS** (Apple Silicon and Intel). Cross-platform
-support is planned.
+TZPL runs on **macOS** and **Linux**. Packaged releases are for macOS on
+Apple Silicon; on Linux, build from source.
 
 ## Packaged releases
 
@@ -32,7 +32,8 @@ Nothing of yours is stored inside it, so this is always safe.
 
 ## Requirements
 
-- **macOS.** The app uses CoreAudio; no other audio drivers are needed.
+- **macOS 13.3 or later on Apple Silicon.** The disk image is arm64 only.
+  The app uses CoreAudio; no other audio drivers are needed.
 - **Xcode Command Line Tools.** Compiling synth definitions uses the system
   C++ compiler. If synthdef compilation fails with a missing-compiler
   error: `xcode-select --install`.
@@ -45,8 +46,11 @@ cd tzpl
 ./build.sh
 ```
 
-Requires Clang (or GCC 15+), CMake 3.21+, and a C++23 toolchain. See
-[Getting Started](Getting_Started.html) for build options, the headless
+Requires Clang (AppleClang on macOS, Clang 19+ on Linux), CMake 3.21+,
+and a C++23 toolchain. On Linux the engine uses ALSA, JACK or PulseAudio;
+packages, a Docker dev environment and real-time setup are covered in
+[docs/LINUX.md](https://github.com/lfnoise/tzpl/blob/main/docs/LINUX.md).
+See [Getting Started](Getting_Started.html) for build options, the headless
 CLI, and environment variables.
 
 ## Editor support
