@@ -1,0 +1,41 @@
+Type error [tests/errors/int_ops_automap_float.x:2:20]
+  |
+2 | println([1.5, 2.5] & 1);
+  |                    ^
+  No matching overload for '&'
+    Supplied types: ([Float], Int)
+    Built-in forms: Int operands, element-wise over collections
+    To support these types, declare: fn &(a [Float], b Int) R { ... }
+
+Type error [tests/errors/int_ops_automap_float.x:3:15]
+  |
+3 | println([1.5] % 2);
+  |               ^
+  No matching overload for '%'
+    Supplied types: ([Float], Int)
+    Built-in forms: Int % Int, element-wise over collections
+    To support these types, declare: fn %(a [Float], b Int) R { ... }
+
+Type error [tests/errors/int_ops_automap_float.x:4:17]
+  |
+4 | println([[1.5]] << 1);
+  |                 ^^
+  No matching overload for '<<'
+    Supplied types: ([[Float]], Int)
+    Built-in forms: Int operands, element-wise over collections
+    To support these types, declare: fn <<(a [[Float]], b Int) R { ... }
+
+Type error [tests/errors/int_ops_automap_float.x:5:17]
+  |
+5 | println([1.5] @ & 1);
+  |                 ^
+  Cannot apply '@' auto-map to this operator with these types
+
+Type error [tests/errors/int_ops_automap_float.x:6:15]
+  |
+6 | println([1.5] // 2);
+  |               ^^
+  No matching overload for '//'
+    Supplied types: ([Float], Int)
+    Built-in forms: Int // Int, element-wise over collections
+    To support these types, declare: fn //(a [Float], b Int) R { ... }

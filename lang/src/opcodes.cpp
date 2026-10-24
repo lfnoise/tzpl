@@ -1612,6 +1612,18 @@ struct OpBitNot {
     i64 operator()(i64 a) const { return ~a; }
 };
 
+// --- Integer-only binary operator structs (same semantics as the scalar
+// MOD_INT / INT_DIV / BITAND_INT ... USHR_INT opcodes) ---
+
+struct OpMod    { static constexpr u32 flags = mathOpIntArgs; i64 operator()(i64 a, i64 b) const { return a % b; } };
+struct OpIntDiv { static constexpr u32 flags = mathOpIntArgs; i64 operator()(i64 a, i64 b) const { return a / b; } };
+struct OpBitAnd { static constexpr u32 flags = mathOpIntArgs; i64 operator()(i64 a, i64 b) const { return a & b; } };
+struct OpBitOr  { static constexpr u32 flags = mathOpIntArgs; i64 operator()(i64 a, i64 b) const { return a | b; } };
+struct OpBitXor { static constexpr u32 flags = mathOpIntArgs; i64 operator()(i64 a, i64 b) const { return a ^ b; } };
+struct OpShl    { static constexpr u32 flags = mathOpIntArgs; i64 operator()(i64 a, i64 b) const { return a << b; } };
+struct OpShr    { static constexpr u32 flags = mathOpIntArgs; i64 operator()(i64 a, i64 b) const { return a >> b; } };
+struct OpUShr   { static constexpr u32 flags = mathOpIntArgs; i64 operator()(i64 a, i64 b) const { return (i64)((u64)a >> b); } };
+
 // --- Array helpers ---
 //
 // Backend-aware accessors used by the generic array dispatch paths. Element
@@ -2603,42 +2615,31 @@ static inline Word compositeUnaryOpTopLevel(VM& vm, Op op, u16 a,
     return dispatchUnaryOp(vm, op, aw, aType, resultType);
 }
 
-// ADD_COMPOSITE Rd, Ra, Rb (5 words: op, regs, resultType*, aType*, bType*)
-void op_add_composite(VM& vm, Code* pc) {
-    u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    Type* resultType = static_cast<Type*>(pc[2].p);
-    Type* aType = static_cast<Type*>(pc[3].p);
-    Type* bType = static_cast<Type*>(pc[4].p);
-    vm.reg(dst) = compositeBinopTopLevel(vm, OpAdd{}, a, b, aType, bType, resultType);
-    DISPATCH(5);
-}
+// ADD_COMPOSITE etc. Rd, Ra, Rb (5 words: op, regs, resultType*, aType*, bType*)
+#define COMPOSITE_BINOP_OP(NAME, OP)                                                \
+    void NAME(VM& vm, Code* pc) {                                                   \
+        u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];              \
+        Type* resultType = static_cast<Type*>(pc[2].p);                             \
+        Type* aType = static_cast<Type*>(pc[3].p);                                  \
+        Type* bType = static_cast<Type*>(pc[4].p);                                  \
+        vm.reg(dst) = compositeBinopTopLevel(vm, OP{}, a, b, aType, bType, resultType); \
+        DISPATCH(5);                                                                \
+    }
 
-void op_sub_composite(VM& vm, Code* pc) {
-    u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    Type* resultType = static_cast<Type*>(pc[2].p);
-    Type* aType = static_cast<Type*>(pc[3].p);
-    Type* bType = static_cast<Type*>(pc[4].p);
-    vm.reg(dst) = compositeBinopTopLevel(vm, OpSub{}, a, b, aType, bType, resultType);
-    DISPATCH(5);
-}
+COMPOSITE_BINOP_OP(op_add_composite, OpAdd)
+COMPOSITE_BINOP_OP(op_sub_composite, OpSub)
+COMPOSITE_BINOP_OP(op_mul_composite, OpMul)
+COMPOSITE_BINOP_OP(op_div_composite, OpDiv)
+COMPOSITE_BINOP_OP(op_mod_composite, OpMod)
+COMPOSITE_BINOP_OP(op_intdiv_composite, OpIntDiv)
+COMPOSITE_BINOP_OP(op_bitand_composite, OpBitAnd)
+COMPOSITE_BINOP_OP(op_bitor_composite, OpBitOr)
+COMPOSITE_BINOP_OP(op_bitxor_composite, OpBitXor)
+COMPOSITE_BINOP_OP(op_shl_composite, OpShl)
+COMPOSITE_BINOP_OP(op_shr_composite, OpShr)
+COMPOSITE_BINOP_OP(op_ushr_composite, OpUShr)
 
-void op_mul_composite(VM& vm, Code* pc) {
-    u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    Type* resultType = static_cast<Type*>(pc[2].p);
-    Type* aType = static_cast<Type*>(pc[3].p);
-    Type* bType = static_cast<Type*>(pc[4].p);
-    vm.reg(dst) = compositeBinopTopLevel(vm, OpMul{}, a, b, aType, bType, resultType);
-    DISPATCH(5);
-}
-
-void op_div_composite(VM& vm, Code* pc) {
-    u16 dst = pc[1].regs[0], a = pc[1].regs[1], b = pc[1].regs[2];
-    Type* resultType = static_cast<Type*>(pc[2].p);
-    Type* aType = static_cast<Type*>(pc[3].p);
-    Type* bType = static_cast<Type*>(pc[4].p);
-    vm.reg(dst) = compositeBinopTopLevel(vm, OpDiv{}, a, b, aType, bType, resultType);
-    DISPATCH(5);
-}
+#undef COMPOSITE_BINOP_OP
 
 // NEG_COMPOSITE Rd, Ra (4 words: op, regs, resultType*, aType*)
 void op_neg_composite(VM& vm, Code* pc) {
@@ -2994,6 +2995,14 @@ INLINE_BINOP_OP(op_add_composite_inline, OpAdd)
 INLINE_BINOP_OP(op_sub_composite_inline, OpSub)
 INLINE_BINOP_OP(op_mul_composite_inline, OpMul)
 INLINE_BINOP_OP(op_div_composite_inline, OpDiv)
+INLINE_BINOP_OP(op_mod_composite_inline, OpMod)
+INLINE_BINOP_OP(op_intdiv_composite_inline, OpIntDiv)
+INLINE_BINOP_OP(op_bitand_composite_inline, OpBitAnd)
+INLINE_BINOP_OP(op_bitor_composite_inline, OpBitOr)
+INLINE_BINOP_OP(op_bitxor_composite_inline, OpBitXor)
+INLINE_BINOP_OP(op_shl_composite_inline, OpShl)
+INLINE_BINOP_OP(op_shr_composite_inline, OpShr)
+INLINE_BINOP_OP(op_ushr_composite_inline, OpUShr)
 
 #undef INLINE_BINOP_OP
 

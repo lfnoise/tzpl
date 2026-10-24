@@ -46,7 +46,7 @@ Type error [tests/errors/no_matching_overload_dispatch.x:18:11]
    |           ^
    No matching overload for '%'
      Supplied types: (Q, Int)
-     Built-in forms: Int % Int
+     Built-in forms: Int % Int, element-wise over collections
      To support these types, declare: fn %(a Q, b Int) R { ... }
 
 Type error [tests/errors/no_matching_overload_dispatch.x:19:11]

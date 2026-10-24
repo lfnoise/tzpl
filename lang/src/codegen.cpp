@@ -552,6 +552,14 @@ Operation CodeGen::getArithOp(BinaryOpExpr::Op op, Type* type) {
         case BinaryOpExpr::Mul: return op_mul_int;
         case BinaryOpExpr::Div: return op_div_int;
         case BinaryOpExpr::Mod: return op_mod_int;
+        // Integer-only ops reach here from the element-wise auto-map paths.
+        case BinaryOpExpr::IntDiv:  return op_int_div;
+        case BinaryOpExpr::BitAnd:  return op_bitand_int;
+        case BinaryOpExpr::BitOr:   return op_bitor_int;
+        case BinaryOpExpr::BitXor:  return op_bitxor_int;
+        case BinaryOpExpr::ShiftL:  return op_shl_int;
+        case BinaryOpExpr::ShiftR:  return op_shr_int;
+        case BinaryOpExpr::UShiftR: return op_ushr_int;
         default: return op_add_int;
     }
 }
@@ -640,6 +648,14 @@ Operation CodeGen::getCompositeArithOp(BinaryOpExpr::Op op) {
         case BinaryOpExpr::Sub: return op_sub_composite;
         case BinaryOpExpr::Mul: return op_mul_composite;
         case BinaryOpExpr::Div: return op_div_composite;
+        case BinaryOpExpr::Mod: return op_mod_composite;
+        case BinaryOpExpr::IntDiv: return op_intdiv_composite;
+        case BinaryOpExpr::BitAnd: return op_bitand_composite;
+        case BinaryOpExpr::BitOr: return op_bitor_composite;
+        case BinaryOpExpr::BitXor: return op_bitxor_composite;
+        case BinaryOpExpr::ShiftL: return op_shl_composite;
+        case BinaryOpExpr::ShiftR: return op_shr_composite;
+        case BinaryOpExpr::UShiftR: return op_ushr_composite;
         default: return op_add_composite;
     }
 }
@@ -650,6 +666,14 @@ Operation CodeGen::getCompositeArithOpInline(BinaryOpExpr::Op op) {
         case BinaryOpExpr::Sub: return op_sub_composite_inline;
         case BinaryOpExpr::Mul: return op_mul_composite_inline;
         case BinaryOpExpr::Div: return op_div_composite_inline;
+        case BinaryOpExpr::Mod: return op_mod_composite_inline;
+        case BinaryOpExpr::IntDiv: return op_intdiv_composite_inline;
+        case BinaryOpExpr::BitAnd: return op_bitand_composite_inline;
+        case BinaryOpExpr::BitOr: return op_bitor_composite_inline;
+        case BinaryOpExpr::BitXor: return op_bitxor_composite_inline;
+        case BinaryOpExpr::ShiftL: return op_shl_composite_inline;
+        case BinaryOpExpr::ShiftR: return op_shr_composite_inline;
+        case BinaryOpExpr::UShiftR: return op_ushr_composite_inline;
         default: return op_add_composite_inline;
     }
 }

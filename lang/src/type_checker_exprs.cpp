@@ -676,6 +676,7 @@ static const char* opToFuncName(BinaryOpExpr::Op op) {
         case BinaryOpExpr::Mul:    return "*";
         case BinaryOpExpr::Div:    return "/";
         case BinaryOpExpr::Mod:    return "%";
+        case BinaryOpExpr::IntDiv: return "//";
         case BinaryOpExpr::Eq:     return "==";
         case BinaryOpExpr::Ne:     return "!=";
         case BinaryOpExpr::Lt:     return "<";
@@ -786,7 +787,9 @@ static std::string_view binaryBuiltinForms(BinaryOpExpr::Op op) {
         case BinaryOpExpr::Div:
             return "numeric operands, element-wise over collections and tuples";
         case BinaryOpExpr::Mod:
-            return "Int % Int";
+            return "Int % Int, element-wise over collections";
+        case BinaryOpExpr::IntDiv:
+            return "Int // Int, element-wise over collections";
         case BinaryOpExpr::Eq:
         case BinaryOpExpr::Ne:
             return "T == T for any T; numeric == numeric";
@@ -819,6 +822,45 @@ static std::string_view unaryBuiltinForms(UnaryOpExpr::Op op) {
         case UnaryOpExpr::Not:    return "!Bool, element-wise over collections";
         case UnaryOpExpr::BitNot: return "~Int, element-wise over collections";
         default:                  return {};
+    }
+}
+
+// Built-in rule for an arithmetic or integer operator applied element-wise
+// to already-unwrapped operand types (implicit or explicit '@' auto-map).
+// Returns the element result type, or nullptr when no built-in rule accepts
+// them. Integer-only operators require Int elements (at any nesting depth)
+// so Float/Complex/Fraction elements never reach an arithmetic opcode.
+Type* TypeChecker::elementwiseArithType(BinaryOpExpr::Op op, Type* left, Type* right) const {
+    switch (op) {
+        case BinaryOpExpr::Add:
+        case BinaryOpExpr::Sub:
+        case BinaryOpExpr::Mul:
+        case BinaryOpExpr::Div:
+            if (isNumeric(left) && isNumeric(right))
+                return commonNumericType(left, right, op == BinaryOpExpr::Div);
+            return nullptr;
+        case BinaryOpExpr::Mod:
+        case BinaryOpExpr::IntDiv: {
+            // Like the scalar rule, a scalar Bool operand counts as Int.
+            auto intScalar = [&](Type* t) {
+                return t == compiler_.intType() || t == compiler_.boolType();
+            };
+            if (intScalar(left) && intScalar(right)) return compiler_.intType();
+            if (isIntComposite(left) && isIntComposite(right))
+                return commonNumericType(left, right);
+            return nullptr;
+        }
+        case BinaryOpExpr::BitAnd:
+        case BinaryOpExpr::BitOr:
+        case BinaryOpExpr::BitXor:
+        case BinaryOpExpr::ShiftL:
+        case BinaryOpExpr::ShiftR:
+        case BinaryOpExpr::UShiftR:
+            if (isIntComposite(left) && isIntComposite(right))
+                return commonNumericType(left, right);
+            return nullptr;
+        default:
+            return nullptr;
     }
 }
 
@@ -882,40 +924,15 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
             }
         }
 
-        // Try built-in numeric ops with unwrapped types
-        bool isDiv = (expr->op == BinaryOpExpr::Div);
-        if (isNumeric(unwrappedLeft) && isNumeric(unwrappedRight)) {
-            Type* scalarResult;
-            switch (expr->op) {
-                case BinaryOpExpr::Add:
-                case BinaryOpExpr::Sub:
-                case BinaryOpExpr::Mul:
-                case BinaryOpExpr::Div:
-                    scalarResult = commonNumericType(unwrappedLeft, unwrappedRight, isDiv);
-                    break;
-                case BinaryOpExpr::Mod:
-                case BinaryOpExpr::IntDiv:
-                    scalarResult = compiler_.intType();
-                    break;
-                case BinaryOpExpr::Eq:
-                case BinaryOpExpr::Ne:
-                case BinaryOpExpr::Lt:
-                case BinaryOpExpr::Le:
-                case BinaryOpExpr::Gt:
-                case BinaryOpExpr::Ge:
-                    scalarResult = compiler_.boolType();
-                    break;
-                case BinaryOpExpr::BitAnd:
-                case BinaryOpExpr::BitOr:
-                case BinaryOpExpr::BitXor:
-                case BinaryOpExpr::ShiftL:
-                case BinaryOpExpr::ShiftR:
-                    scalarResult = compiler_.intType();
-                    break;
-                default:
-                    scalarResult = commonNumericType(unwrappedLeft, unwrappedRight, isDiv);
-                    break;
-            }
+        // Try built-in ops with unwrapped types
+        if (Type* scalarResult = elementwiseArithType(expr->op, unwrappedLeft, unwrappedRight)) {
+            return wrapAutoMapResult(scalarResult, leftAM, rightAM, anyList, anyPVec);
+        }
+        bool isArithOp = expr->op <= BinaryOpExpr::UShiftR;
+        if (!isArithOp && isNumeric(unwrappedLeft) && isNumeric(unwrappedRight)) {
+            bool isCmp = expr->op >= BinaryOpExpr::Eq && expr->op <= BinaryOpExpr::Ge;
+            Type* scalarResult = isCmp ? compiler_.boolType()
+                                       : commonNumericType(unwrappedLeft, unwrappedRight);
             return wrapAutoMapResult(scalarResult, leftAM, rightAM, anyList, anyPVec);
         }
 
@@ -1016,8 +1033,7 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
                 (rightType == compiler_.intType() || rightType == compiler_.boolType())) {
                 return compiler_.intType();
             }
-            error(expr->loc, "'//' requires integer operands");
-            return compiler_.intType();
+            break;  // Fall through to operator overload lookup
 
         case BinaryOpExpr::Eq:
         case BinaryOpExpr::Ne:
@@ -1245,13 +1261,12 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
                 if (!func) func = tryResolveTemplate(opN, unwrappedArgs, nullptr);
                 if (!func) func = tryResolveOverload(opN, unwrappedArgs);
 
-                // Also try built-in numeric ops on unwrapped types
-                if (!func && isNumeric(unwrappedLeft) && isNumeric(unwrappedRight)) {
+                // Also try built-in ops on unwrapped types
+                Type* scalarResult = func ? nullptr
+                    : elementwiseArithType(expr->op, unwrappedLeft, unwrappedRight);
+                if (scalarResult) {
                     expr->leftAutoMap = leftAM;
                     expr->rightAutoMap = rightAM;
-                    Type* scalarResult;
-                    bool isDiv = (expr->op == BinaryOpExpr::Div);
-                    scalarResult = commonNumericType(unwrappedLeft, unwrappedRight, isDiv);
                     return wrapAutoMapResult(scalarResult, leftAM, rightAM, anyList, anyPVec);
                 }
 

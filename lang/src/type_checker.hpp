@@ -620,6 +620,7 @@ private:
     bool typesNominallyEqual(Type* a, Type* b) const;
     int numericRank(Type* t) const;
     Type* commonNumericType(Type* a, Type* b, bool isDiv = false) const;
+    Type* elementwiseArithType(BinaryOpExpr::Op op, Type* left, Type* right) const;
     Type* comparisonResultType(Type* a, Type* b) const;
 
     // Constraint checking
