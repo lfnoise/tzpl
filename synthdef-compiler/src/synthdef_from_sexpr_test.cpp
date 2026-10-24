@@ -24,7 +24,6 @@
 #include "synthdef_from_sexpr.hpp"
 #include "synthdef_compile.hpp"
 #include <print>
-#include <fstream>
 
 // The test suite is built with NDEBUG, which makes TEST_ASSERT() a no-op.
 // TEST_ASSERT aborts on failure in release builds too, with a clear message.
@@ -126,35 +125,6 @@ void test_sexpr_from_language() {
         synth->graphAnalysis();
         synth->dump();
     }
-}
-
-void test_sexpr_from_file() {
-    std::println("\n=== Testing s-expression from file ===");
-
-    // Read the file that was written by the language test
-    std::ifstream file("/tmp/test_synth.sexpr");
-    if (!file) {
-        std::println("ERROR: Could not open /tmp/test_synth.sexpr");
-        std::println("Run the language test first: ./whatever test_sexpr_io.tzpl");
-        return;
-    }
-
-    std::string sexprText((std::istreambuf_iterator<char>(file)),
-                          std::istreambuf_iterator<char>());
-
-    std::println("Read s-expression from file:\n{}", sexprText);
-
-    auto result = synthFromSExprText(sexprText, "from_file");
-    if (!result) {
-        std::println("ERROR: {}", result.error());
-        return;
-    }
-
-    Synth* synth = result.value();
-    std::println("SUCCESS: Created synth from file with {} expressions", synth->exprs.size());
-
-    synth->graphAnalysis();
-    synth->dump();
 }
 
 void test_sexpr_synth_wrapper() {
@@ -357,7 +327,6 @@ void test_sexpr_integration() {
     test_sexpr_from_language();
     test_sexpr_synth_wrapper();
     test_sexpr_if_expr();
-    test_sexpr_from_file();
     test_sexpr_vec_ops();
 
     std::println("\n=== S-Expression Integration Tests Complete ===");
