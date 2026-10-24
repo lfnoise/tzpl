@@ -515,7 +515,9 @@ namespace synthdef {
             rule(x==x, one),
     #endif
 
-            rule(k*abs(x), abs(k*x)),
+            // k|x| == |kx| only for k >= 0, so match a positive constant, not
+            // any low-rate k (a negative k would flip the sign of the result).
+            rule(pos*abs(x), abs(pos*x)),
 
             rule((x+j)+k, (j+k)+x),
             rule((x+j)-k, (j-k)+x),

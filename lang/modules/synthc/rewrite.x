@@ -346,7 +346,9 @@ fn _buildRules() [Rule] {
 		rule(min(x, x), x),
 		rule(max(x, x), x),
 
-		rule(k * abs(x), abs(k * x)),
+		-- k|x| == |kx| only for k >= 0, so match a positive constant, not
+		-- any low-rate k (a negative k would flip the sign of the result).
+		rule(pos * abs(x), abs(pos * x)),
 
 		-- rate-aware reassociation: group low-clock (I,J,K) work together so it
 		-- factors out of the high-clock signal (X,Y,Z) and feeds constant
