@@ -3912,6 +3912,9 @@ fn genBlockBufDecls(ctx Ctx) String {
 	for (k : ctx.blockCycles) {
 		let ty = ctx _blockCycleType(k);
 		for (part : ["x", "a", "b", "w"]) { s = s $ "\t%^* rc%^_%^;\n" fmt(ty, k, part); }
+		if (ctx _blockCycleForm(k) == "statespace") {
+			s = s $ "\ttzpl::dsp::BlockStateSpace<%^, %^> ss%^;\n\tu8 ssv%^;\n" fmt(ty, ctx.cycles[k].readers length, k, k);
+		}
 	}
 	for (x : `cgRootBuf) { s = s $ "\t%^* bk%^;\n" fmt(cppType(ctx.typ[x]), ctx.serial[x]); }
 	for (x : `cgBlockTemps) { s = s $ "\t%^* bt%^;\n" fmt(cppType(ctx.typ[x]), ctx.serial[x]); }
@@ -4021,6 +4024,8 @@ fn _advanceDelay(ctx Ctx, d DelayInfo) String =
 
 fn _blockCycleType(ctx Ctx, k Int) String = cppType(ctx.typ[ctx.dsrc[ctx.cycles[k].readers[0]]]);
 
+fn _blockCycleForm(ctx Ctx, k Int) String = ctx blockFormOf(ctx.cycles[k], (ctx classifyRecurrences)[k]);
+
 -- The block cycle a region consists of, or NONE.
 fn _regionBlockCycle(ctx Ctx, region [Int]) Int {
 	var k = NONE;
@@ -4125,6 +4130,126 @@ fn _genBlockCycle(ctx Ctx, k Int, region [Int]) String {
 	s
 }
 
+-- Block state space (plan 4.7, "Affine, block-constant coefficients"):
+-- the cycle as a step function of its states s[j] (the reads of its
+-- single-value delays) and its one outside audio input x, returning its one
+-- output. When every coefficient's parameter group is cached or computed
+-- once this call, the matrices (rebuilt when a group recomputed) run the
+-- whole block; while any group computes every sample, the block runs as the
+-- plain recurrence (the region code) -- the state layout is shared, so
+-- either form continues the other.
+
+-- The cycle node n as an expression over the states and x.
+fn _cycExpr(ctx Ctx, cy CycleInfo, e NIdx, n NIdx) String {
+	var j = 0;
+	while (j < cy.readers length) {
+		if (cy.readers[j] == n) { return "s[%^]" fmt(j); }
+		j = j + 1;
+	}
+	if (n == e) { return "x"; }
+	-- An outside value: lower rate (a coefficient) or materialized, read as
+	-- is; an inlined audio-rate expression is rebuilt over x.
+	let inlinedAudio = !(cy.nodes contains(n)) && ctx.nrate[n] == Rate.audio && !(ctx isMaterialized(n));
+	if (!(cy.nodes contains(n)) && !inlinedAudio) {
+		return "(%^)" fmt(ctx _isRootNode(n) ? _varRef(ctx, n, "0") : genExpr(ctx, n, "0"));
+	}
+	let ins = ctx.ins[n];
+	match (ctx.kind[n]) {
+		binopK(op): {
+			let a = ctx _cycExpr(cy, e, ins[0]);
+			let b = ctx _cycExpr(cy, e, ins[1]);
+			match (op) {
+				add: { return "(%^ + %^)" fmt(a, b); }
+				sub: { return "(%^ - %^)" fmt(a, b); }
+				mul: { return "(%^ * %^)" fmt(a, b); }
+				div: { return "(%^ / %^)" fmt(a, b); }
+				_: {}
+			}
+		}
+		unopK(op): { match (op) { neg: { return "(-%^)" fmt(ctx _cycExpr(cy, e, ins[0])); } _: {} } }
+		castopK(t): { return "W(%^)" fmt(ctx _cycExpr(cy, e, ins[0])); }
+		_: {}
+	}
+	"W(0)"   -- not reached: the cycle classified affine
+}
+
+-- A block pointer to the samples of node n, or "" if it has none.
+fn _blockPtr(ctx Ctx, n NIdx) String {
+	match (ctx.kind[n]) {
+		inletK(_, sn, _): { return ctx.chans[n] == 1 ? "(%^*)p->ins[%^].chans[0]" fmt(cppType(ctx.typ[n]), sn) : ""; }
+		_: {}
+	}
+	if (ctx.chans[n] != 1) { return ""; }
+	if (ctx _isBlockTemp(n)) { return "p->bt%^" fmt(ctx.serial[n]); }
+	if (ctx _isRootBuf(n) && ctx.nrate[n] == Rate.audio) { return "p->bk%^" fmt(ctx.serial[n]); }
+	""
+}
+
+-- The parameter groups of the block-rate values a cycle reads.
+fn _cycleGroups(ctx Ctx, cy CycleInfo) [Int] {
+	var out [Int] = [];
+	for (x : cy.nodes) {
+		for (i : ctx.ins[x]) {
+			if (!(cy.nodes contains(i)) && ctx.nrate[i] == Rate.block) {
+				let g = ctx.groupOf[i];
+				if (g != NONE && !(out contains(g))) { out push!(g); }
+			}
+		}
+	}
+	out
+}
+
+fn _genStateSpace(ctx Ctx, k Int, region [Int], delays [DelayInfo]) String {
+	let cy = ctx.cycles[k];
+	let e = ctx stateSpaceInput(cy);
+	let o = ctx stateSpaceOutput(cy);
+	let ty = ctx _blockCycleType(k);
+	let xp = ctx _blockPtr(e);
+	let yp = ctx _blockPtr(o);
+	let serial = ctx _genRegion(region, delays);
+	if (xp length == 0 || yp length == 0 || ctx.typ[e].0 != ctx.typ[o].0 || cppType(ctx.typ[o]) != ty) {
+		return serial;    -- no block buffers to run over: the plain recurrence
+	}
+	let nst = cy.readers length;
+	var `cgIndent Int = 2;
+	var `cgRoot Int = NONE;
+	-- the step: next states from the old ones, then the output
+	var stepBody = "";
+	var j = 0;
+	while (j < nst) {
+		stepBody = stepBody $ "\t\t\tW n%^ = W(%^);\n" fmt(j, ctx _cycExpr(cy, e, ctx.dsrc[cy.readers[j]]));
+		j = j + 1;
+	}
+	stepBody = stepBody $ "\t\t\tW y = W(%^);\n" fmt(ctx _cycExpr(cy, e, o));
+	j = 0;
+	while (j < nst) { stepBody = stepBody $ "\t\t\ts[%^] = n%^;\n" fmt(j, j); j = j + 1; }
+	let rl = ctx _rowLocalsFor("bi", stepBody);
+	let groups = ctx _cycleGroups(cy);
+	var varying [String] = [];
+	var changed [String] = ["!p->ssv%^" fmt(k)];
+	for (g : groups) { varying push!("pgS%^" fmt(g)); changed push!("pg%^ == 1" fmt(g)); }
+	var s = "\t{ // recurrence %^: block state space (%^ states)\n" fmt(k, nst);
+	s = s $ "\tif (%^) {\n" fmt(varying length > 0 ? varying join(" || ") : "false");
+	s = s $ serial;
+	s = s $ "\t} else {\n" $ rl.bases $ "\t\ti32 bi = off;\n" $ rl.rows;
+	s = s $ "\t\tauto step = [&](auto* s, auto x) {\n";
+	s = s $ "\t\t\tusing W = std::remove_pointer_t<decltype(s)>;\n" $ stepBody $ "\t\t\treturn y;\n\t\t};\n";
+	s = s $ "\t\tif (%^) {\n\t\t\tp->ss%^ = tzpl::dsp::BlockStateSpace<%^, %^>::build(step);\n\t\t\tp->ssv%^ = 1;\n\t\t}\n"
+		fmt(changed join(" || "), k, ty, nst, k);
+	s = s $ "\t\t%^ s[%^] = {" fmt(ty, nst);
+	var states [String] = [];
+	for (r : cy.readers) {
+		let d = match (ctx.kind[r]) { delayFixReadK(di, _): di; _: 0; };
+		states push!("p->d%^" fmt(ctx.delays[d].serial));
+	}
+	s = s $ states join(", ") $ "};\n";
+	s = s $ "\t\ttzpl::dsp::runStateSpace(p->ss%^, step, s, %^ + off, 1, %^ + off, n);\n" fmt(k, xp, yp);
+	j = 0;
+	while (j < nst) { s = s $ "\t\t%^ = s[%^];\n" fmt(states[j], j); j = j + 1; }
+	s = s $ "\t}\n\t}\n";
+	s
+}
+
 -- One region: its loops sample by sample, and the root delays it owns.
 fn _genRegion(ctx Ctx, region [Int], delays [DelayInfo]) String {
 	var `cgIndent Int = 2;
@@ -4164,7 +4289,9 @@ fn genTickFun(ctx Ctx, name String) String {
 	var ri = 0;
 	while (ri < regions length) {
 		let k = ctx _regionBlockCycle(regions[ri]);
-		s = s $ (k != NONE ? ctx _genBlockCycle(k, regions[ri]) : ctx _genRegion(regions[ri], owned[ri]));
+		s = s $ (k == NONE ? ctx _genRegion(regions[ri], owned[ri])
+		        : (ctx _blockCycleForm(k) == "statespace" ? ctx _genStateSpace(k, regions[ri], owned[ri])
+		                                                   : ctx _genBlockCycle(k, regions[ri])));
 		ri = ri + 1;
 	}
 	s = s $ "\t%^_scatter(p, off, n);\n" fmt(name);
@@ -4568,7 +4695,9 @@ fn genCpp(ctx Ctx, name String, simdWidth Int = 0) String {
 	s = s $ "#include \"tzpl_random.hpp\"\n";
 	s = s $ "#include \"tzpl_delay_interp.hpp\"\n";
 	if (ctx _spectralChains length > 0) { s = s $ "#include \"tzpl_fft.hpp\"\n"; }
-	if (ctx.blockCycles length > 0) { s = s $ "#include \"tzpl_dsp/scan.hpp\"\n"; }
+	if (ctx.blockCycles length > 0) {
+		s = s $ "#include \"tzpl_dsp/scan.hpp\"\n#include \"tzpl_dsp/state_space.hpp\"\n";
+	}
 	s = s $ "#include <cmath>\n#include <cstdio>\n#include <cstring>\n#include <cstdlib>\n#include <array>\n\n";
 	s = s $ "using namespace synthdef;\nusing namespace simd;\n";
 	s = s $ "\n";

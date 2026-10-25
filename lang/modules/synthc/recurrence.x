@@ -200,10 +200,11 @@ fn blockFormOf(ctx Ctx, cy CycleInfo, c RecClass) String {
 	let kind = match (c) {
 		scan(op):           (op == "+" || op == "+wrap") ? "scan" $ op : "";
 		affineScan:         "affine";
-		affineBlock(order): order == 1 ? "affine" : "";
+		affineBlock(order): order == 1 ? "affine" : "statespace";
 		_:                  "";
 	};
 	if (kind length == 0) { return ""; }
+	if (kind == "statespace") { return ctx _stateSpaceOK(cy) ? kind : ""; }
 	if (cy.readers length != 1) { return ""; }
 	let r = cy.readers[0];
 	if (ctx.dweight[r] != 1) { return ""; }
@@ -269,4 +270,89 @@ fn annotateRecurrences(ctx Ctx) Void {
 		ctx.cycles[i] = CycleInfo { ...ctx.cycles[i], cls: ctx recClassStr(c), strategy: strategy };
 		i = i + 1;
 	}
+}
+
+-- Block state space (affine, block-rate coefficients, 2 to 8 states): every
+-- state a weight-1 read of its own single-value delay (allocSize 1, no other
+-- reader), one channel, root graph; exactly one audio-rate input from
+-- outside the cycle (materialized), every other outside input at block rate
+-- or lower; and exactly one cycle value used outside the cycle (the output).
+fn _stateSpaceOK(ctx Ctx, cy CycleInfo) Bool {
+	let nst = cy.readers length;
+	if (nst < 2 || nst > 8) { return false; }
+	for (x : cy.nodes) { if (ctx.graphOf[x] != 0 || ctx.chans[x] != 1) { return false; } }
+	let t = ctx.typ[ctx.dsrc[cy.readers[0]]];
+	if (!(t.0 == 4 || t.0 == 8)) { return false; }
+	for (r : cy.readers) {
+		if (ctx.dweight[r] != 1) { return false; }
+		let d = match (ctx.kind[r]) { delayFixReadK(di, _): di; _: NONE; };
+		if (d == NONE) { return false; }
+		let di = ctx.delays[d];
+		if (di.allocSize != 1 || di.fixReaders length != 1 || di.varReaders length != 0) { return false; }
+		if (ctx.typ[ctx.dsrc[r]].0 != t.0) { return false; }
+	}
+	ctx stateSpaceInput(cy) != NONE && ctx stateSpaceOutput(cy) != NONE
+}
+
+-- The state-space cycle's one audio-rate outside input, or NONE: the single
+-- materialized audio value its outside inputs reach through inlined
+-- audio-rate expressions (e.g. the b0*x, b1*x, b2*x of a biquad), which
+-- must be linear in it (+, -, * or / by a lower-rate value, negation, float
+-- casts).
+fn stateSpaceInput(ctx Ctx, cy CycleInfo) NIdx {
+	var leaves [NIdx] = [];
+	for (x : cy.nodes) {
+		for (i : ctx.ins[x]) {
+			if (cy.nodes contains(i) || ctx.nrate[i] != Rate.audio) { continue; }
+			if (!(ctx _audioLeaves(i, leaves))) { return NONE; }
+		}
+	}
+	leaves length == 1 ? leaves[0] : NONE
+}
+
+fn isMaterialized(ctx Ctx, n NIdx) Bool =
+	match (ctx.kind[n]) { inletK(_, _, _): true; _: !(ctx.cut[n] isNoneCut); };
+
+-- Collect the materialized audio leaves under n; false if an inlined node on
+-- the way is not linear.
+fn _audioLeaves(ctx Ctx, n NIdx, leaves [NIdx]) Bool {
+	if (ctx isMaterialized(n)) {
+		if (!(leaves contains(n))) { leaves push!(n); }
+		return true;
+	}
+	let linear = match (ctx.kind[n]) {
+		binopK(op): (match (op) { add: true; sub: true; mul: true; div: true; _: false; });
+		unopK(op): (match (op) { neg: true; _: false; });
+		castopK(t): t.0 == 4 || t.0 == 8;
+		_: false;
+	};
+	if (!linear) { return false; }
+	var audioIns = 0;
+	for (i : ctx.ins[n]) {
+		if (ctx.nrate[i] == Rate.audio) {
+			audioIns = audioIns + 1;
+			if (!(ctx _audioLeaves(i, leaves))) { return false; }
+		}
+	}
+	-- a product or quotient of two audio values is not linear in the input
+	match (ctx.kind[n]) {
+		binopK(op): { match (op) { mul: { if (audioIns > 1) { return false; } } div: { if (ctx.nrate[ctx.ins[n][1]] == Rate.audio) { return false; } } _: {} } }
+		_: {}
+	}
+	true
+}
+
+-- The state-space cycle's one value used outside it, or NONE.
+fn stateSpaceOutput(ctx Ctx, cy CycleInfo) NIdx {
+	var o = NONE;
+	for (x : cy.nodes) {
+		for (c : ctx.consumers[x]) {
+			let isWriter = match (ctx.kind[c]) { delayWriteK(_): true; _: false; };
+			if (!(cy.nodes contains(c)) && !isWriter) {
+				if (o != NONE && o != x) { return NONE; }
+				o = x;
+			}
+		}
+	}
+	o
 }

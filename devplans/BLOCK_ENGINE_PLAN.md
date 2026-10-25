@@ -1381,6 +1381,10 @@ Progress (2026-10-25; M7 is in progress):
   - One-channel ports are read and written in place. Multichannel ports go through
     interleaved block buffers, gathered once per call, and a multichannel input read
     only by parameter groups (`notes`) is gathered only when it changed.
+    **This copy is temporary.** It exists only so the inherited per-sample loop code,
+    with its 4-wide channel loads, can stay as it is. M8 removes it: ports are read
+    zero-copy through the channel-pointer table, and channel-vector loops transpose in
+    registers (D4, §4.3).
   - Buffer bases are hoisted `__restrict` locals.
 - **Block forms:** first-order cycles run over the block in two passes around a
   `tzpl_dsp` scan:
@@ -1394,6 +1398,20 @@ Progress (2026-10-25; M7 is in progress):
     one channel; root graph; one weight-1 read of a delay with no other reader, kept
     as a single value; no random draw inlined into the cycle's inputs.
   - In the dump corpus: 96 scans and 13 first-order affine cycles.
+- **Block state space** (`tzpl_dsp::BlockStateSpace`) runs affine cycles with block-rate
+  coefficients and 2–8 states.
+  - **Shape:** each state is a weight-1 read of its own single-value delay. There is
+    one outside audio input, reached through inlined linear expressions such as a
+    biquad's `b0·x`, `b1·x` and `b2·x`, and one output used outside the cycle.
+  - **The step function** is the cycle's equations over `s[]` and `x`, emitted as a
+    generic lambda, so f32 matrices are built in f64.
+  - **Per block, at run time:** while any coefficient group recomputes every sample,
+    the block runs as the plain recurrence. Otherwise the block runs on the matrices,
+    rebuilt when a group recomputed once (or on first use). The state layout is
+    shared, so either form continues the other.
+  - **Coverage:** mono RBJ biquads (`rlpf` and kin). In the dump corpus only 2 cycles
+    qualify; the others are multichannel, and those already run 4 channels or voices
+    to a vector.
 - **`TZPL_STRICT_RECURRENCES=1`** turns block forms off: every recurrence runs in
   its own order. This is the plan's `strictRecurrences`, as an environment variable
   for now.
@@ -1416,9 +1434,11 @@ Status:
   little yet: most loops still compute one sample at a time between them, and
   vectorizing those over samples is M8's fusion.
 - **Not done yet:**
-  - block state space for order-2 and order-3 filters, and multichannel cycles;
+  - block forms for multichannel cycles (planar block buffers, which come with M8's
+    layouts), and state space for cycles with several inputs or outputs;
   - the per-ugen accuracy and speed runs against the M1 references;
-  - a per-cycle stride check that picks the block or the per-sample form each block.
+  - the stride check for the first-order affine forms. They always run as scans;
+    state space already chooses per block.
 
 **M8: Strategy and fusion optimiser (§4.2 steps 6–8).**
 - Serial-loop isolation of short cycles, the cost table, loop formation of all three
