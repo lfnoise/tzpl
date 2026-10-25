@@ -10,26 +10,17 @@
 //  tzpl_chanadapt.hpp
 //  audio engine
 //
-//  Hidden channel-adapting node. Interposed automatically when a source's
-//  channel count differs from its destination's, so any outlet can drive any
-//  inlet of the same element type and rate.
-//
-//    widening (src < dst):  out[c] = in[c & (srcChans-1)]
-//        a mono source feeds every destination channel; a stereo source into
-//        a quad inlet lands as (L, R, L, R).
-//
-//    narrowing (src > dst): out[c] = sum of in[j] for every j & (dstChans-1) == c
-//        an 8-channel source into a stereo inlet mixes down to
-//        (a0+a2+a4+a6, a1+a3+a5+a7).
-//
-//  The two rules are duals -- both wrap channel index c around the smaller
-//  count -- and agree with a plain copy when the counts are equal (in which
-//  case no adapter is inserted at all). Channel counts are required to be
-//  powers of two, so the wrap is a mask.
+//  Hidden channel-folding node. Broadcasting (a destination at least as
+//  large as its source in every dimension) is free pointer remapping in
+//  Silo::connect. Where a destination is SMALLER than its source in some
+//  dimension, this node sits between them and folds: destination channel w
+//  sums every source channel that maps to it (per dimension, source index j
+//  lands on j % dst; broadcast dimensions repeat as usual). An 8-channel
+//  source into a stereo inlet mixes down to (a0+a2+a4+a6, a1+a3+a5+a7).
 //
 //  An adapter sits immediately downstream of its source, ahead of any
 //  crossfader or fan-in mixer, so everything else in the graph only ever
-//  sees matching channel counts. It is a hidden node (nodeID -1) and retires
+//  sees shapes that broadcast. It is a hidden node (nodeID -1) and retires
 //  itself as soon as either side of it is disconnected (see Silo::unlink).
 //
 
@@ -45,8 +36,7 @@ struct Silo;
 struct Node;
 struct OutPort;
 
-// Create a hidden adapter converting srcType to dstType. The two types must
-// agree on element type and rate; only the channel counts may differ.
+// Create a hidden fold adapter from srcType to dstType (same element type).
 // Allocated in NRT, like mixers and crossfaders.
 Node* newChanAdaptNode(Engine* e, Silo* silo,
                        tzpl_SignalType srcType, tzpl_SignalType dstType);

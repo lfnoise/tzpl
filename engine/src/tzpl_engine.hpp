@@ -200,6 +200,10 @@ struct Engine
 	std::atomic_int runSilos_ = 1;
 
 	std::vector<Silo> silos_;
+	// Block size: the most samples a synth processes per call (maxBlock).
+	int blockSize_ = 64;
+	// Frames in the device buffer being processed (set by processAudioBlock).
+	int curFrames_ = 0;
 	int numTempoClocks_ = 1; // number of TempoClock slots per silo
 	std::vector<NodeDef*> defs_;
 
@@ -238,6 +242,11 @@ struct Engine
 	// nrtMode_ = false.
 	bool nrtMode_ = false;
 	bool runBackgroundThreads_ = true;
+	// Set by a backend listener when the device's nominal sample rate is
+	// changed externally; processNRTCommands stops the stream on the next tick.
+	// Declared before the threads below: they start in the member-init list
+	// and read it straight away.
+	std::atomic<bool> sampleRateChanged_{false};
 	std::thread nrt_cmd_thread_;
 	std::thread dead_node_thread_;
 
@@ -282,9 +291,6 @@ struct Engine
 	f32 const* in_ = nullptr;
 	f32* out_ = nullptr;
 
-	// Set by a backend listener when the device's nominal sample rate is
-	// changed externally; processNRTCommands stops the stream on the next tick.
-	std::atomic<bool> sampleRateChanged_{false};
 
     Engine(EngineConfig const& config, AudioStreamParameters& streamParams,
            std::unique_ptr<AudioBackend> backend);
@@ -303,7 +309,6 @@ struct Engine
 
 	void defOutputNode(int numChannels);
 	void defInputNode(int inputChannels);
-	void defXFaderNode();
  
     bool isAudioInitialized() const { return audioState_ >= AudioState::initted; }
     bool isAudioRunning() const { return audioState_ == AudioState::running; }
@@ -311,13 +316,6 @@ struct Engine
 	f64 getStreamTime();
 	i64 streamTimeToSampleTime(f64 streamTime);
 	
-    // real time methods
-	
-	int noteOn(Node* node, int noteID, f32 pch, f32 vel);
-	int noteOff(Node* node, int noteID, f32 vel);
-	int noteControl(Node* node, int noteID, i64 controlID, f32 value);
-	int noteControl(Node* node, int noteID, i64 controlID, int byteSize, void* values);
-
 	static void processNRTCommands(Engine* e);
 	static void processDeadNodes(Engine* e);
 };

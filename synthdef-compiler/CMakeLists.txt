@@ -46,7 +46,13 @@ target_compile_definitions(synthdef_compiler_lib PRIVATE
     TZPL_PLUGIN_CXX="${CMAKE_CXX_COMPILER}")
 
 # --- synthdef-compiler executable (tests, examples, audio playback) ---
-
+#
+# Frozen on the block-engine branch (devplans/BLOCK_ENGINE_PLAN.md D9): its
+# in-process test harness drives plugins through the pre-v3 plugin ABI, which
+# no longer exists. Its --test suite is retired (plan section 8); the library
+# above still builds, for the compile-and-link step synthc uses.
+option(TZPL_SYNTHDEF_LEGACY_EXE "Build the frozen synthdef-compiler executable (pre-v3 ABI)" OFF)
+if(TZPL_SYNTHDEF_LEGACY_EXE)
 set(EXE_SOURCES
     src/main.cpp
     src/synthdef_compile.cpp
@@ -59,6 +65,7 @@ set(EXE_SOURCES
 add_executable(synthdef-compiler ${EXE_SOURCES})
 target_link_libraries(synthdef-compiler PRIVATE synthdef_compiler_lib rtaudio)
 target_compile_options(synthdef-compiler PRIVATE -ffast-math)
+endif()
 
 # --- install targets ---
 
@@ -91,6 +98,8 @@ install(FILES
     src/synthdef_compile_link.hpp
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/synthdef
 )
+if(TZPL_SYNTHDEF_LEGACY_EXE)
 install(TARGETS synthdef-compiler
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
+endif()

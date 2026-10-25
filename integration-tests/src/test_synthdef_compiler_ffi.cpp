@@ -330,7 +330,7 @@ static void test_def_desc_introspection() {
         check(desc.outs.size() == 1, "one outlet");
         if (desc.outs.size() == 1) {
             check(desc.outs[0].name == "out", "outlet named 'out'");
-            check(desc.outs[0].type.chans == 2, "outlet has 2 channels");
+            check(desc.outs[0].type.shape.dims[3] == 2, "outlet has 2 channels");
         }
         check(desc.controls.empty(), "no controls");
         check(desc.tags.size() == 2 && desc.tags[0] == "demo"
@@ -341,7 +341,7 @@ static void test_def_desc_introspection() {
             check(desc.buffers[0].name == "buf0", "buffer named 'buf0'");
             check(desc.buffers[0].bufID == 0, "buffer id 0");
             check(desc.buffers[0].type.elem == tzpl_kF64, "buffer elem type f64");
-            check(desc.buffers[0].type.chans == 2, "buffer spans 2 channels");
+            check(desc.buffers[0].type.shape.dims[3] == 2, "buffer spans 2 channels");
         }
     }
 
@@ -387,7 +387,7 @@ static void test_def_desc_introspection() {
         if (fok) {
             check(fileDesc.name == "test_bufdesc", "file desc name matches");
             check(fileDesc.buffers.size() == 1
-                  && fileDesc.buffers[0].type.chans == 2,
+                  && fileDesc.buffers[0].type.shape.dims[3] == 2,
                   "file desc reports the buffer metadata");
         }
         engine::DefDesc fileDesc2;

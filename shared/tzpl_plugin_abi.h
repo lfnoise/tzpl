@@ -69,14 +69,22 @@ extern "C" {
  * loaders additionally refuse a version-1 plugin that exports
  * "swapSampleBank" -- only such a plugin indexes bank entries. Version-1
  * plugins without sample banks keep loading unchanged. */
-#define TZPL_PLUGIN_ABI_VERSION 2
+#define TZPL_PLUGIN_ABI_VERSION 3
+
+/* Version 3 (2026-10, block engine): synths process blocks and signals are
+ * tensors of per-channel buffers. tzpl_SignalType carries a tzpl_Shape in
+ * place of `chans`; the element type order changed; controls, event rate and
+ * the note functions are gone (controls are ordinary inputs, notes are a
+ * `notes` input tensor driven by the engine's voicer); tzpl_SynthFuns has
+ * process(offset, n) and resetVoice. Loaders refuse anything older than 3. */
+#define TZPL_PLUGIN_ABI_MIN_VERSION 3
 
 /* Forward declarations */
 struct tzpl_Engine;
 struct tzpl_Node;
 struct tzpl_SynthData;
 
-/* Error codes */
+/* Error codes. Append-only: these values cross the ABI. */
 typedef enum tzpl_SErr {
     tzpl_errNone = 0,
     tzpl_errInternal,
@@ -84,7 +92,7 @@ typedef enum tzpl_SErr {
     tzpl_errNodeDefNotFound,
     tzpl_errNodeNotFound,
     tzpl_errNoteNotFound,
-    tzpl_errControlNotFound,
+    tzpl_errControlNotFound,   /* retired in v3 (no controls); kept for numbering */
     tzpl_errDeviceNotFound,
     tzpl_errAlreadyAdded,
     tzpl_errAlreadyRemoved,
@@ -96,65 +104,75 @@ typedef enum tzpl_SErr {
     tzpl_errCommandsQueuedButNotSent,
     tzpl_errNoActiveBundle,
     tzpl_errEngineInUse,
-    tzpl_errCyclicConnection,
-    
+    tzpl_errCyclicConnection,   /* a connection would close a cycle (the
+                                   graph is feed-forward only) */
+
     tzpl_errTypeMismatch,
     tzpl_errRateMismatch,
     tzpl_errChanMismatch,
     tzpl_errNumPortsMismatch,
-    
+
     tzpl_errNotImplemented,
 
     tzpl_errTooLate,
     tzpl_errClockOutOfRange,
 
-    /* A fixed-size engine resource is full (e.g. a silo's signal-tap table).
-       Append new codes at the end only -- these values cross the ABI. */
+    /* A fixed-size engine resource is full (e.g. a silo's signal-tap table). */
     tzpl_errResourceLimit,
 
     /* A sample-bank spec is invalid (range out of 0..127, lo > hi, two
        zones covering the same (pitch, velocity) cell) or one of its sound
        files failed to load. */
     tzpl_errBadSampleBank,
+
+    /* A region (offset/extent box) does not fit the port's shape. */
+    tzpl_errRegionOutOfRange,
 } tzpl_SErr;
 
-/* Signal rate - defines how signals are processed */
+/* Signal rate. Informational on ports: every input is audio rate at the ABI
+ * (any input can be patched). const/init/reset remain internal rates of the
+ * synth compiler. */
 typedef enum tzpl_Rate {
-    tzpl_constRate = 0,  /* Constant value */
-    tzpl_initRate,       /* Initialized once */
-    tzpl_resetRate,      /* Reset rate */
-    tzpl_eventRate,      /* Event rate */
-    tzpl_audioRate       /* Audio Rate */
+    tzpl_constRate = 0,  /* literal */
+    tzpl_initRate,       /* computed once at init */
+    tzpl_resetRate,      /* latched at resetVoice / reset */
+    tzpl_audioRate       /* per sample */
 } tzpl_Rate;
 
-/* Element type - bit 0 = is_float, bit 1 = is_64bit */
+/* Element type */
 typedef enum tzpl_ElemType {
-    tzpl_kI32 = 0,  /* 32-bit integer */
-    tzpl_kF32 = 1,  /* 32-bit float */
-    tzpl_kI64 = 2,  /* 64-bit integer */
-    tzpl_kF64 = 3,  /* 64-bit float */
+    tzpl_kI32 = 0,
+    tzpl_kI64 = 1,
+    tzpl_kF32 = 2,
+    tzpl_kF64 = 3,
 } tzpl_ElemType;
 
-/* Signal type descriptor - combines element type, rate, and channel count */
+/* Tensor shape, row-major: dims[3] varies fastest. Unused leading dims are 1,
+ * so a scalar is {1,1,1,1}, n channels {1,1,1,n}, a rows x cols matrix
+ * {1,1,rows,cols}. Channel c of a port is the row-major flattening. */
+#define TZPL_MAX_RANK 4
+typedef struct tzpl_Shape {
+    uint32_t dims[TZPL_MAX_RANK];
+} tzpl_Shape;
+
+/* Signal type descriptor */
 typedef struct tzpl_SignalType {
-    tzpl_ElemType elem;  /* Element type */
-    tzpl_Rate rate;      /* Signal rate */
-    int chans;           /* Number of channels */
+    tzpl_Shape shape;
+    tzpl_ElemType elem;
+    tzpl_Rate rate;
 } tzpl_SignalType;
 
-/* Slice for passing multi-channel data */
-typedef struct tzpl_Slice {
-    int chans;
-    void* data;
-} tzpl_Slice;
+static inline int tzpl_shapeChans(tzpl_Shape s) {
+    return (int)(s.dims[0] * s.dims[1] * s.dims[2] * s.dims[3]);
+}
 
-/* Parameter pair for note control */
+/* Parameter pair for note parameter updates (engine API, not a plugin call) */
 typedef struct tzpl_ParamPair {
     int index;
     float value;
 } tzpl_ParamPair;
 
-/* Control kinds */
+/* Input kinds (UI metadata) */
 typedef enum tzpl_ControlKind {
     tzpl_ckContinuous = 0,
     tzpl_ckTrigger,
@@ -162,9 +180,8 @@ typedef enum tzpl_ControlKind {
     tzpl_ckSelect
 } tzpl_ControlKind;
 
-/* Control warp types for mapping (position 0..1 -> value).
- * Ordinals are the lang-side synthdef.x ControlWarp ordinal + 1;
- * 0 (None) means the plugin predates warp emission. */
+/* Warp types for mapping a UI position 0..1 -> value.
+ * Ordinals are the lang-side synthdef.x ControlWarp ordinal + 1. */
 typedef enum tzpl_ControlWarp {
     tzpl_cwNone = 0,
     tzpl_cwLinear,
@@ -174,82 +191,78 @@ typedef enum tzpl_ControlWarp {
     tzpl_cwCubed
 } tzpl_ControlWarp;
 
-/* Control specification */
+/* Input specification: UI range plus the value an unconnected input holds. */
 typedef struct tzpl_ControlSpec {
     double lo, hi, init, param;
     tzpl_ControlWarp warp;
     tzpl_ControlKind kind;
 } tzpl_ControlSpec;
 
-/* Port definition - describes an input or output port */
+/* Port definition. `hasSpec` is set for inputs that carry UI metadata (the
+ * old controls); `spec.init` is then the value of the input while it is not
+ * connected (0 otherwise). Outputs leave hasSpec 0. */
 typedef struct tzpl_PortDef {
     const char* name;
     tzpl_SignalType type;
+    int hasSpec;
+    tzpl_ControlSpec spec;
 } tzpl_PortDef;
 
-/* Control definition - describes a control parameter */
-typedef struct tzpl_ControlDef {
-    const char* name;
-    tzpl_SignalType type;
-    uint64_t id;
-    tzpl_ControlSpec spec;
-} tzpl_ControlDef;
+/* What a synth sees of one input port: one pointer per channel to a block of
+ * samples (valid for [0, maxBlock)), plus per-channel flags the engine
+ * refreshes before every process call:
+ *   isConst[c]  1 if channel c holds one value for the whole block
+ *   version[c]  bumped whenever channel c's constant value or source changes,
+ *               so a synth can skip recomputing what depends only on it.
+ * Several channel pointers may alias one buffer (broadcasting). */
+typedef struct tzpl_InPort {
+    void* const* chans;
+    const uint8_t* isConst;
+    const uint32_t* version;
+} tzpl_InPort;
 
-/* Control dispatch table - for hierarchical control lookup */
-struct tzpl_ControlDispatchTable;
-
-typedef struct tzpl_ControlDispatchTableEntry {
-    int which;  /* 0 = table, 1 = def */
-    union {
-        struct tzpl_ControlDispatchTable* table;
-        tzpl_ControlDef* def;
-    };
-} tzpl_ControlDispatchTableEntry;
-
-typedef struct tzpl_ControlDispatchTable {
-    size_t size;
-    const char** names;
-    tzpl_ControlDispatchTableEntry* entries;
-} tzpl_ControlDispatchTable;
+/* One output port: per-channel buffers of maxBlock samples, owned by the
+ * engine. A synth may report a channel as constant for the block by setting
+ * isConst[c] (and bumping version[c] when the value changes); the engine
+ * passes that on to the inputs it feeds. Synths that never write them leave
+ * them 0, which is always correct. */
+typedef struct tzpl_OutPort {
+    void* const* chans;
+    uint8_t* isConst;
+    uint32_t* version;
+} tzpl_OutPort;
 
 /* Function pointers for synth operations */
 typedef struct tzpl_SynthFuns {
-    struct tzpl_SynthData* (*alloc)(void);
+    struct tzpl_SynthData* (*alloc)(int32_t maxBlock);
     tzpl_SErr (*free)(struct tzpl_SynthData* synth);
     tzpl_SErr (*init)(struct tzpl_SynthData* synth);
     tzpl_SErr (*uninit)(struct tzpl_SynthData* synth);  /* optional */
     tzpl_SErr (*reset)(struct tzpl_SynthData* synth);   /* optional */
-    tzpl_SErr (*event)(struct tzpl_SynthData* synth, uint64_t id,
-                       tzpl_Slice dst, tzpl_Slice data);
-    void (*processEvents)(struct tzpl_SynthData* synth);
-    void (*processAudio)(struct tzpl_SynthData* synth);
-
-    /* Note allocation (all optional) */
-    tzpl_SErr (*noteOn)(struct tzpl_SynthData* synth, int64_t now,
-                        int noteID, int n, float* params);
-    tzpl_SErr (*noteOff)(struct tzpl_SynthData* synth, int64_t now, int noteID);
-    tzpl_SErr (*allNotesOff)(struct tzpl_SynthData* synth, int64_t now);
-    tzpl_SErr (*noteSetParams)(struct tzpl_SynthData* synth, int noteID,
-                               int n, tzpl_ParamPair* params);
-    tzpl_SErr (*noteSetParamRange)(struct tzpl_SynthData* synth, int noteID,
-                                   int first, int length, float* values);
-
+    /* Compute samples [offset, offset+n) of every output from the same range
+     * of every input. Any n in [1, maxBlock - offset]. */
+    void (*process)(struct tzpl_SynthData* synth, int32_t offset, int32_t n);
+    /* Voiced synths only (NULL otherwise): re-initialize voice `voice`'s
+     * state; called by the engine at a note onset, between process calls. */
+    tzpl_SErr (*resetVoice)(struct tzpl_SynthData* synth, int32_t voice);
     /* Buffer swap -- replaces buffer pointer, returns old buffer for NRT cleanup */
     struct tzpl_Buffer* (*swapBuffer)(struct tzpl_SynthData* synth, int64_t bufID,
                                       struct tzpl_Buffer* newBuffer);
 } tzpl_SynthFuns;
 
-/* Synth definition - returned by plugin load function */
+/* Synth definition - returned by plugin load function.
+ * A voiced synth has an input named "notes" of shape {maxVoices, 1+N}:
+ * column 0 is the gate, columns 1..N the note parameters. The engine
+ * allocates voices, writes the rows and calls resetVoice. */
 typedef struct tzpl_SynthDef {
     const char* name;
     tzpl_SynthFuns funs;
     int num_ins;
     int num_outs;
-    int num_controls;
     tzpl_PortDef* ins;
     tzpl_PortDef* outs;
-    tzpl_ControlDef* controls;
-    tzpl_ControlDispatchTable controlDispatch;
+    int voiced;      /* 1 if the def has a "notes" input driven by the voicer */
+    int maxVoices;   /* rows of "notes" (0 when not voiced) */
 } tzpl_SynthDef;
 
 /* Synth instance data - base struct (plugins extend this with custom data) */
@@ -257,12 +270,11 @@ typedef struct tzpl_SynthData {
     tzpl_SynthFuns funs;
     struct tzpl_Engine* engine;  /* Opaque pointer to audio engine */
     struct tzpl_Node* node;      /* Opaque pointer to containing node */
-    int num_ins;
-    int num_outs;
-    int num_controls;
-    void** inlets;    /* Array of input data pointers */
-    void** outlets;   /* Array of output data pointers */
-    void** controls;  /* Array of control data pointers */
+    int32_t num_ins;
+    int32_t num_outs;
+    int32_t maxBlock;
+    tzpl_InPort* ins;
+    tzpl_OutPort* outs;
     double fs, sd;  /* Sample rate, sample duration */
     /* Custom data follows in derived structs... */
 } tzpl_SynthData;
@@ -277,7 +289,7 @@ typedef struct tzpl_Buffer {
     double** data;     /* one allocation per channel */
     int64_t length;    /* actual content length in frames; sample indices wrap here */
     int64_t mask;      /* nextPowerOfTwo(length) - 1: allocation bound, legacy wrap */
-    int64_t chans;     /* channel count (power of 2) */
+    int64_t chans;     /* channel count */
 } tzpl_Buffer;
 
 /* Buffer creation and destruction utilities */
@@ -291,9 +303,7 @@ static inline tzpl_Buffer* tzpl_createBuffer(int64_t numChannels, int64_t length
     while (allocLen < length) allocLen <<= 1;
     buf->length = length;
     buf->mask = allocLen - 1;
-    /* Round chans up to power of 2 */
-    int64_t allocChans = 1;
-    while (allocChans < numChannels) allocChans <<= 1;
+    int64_t allocChans = numChannels < 1 ? 1 : numChannels;
     buf->chans = allocChans;
     buf->data = (double**)calloc((size_t)allocChans, sizeof(double*));
     if (!buf->data) { free(buf); return NULL; }

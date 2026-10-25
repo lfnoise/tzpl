@@ -23,39 +23,240 @@
 
 #include "tzpl_node.hpp"
 #include "tzpl_engine.hpp"
+#include "tzpl_note_voicer.hpp"
+#include <cstring>
 #include <print>
 
 namespace engine {
 
 //=============================================================================================
+#pragma mark BUFFERS
+
+namespace {
+
+constexpr usize kBufAlign = 64;
+
+usize alignUp(usize n) { return (n + kBufAlign - 1) & ~(kBufAlign - 1); }
+
+// One aligned allocation holding `chans` channel buffers of maxBlock
+// elements each; fills `ptrs` with the channel starts. Freed with
+// freeChannelBuffers(ptrs[0]).
+void allocChannelBuffers(void** ptrs, int chans, int maxBlock, tzpl_ElemType elem) {
+    if (chans <= 0) return;
+    usize stride = alignUp((usize)maxBlock * elemSize(elem));
+    u8* mem = static_cast<u8*>(std::aligned_alloc(kBufAlign, stride * (usize)chans));
+    if (!mem) throw tzpl_errInternal;
+    memset(mem, 0, stride * (usize)chans);
+    for (int c = 0; c < chans; ++c) ptrs[c] = mem + stride * (usize)c;
+}
+
+void freeChannelBuffers(void** ptrs, int chans) {
+    if (chans > 0 && ptrs) std::free(ptrs[0]);
+}
+
+template <typename T>
+void fillT(void* buf, f64 v, int from, int to) {
+    T* p = static_cast<T*>(buf);
+    T x;
+    if constexpr (std::is_integral_v<T>) x = static_cast<T>(std::llround(v));
+    else x = static_cast<T>(v);
+    for (int i = from; i < to; ++i) p[i] = x;
+}
+
+template <typename T>
+void storeT(void* buf, int i, f64 v) {
+    if constexpr (std::is_integral_v<T>) static_cast<T*>(buf)[i] = static_cast<T>(std::llround(v));
+    else static_cast<T*>(buf)[i] = static_cast<T>(v);
+}
+
+void storeValue(void* buf, tzpl_ElemType elem, int i, f64 v) {
+    switch (elem) {
+        case tzpl_kI32: storeT<i32>(buf, i, v); break;
+        case tzpl_kI64: storeT<i64>(buf, i, v); break;
+        case tzpl_kF32: storeT<f32>(buf, i, v); break;
+        case tzpl_kF64: storeT<f64>(buf, i, v); break;
+    }
+}
+
+} // namespace
+
+void fillBuffer(void* buf, tzpl_ElemType elem, f64 v, int from, int to) {
+    switch (elem) {
+        case tzpl_kI32: fillT<i32>(buf, v, from, to); break;
+        case tzpl_kI64: fillT<i64>(buf, v, from, to); break;
+        case tzpl_kF32: fillT<f32>(buf, v, from, to); break;
+        case tzpl_kF64: fillT<f64>(buf, v, from, to); break;
+    }
+}
+
+//=============================================================================================
+#pragma mark INPUT STAGES
+
+f64 InPort::valueAt(int c, f64 t) const {
+    ChanStage const& st = stages_[c];
+    if (!st.ramping) return st.value;
+    f64 x = fadePosition(t, st.rampT0, st.rampCount);
+    return fadeValue<f64>(st.rampCurve, x, st.rampFrom, st.value);
+}
+
+void InPort::advance(Silo* s, int c, int off) {
+    ChanStage& st = stages_[c];
+    i64 b0 = s->blockStart_;
+    if (st.stamp != b0) {
+        st.stamp = b0;
+        st.renderedTo = 0;
+        st.touched = false;
+    }
+    if (off <= st.renderedTo) return;
+    int from = st.renderedTo;
+    st.renderedTo = off;
+    void* buf = ownBufs_[c];
+    tzpl_ElemType elem = type_.elem;
+
+    if (st.ramping) {
+        st.touched = true;
+        st.dirty = true;
+        int i = from;
+        for (; i < off; ++i) {
+            f64 t = (f64)(b0 + i);
+            f64 x = fadePosition(t, st.rampT0, st.rampCount);
+            storeValue(buf, elem, i, fadeValue<f64>(st.rampCurve, x, st.rampFrom, st.value));
+            if (fadeDoneAfter(t, st.rampT0, st.rampCount)) { ++i; st.ramping = false; break; }
+        }
+        if (i < off) fillBuffer(buf, elem, st.value, i, off);
+    } else if (st.dirty) {
+        fillBuffer(buf, elem, st.value, from, off);
+    }
+
+    if (st.impulseAt >= b0 + from && st.impulseAt < b0 + off) {
+        storeValue(buf, elem, (int)(st.impulseAt - b0), st.impulseValue);
+        st.impulseAt = -1;
+        st.touched = true;
+        st.dirty = true;
+    }
+}
+
+void InPort::stepTo(Silo* s, int c, f64 v, int off) {
+    advance(s, c, off);
+    ChanStage& st = stages_[c];
+    if (!st.ramping && st.value == v) return;
+    st.ramping = false;
+    st.value = v;
+    st.dirty = true;
+    // A step at offset 0 still makes the block one value, but the change has
+    // to reach change detection: the version bump does that.
+    if (off > 0) st.touched = true;
+    ++ownVersion_[c];
+    markActive(c);
+}
+
+void InPort::rampTo(Silo* s, int c, f64 v, f64 t0, int off, i64 count, FadeCurve curve) {
+    advance(s, c, off);
+    ChanStage& st = stages_[c];
+    // A ramp started during another starts from the value rendered so far.
+    st.rampFrom = valueAt(c, t0);
+    st.value = v;
+    st.rampT0 = t0;
+    st.rampCount = count;
+    st.rampCurve = curve;
+    st.ramping = true;
+    st.dirty = true;
+    ++ownVersion_[c];
+    markActive(c);
+}
+
+void InPort::impulse(Silo* s, int c, f64 v, int off) {
+    advance(s, c, off);
+    ChanStage& st = stages_[c];
+    st.impulseAt = s->blockStart_ + off;
+    st.impulseValue = v;
+    ++ownVersion_[c];
+    markActive(c);
+}
+
+void InPort::render(Silo* s, int n) {
+    if (srcPort_) {
+        OutPort* src = srcPort_;
+        for (int c = 0; c < chans_; ++c) {
+            int j = srcMap_[c];
+            isConst_[c] = src->isConst_[j];
+            version_[c] = ownVersion_[c] + src->version_[j];
+        }
+        return;
+    }
+    if (!activeStages_) return;
+    int maxBlock = node_->synth->maxBlock;
+    for (int c = 0; c < chans_; ++c) {
+        if (!stageActive_[c]) continue;
+        advance(s, c, n);
+        ChanStage& st = stages_[c];
+        bool constBlock = !st.touched && !st.ramping;
+        // Whatever follows this block holds the stage's value, unless a ramp
+        // or an impulse is still pending.
+        if (!st.ramping) {
+            if (constBlock) {
+                // [0, n) was refilled in one piece: finish the buffer.
+                if (st.dirty) fillBuffer(ownBufs_[c], type_.elem, st.value, n, maxBlock);
+                st.dirty = false;
+            }
+        }
+        isConst_[c] = constBlock ? 1 : 0;
+        version_[c] = ownVersion_[c];
+        if (!st.dirty && !st.ramping && st.impulseAt < 0) {
+            stageActive_[c] = false;
+            --activeStages_;
+        }
+    }
+}
+
+void InPort::restoreOwnBuffers() {
+    for (int c = 0; c < chans_; ++c) {
+        chanPtrs_[c] = ownBufs_[c];
+        stages_[c].dirty = true;
+        stages_[c].stamp = -1;
+        ++ownVersion_[c];
+        version_[c] = ownVersion_[c];
+        isConst_[c] = 0;
+        markActive(c);
+    }
+}
+
+//=============================================================================================
+#pragma mark NODE DEF
+
+int NodeDef::inputIndex(char const* name) const {
+    for (int i = 0; i < info_.num_ins; ++i) {
+        if (info_.ins[i].name && strcmp(info_.ins[i].name, name) == 0) return i;
+    }
+    return -1;
+}
+
+//=============================================================================================
 #pragma mark NODE METHODS
 
 Node::Node(Engine* e, Silo* silo, NodeDefInfo const& info)
-    : nodeID(-1), def(nullptr), silo_(silo)
+    : nodeID(-1), silo_(silo), def(nullptr)
 {
 #if DEBUG_NODES
     ++numNodesCreated;
 #endif
-
+    started_ = true; // hidden nodes run from the block they are spliced in
     synth = setupSynth(e, info);
     init();
 }
 
 tzpl_SynthData* Node::setupSynth(Engine* e, NodeDefInfo const& info) {
     funs = info.funs;
-    
-    tzpl_SynthData* synth = funs.alloc();
+    int maxBlock = e->blockSize_;
+
+    tzpl_SynthData* synth = funs.alloc(maxBlock);
+    if (!synth) throw tzpl_errInternal;
     synth->engine = (tzpl_Engine*)e;
     synth->node = (tzpl_Node*)this;
     synth->funs = funs;
-    
     synth->num_ins = info.num_ins;
     synth->num_outs = info.num_outs;
-    synth->num_controls = info.num_controls;
-    
-    synth->inlets = (void**)calloc(synth->num_ins, sizeof(void*));
-    synth->outlets = (void**)calloc(synth->num_outs, sizeof(void*));
-    synth->controls = (void**)calloc(synth->num_controls, sizeof(void*));
+    synth->maxBlock = maxBlock;
     synth->fs = e->streamParams_.sampleRate;
     synth->sd = 1. / synth->fs;
 
@@ -68,60 +269,66 @@ tzpl_SynthData* Node::setupSynth(Engine* e, NodeDefInfo const& info) {
         nrt_list.next = head;
         silo_->nrt_nodeTable_[bin] = this;
     }
-    
-    // initialize input ports
-    for (int i = 0; i < synth->num_ins; ++i) {    
-        PortInfo const& in = info.ins[i];
-        InPort port;
+
+    ins.resize(info.num_ins);
+    abiIns_.resize(info.num_ins);
+    for (int i = 0; i < info.num_ins; ++i) {
+        PortInfo const& pi = info.ins[i];
+        InPort& port = ins[i];
         port.node_ = this;
         port.index_ = i;
-        port.type_ = in.type;
-        port.dataBuffer_ = (void*)calloc(port.type_.chans, elemSize(port.type_.elem));
-        synth->inlets[i] = port.dataBuffer_;
-        ins.push_back(port);
-    }
-    
-    // initialize output ports
-    for (int i = 0; i < synth->num_outs; ++i) {    
-        PortInfo const& out = info.outs[i];
-        OutPort port;
-        port.node_ = this;
-        port.index_ = i;
-        port.type_ = out.type;
-        port.dataBuffer_ = (void*)calloc(port.type_.chans, elemSize(port.type_.elem));
-        synth->outlets[i] = port.dataBuffer_;
-        outs.push_back(port);
+        port.type_ = pi.type;
+        int n = tzpl::chans(pi.type.shape);
+        port.chans_ = n;
+        port.chanPtrs_ = new void*[n];
+        port.ownBufs_ = new void*[n];
+        port.isConst_ = new u8[n];
+        port.version_ = new u32[n];
+        port.ownVersion_ = new u32[n];
+        port.stages_ = new ChanStage[n];
+        port.srcMap_ = new int[n];
+        port.stageActive_ = new bool[n];
+        allocChannelBuffers(port.ownBufs_, n, maxBlock, pi.type.elem);
+        // An unconnected input holds its spec'd init value (0 without a spec).
+        f64 init = pi.hasSpec ? pi.spec.init : 0.;
+        for (int c = 0; c < n; ++c) {
+            port.chanPtrs_[c] = port.ownBufs_[c];
+            port.stages_[c].value = init;
+            port.stages_[c].dirty = false;
+            fillBuffer(port.ownBufs_[c], pi.type.elem, init, 0, maxBlock);
+            port.isConst_[c] = 1;
+            port.ownVersion_[c] = 1;
+            port.version_[c] = 1;
+            port.srcMap_[c] = c;
+            port.stageActive_[c] = false;
+        }
+        abiIns_[i] = tzpl_InPort{port.chanPtrs_, port.isConst_, port.version_};
     }
 
-    // initialize controls
-    for (int i = 0; i < synth->num_controls; ++i) {
-        ControlInfo const& cinfo = info.controls[i];
-        Control control;
-        control.controlID_ = cinfo.controlID;
-        control.spec_ = cinfo.spec;
-        control.type_ = cinfo.type;
-        control.data_ = (void*)calloc(cinfo.type.chans, elemSize(cinfo.type.elem));
-        // Seed the control buffer with its spec'd init value (calloc leaves it
-        // zero otherwise). The generated synth reads its controls into instance
-        // vars on the first processEvents, so without this every control would
-        // start at 0 regardless of its declared init.
-        for (int ch = 0; ch < cinfo.type.chans; ++ch) {
-            switch (cinfo.type.elem) {
-                case tzpl_kF32: ((f32*)control.data_)[ch] = (f32)cinfo.spec.init; break;
-                case tzpl_kF64: ((f64*)control.data_)[ch] = (f64)cinfo.spec.init; break;
-                case tzpl_kI32: ((i32*)control.data_)[ch] = (i32)cinfo.spec.init; break;
-                case tzpl_kI64: ((i64*)control.data_)[ch] = (i64)cinfo.spec.init; break;
-            }
-        }
-        synth->controls[i] = control.data_;
-        controls.push_back(control);
+    outs.resize(info.num_outs);
+    abiOuts_.resize(info.num_outs);
+    for (int i = 0; i < info.num_outs; ++i) {
+        PortInfo const& pi = info.outs[i];
+        OutPort& port = outs[i];
+        port.node_ = this;
+        port.index_ = i;
+        port.type_ = pi.type;
+        int n = tzpl::chans(pi.type.shape);
+        port.chans_ = n;
+        port.bufs_ = new void*[n];
+        port.isConst_ = new u8[n]();
+        port.version_ = new u32[n]();
+        allocChannelBuffers(port.bufs_, n, maxBlock, pi.type.elem);
+        abiOuts_[i] = tzpl_OutPort{port.bufs_, port.isConst_, port.version_};
     }
-    
+
+    synth->ins = abiIns_.data();
+    synth->outs = abiOuts_.data();
     return synth;
 }
 
 Node::Node(Engine* e, Silo* silo, NodeDef* def, i64 nodeID)
-    : nodeID(nodeID), def(def), silo_(silo)
+    : nodeID(nodeID), silo_(silo), def(def)
 {
 #if DEBUG_NODES
     ++numNodesCreated;
@@ -130,23 +337,20 @@ Node::Node(Engine* e, Silo* silo, NodeDef* def, i64 nodeID)
     if (def) def->refCount_++;
 
     NodeDefInfo& info = def->info_;
-
     synth = setupSynth(e, info);
 
-    init();
-
-    // Prime event-rate controls: push each control's (init-seeded) buffer
-    // through the synth's event() so its ctrlN_active flag is set, then flag
-    // the node so the first runNodes() call runs processEvents and propagates
-    // the init values into the synth's instance vars before audio reads them.
-    if (funs.event) {
-        for (Control& c : controls) {
-            tzpl_Slice dst{0, nullptr};
-            tzpl_Slice data{c.type_.chans, c.data_};
-            funs.event(synth, c.controlID_, dst, data);
+    if (info.voiced) {
+        notesPort_ = def->inputIndex("notes");
+        if (notesPort_ >= 0) {
+            InPort const& np = ins[notesPort_];
+            int rows = (int)np.type_.shape.dims[2];
+            int cols = (int)np.type_.shape.dims[3];
+            int maxVoices = info.maxVoices > 0 ? std::min(info.maxVoices, rows) : rows;
+            voicer_ = new NoteVoicer(maxVoices, cols - 1);
         }
-        if (!controls.empty()) triggered = true;
     }
+
+    init();
 }
 
 Node::~Node() {
@@ -154,30 +358,11 @@ Node::~Node() {
     Engine* engine = (Engine*)synth->engine;
 
     // NB: do NOT call uninit() here. The generated `_free` (funs.free, below)
-    // already calls `_uninit` before releasing the instance, and built-in nodes
-    // do their teardown in `_free`/delete. Calling uninit() here too ran `_uninit`
-    // TWICE: a `_uninit` that frees a resource without nulling it (e.g. spectral's
-    // tzpl_fft_destroy) then double-freed and crashed on the second teardown.
-    // (Delay synths survived only because genDelayDealloc nulls after free.)
-
-    for (int i = 0; i < synth->num_ins; ++i) {
-        free(synth->inlets[i]);
-    }
-    for (int i = 0; i < synth->num_outs; ++i) {
-        free(synth->outlets[i]);
-    }
-    for (int i = 0; i < synth->num_controls; ++i) {
-        free(synth->controls[i]);
-    }
-
-    free(synth->inlets);
-    free(synth->outlets);
-    free(synth->controls);
+    // already calls `_uninit` before releasing the instance.
 
     // Swap out and free any installed sample buffers and banks. They are
     // owned by whoever last swapped them in; the generated `_free` does not
-    // touch them, so without this a node freed with content loaded leaks it.
-    // Runs on the dead-node NRT thread -- freeing here is safe.
+    // touch them. Runs on the dead-node NRT thread -- freeing here is safe.
     if (def) {
         NodeDefInfo const& info = def->info_;
         if (funs.swapBuffer) {
@@ -194,6 +379,25 @@ Node::~Node() {
 
     funs.free(synth);
 
+    for (InPort& p : ins) {
+        freeChannelBuffers(p.ownBufs_, p.chans_);
+        delete[] p.chanPtrs_;
+        delete[] p.ownBufs_;
+        delete[] p.isConst_;
+        delete[] p.version_;
+        delete[] p.ownVersion_;
+        delete[] p.stages_;
+        delete[] p.srcMap_;
+        delete[] p.stageActive_;
+    }
+    for (OutPort& p : outs) {
+        freeChannelBuffers(p.bufs_, p.chans_);
+        delete[] p.bufs_;
+        delete[] p.isConst_;
+        delete[] p.version_;
+    }
+    delete voicer_;
+
     // Release the def reference. May unload a superseded dylib.
     if (def) {
         releaseNodeDef(engine, def);
@@ -201,7 +405,6 @@ Node::~Node() {
 
     // remove from nrt_list
     if (nodeID >= 0) {
-        // remove node from nrt_nodeTable_
         int bin = nodeID & kHashMask;
         if (nrt_list.next) nrt_list.next->nrt_list.prev = nrt_list.prev;
         if (nrt_list.prev) nrt_list.prev->nrt_list.next = nrt_list.next;
@@ -212,10 +415,80 @@ Node::~Node() {
 #endif
 }
 
+int Node::inputIndex(char const* name) const {
+    if (def) return def->inputIndex(name);
+    return -1;
+}
 
+void Node::addEvent(Silo* s, int off, NodeEventKind kind, int arg) {
+    if (eventsStamp_ != s->blockStart_) {
+        eventsStamp_ = s->blockStart_;
+        numEvents_ = 0;
+    }
+    if (numEvents_ >= kMaxEvents) {
+        ++s->droppedNodeEvents_;
+        return;
+    }
+    // Events arrive in time order; never let one land before its predecessor.
+    if (numEvents_ > 0 && off < events_[numEvents_ - 1].offset)
+        off = events_[numEvents_ - 1].offset;
+    events_[numEvents_++] = NodeEvent{off, kind, arg};
+}
 
-void* getInput(tzpl_SynthData* dstPlugin, int dstIndex) {
-    return dstPlugin->inlets[dstIndex];
+void Node::zeroOutputs(int from, int to) {
+    if (to <= from) return;
+    for (OutPort& p : outs) {
+        for (int c = 0; c < p.chans_; ++c) fillBuffer(p.bufs_[c], p.type_.elem, 0., from, to);
+    }
+}
+
+void Node::runBlock(Silo* s, int n) {
+    for (InPort& p : ins) p.render(s, n);
+
+    if (eventsStamp_ != s->blockStart_ || numEvents_ == 0) {
+        funs.process(synth, 0, n);
+        return;
+    }
+
+    // Split the block at each event. A node starting mid-block outputs 0
+    // before its start; a node freed mid-block outputs 0 after it.
+    bool running = true;
+    for (int k = 0; k < numEvents_; ++k) {
+        if (events_[k].kind == nodeEvStart) { running = false; break; }
+    }
+    int pos = 0;
+    for (int k = 0; k < numEvents_; ++k) {
+        NodeEvent const& ev = events_[k];
+        int off = std::min(ev.offset, n);
+        switch (ev.kind) {
+            case nodeEvStart:
+                if (!running) {
+                    zeroOutputs(pos, off);
+                    pos = off;
+                    running = true;
+                }
+                break;
+            case nodeEvFree:
+                if (running && off > pos) funs.process(synth, pos, off - pos);
+                if (running) pos = off;
+                zeroOutputs(pos, n);
+                pos = n;
+                running = false;
+                break;
+            case nodeEvResetVoice:
+            case nodeEvReset:
+                if (running && off > pos) {
+                    funs.process(synth, pos, off - pos);
+                    pos = off;
+                }
+                if (ev.kind == nodeEvReset) reset();
+                else if (funs.resetVoice) funs.resetVoice(synth, ev.arg);
+                break;
+        }
+    }
+    if (running && pos < n) funs.process(synth, pos, n - pos);
+    else if (!running && pos < n) zeroOutputs(pos, n);
+    numEvents_ = 0;
 }
 
 void deleteNodes(Node* node) {
@@ -226,6 +499,4 @@ void deleteNodes(Node* node) {
     }
 }
 
-
 }
-

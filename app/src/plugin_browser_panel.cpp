@@ -17,6 +17,7 @@
 #include "plugin_browser_panel.hpp"
 
 #include "tzpl_app_context.hpp"
+#include "tzpl_shape.hpp"
 
 #include "imgui.h"
 
@@ -43,7 +44,6 @@ char const* rateName(tzpl_Rate r) {
     case tzpl_constRate: return "const";
     case tzpl_initRate:  return "init";
     case tzpl_resetRate: return "reset";
-    case tzpl_eventRate: return "event";
     case tzpl_audioRate: return "audio";
     }
     return "?";
@@ -91,7 +91,7 @@ bool containsCaseless(std::string const& hay, char const* needle) {
 void signalTypeCells(std::string const& name, tzpl_SignalType const& t) {
     ImGui::TableNextRow();
     ImGui::TableNextColumn(); ImGui::TextUnformatted(name.c_str());
-    ImGui::TableNextColumn(); ImGui::Text("%d", t.chans);
+    ImGui::TableNextColumn(); ImGui::TextUnformatted(tzpl::shapeString(t.shape).c_str());
     ImGui::TableNextColumn(); ImGui::TextUnformatted(elemName(t.elem));
     ImGui::TableNextColumn(); ImGui::TextUnformatted(rateName(t.rate));
 }

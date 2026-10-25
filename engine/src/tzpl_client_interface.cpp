@@ -87,7 +87,7 @@ void copyNodeDefs(Engine* from, Engine* to) {
                 void* handle = nullptr;
                 if (def->dlHandle_) {
                     Dl_info dl;
-                    if (dladdr((void*)def->info_.funs.processAudio, &dl)
+                    if (dladdr((void*)def->info_.funs.process, &dl)
                         && dl.dli_fname) {
                         handle = dlopen(dl.dli_fname, RTLD_NOW);
                     }
@@ -163,14 +163,13 @@ static bool pluginAbiAcceptable(void* handle, char const* path, bool verbose) {
         }
         return false;
     }
-    // Version 2 appended loop fields to tzpl_SampleBankEntry, changing the
-    // samples[] stride. Only plugins that index bank entries are affected, and
-    // exactly those export "swapSampleBank" (see the header's version notes).
-    if (version < 2 && dlsym(handle, "swapSampleBank")) {
+    // Version 3 is the block engine: everything before it processes one
+    // sample per call through a different struct layout.
+    if (version < TZPL_PLUGIN_ABI_MIN_VERSION) {
         if (verbose) {
-            fprintf(stderr, "*** ERROR: plugin '%s' (ABI version %lld) uses sample "
-                    "banks, whose entry layout changed in version 2; rebuild it\n",
-                    path, (long long)version);
+            fprintf(stderr, "*** ERROR: plugin '%s' (ABI version %lld) predates the "
+                    "block engine (version %d); rebuild it\n",
+                    path, (long long)version, TZPL_PLUGIN_ABI_MIN_VERSION);
         }
         return false;
     }
@@ -205,10 +204,33 @@ static bool validSynthDefArrays(tzpl_SynthDef const& def,
                                 tzpl_TagList const* tags,
                                 tzpl_SampleBankDefList const* banks = nullptr) {
     char const* n = def.name;
-    return validPluginArray(def.num_ins, def.ins, "inputs", n)
-        && validPluginArray(def.num_outs, def.outs, "outputs", n)
-        && validPluginArray(def.num_controls, def.controls, "controls", n)
-        && (!bufs || validPluginArray(bufs->num_buffers, bufs->buffers, "buffers", n))
+    if (!validPluginArray(def.num_ins, def.ins, "inputs", n)
+        || !validPluginArray(def.num_outs, def.outs, "outputs", n)) return false;
+    // Shapes size every port's buffers: refuse a zero dimension or a tensor
+    // too big to be a port.
+    constexpr int kMaxPortChans = 1 << 16;
+    auto validPorts = [&](int count, tzpl_PortDef const* ports, char const* what) {
+        for (int i = 0; i < count; ++i) {
+            tzpl_Shape sh = ports[i].type.shape;
+            bool ok = tzpl::validShape(sh);
+            for (int d = 0; ok && d < TZPL_MAX_RANK; ++d) ok = sh.dims[d] <= (u32)kMaxPortChans;
+            if (ok) ok = (u64)sh.dims[0] * sh.dims[1] * sh.dims[2] * sh.dims[3]
+                         <= (u64)kMaxPortChans;
+            if (!ok || (u32)ports[i].type.elem > tzpl_kF64) {
+                fprintf(stderr, "*** ERROR: plugin def '%s' %s %d has an invalid type\n",
+                        n ? n : "?", what, i);
+                return false;
+            }
+        }
+        return true;
+    };
+    if (!validPorts(def.num_ins, def.ins, "input") || !validPorts(def.num_outs, def.outs, "output"))
+        return false;
+    if (!def.funs.alloc || !def.funs.free || !def.funs.process) {
+        fprintf(stderr, "*** ERROR: plugin def '%s' lacks alloc/free/process\n", n ? n : "?");
+        return false;
+    }
+    return (!bufs || validPluginArray(bufs->num_buffers, bufs->buffers, "buffers", n))
         && (!tags || validPluginArray(tags->num_tags, tags->tags, "tags", n))
         && (!banks || validPluginArray(banks->num_banks, banks->banks, "sample banks", n));
 }
@@ -343,6 +365,7 @@ void processAudioBlock(Engine* e, f32 const* in, f32* out,
 
     e->in_ = in;
     e->out_ = out;
+    e->curFrames_ = (int)numFrames;
     e->anchorStreamTime_ = streamTime;
 
     // Release worker silos.
@@ -604,27 +627,26 @@ void addSynthDef(Engine* e, tzpl_SynthDef const& def, void* dlHandle,
     info.funs = def.funs;
     info.num_ins = def.num_ins;
     info.num_outs = def.num_outs;
-    info.num_controls = def.num_controls;
 
-    // tzpl_PortDef and PortInfo have identical layout: { const char* name; tzpl_SignalType type; }
+    // tzpl_PortDef and PortInfo have identical layout.
     info.ins  = reinterpret_cast<PortInfo*>(def.ins);
     info.outs = reinterpret_cast<PortInfo*>(def.outs);
 
-    // tzpl_ControlDef → ControlInfo requires field mapping.
-    if (def.num_controls > 0) {
-        auto* controls = new ControlInfo[def.num_controls];
-        for (int i = 0; i < def.num_controls; ++i) {
-            tzpl_ControlDef const& src = def.controls[i];
-            controls[i].PortInfo::name = src.name;
-            controls[i].PortInfo::type = src.type;
-            controls[i].name = src.name;
-            controls[i].type = src.type;
-            controls[i].controlID = static_cast<i64>(src.id);
-            controls[i].spec = src.spec;
+    // A voiced def must have a rank <= 2 "notes" input ({maxVoices, 1+N});
+    // anything else is treated as unvoiced.
+    if (def.voiced) {
+        for (int i = 0; i < def.num_ins; ++i) {
+            tzpl_PortDef const& p = def.ins[i];
+            if (p.name && strcmp(p.name, "notes") == 0 && tzpl::rank(p.type.shape) <= 2
+                && p.type.shape.dims[3] >= 1) {
+                info.voiced = 1;
+                info.maxVoices = def.maxVoices;
+            }
         }
-        info.controls = controls;
-    } else {
-        info.controls = nullptr;
+        if (!info.voiced) {
+            fprintf(stderr, "*** WARNING: def '%s' is voiced but has no usable 'notes' "
+                    "input; notes will be refused\n", def.name ? def.name : "?");
+        }
     }
 
     // tzpl_BufferDef and BufferInfo have identical layout.
@@ -674,9 +696,10 @@ bool listDefControls(Engine* e, const char* defName, std::vector<ControlDesc>& o
         def = def->next_;
     }
     if (!def) return false;
-    for (int i = 0; i < def->info_.num_controls; ++i) {
-        ControlInfo const& c = def->info_.controls[i];
-        out.push_back({c.name ? c.name : "", c.controlID, c.spec, c.type});
+    for (int i = 0; i < def->info_.num_ins; ++i) {
+        PortInfo const& p = def->info_.ins[i];
+        if (!p.hasSpec) continue;
+        out.push_back({p.name ? p.name : "", (i64)i, p.spec, p.type});
     }
     return true;
 }
@@ -692,16 +715,15 @@ static void copyDefDesc(NodeDef const* def, DefDesc& out) {
     out.banks.clear();
     for (int i = 0; i < info.num_ins; ++i) {
         PortInfo const& p = info.ins[i];
-        out.ins.push_back({p.name ? p.name : "", p.type});
+        out.ins.push_back({p.name ? p.name : "", p.type, p.hasSpec != 0, p.spec});
+        if (p.hasSpec) out.controls.push_back({p.name ? p.name : "", (i64)i, p.spec, p.type});
     }
     for (int i = 0; i < info.num_outs; ++i) {
         PortInfo const& p = info.outs[i];
         out.outs.push_back({p.name ? p.name : "", p.type});
     }
-    for (int i = 0; i < info.num_controls; ++i) {
-        ControlInfo const& c = info.controls[i];
-        out.controls.push_back({c.name ? c.name : "", c.controlID, c.spec, c.type});
-    }
+    out.voiced = info.voiced != 0;
+    out.maxVoices = info.maxVoices;
     for (int i = 0; i < info.num_buffers; ++i) {
         BufferInfo const& b = info.buffers[i];
         out.buffers.push_back({b.name ? b.name : "", b.type, b.bufID});
@@ -865,17 +887,15 @@ static void defDescFromSynthDef(tzpl_SynthDef const& def,
     out.name = def.name ? def.name : "";
     for (int i = 0; i < def.num_ins; ++i) {
         tzpl_PortDef const& p = def.ins[i];
-        out.ins.push_back({p.name ? p.name : "", p.type});
+        out.ins.push_back({p.name ? p.name : "", p.type, p.hasSpec != 0, p.spec});
+        if (p.hasSpec) out.controls.push_back({p.name ? p.name : "", (i64)i, p.spec, p.type});
     }
     for (int i = 0; i < def.num_outs; ++i) {
         tzpl_PortDef const& p = def.outs[i];
         out.outs.push_back({p.name ? p.name : "", p.type});
     }
-    for (int i = 0; i < def.num_controls; ++i) {
-        tzpl_ControlDef const& c = def.controls[i];
-        out.controls.push_back({c.name ? c.name : "",
-                                static_cast<i64>(c.id), c.spec, c.type});
-    }
+    out.voiced = def.voiced != 0;
+    out.maxVoices = def.maxVoices;
     for (int i = 0; i < bufs.num_buffers; ++i) {
         tzpl_BufferDef const& b = bufs.buffers[i];
         out.buffers.push_back({b.name ? b.name : "", b.type, b.bufID});
@@ -1154,6 +1174,46 @@ void sendCmds(Engine* e, Silo* s, Command* cmd) noexcept {
 // as the eager builders used to.
 // ----------------------------------------------------------------------------
 
+// Set while a bundle replays for sched(): its edits may land mid-block, so
+// graph edits pre-allocate a 0-length (step) fader to take effect at the
+// exact sample. Immediate bundles always land on a block start and need none.
+static thread_local bool tApplyScheduled = false;
+
+static Node* stepFaderFor(Engine* e, Silo* s, tzpl_SignalType type) {
+    if (!tApplyScheduled || !isFloat(type.elem)) return nullptr;
+    return newXFaderNode(e, s, 0., fadeLinear, type);
+}
+
+// Would connecting srcNode -> dstNode close a cycle in the graph the bundle
+// sees: the silo's shadow with this bundle's edits so far applied? (The
+// shadow lags bundles still in flight; ConnectCmd re-checks on RT.)
+static bool shadowWouldCycle(Engine* e, Silo* s, ShadowEdits const& edits,
+                             i64 srcNode, i64 dstNode) {
+    if (srcNode == dstNode) return true;
+    GraphShadow g;
+    {
+        std::lock_guard<std::mutex> lck(e->shadowMtx_);
+        g = s->shadow_;
+    }
+    commitShadowEdits(g, edits);
+    // Reachability from dstNode along connections.
+    std::unordered_map<i64, std::vector<i64>> adj;
+    for (ShadowConn const& c : g.conns) adj[c.srcNode].push_back(c.dstNode);
+    std::vector<i64> stack{dstNode};
+    std::unordered_map<i64, bool> seen{{dstNode, true}};
+    while (!stack.empty()) {
+        i64 n = stack.back();
+        stack.pop_back();
+        auto it = adj.find(n);
+        if (it == adj.end()) continue;
+        for (i64 m : it->second) {
+            if (m == srcNode) return true;
+            if (!seen[m]) { seen[m] = true; stack.push_back(m); }
+        }
+    }
+    return false;
+}
+
 static tzpl_SErr applyNewNode(Engine* e, Silo* s, CommandList& out,
                               ShadowEdits& edits,
                               char const* name, i64 nodeID) {
@@ -1191,22 +1251,23 @@ static tzpl_SErr applyConnect(Engine* e, Silo* s, CommandList& out,
     err = s->nrt_getInPort(dst, dstPort);
     if (err != tzpl_errNone) return err;
 
-    // Element type and rate must match exactly; differing channel counts are
-    // adapted by a hidden node (see tzpl_chanadapt.hpp).
-    {
-        tzpl_SErr err = relaxedCompatibleTypes(srcPort->type_, dstPort->type_);
-        if (err != tzpl_errNone) return err;
-    }
+    // Element types must match; shapes broadcast, or fold through a hidden
+    // adapter (see tzpl_chanadapt.hpp).
+    err = connectableTypes(srcPort->type_, dstPort->type_);
+    if (err != tzpl_errNone) return err;
+
+    // Feed-forward only (D1 phase 1).
+    if (shadowWouldCycle(e, s, edits, src.nodeID, dst.nodeID)) return tzpl_errCyclicConnection;
 
     // Pre-allocate the hidden nodes this connection may need. All of them are
     // built in NRT (allocation is forbidden on the RT thread) and whichever
     // the RT thread does not use is handed straight back for reclamation.
     //
     // The adapter sits closest to the source, so everything downstream of it
-    // -- crossfader, mixer, destination -- speaks the destination's type.
+    // -- crossfader, mixer, destination -- speaks the destination's shape.
     tzpl_SignalType type = dstPort->type_;
     Node* adaptNode = nullptr;
-    if (srcPort->type_.chans != type.chans) {
+    if (!tzpl::broadcastsTo(srcPort->type_.shape, type.shape)) {
         adaptNode = newChanAdaptNode(e, s, srcPort->type_, type);
     }
 
@@ -1217,10 +1278,14 @@ static tzpl_SErr applyConnect(Engine* e, Silo* s, CommandList& out,
     Node* mixerNode = newMixerNode(e, s, type, 4);
 
     Node* xfaderNode = nullptr;
+    bool step = false;
     if (xfadeTime > 0. && isFloat(type.elem)) {
         xfaderNode = newXFaderNode(e, s, xfadeTime, curve, type);
+    } else {
+        xfaderNode = stepFaderFor(e, s, type);
+        step = xfaderNode != nullptr;
     }
-    out.add(new ConnectCmd(src, dst, xfaderNode, curve, mixerNode, adaptNode));
+    out.add(new ConnectCmd(src, dst, xfaderNode, curve, mixerNode, adaptNode, step));
     edits.push_back({ShadowEdit::AddConn,
                      {src.nodeID, src.index, dst.nodeID, dst.index}});
     return tzpl_errNone;
@@ -1242,12 +1307,31 @@ static tzpl_SErr applyReconnectOutput(Engine* e, Silo* s, CommandList& out,
     err = compatibleTypes(oldSrcPort->type_, newSrcPort->type_);
     if (err != tzpl_errNone) return err;
 
+    // Every input oldSrc feeds will be fed by newSrc: none may reach it.
+    {
+        std::vector<i64> dsts;
+        {
+            std::lock_guard<std::mutex> lck(e->shadowMtx_);
+            for (ShadowConn const& c : s->shadow_.conns)
+                if (c.srcNode == oldSrc.nodeID && c.srcPort == oldSrc.index)
+                    dsts.push_back(c.dstNode);
+        }
+        for (i64 d : dsts) {
+            if (d != newSrc.nodeID && shadowWouldCycle(e, s, edits, newSrc.nodeID, d))
+                return tzpl_errCyclicConnection;
+        }
+    }
+
     Node* xfaderNode = nullptr;
+    bool step = false;
     tzpl_SignalType type = newSrcPort->type_;
     if (xfadeTime > 0. && isFloat(type.elem)) {
         xfaderNode = newXFaderNode(e, s, xfadeTime, curve, type);
+    } else {
+        xfaderNode = stepFaderFor(e, s, type);
+        step = xfaderNode != nullptr;
     }
-    out.add(new ReconnectOutputCmd(oldSrc, newSrc, xfaderNode, curve));
+    out.add(new ReconnectOutputCmd(oldSrc, newSrc, xfaderNode, curve, step));
     edits.push_back({ShadowEdit::RewriteSrc,
                      {oldSrc.nodeID, oldSrc.index, newSrc.nodeID, newSrc.index}});
     return tzpl_errNone;
@@ -1334,11 +1418,15 @@ static tzpl_SErr applyDisconnectInput(Engine* e, Silo* s, CommandList& out,
     if (err != tzpl_errNone) return err;
 
     Node* xfaderNode = nullptr;
+    bool step = false;
     tzpl_SignalType type = port->type_;
     if (xfadeTime > 0. && isFloat(type.elem)) {
         xfaderNode = newXFaderNode(e, s, xfadeTime, curve, type);
+    } else {
+        xfaderNode = stepFaderFor(e, s, type);
+        step = xfaderNode != nullptr;
     }
-    out.add(new DisconnectInputCmd(dst, xfaderNode, curve));
+    out.add(new DisconnectInputCmd(dst, xfaderNode, curve, step));
     edits.push_back({ShadowEdit::RemoveConnsToDst, {0, 0, dst.nodeID, dst.index}});
     return tzpl_errNone;
 }
@@ -1356,11 +1444,15 @@ static tzpl_SErr applyDisconnectSource(Engine* e, Silo* s, CommandList& out,
     if (err != tzpl_errNone) return err;
 
     Node* xfaderNode = nullptr;
+    bool step = false;
     tzpl_SignalType type = dstPort->type_;
     if (xfadeTime > 0. && isFloat(type.elem)) {
         xfaderNode = newXFaderNode(e, s, xfadeTime, curve, type);
+    } else {
+        xfaderNode = stepFaderFor(e, s, type);
+        step = xfaderNode != nullptr;
     }
-    out.add(new DisconnectSourceCmd(src, dst, xfaderNode, curve));
+    out.add(new DisconnectSourceCmd(src, dst, xfaderNode, curve, step));
     edits.push_back({ShadowEdit::DisconnectSrc,
                      {src.nodeID, src.index, dst.nodeID, dst.index}});
     return tzpl_errNone;
@@ -1377,64 +1469,69 @@ static tzpl_SErr applyDisconnectOutput(Engine*, Silo* s, CommandList& out,
     return tzpl_errNone;
 }
 
-// Convert the values captured at record time (srcElem-typed bytes) into the
-// destination element type. When the types match this is a straight copy;
-// when they differ, convert per element (the old void* API silently
-// reinterpreted the buffer in that case).
-template <class T>
-static std::vector<T> convertValues(tzpl_ElemType srcElem, void const* bytes, int n) {
-    std::vector<T> out(n);
-    switch (srcElem) {
-        case tzpl_kI32 : {
-            i32 const* p = static_cast<i32 const*>(bytes);
-            for (int i = 0; i < n; ++i) out[i] = static_cast<T>(p[i]);
-        } break;
-        case tzpl_kI64 : {
-            i64 const* p = static_cast<i64 const*>(bytes);
-            for (int i = 0; i < n; ++i) out[i] = static_cast<T>(p[i]);
-        } break;
-        case tzpl_kF32 : {
-            f32 const* p = static_cast<f32 const*>(bytes);
-            for (int i = 0; i < n; ++i) out[i] = static_cast<T>(p[i]);
-        } break;
-        case tzpl_kF64 : {
-            f64 const* p = static_cast<f64 const*>(bytes);
-            for (int i = 0; i < n; ++i) out[i] = static_cast<T>(p[i]);
-        } break;
+// The flat channels of a region of `shape`, in row-major order.
+static tzpl_SErr regionChannels(tzpl_Shape const& shape, Region const& r,
+                                std::vector<int>& out) {
+    int n = tzpl::chans(shape);
+    switch (r.kind) {
+        case Region::whole:
+            for (int c = 0; c < n; ++c) out.push_back(c);
+            return tzpl_errNone;
+        case Region::range:
+            if (r.first < 0 || r.count < 0 || r.first + r.count > n)
+                return tzpl_errRegionOutOfRange;
+            for (int c = 0; c < r.count; ++c) out.push_back(r.first + c);
+            return tzpl_errNone;
+        case Region::box: {
+            int ext[tzpl::kMaxRank];
+            for (int d = 0; d < tzpl::kMaxRank; ++d) {
+                ext[d] = r.extent[d] ? (int)r.extent[d] : (int)shape.dims[d] - (int)r.offset[d];
+                if (ext[d] <= 0 || r.offset[d] + ext[d] > shape.dims[d])
+                    return tzpl_errRegionOutOfRange;
+            }
+            int idx[tzpl::kMaxRank] = {0, 0, 0, 0};
+            for (;;) {
+                int full[tzpl::kMaxRank];
+                for (int d = 0; d < tzpl::kMaxRank; ++d) full[d] = (int)r.offset[d] + idx[d];
+                out.push_back(tzpl::flatten(shape, full));
+                int d = tzpl::kMaxRank - 1;
+                while (d >= 0 && ++idx[d] == ext[d]) { idx[d] = 0; --d; }
+                if (d < 0) break;
+            }
+            return tzpl_errNone;
+        }
     }
-    return out;
+    return tzpl_errRegionOutOfRange;
 }
 
+enum class SetMode : u8 { set, fade, impulse };
+
 static tzpl_SErr applySetInput(Engine* e, Silo* s, CommandList& out,
-                               ShadowEdits&, // setInput never unlinks a wire
-                               PortAddr dst, tzpl_ElemType srcElem,
-                               void const* bytes, int numValues,
-                               f64 xfadeTime, FadeCurve curve) {
+                               PortAddr dst, Region const& region,
+                               std::vector<f64> const& values, f64 time,
+                               FadeCurve curve, SetMode mode) {
     InPort* port;
     tzpl_SErr err = s->nrt_getInPort(dst, port);
     if (err != tzpl_errNone) return err;
+    if (values.empty()) return tzpl_errNone;
 
-    tzpl_SignalType type = port->type_;
-    switch (type.elem) {
-        case tzpl_kI32 : {
-            auto v = convertValues<i32>(srcElem, bytes, numValues);
-            out.add(new SetInputCmd<i32>(dst, numValues, v.data(), nullptr));
-        }   break;
-        case tzpl_kI64 : {
-            auto v = convertValues<i64>(srcElem, bytes, numValues);
-            out.add(new SetInputCmd<i64>(dst, numValues, v.data(), nullptr));
-        }   break;
-        case tzpl_kF32 : {
-            auto v = convertValues<f32>(srcElem, bytes, numValues);
-            Node* xfader = xfadeTime > 0. ? newXFaderNode(e, s, xfadeTime, curve, type) : nullptr;
-            out.add(new SetInputCmd<f32>(dst, numValues, v.data(), xfader));
-        }   break;
-        case tzpl_kF64 : {
-            auto v = convertValues<f64>(srcElem, bytes, numValues);
-            Node* xfader = xfadeTime > 0. ? newXFaderNode(e, s, xfadeTime, curve, type) : nullptr;
-            out.add(new SetInputCmd<f64>(dst, numValues, v.data(), xfader));
-        }   break;
+    std::vector<int> chans;
+    err = regionChannels(port->type_.shape, region, chans);
+    if (err != tzpl_errNone) return err;
+    std::vector<f64> vals(chans.size());
+    for (usize k = 0; k < chans.size(); ++k) vals[k] = values[k % values.size()];
+
+    f64 fs = e->streamParams_.sampleRate;
+    i64 count = time > 0. ? std::max((i64)1, (i64)(time * fs)) : 0;
+    Node* xfader = nullptr;
+    if (mode == SetMode::fade && time > 0. && isFloat(port->type_.elem)
+        && region.kind == Region::whole) {
+        // Used only if the input is connected when the command runs.
+        xfader = newXFaderNode(e, s, time, curve, port->type_);
     }
+    out.add(new SetInputCmd(dst, std::move(chans), std::move(vals), count, curve, xfader,
+                            mode == SetMode::impulse ? SetInputCmd::impulse
+                                                     : SetInputCmd::set));
     return tzpl_errNone;
 }
 
@@ -1470,8 +1567,7 @@ static tzpl_SErr applyTapOutlet(Engine* e, Silo* s, CommandList& out,
         slot->silo = s->index_;
         slot->ownerKind = (TapOwnerKind)ownerKind;
         slot->ownerSilo = ownerSilo;
-        slot->chans = std::min(port->type_.chans,
-                               (decltype(port->type_.chans))TapSlot::kMaxScopeChans);
+        slot->chans = std::min(port->chans_, TapSlot::kMaxScopeChans);
         if (slot->chans < 1) slot->chans = 1;
     }
     out.add(new TapOutletCmd(e, nodeID, outlet, tapID, slot));
@@ -1531,60 +1627,6 @@ static tzpl_SErr applyUntap(Engine* e, Silo* s, CommandList& out,
     if (s->index_ != (isMaster ? 0 : tapSilo)) return tzpl_errSiloOutOfRange;
     out.add(new UntapCmd(tapID, isMaster));
     return tzpl_errNone;
-}
-
-static tzpl_SErr applySetControl(Engine*, Silo* s, CommandList& out,
-                                 ShadowEdits&,
-                                 i64 nodeID, i64 controlID,
-                                 tzpl_ElemType srcElem, void const* bytes, int numValues) {
-    Node* node = s->nrt_getNode(nodeID);
-    if (!node) return tzpl_errNodeNotFound;
-
-    // check existence of control.
-    Control* c = node->getControl(controlID);
-    if (!c) return tzpl_errControlNotFound;
-
-    switch (c->type_.elem) {
-        case tzpl_kI32 : {
-            auto v = convertValues<i32>(srcElem, bytes, numValues);
-            out.add(new SetControlCmd<i32>(nodeID, controlID, numValues, v.data()));
-        }   break;
-        case tzpl_kI64 : {
-            auto v = convertValues<i64>(srcElem, bytes, numValues);
-            out.add(new SetControlCmd<i64>(nodeID, controlID, numValues, v.data()));
-        }   break;
-        case tzpl_kF32 : {
-            auto v = convertValues<f32>(srcElem, bytes, numValues);
-            out.add(new SetControlCmd<f32>(nodeID, controlID, numValues, v.data()));
-        }   break;
-        case tzpl_kF64 : {
-            auto v = convertValues<f64>(srcElem, bytes, numValues);
-            out.add(new SetControlCmd<f64>(nodeID, controlID, numValues, v.data()));
-        }   break;
-    }
-    return tzpl_errNone;
-}
-
-// By-name form: resolve the control name against the target node's def, then
-// hand off to the by-ID path. Runs at submit, so a node created earlier in
-// the same bundle already exists here.
-static tzpl_SErr applySetControlByName(Engine* e, Silo* s, CommandList& out,
-                                       ShadowEdits& edits,
-                                       i64 nodeID, char const* controlName,
-                                       tzpl_ElemType srcElem, void const* bytes,
-                                       int numValues) {
-    Node* node = s->nrt_getNode(nodeID);
-    if (!node) return tzpl_errNodeNotFound;
-
-    NodeDefInfo const& info = node->def->info_;
-    for (int i = 0; i < info.num_controls; ++i) {
-        ControlInfo const& c = info.controls[i];
-        if (c.name && strcmp(c.name, controlName) == 0) {
-            return applySetControl(e, s, out, edits, nodeID, c.controlID,
-                                   srcElem, bytes, numValues);
-        }
-    }
-    return tzpl_errControlNotFound;
 }
 
 // ----------------------------------------------------------------------------
@@ -1776,67 +1818,28 @@ struct DisconnectOutputOp : BundleOp
 struct SetInputOp : BundleOp
 {
     PortAddr dst_;
-    tzpl_ElemType elem_;
-    int numValues_;
-    f64 xfadeTime_;
+    std::string portName_;   // non-empty: resolve dst_.index by name at submit
+    Region region_;
+    std::vector<f64> values_;
+    f64 time_;
     FadeCurve curve_;
-    std::vector<u8> bytes_;
+    SetMode mode_;
 
-    SetInputOp(PortAddr dst, tzpl_ElemType elem, int numValues, void const* values,
-               f64 xfadeTime, FadeCurve curve)
-        : dst_(dst), elem_(elem), numValues_(numValues),
-          xfadeTime_(xfadeTime), curve_(curve),
-          bytes_(numValues * elemSize(elem))
-    {
-        memcpy(bytes_.data(), values, bytes_.size());
-    }
+    SetInputOp(PortAddr dst, char const* portName, Region const& region,
+               std::vector<f64> values, f64 time, FadeCurve curve, SetMode mode)
+        : dst_(dst), portName_(portName ? portName : ""), region_(region),
+          values_(std::move(values)), time_(time), curve_(curve), mode_(mode)
+    {}
 
-    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out, ShadowEdits& edits) override {
-        return applySetInput(e, s, out, edits, dst_, elem_, bytes_.data(), numValues_,
-                             xfadeTime_, curve_);
-    }
-};
-
-struct SetControlOp : BundleOp
-{
-    i64 nodeID_, controlID_;
-    tzpl_ElemType elem_;
-    int numValues_;
-    std::vector<u8> bytes_;
-
-    SetControlOp(i64 nodeID, i64 controlID, tzpl_ElemType elem, int numValues,
-                 void const* values)
-        : nodeID_(nodeID), controlID_(controlID), elem_(elem), numValues_(numValues),
-          bytes_(numValues * elemSize(elem))
-    {
-        memcpy(bytes_.data(), values, bytes_.size());
-    }
-
-    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out, ShadowEdits& edits) override {
-        return applySetControl(e, s, out, edits, nodeID_, controlID_, elem_,
-                               bytes_.data(), numValues_);
-    }
-};
-
-struct SetControlByNameOp : BundleOp
-{
-    i64 nodeID_;
-    std::string controlName_;
-    tzpl_ElemType elem_;
-    int numValues_;
-    std::vector<u8> bytes_;
-
-    SetControlByNameOp(i64 nodeID, char const* controlName, tzpl_ElemType elem,
-                       int numValues, void const* values)
-        : nodeID_(nodeID), controlName_(controlName), elem_(elem),
-          numValues_(numValues), bytes_(numValues * elemSize(elem))
-    {
-        memcpy(bytes_.data(), values, bytes_.size());
-    }
-
-    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out, ShadowEdits& edits) override {
-        return applySetControlByName(e, s, out, edits, nodeID_, controlName_.c_str(),
-                                     elem_, bytes_.data(), numValues_);
+    tzpl_SErr apply(Engine* e, Silo* s, CommandList& out, ShadowEdits&) override {
+        PortAddr dst = dst_;
+        if (!portName_.empty()) {
+            Node* node = s->nrt_getNode(dst.nodeID);
+            if (!node) return tzpl_errNodeNotFound;
+            dst.index = node->inputIndex(portName_.c_str());
+            if (dst.index < 0) return tzpl_errInputOutOfRange;
+        }
+        return applySetInput(e, s, out, dst, region_, values_, time_, curve_, mode_);
     }
 };
 
@@ -1927,6 +1930,7 @@ tzpl_SErr sched(int silo, int clock, f64 beat, SchedPolicy policy) {
     // shadow journal is discarded with them (nothing was committed).
     CommandList cmds;
     ShadowEdits edits;
+    tApplyScheduled = policy != schedImmediate;
     for (BundleOp* op = tBundle.head; op; op = op->next_) {
         tzpl_SErr err = op->apply(e, s, cmds, edits);
         if (err != tzpl_errNone) {
@@ -2097,69 +2101,105 @@ tzpl_SErr disconnectNode(i64 nodeID) {
     return tzpl_errNone;
 }
 
-// setInput / setControl capture the caller's values with their static type;
-// at submit the values are converted to the port's / control's element type
-// if they differ.
+// Values are captured as f64 at record time and converted to the port's
+// element type when they are rendered.
 
-static tzpl_SErr recordSetInput(PortAddr dst, tzpl_ElemType elem, int numValues,
-                                void const* values, f64 xfadeTime, FadeCurve curve) {
+static tzpl_SErr recordSetInput(PortAddr dst, char const* portName, Region const& region,
+                                std::vector<f64> values, f64 time, FadeCurve curve,
+                                SetMode mode) {
     if (!tBundle.engine) return tzpl_errNoActiveBundle;
-    tBundle.add(new SetInputOp(dst, elem, numValues, values, xfadeTime, curve));
+    tBundle.add(new SetInputOp(dst, portName, region, std::move(values), time, curve, mode));
     return tzpl_errNone;
+}
+
+template <typename T>
+static std::vector<f64> toF64(int n, T const* values) {
+    std::vector<f64> v(n > 0 ? n : 0);
+    for (int i = 0; i < n; ++i) v[i] = (f64)values[i];
+    return v;
+}
+
+tzpl_SErr setInput(PortAddr dst, Region const& region, std::span<f64 const> values,
+                   f64 rampTime, FadeCurve curve) {
+    return recordSetInput(dst, nullptr, region, {values.begin(), values.end()},
+                          rampTime, curve, SetMode::set);
+}
+
+tzpl_SErr setInput(i64 nodeID, char const* portName, Region const& region,
+                   std::span<f64 const> values, f64 rampTime, FadeCurve curve) {
+    return recordSetInput({nodeID, 0}, portName, region, {values.begin(), values.end()},
+                          rampTime, curve, SetMode::set);
+}
+
+tzpl_SErr setInputX(PortAddr dst, Region const& region, std::span<f64 const> values,
+                    f64 xfadeTime, FadeCurve curve) {
+    return recordSetInput(dst, nullptr, region, {values.begin(), values.end()},
+                          xfadeTime, curve, SetMode::fade);
+}
+
+tzpl_SErr impulseInput(PortAddr dst, Region const& region, std::span<f64 const> values) {
+    return recordSetInput(dst, nullptr, region, {values.begin(), values.end()},
+                          0., fadeLinear, SetMode::impulse);
+}
+
+tzpl_SErr impulseInput(i64 nodeID, char const* portName, Region const& region,
+                       std::span<f64 const> values) {
+    return recordSetInput({nodeID, 0}, portName, region, {values.begin(), values.end()},
+                          0., fadeLinear, SetMode::impulse);
+}
+
+template <typename T>
+static tzpl_SErr setInputFlat(PortAddr dst, int numValues, T const* values,
+                              f64 xfadeTime, FadeCurve curve) {
+    return recordSetInput(dst, nullptr, Region::channels(0, numValues),
+                          toF64(numValues, values), xfadeTime, curve,
+                          xfadeTime > 0. ? SetMode::fade : SetMode::set);
 }
 
 tzpl_SErr setInput(PortAddr dst, int numValues, f32 const* values, f64 xfadeTime, FadeCurve curve) {
-    return recordSetInput(dst, tzpl_kF32, numValues, values, xfadeTime, curve);
+    return setInputFlat(dst, numValues, values, xfadeTime, curve);
 }
 tzpl_SErr setInput(PortAddr dst, int numValues, f64 const* values, f64 xfadeTime, FadeCurve curve) {
-    return recordSetInput(dst, tzpl_kF64, numValues, values, xfadeTime, curve);
+    return setInputFlat(dst, numValues, values, xfadeTime, curve);
 }
 tzpl_SErr setInput(PortAddr dst, int numValues, i32 const* values, f64 xfadeTime, FadeCurve curve) {
-    return recordSetInput(dst, tzpl_kI32, numValues, values, xfadeTime, curve);
+    return setInputFlat(dst, numValues, values, xfadeTime, curve);
 }
 tzpl_SErr setInput(PortAddr dst, int numValues, i64 const* values, f64 xfadeTime, FadeCurve curve) {
-    return recordSetInput(dst, tzpl_kI64, numValues, values, xfadeTime, curve);
-}
-
-static tzpl_SErr recordSetControl(i64 nodeID, i64 controlID, tzpl_ElemType elem,
-                                  int numValues, void const* values) {
-    if (!tBundle.engine) return tzpl_errNoActiveBundle;
-    tBundle.add(new SetControlOp(nodeID, controlID, elem, numValues, values));
-    return tzpl_errNone;
+    return setInputFlat(dst, numValues, values, xfadeTime, curve);
 }
 
 tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, f32 const* values) {
-    return recordSetControl(nodeID, controlID, tzpl_kF32, numValues, values);
+    return recordSetInput({nodeID, (int)controlID}, nullptr, Region::all(),
+                          toF64(numValues, values), 0., fadeLinear, SetMode::set);
 }
 tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, f64 const* values) {
-    return recordSetControl(nodeID, controlID, tzpl_kF64, numValues, values);
+    return recordSetInput({nodeID, (int)controlID}, nullptr, Region::all(),
+                          toF64(numValues, values), 0., fadeLinear, SetMode::set);
 }
 tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, i32 const* values) {
-    return recordSetControl(nodeID, controlID, tzpl_kI32, numValues, values);
+    return recordSetInput({nodeID, (int)controlID}, nullptr, Region::all(),
+                          toF64(numValues, values), 0., fadeLinear, SetMode::set);
 }
 tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, i64 const* values) {
-    return recordSetControl(nodeID, controlID, tzpl_kI64, numValues, values);
+    return recordSetInput({nodeID, (int)controlID}, nullptr, Region::all(),
+                          toF64(numValues, values), 0., fadeLinear, SetMode::set);
 }
-
-static tzpl_SErr recordSetControlByName(i64 nodeID, char const* controlName,
-                                        tzpl_ElemType elem, int numValues,
-                                        void const* values) {
-    if (!tBundle.engine) return tzpl_errNoActiveBundle;
-    tBundle.add(new SetControlByNameOp(nodeID, controlName, elem, numValues, values));
-    return tzpl_errNone;
+tzpl_SErr setControl(i64 nodeID, char const* name, int numValues, f32 const* values) {
+    return recordSetInput({nodeID, 0}, name, Region::all(), toF64(numValues, values),
+                          0., fadeLinear, SetMode::set);
 }
-
-tzpl_SErr setControl(i64 nodeID, char const* controlName, int numValues, f32 const* values) {
-    return recordSetControlByName(nodeID, controlName, tzpl_kF32, numValues, values);
+tzpl_SErr setControl(i64 nodeID, char const* name, int numValues, f64 const* values) {
+    return recordSetInput({nodeID, 0}, name, Region::all(), toF64(numValues, values),
+                          0., fadeLinear, SetMode::set);
 }
-tzpl_SErr setControl(i64 nodeID, char const* controlName, int numValues, f64 const* values) {
-    return recordSetControlByName(nodeID, controlName, tzpl_kF64, numValues, values);
+tzpl_SErr setControl(i64 nodeID, char const* name, int numValues, i32 const* values) {
+    return recordSetInput({nodeID, 0}, name, Region::all(), toF64(numValues, values),
+                          0., fadeLinear, SetMode::set);
 }
-tzpl_SErr setControl(i64 nodeID, char const* controlName, int numValues, i32 const* values) {
-    return recordSetControlByName(nodeID, controlName, tzpl_kI32, numValues, values);
-}
-tzpl_SErr setControl(i64 nodeID, char const* controlName, int numValues, i64 const* values) {
-    return recordSetControlByName(nodeID, controlName, tzpl_kI64, numValues, values);
+tzpl_SErr setControl(i64 nodeID, char const* name, int numValues, i64 const* values) {
+    return recordSetInput({nodeID, 0}, name, Region::all(), toF64(numValues, values),
+                          0., fadeLinear, SetMode::set);
 }
 
 tzpl_SErr tapOutlet(i64 nodeID, int outlet, i64 tapID, int mode,
@@ -2440,7 +2480,7 @@ tzpl_SErr clearSched() {
     return tzpl_errNone;
 }
 
-tzpl_SErr noteOn(i64 nodeID, int noteID, int length, f32* paramValues) {
+tzpl_SErr noteOn(i64 nodeID, int noteID, int length, f32 const* paramValues) {
     if (!tBundle.engine) return tzpl_errNoActiveBundle;
     // NoteOnCmd copies paramValues into its own vector.
     tBundle.add(new NodeCheckedCmdOp(nodeID, new NoteOnCmd(nodeID, noteID, length, paramValues)));
@@ -2453,17 +2493,40 @@ tzpl_SErr noteOff(i64 nodeID, int noteID) {
     return tzpl_errNone;
 }
 
-tzpl_SErr noteSetParams(i64 nodeID, int noteID, int n, tzpl_ParamPair* paramValues) {
+static i64 rampSamples(f64 rampTime) {
+    if (!tBundle.engine || rampTime <= 0.) return 0;
+    return std::max((i64)1, (i64)(rampTime * tBundle.engine->streamParams_.sampleRate));
+}
+
+tzpl_SErr noteSetParams(i64 nodeID, int noteID, int n, tzpl_ParamPair const* params,
+                        f64 rampTime) {
     if (!tBundle.engine) return tzpl_errNoActiveBundle;
-    tBundle.add(new NodeCheckedCmdOp(nodeID, new NoteSetParamsCmd(nodeID, noteID, n, paramValues)));
+    std::vector<tzpl_ParamPair> v(params, params + std::max(0, n));
+    tBundle.add(new NodeCheckedCmdOp(nodeID,
+        new NoteSetParamsCmd(nodeID, noteID, std::move(v), rampSamples(rampTime))));
     return tzpl_errNone;
 }
 
-tzpl_SErr noteSetParamRange(i64 nodeID, int noteID, int first, int length, f32* paramValues) {
+tzpl_SErr noteSetParamRange(i64 nodeID, int noteID, int first, int length,
+                            f32 const* values, f64 rampTime) {
     if (!tBundle.engine) return tzpl_errNoActiveBundle;
+    std::vector<tzpl_ParamPair> v;
+    for (int i = 0; i < length; ++i) v.push_back({first + i, values[i]});
     tBundle.add(new NodeCheckedCmdOp(nodeID,
-        new NoteSetParamRangeCmd(nodeID, noteID, first, length, paramValues)));
+        new NoteSetParamsCmd(nodeID, noteID, std::move(v), rampSamples(rampTime))));
     return tzpl_errNone;
+}
+
+tzpl_SErr rtNoteOn(Silo* s, i64 nodeID, int noteID, int length, f32 const* params) {
+    Node* node = s->rt_getNode(nodeID);
+    if (!node) return tzpl_errNodeNotFound;
+    return s->rt_noteOn(node, noteID, length, params);
+}
+
+tzpl_SErr rtNoteOff(Silo* s, i64 nodeID, int noteID) {
+    Node* node = s->rt_getNode(nodeID);
+    if (!node) return tzpl_errNodeNotFound;
+    return s->rt_noteOff(node, noteID);
 }
 
 // -- Buffer commands --

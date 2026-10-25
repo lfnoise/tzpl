@@ -33,6 +33,7 @@
 
 #include "tzpl_client_interface.hpp"
 #include "tzpl_engine.hpp"
+#include "tzpl_note_voicer.hpp"
 #include "tzpl_silo.hpp"
 #include "tzpl_node.hpp"
 #include "tzpl_audio_backend.hpp"
@@ -75,31 +76,34 @@ struct StubBackend : AudioBackend {
 // test can tell exactly which nodes a panic sweep reached.
 // ---------------------------------------------------------------------------
 
-static int gAllNotesOffCalls = 0;
 
+// A voiced synth whose voices the panic can release. The engine's voicer
+// tracks the gates, so "the panic reached the node" is: its active voice
+// count went to 0.
 struct CountingSynth : tzpl_SynthData {};
-static tzpl_SynthData* cs_alloc() { return (tzpl_SynthData*)new CountingSynth(); }
+static tzpl_SynthData* cs_alloc(int32_t) { return new CountingSynth(); }
 static tzpl_SErr cs_free(tzpl_SynthData* s) {
-    delete (CountingSynth*)s;
+    delete static_cast<CountingSynth*>(s);
     return tzpl_errNone;
 }
-static void cs_process(tzpl_SynthData*) {}
-static tzpl_SErr cs_allNotesOff(tzpl_SynthData*, int64_t) {
-    ++gAllNotesOffCalls;
-    return tzpl_errNone;
-}
+static void cs_process(tzpl_SynthData*, int32_t, int32_t) {}
 
 static void createCountingNode(Engine* e) {
-    static PortInfo outPort{"out", {tzpl_kF32, tzpl_audioRate, 2}};
-    NodeDefInfo info;
-    memset(&info, 0, sizeof info);
+    static PortInfo ports[2] = {
+        PortInfo{"notes", {tzpl::shapeMatrix(2, 2), tzpl_kF32, tzpl_audioRate}},
+        PortInfo{"out", {tzpl::shapeRow(2), tzpl_kF32, tzpl_audioRate}},
+    };
+    NodeDefInfo info{};
     info.name = "CountingSynth";
+    info.num_ins = 1;
+    info.ins = &ports[0];
     info.num_outs = 1;
-    info.outs = &outPort;
+    info.outs = &ports[1];
+    info.voiced = 1;
+    info.maxVoices = 2;
     info.funs.alloc = cs_alloc;
     info.funs.free = cs_free;
-    info.funs.processAudio = cs_process;
-    info.funs.allNotesOff = cs_allNotesOff;
+    info.funs.process = cs_process;
     addNodeDef(e, info);
 }
 
@@ -134,11 +138,16 @@ int main() {
         if (n == n100) inList = true;
     check(inList, "node is in the RT sorted list after sortNodes");
 
-    // Panic while the node is alive reaches it through the sorted list.
+    // Panic while the node is alive reaches it.
+    f32 p[1] = {60.f};
+    begin(e);
+    noteOn(100, 1, 1, p);
+    check(go(0) == tzpl_errNone, "note bundle runs synchronously");
+    check(n100->voicer_ && n100->voicer_->active == 1, "a voice is sounding");
     begin(e);
     allNotesOffAll();
     check(go(0) == tzpl_errNone, "panic bundle runs synchronously");
-    check(gAllNotesOffCalls == 1, "panic reached the live node");
+    check(n100->voicer_->active == 0, "panic reached the live node");
 
     // Free the node while stopped: both stages run inline and the Node is
     // deleted immediately. It must have left the sorted list.
@@ -158,7 +167,6 @@ int main() {
         begin(e);
         allNotesOffAll();
         check(go(0) == tzpl_errNone, "panic after free runs synchronously");
-        check(gAllNotesOffCalls == 1, "panic no longer reaches the freed node");
     }
 
     freeEngine(e);

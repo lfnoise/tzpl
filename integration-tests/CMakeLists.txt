@@ -41,6 +41,16 @@ target_link_libraries(test_metering
     PRIVATE audio_engine_lib
 )
 
+# The block engine, offline, with hand-written v3 test plugins.
+add_executable(test_block_engine
+    src/test_block_engine.cpp
+    ${CMAKE_SOURCE_DIR}/engine/src/tzpl_test_plugins.cpp
+)
+
+target_link_libraries(test_block_engine
+    PRIVATE audio_engine_lib
+)
+
 # Header-only voice-allocator invariants; no audio, links nothing.
 add_executable(test_voicer
     src/test_voicer.cpp

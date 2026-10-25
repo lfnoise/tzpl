@@ -59,7 +59,7 @@ std::uint64_t bindControlWidget(UIState* ui, std::string const& panel,
                                 long long nodeID, int silo) {
     if (!ui) return 0;
     UISpec spec = specFromControl(c.spec);
-    int const chans = std::max(1, c.type.chans);
+    int const chans = std::max(1, tzpl_shapeChans(c.type.shape));
 
     std::lock_guard<std::mutex> lock(ui->mtx);
     UIWidget* w;

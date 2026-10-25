@@ -62,7 +62,7 @@ jobs:
       - name: Configure (both apps)
         run: >
           cmake -B build -DCMAKE_BUILD_TYPE=Release
-          -DTZPL_BUILD_APP=ON -DTZPL_BUILD_APP_JUCE=ON
+          -DTZPL_BUILD_APP=ON -DTZPL_BUILD_APP_JUCE=ON -DTZPL_BUILD_TESTS=ON
 
       - name: Build ImGui app + doc tests
         run: cmake --build build --target tzpl_app tzpl_doc_tests -j$(sysctl -n hw.ncpu)
@@ -73,12 +73,12 @@ jobs:
       - name: Doc tests
         run: ./build/app/tzpl_doc_tests
 
-      - name: Build synthdef-compiler
-        run: cmake --build build --target synthdef-compiler -j$(sysctl -n hw.ncpu)
-
-      # End-to-end: codegen -> clang -> dylib -> dlopen -> ABI check.
-      - name: Synthdef compiler tests
-        run: ./build/synthdef-compiler/synthdef-compiler --test
+      # Block engine (ABI v3) with hand-written test plugins. The C++
+      # synthdef-compiler's --test is retired on this branch (plan D9, s.8).
+      - name: Block engine tests
+        run: |
+          cmake --build build --target test_block_engine -j$(sysctl -n hw.ncpu)
+          ./build/integration-tests/test_block_engine
 
       - name: JUCE headless self-test
         run: |
@@ -157,8 +157,8 @@ jobs:
           bash run_tests.sh | tee result.txt
           grep -Eq '[1-9][0-9]* passed' result.txt
 
-      - name: Synthdef compiler tests
-        run: ./build/synthdef-compiler/synthdef-compiler --test
+      - name: Block engine tests
+        run: ./build/integration-tests/test_block_engine
 
       # Block-engine runtime support library (shared/tzpl_dsp) on x86-64: the
       # Sleef backend, the forced libm fallback, and the -ffast-math build.

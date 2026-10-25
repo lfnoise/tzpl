@@ -17,9 +17,11 @@ The shared plugin ABI header lives in `../shared/tzpl_plugin_abi.h`.
 | `tzpl_audio_backend_rtaudio.hpp/cpp` | Default RtAudio backend (CoreAudio/ALSA), separate-input-device staging, macOS sample-rate listener |
 | `tzpl_engine.hpp/cpp` | Engine struct, safety limiter, built-in node defs, NRT/dead-node threads |
 | `tzpl_silo.hpp/cpp` | Parallel processing unit: node tables, topological sort, audio processing, command dispatch |
-| `tzpl_node.hpp/cpp` | Node, InPort, OutPort, Control, NodeDef — the graph data model |
-| `tzpl_command.hpp`, `tzpl_command_subclasses.hpp` | Command base class, scheduler queue, all concrete command types |
-| `tzpl_xfader.hpp/cpp` | Crossfader node: 7 fade curves, automatic splice-in/splice-out |
+| `tzpl_node.hpp/cpp` | Node, InPort (value stages), OutPort, NodeDef — the graph data model |
+| `tzpl_command.hpp`, `tzpl_command_subclasses.hpp` | Command base class, beat-sorted queue, all concrete command types |
+| `tzpl_xfader.hpp/cpp` | Crossfader node: block form, fractional start, nesting, retire after the block |
+| `tzpl_fade_curves.hpp` | The 7 fade curves and the fade position function (faders and ramps) |
+| `tzpl_note_voicer.hpp` | Engine-side voice allocation for voiced synths |
 | `tzpl_atomic_fifo.hpp` | Lock-free SPSC FIFO for RT-safe inter-thread communication |
 | `tzpl_sexpr.hpp/cpp` | S-expression parser for text-based commands |
 | `tzpl_common.hpp` | Type aliases (`f32`, `i64`, SIMD types) |
@@ -27,7 +29,8 @@ The shared plugin ABI header lives in `../shared/tzpl_plugin_abi.h`.
 | `tzpl_random.hpp` | xoroshiro128++ PRNG, SIMD-templated |
 | `tzpl_complex.hpp` | Complex number utilities |
 | `tzpl_plugin_interface.hpp` | Legacy/reference plugin helpers (mostly commented out) |
-| `main.cpp` | Test code, built-in plugins (VoicerTest, SinOsc, AddOp, MulOp), Voicer template |
+| `tzpl_test_plugins.hpp/cpp` | Hand-written v3 test plugins (sinosc, +, *, voicerTest, pass, counter, vtest, rec) |
+| `main.cpp` | Old manual test driver |
 | `RtAudio.h/cpp` | Third-party cross-platform audio I/O (CoreAudio on macOS) |
 
 ## Building
@@ -49,17 +52,17 @@ The shared plugin ABI header lives in `../shared/tzpl_plugin_abi.h`.
 - **Silos**: Independent parallel processing units, each with its own node graph, worker thread, and command queue. Silo 0 runs on the audio callback thread; silos 1..N-1 run on dedicated worker threads. Outputs are summed via binary-tree reduction.
 - **Two-stage commands**: Stage 1 (`doRT`) runs on the RT thread; stage 2 (`doNRT`) runs on a background thread for cleanup/deallocation. Commands are bundled atomically via `begin()`/`go(silo)`/`sched(silo, ...)` -- the target silo is chosen at submit, where the whole bundle is validated and materialized; an invalid bundle is discarded in its entirety (atomic abort).
 - **Lock-free FIFOs**: All RT <-> NRT communication uses `AtomicFifo` (SPSC). No locks or allocations on the audio thread.
-- **Zero-copy connections**: Connecting an InPort to an OutPort redirects the inlet pointer to the outlet's buffer. No data copying during audio processing.
-- **Hidden helper nodes** (`nodeID == -1`, invisible to the topology shadow): crossfaders for smooth transitions, mixers for fan-in (chained when a mixer fills up, so fan-in is unbounded), and channel adapters when an outlet's channel count differs from its inlet's (widening wraps, narrowing folds). Rule for anything that re-routes a source: **connect the new link before breaking the old one** -- adapters retire themselves the moment they have no destination.
-- **Sample-by-sample processing**: Nodes process one sample at a time, enabling sample-accurate scheduling.
+- **Zero-copy connections**: Connecting an InPort to an OutPort points each inlet channel at the outlet channel it broadcasts from. No data copying during audio processing.
+- **Hidden helper nodes** (`nodeID == -1`, invisible to the topology shadow): crossfaders for smooth transitions, mixers for fan-in (chained when a mixer fills up, so fan-in is unbounded), and fold adapters when an outlet's shape is larger than its inlet's in some dimension (broadcasting needs no node). Rule for anything that re-routes a source: **connect the new link before breaking the old one** -- adapters retire themselves the moment they have no destination.
+- **Block processing** (ABI v3): nodes process up to `blockSize` samples per call (`process(off, n)`). Every port channel is its own buffer; connections remap channel pointers (broadcasting is free; folding uses a hidden node). Unconnected inputs hold per-channel value stages (step, ramp, impulse) rendered at their sample. Commands and silo tasks run in time order before the nodes; node start/free/resetVoice split the node's block. Feed-forward only: a connection that would close a cycle is refused with `tzpl_errCyclicConnection`. See `devplans/BLOCK_ENGINE_PLAN.md`.
 - **Crossfaders**: Temporary nodes spliced into the signal graph for smooth transitions. They self-remove when the fade completes.
-- **Topological sort**: Depth-first from the output node. Re-sorted only when connections change. Cycles cause one-sample delay rather than failure.
+- **Topological sort**: Depth-first from the output node, generation-stamped (never walks the old list). Re-sorted only when connections change.
 
 ## Plugin ABI
 
 Plugins are `.dylib` files exporting a `load` function. The stable C ABI is defined in
 `../shared/tzpl_plugin_abi.h`. Plugins extend `tzpl_SynthData` with custom fields and
-provide a `tzpl_SynthFuns` function table (alloc, free, init, processAudio, noteOn, etc.).
+provide a `tzpl_SynthFuns` function table (alloc(maxBlock), free, init, process(off, n), resetVoice, swapBuffer). Voiced synths have a `notes` input tensor driven by the engine's voicer.
 
 ## Thread Safety Rules
 

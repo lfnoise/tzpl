@@ -27,367 +27,157 @@
 
 namespace engine {
 
-template <std::floating_point T>
-T smoothStep(T x) {
-    return x * x * (T(3) - T(2) * x);
-}
-
-template <std::floating_point T>
-T panfun(T x) {
-    static constexpr T a = 0.337403011047526069;
-    static constexpr T b = -1.334338069017510398;
-    static constexpr T c = -a-b-T(1); // a+b+c = -1.
-    return T(1) + x * (c + x * (b + x * a));
-}
-
-template <std::floating_point T>
-T cubed(T x) { return x*x*x; }
-
-template <std::floating_point T>
-struct LinearFade {
-    static T fade(T x, T a, T b) {
-        return a + x * (b - a);
-    }
-};
-
-template <std::floating_point T>
-struct ExponentialFade {
-    static T fade(T x, T a, T b) {
-        return a * pow(b/a, x);
-    }
-};
-
-template <std::floating_point T>
-struct SmoothStepFade {
-    static T fade(T x, T a, T b) {
-        return a + smoothStep(x) * (b - a);
-    }
-};
-
-template <std::floating_point T>
-struct OutInFade {
-    static T fade(T x, T a, T b) {
-        return x < 0.5 ? smoothStep(T(1) - T(2)*x) * a : smoothStep(T(2)*x - T(1)) * b;
-    }
-};
-
-template <std::floating_point T>
-struct EqPowFade {
-    // panfun is a fade-out gain (panfun(0) = 1, panfun(1) = 0), so the
-    // outgoing signal takes panfun(x) and the incoming one panfun(1 - x);
-    // with the arguments the other way around the whole fade ran backward
-    // (started at b, ended at a, and both splice points clicked).
-    static T fade(T x, T a, T b) {
-        return a * panfun(x) + b * panfun(T(1) - x);
-    }
-};
-
-template <std::floating_point T>
-struct EaseInCubicFade {
-    static T fade(T x, T a, T b) {
-        return a + cubed(x) * (b - a);
-    }
-};
-
-template <std::floating_point T>
-struct EaseOutCubicFade {
-    static T fade(T x, T a, T b) {
-        return b + cubed(T(1) - x) * (a - b);
-    }
-};
-
-template <std::floating_point T, typename F>
-struct XFader : tzpl_SynthData
+struct XFaderBase : tzpl_SynthData
 {
-    i64 count;
-    f64 slope;
-    f64 xfade = 0.;
-    int numChannels;
-    T* norm;
-
-    void fade(T const* ax, T const* bx) {
-        T* out = getOut<T>(this, 0);
-        for (int i = 0; i < numChannels; ++i) {
-            T a = ax[i];
-            T b = bx[i];
-            out[i] = F::fade(xfade, a, b);
-        }
-    }
+    f64 t0 = 0.;        // absolute fractional start time
+    i64 count = 1;      // fade length in samples (0 = step)
 };
 
 template <std::floating_point T, typename F>
-tzpl_SynthData* XFader_alloc() {
-    return (tzpl_SynthData*)new XFader<T,F>();
+struct XFader : XFaderBase {};
+
+template <std::floating_point T, typename F>
+tzpl_SynthData* XFader_alloc(int32_t) {
+    return new XFader<T,F>();
 }
 
 template <std::floating_point T, typename F>
 tzpl_SErr XFader_free(tzpl_SynthData* synth) {
-    delete (XFader<T,F>*)synth;
+    delete static_cast<XFader<T,F>*>(synth);
     return tzpl_errNone;
 }
 
-template <std::floating_point T, typename F>
-tzpl_SErr XFader_init(tzpl_SynthData* synth) {
-    return tzpl_errNone;
-}
+static tzpl_SErr XFader_init(tzpl_SynthData*) { return tzpl_errNone; }
 
 template <std::floating_point T, typename F>
-tzpl_SErr XFader_uninit(tzpl_SynthData* synth) {
-    return tzpl_errNone;
-}
+void XFader_process(tzpl_SynthData* synth, int32_t off, int32_t n) {
+    auto* o = static_cast<XFader<T,F>*>(synth);
+    Node* node = (Node*)synth->node;
+    i64 b0 = node->silo_->blockStart_;
 
-template <std::floating_point T, typename F>
-void XFadeTwo_processAudio(tzpl_SynthData* synth) {
-    XFader<T,F>* o = (XFader<T,F>*)synth;
-    T const* a = (T const*)getInput(synth, 0);
-    T const* b = (T const*)getInput(synth, 1);
+    // One position per sample, shared by every channel.
+    T x[1024];
+    for (int i = 0; i < n; ++i) x[i] = (T)fadePosition((f64)(b0 + off + i), o->t0, o->count);
 
-    o->fade(a, b);
-
-    Node* sub = (Node*)synth->node;
-    if (--o->count <= 0) {
-        Silo* s = sub->silo_;
-        InPort* dstPort = sub->outs[0].dstList_;
-        OutPort* srcPort = sub->ins[1].srcPort_;
-        // Splice the new source around self first, then unlink: a hidden
-        // channel adapter feeding this fade retires itself the moment it has
-        // no destination left, so it must never be left without one.
-        s->connect(srcPort, dstPort);
-        s->disconnectNode(sub); // unlink self.
-        s->pushDeadNode(sub);
-    } else {
-        o->xfade += o->slope;
+    int chans = node->outs[0].chans_;
+    for (int c = 0; c < chans; ++c) {
+        T const* a = inChan<T>(synth, 0, c) + off;
+        T const* b = inChan<T>(synth, 1, c) + off;
+        T* out = outChan<T>(synth, 0, c) + off;
+        for (int i = 0; i < n; ++i) out[i] = F::fade(x[i], a[i], b[i]);
     }
+    if (fadeDoneAfter((f64)(b0 + off + n - 1), o->t0, o->count)) node->faderDone_ = true;
 }
 
 template <std::floating_point T, typename F>
-void XFadeIn_processAudio(tzpl_SynthData* synth) {
-    XFader<T,F>* o = (XFader<T,F>*)synth;
-    T const* a = o->norm;
-    T const* b = (T const*)getInput(synth, 1);
-
-    o->fade(a, b);
-
-    Node* sub = (Node*)synth->node;
-    if (--o->count <= 0) {
-        Silo* s = sub->silo_;
-        InPort* dstPort = sub->outs[0].dstList_;
-        OutPort* srcPort = sub->ins[1].srcPort_;
-        // Splice the new source around self first, then unlink: a hidden
-        // channel adapter feeding this fade retires itself the moment it has
-        // no destination left, so it must never be left without one.
-        s->connect(srcPort, dstPort);
-        s->disconnectNode(sub); // unlink self.
-        s->pushDeadNode(sub);
-    } else {
-        o->xfade += o->slope;
-    }
-}
-
-template <std::floating_point T, typename F>
-void XFadeOut_processAudio(tzpl_SynthData* synth) {
-    XFader<T,F>* o = (XFader<T,F>*)synth;
-    T const* a = (T const*)getInput(synth, 0);
-    T const* b = getIn<T>(o, 1);
-
-    o->fade(a, b);
-
-    Node* sub = (Node*)synth->node;
-    if (--o->count <= 0) {
-        Silo* s = sub->silo_;
-        s->disconnectNode(sub); // unlink self.
-        s->pushDeadNode(sub);
-    } else {
-        o->xfade += o->slope;
-    }
-}
-
-template <std::floating_point T, typename F>
-void XFadeSet_processAudio(tzpl_SynthData* synth) {
-    XFader<T,F>* o = (XFader<T,F>*)synth;
-    T const* a = getIn<T>(o, 0);
-    T const* b = getIn<T>(o, 1);
-    
-    o->fade(a, b);
-
-    Node* sub = (Node*)synth->node;
-    if (--o->count <= 0) {
-        Silo* s = sub->silo_;
-        s->disconnectNode(sub); // unlink self.
-        s->pushDeadNode(sub);
-    } else {
-        o->xfade += o->slope;
-    }
-}
-
-template <std::floating_point T, typename F>
-Node* newXFaderNodeT(Engine* e, Silo* silo, f64 xfadeTime, tzpl_SignalType type) {
-    f64 fs = e->streamParams_.sampleRate;
-    i64 count = std::max((i64)1, (i64)(xfadeTime * fs));
-    
+Node* newXFaderNodeT(Engine* e, Silo* silo, i64 count, tzpl_SignalType type) {
     tzpl_SynthFuns funs = {0};
-    funs.alloc  = XFader_alloc<T,F>;
-    funs.free   = XFader_free<T,F>;
-    funs.init   = XFader_init<T,F>;
-    funs.uninit = XFader_uninit<T,F>;
-        
-    NodeDefInfo info;
-    memset(&info, 0, sizeof(info));
-    
+    funs.alloc   = XFader_alloc<T,F>;
+    funs.free    = XFader_free<T,F>;
+    funs.init    = XFader_init;
+    funs.process = XFader_process<T,F>;
+
+    // Ports carry the connection's own type: the fade runs over however many
+    // channels the destination has.
+    PortInfo ins[2] = {PortInfo{"a", type}, PortInfo{"b", type}};
+    PortInfo outs[1] = {PortInfo{"out", type}};
+
+    NodeDefInfo info{};
     info.name = "xfader";
     info.num_ins = 2;
     info.num_outs = 1;
-
-    // Ports carry the connection's own type: the fade runs over however many
-    // channels the signal has, and the port buffers are sized to match.
-    PortInfo a{"a", type};
-    PortInfo b{"b", type};
-    info.ins = (PortInfo*)calloc(info.num_ins, sizeof(PortInfo));
-    info.ins[0] = a;
-    info.ins[1] = b;
-
-    PortInfo out{"out", type};
-    info.outs = (PortInfo*)calloc(info.num_outs, sizeof(PortInfo));
-    info.outs[0] = out;
+    info.ins = ins;
+    info.outs = outs;
     info.funs = funs;
 
     Node* sub = new Node(e, silo, info);
     sub->isXFader_ = true;
-
-    free(info.ins);
-    free(info.outs);
-
-    XFader<T,F>* xfader = (XFader<T,F>*)sub->synth;
-
-    xfader->numChannels = type.chans;
-    
-    xfader->count = count;
-    xfader->slope = 1. / (f64)(count + 1);
-
-    
+    static_cast<XFaderBase*>(sub->synth)->count = count;
     return sub;
 }
 
 Node* newXFaderNode(Engine* e, Silo* silo, f64 xfadeTime, FadeCurve curve, tzpl_SignalType type) {
-    #define CALL_NEW_XFADER_T(TYPE, F) \
-        (TYPE.elem == tzpl_kF32 ? newXFaderNodeT<f32, F<f32>>(e, silo, xfadeTime, TYPE) \
-                                : newXFaderNodeT<f64, F<f64>>(e, silo, xfadeTime, TYPE))
+    if (!isFloat(type.elem)) return nullptr;
+    f64 fs = e->streamParams_.sampleRate;
+    i64 count = xfadeTime > 0. ? std::max((i64)1, (i64)(xfadeTime * fs)) : 0;
+
+    #define NEW_XFADER_T(F) \
+        (type.elem == tzpl_kF32 ? newXFaderNodeT<f32, F<f32>>(e, silo, count, type) \
+                                : newXFaderNodeT<f64, F<f64>>(e, silo, count, type))
     switch (curve) {
-        case fadeLinear :
-            return CALL_NEW_XFADER_T(type, LinearFade);
-        case fadeExponential :
-            return CALL_NEW_XFADER_T(type, ExponentialFade);
-        case fadeSmoothstep :
-            return CALL_NEW_XFADER_T(type, SmoothStepFade);
-        case fadeEqualPower :
-            return CALL_NEW_XFADER_T(type, EqPowFade);
-        case fadeOutIn :
-            return CALL_NEW_XFADER_T(type, OutInFade);
-        case fadeEaseInCubic :
-            return CALL_NEW_XFADER_T(type, EaseInCubicFade);
-        case fadeEaseOutCubic :
-            return CALL_NEW_XFADER_T(type, EaseOutCubicFade);
+        case fadeLinear:       return NEW_XFADER_T(LinearFade);
+        case fadeExponential:  return NEW_XFADER_T(ExponentialFade);
+        case fadeSmoothstep:   return NEW_XFADER_T(SmoothStepFade);
+        case fadeEqualPower:   return NEW_XFADER_T(EqPowFade);
+        case fadeOutIn:        return NEW_XFADER_T(OutInFade);
+        case fadeEaseInCubic:  return NEW_XFADER_T(EaseInCubicFade);
+        case fadeEaseOutCubic: return NEW_XFADER_T(EaseOutCubicFade);
+    }
+    #undef NEW_XFADER_T
+    return nullptr;
+}
+
+// Hold `in` at constants: per channel, values[c] (or dst's stage values).
+static void holdConstants(Silo* s, InPort& in, InPort const* dst, f64 const* values) {
+    f64 t = s->eventTime();
+    for (int c = 0; c < in.chans_; ++c) {
+        f64 v = values ? values[c] : dst->valueAt(c, t);
+        ChanStage& st = in.stages_[c];
+        st.value = v;
+        st.ramping = false;
+        st.dirty = true;
+        st.stamp = -1;
+        in.markActive(c);
     }
 }
 
-template <std::floating_point T, typename F>
-tzpl_SErr setupXFaderT(Silo* s, Node* sub, OutPort* newSrc, InPort* dst, void* values) {
-    
-    XFader<T,F>* xfader = (XFader<T,F>*)sub->synth;
-
-    xfader->norm = (T*)dst->dataBuffer_;
-        
-    sub->ins[0].type_ = sub->ins[1].type_ = sub->outs[0].type_ = dst->type_;
-
-    OutPort* oldSrc = dst->srcPort_;
-    // Connect before disconnecting: if the old source reaches dst through a
-    // hidden channel adapter, the adapter must keep a destination at all
-    // times or it retires itself out from under this fade.
-    if (oldSrc) {
-        s->connect(oldSrc, &sub->ins[0]);
-    }
-    s->disconnect(dst);
-
-    int byteSize = calcByteSize(dst->type_);
-    if (newSrc) {
-        if (oldSrc) {
-            sub->funs.processAudio = XFadeTwo_processAudio<T,F>;
-            memcpy(sub->ins[0].dataBuffer_, dst->dataBuffer_, byteSize);
-        } else {
-            sub->funs.processAudio = XFadeIn_processAudio<T,F>;
-        }
-    } else {
-        if (oldSrc) {
-            sub->funs.processAudio = XFadeOut_processAudio<T,F>;
-            memcpy(sub->ins[0].dataBuffer_, dst->dataBuffer_, byteSize);
-            memcpy(getIn<T>(xfader, 1), values, byteSize);
-        } else {
-            sub->funs.processAudio = XFadeSet_processAudio<T,F>;
-            memcpy(getIn<T>(xfader, 0), dst->dataBuffer_, byteSize);
-            memcpy(getIn<T>(xfader, 1), values, byteSize);
-        }
-    }
-    
-    if (newSrc) {
-        s->connect(newSrc, &sub->ins[1]);
-    }
-    s->connect(&sub->outs[0], dst);
-    
-    return tzpl_errNone;
-}
-
-
-tzpl_SErr setupXFader(Silo* s, Node* sub, OutPort* newSrc, InPort* dst, FadeCurve curve, void* values) {
+tzpl_SErr setupXFader(Silo* s, Node* sub, OutPort* newSrc, InPort* dst, f64 const* endValues) {
     sub->silo_ = s;
-    
-    // call in RT thread.
-    if (!isFloat(dst->type_.elem)) {
+    if (!isFloat(dst->type_.elem) || sub->ins[0].chans_ != dst->chans_) {
         s->pushDeadNode(sub);
         return tzpl_errTypeMismatch;
     }
     if (newSrc) {
-        tzpl_SErr err = compatibleTypes(newSrc->type_, dst->type_);
+        tzpl_SErr err = connectableTypes(newSrc->type_, dst->type_);
+        if (err == tzpl_errNone && !tzpl::broadcastsTo(newSrc->type_.shape, dst->type_.shape))
+            err = tzpl_errChanMismatch;
         if (err != tzpl_errNone) {
             s->pushDeadNode(sub);
-            return tzpl_errTypeMismatch;
+            return err;
         }
     }
- 
-#define CALL_SETUP_XFADER_T(E, F) \
-    (E == tzpl_kF32 ? setupXFaderT<f32, F<f32>>(s, sub, newSrc, dst, values) \
-                            : setupXFaderT<f64, F<f64>>(s, sub, newSrc, dst, values))
-    
-    auto elem = dst->type_.elem;
-    
-    switch (curve) {
-        case fadeLinear :
-            return CALL_SETUP_XFADER_T(elem, LinearFade);
-        case fadeExponential :
-            return CALL_SETUP_XFADER_T(elem, ExponentialFade);
-        case fadeSmoothstep :
-            return CALL_SETUP_XFADER_T(elem, SmoothStepFade);
-        case fadeEqualPower :
-            return CALL_SETUP_XFADER_T(elem, EqPowFade);
-        case fadeOutIn :
-            return CALL_SETUP_XFADER_T(elem, OutInFade);
-        case fadeEaseInCubic :
-            return CALL_SETUP_XFADER_T(elem, EaseInCubicFade);
-        case fadeEaseOutCubic :
-            return CALL_SETUP_XFADER_T(elem, EaseOutCubicFade);
+    static_cast<XFaderBase*>(sub->synth)->t0 = s->eventTime();
+
+    // Connect before disconnecting: if the old source reaches dst through a
+    // hidden channel adapter, the adapter must keep a destination at all
+    // times or it retires itself out from under this fade.
+    OutPort* oldSrc = dst->srcPort_;
+    if (oldSrc) {
+        s->connect(oldSrc, &sub->ins[0]);
+        s->disconnect(dst);
+    } else {
+        holdConstants(s, sub->ins[0], dst, nullptr);
     }
+
+    if (newSrc) {
+        s->connect(newSrc, &sub->ins[1]);
+    } else {
+        holdConstants(s, sub->ins[1], dst, endValues);
+    }
+    s->connect(&sub->outs[0], dst);
+    return tzpl_errNone;
 }
 
-
-template <std::floating_point T, typename F>
-tzpl_SErr setupXFaderT(Silo* s, Node* sub, OutPort* oldSrc, OutPort* newSrc) {
-    
-    //XFader<T,F>* xfader = (XFader<T,F>*)sub->data;
-        
-    sub->ins[0].type_ = sub->ins[1].type_ = sub->outs[0].type_ = newSrc->type_;
-    
-    sub->funs.processAudio = XFadeTwo_processAudio<T,F>;
-    
-    tzpl_SErr err;
+tzpl_SErr setupXFader(Silo* s, Node* sub, OutPort* oldSrc, OutPort* newSrc) {
+    sub->silo_ = s;
+    tzpl_SErr err = compatibleTypes(oldSrc->type_, newSrc->type_);
+    if (err == tzpl_errNone && !isFloat(oldSrc->type_.elem)) err = tzpl_errTypeMismatch;
+    if (err == tzpl_errNone && sub->ins[0].chans_ != oldSrc->chans_) err = tzpl_errChanMismatch;
+    if (err != tzpl_errNone) {
+        s->pushDeadNode(sub);
+        return err;
+    }
+    static_cast<XFaderBase*>(sub->synth)->t0 = s->eventTime();
 
     OutPort* xfadeOut = &sub->outs[0];
     InPort* dst = oldSrc->dstList_;
@@ -400,53 +190,31 @@ tzpl_SErr setupXFaderT(Silo* s, Node* sub, OutPort* oldSrc, OutPort* newSrc) {
 
     err = s->connect(oldSrc, &sub->ins[0]);
     if (err) return err;
-    
+
     err = s->connect(newSrc, &sub->ins[1]);
     if (err) return err;
 
     return tzpl_errNone;
 }
 
-tzpl_SErr setupXFader(Silo* s, Node* sub, OutPort* oldSrc, OutPort* newSrc, FadeCurve curve) {
-    sub->silo_ = s;
-    
-    // call in RT thread.
-    if (!isFloat(oldSrc->type_.elem) || !isFloat(newSrc->type_.elem)) {
-        s->pushDeadNode(sub);
-        return tzpl_errTypeMismatch;
-    }
+void retireXFader(Silo* s, Node* sub) {
+    sub->faderDone_ = false;
+    // Hand the new source to everything the fader fed, then unlink: connect
+    // before disconnecting, so a hidden adapter feeding the fade always has
+    // a destination. With a constant new value the destinations revert to
+    // their own stage values, which the command that started the fade set.
+    OutPort* newSrc = sub->ins[1].srcPort_;
     if (newSrc) {
-        tzpl_SErr err = compatibleTypes(oldSrc->type_, newSrc->type_);
-        if (err != tzpl_errNone) {
-            s->pushDeadNode(sub);
-            return tzpl_errTypeMismatch;
+        InPort* dst = sub->outs[0].dstList_;
+        while (dst) {
+            InPort* next = dst->next_;
+            s->connect(newSrc, dst);
+            dst = next;
         }
     }
- 
-#define CALL_SETUP_XFADER_T2(E, F) \
-    (E == tzpl_kF32 ? setupXFaderT<f32, F<f32>>(s, sub, oldSrc, newSrc) \
-                            : setupXFaderT<f64, F<f64>>(s, sub, oldSrc, newSrc))
-    
-    auto elem = oldSrc->type_.elem;
-    
-    switch (curve) {
-        case fadeLinear :
-            return CALL_SETUP_XFADER_T2(elem, LinearFade);
-        case fadeExponential :
-            return CALL_SETUP_XFADER_T2(elem, ExponentialFade);
-        case fadeSmoothstep :
-            return CALL_SETUP_XFADER_T2(elem, SmoothStepFade);
-        case fadeEqualPower :
-            return CALL_SETUP_XFADER_T2(elem, EqPowFade);
-        case fadeOutIn :
-            return CALL_SETUP_XFADER_T2(elem, OutInFade);
-        case fadeEaseInCubic :
-            return CALL_SETUP_XFADER_T2(elem, EaseInCubicFade);
-        case fadeEaseOutCubic :
-            return CALL_SETUP_XFADER_T2(elem, EaseOutCubicFade);
-    }
-    return tzpl_errNone;
+    s->disconnectNode(sub);
+    s->sortedListRemove(sub);
+    s->pushDeadNode(sub);
 }
 
 }
-

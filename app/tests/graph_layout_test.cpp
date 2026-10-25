@@ -286,14 +286,12 @@ static void test_edit_helpers() {
     PortVM f32a2in{"in", 2, tzpl_kF32, tzpl_audioRate};
     PortVM f32a1in{"in", 1, tzpl_kF32, tzpl_audioRate};
     PortVM i64a2in{"in", 2, tzpl_kI64, tzpl_audioRate};
-    PortVM f32e2in{"in", 2, tzpl_kF32, tzpl_eventRate};
 
     check(canConnect(f32a2, f32a2in, 5), "matching type/rate/chans connects");
     check(canConnect(f32a2, f32a1in, 5), "channel mismatch is adapted, not rejected");
     check(canConnect(f32a2, f32a1in, 0), "Audio Out takes any channel count");
     check(!canConnect(f32a2, i64a2in, 5), "element type mismatch rejected");
     check(!canConnect(f32a2, i64a2in, 0), "Audio Out still checks element type");
-    check(!canConnect(f32a2, f32e2in, 5), "rate mismatch rejected");
 
     GraphViewModel vm;
     vm.nodes.push_back({.nodeID = 0});
@@ -379,23 +377,25 @@ static void test_node_controls_materialize() {
     // Register a def with a control of each kind, single- and multi-
     // channel (funs never called: no node is instantiated, only the
     // def's ControlSpecs are read).
-    tzpl_SignalType ctlType{tzpl_kF32, tzpl_eventRate, 1};
-    tzpl_SignalType ctlType4{tzpl_kF32, tzpl_eventRate, 4};
-    tzpl_SignalType ctlType3{tzpl_kF32, tzpl_eventRate, 3};
-    tzpl_ControlDef ctls[6] = {
+    // Controls are inputs with specs (ABI v3); a control's ID is its input
+    // index.
+    tzpl_SignalType ctlType{tzpl::shapeRow(1), tzpl_kF32, tzpl_audioRate};
+    tzpl_SignalType ctlType4{tzpl::shapeRow(4), tzpl_kF32, tzpl_audioRate};
+    tzpl_SignalType ctlType3{tzpl::shapeRow(3), tzpl_kF32, tzpl_audioRate};
+    static tzpl_PortDef ctls[6] = {
         {"freq", ctlType, 1,
          {20., 20000., 440., 0., tzpl_cwExponential, tzpl_ckContinuous}},
-        {"gate", ctlType, 2, {0., 1., 0., 0., tzpl_cwLinear, tzpl_ckBoolean}},
-        {"trig", ctlType, 3, {0., 1., 0., 0., tzpl_cwLinear, tzpl_ckTrigger}},
-        {"levels", ctlType4, 4,
+        {"gate", ctlType, 1, {0., 1., 0., 0., tzpl_cwLinear, tzpl_ckBoolean}},
+        {"trig", ctlType, 1, {0., 1., 0., 0., tzpl_cwLinear, tzpl_ckTrigger}},
+        {"levels", ctlType4, 1,
          {0., 1., 0.5, 0., tzpl_cwLinear, tzpl_ckContinuous}},
-        {"mutes", ctlType3, 5, {0., 1., 0., 0., tzpl_cwLinear, tzpl_ckBoolean}},
-        {"trigs", ctlType3, 6, {0., 1., 0., 0., tzpl_cwLinear, tzpl_ckTrigger}},
+        {"mutes", ctlType3, 1, {0., 1., 0., 0., tzpl_cwLinear, tzpl_ckBoolean}},
+        {"trigs", ctlType3, 1, {0., 1., 0., 0., tzpl_cwLinear, tzpl_ckTrigger}},
     };
     tzpl_SynthDef def{};
     def.name = "ctl_test";
-    def.num_controls = 6;
-    def.controls = ctls;
+    def.num_ins = 6;
+    def.ins = ctls;
     engine::addSynthDef(e, def);
 
     bridge::UIState ui;
@@ -420,7 +420,7 @@ static void test_node_controls_materialize() {
         check(freq && freq->spec.warp == bridge::UIWarp::Exponential,
               "ABI warp ordinal mapped to UIWarp");
         check(freq && freq->target
-                   && freq->target->nodeID == 5 && freq->target->controlID == 1
+                   && freq->target->nodeID == 5 && freq->target->controlID == 0
                    && freq->target->silo == 0,
               "widget bound to (node, controlID, silo)");
         check(freq && freq->dirtyEngine,
@@ -444,7 +444,7 @@ static void test_node_controls_materialize() {
                     && trigs->rows == 1 && trigs->cols == 3
                     && trigs->momentary,
               "multichannel trigger becomes a 1x3 momentary row");
-        check(levels && levels->target && levels->target->controlID == 4
+        check(levels && levels->target && levels->target->controlID == 3
                      && levels->dirtyEngine,
               "multichannel widget bound and marked for push");
     }

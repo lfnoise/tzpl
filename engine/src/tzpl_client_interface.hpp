@@ -28,6 +28,7 @@
 #include "tzpl_common.hpp"
 #include "tzpl_audio_backend.hpp"
 #include "tzpl_tap.hpp"   // TapMode, TapOwnerKind (used in default arguments)
+#include "tzpl_fade_curves.hpp"
 #include <memory>
 #include <span>
 
@@ -41,14 +42,28 @@ enum SchedPolicy {
     schedOnTimeOnly,
 };
 
-enum FadeCurve {
-    fadeLinear,
-    fadeExponential,
-    fadeSmoothstep,
-    fadeEqualPower,
-    fadeOutIn,
-    fadeEaseInCubic,
-    fadeEaseOutCubic,
+// FadeCurve: see tzpl_fade_curves.hpp.
+
+// A part of an input port's tensor, for value operations. Values given with
+// it are broadcast cyclically over its channels (row-major order).
+struct Region {
+    enum Kind : u8 { whole, range, box };
+    Kind kind = whole;
+    int first = 0, count = 0;          // range: flat channels [first, first+count)
+    u32 offset[TZPL_MAX_RANK] = {};    // box, in shape coordinates
+    u32 extent[TZPL_MAX_RANK] = {};
+
+    static Region all() { return Region{}; }
+    static Region channels(int first, int count) {
+        Region r; r.kind = range; r.first = first; r.count = count; return r;
+    }
+    static Region element(int flatIndex) { return channels(flatIndex, 1); }
+    // A box: offset/extent per dimension (row-major, like tzpl_Shape).
+    static Region boxed(u32 const off[TZPL_MAX_RANK], u32 const ext[TZPL_MAX_RANK]) {
+        Region r; r.kind = box;
+        for (int d = 0; d < TZPL_MAX_RANK; ++d) { r.offset[d] = off[d]; r.extent[d] = ext[d]; }
+        return r;
+    }
 };
 
 
@@ -78,6 +93,9 @@ struct PortAddr {
 struct EngineConfig {
     int numSilos = 4;
     int numTempoClocks = 1; // beat-based TempoClock slots per silo
+    // Most samples a synth processes per call (a multiple of 4, <= 1024).
+    // Device buffers are processed in chunks of up to this many samples.
+    int blockSize = 64;
 };
 
 // Create a real-time engine. `backend` selects the audio device backend;
@@ -149,7 +167,9 @@ void addSynthDef(Engine* e, tzpl_SynthDef const& def, void* dlHandle = nullptr,
 // Collect the names of all registered node defs.
 void listNodeDefs(Engine* e, std::vector<std::string>& names);
 
-// Control metadata for a registered node def (for UI/introspection).
+// Input metadata for the inputs of a def that carry a spec (the old
+// controls), for UI/introspection. controlID is the input port index.
+// DEPRECATED on the block-engine branch: use DefDesc::ins (hasSpec/spec).
 struct ControlDesc {
     std::string name;
     i64 controlID;
@@ -164,6 +184,8 @@ bool listDefControls(Engine* e, const char* defName, std::vector<ControlDesc>& o
 struct PortDesc {
     std::string name;
     tzpl_SignalType type{};
+    bool hasSpec = false;
+    tzpl_ControlSpec spec{};
 };
 
 struct BufferDesc {
@@ -185,6 +207,8 @@ struct DefDesc {
     std::vector<BufferDesc> buffers;
     std::vector<SampleBankDesc> banks;
     std::vector<std::string> tags;  // embedded category tags (may be empty)
+    bool voiced = false;            // has a "notes" input driven by the voicer
+    int maxVoices = 0;
 };
 
 // Copy the full metadata of def `defName`. Returns false if no such def.
@@ -320,9 +344,31 @@ tzpl_SErr reconnectOutput(PortAddr oldSrc, PortAddr newSrc, f64 xfadeTime = 0., 
 
 tzpl_SErr replaceNode(i64 oldNodeID, i64 newNodeID, f64 xfadeTime = 0., FadeCurve curve = fadeLinear);
 
-// set the input to a constant value. This will have no effect if the input is normalled internally.
-// The values are captured with the caller's element type and converted to the
-// port's element type at submit if they differ.
+// Value operations on an input's own stages. An unconnected input channel
+// holds a value; these change it at the bundle's time, sample-accurately:
+//   setInput     a step, or with rampTime > 0 a ramp from the current value
+//                (on `curve`). Ramps start between samples when the bundle's
+//                beat falls there.
+//   setInputX    crossfade to constants over xfadeTime: a ramp when the
+//                input is unconnected; when it is connected, its signal is
+//                crossfaded out to the constants (whole port only) and the
+//                input is left unconnected holding them.
+//   impulseInput the value at the bundle's sample only, then back (triggers).
+// On a connected input setInput changes the value the input reverts to when
+// it is disconnected. `values` are broadcast cyclically over the region.
+// i64 inputs are carried as f64 (exact to 2^53).
+tzpl_SErr setInput(PortAddr dst, Region const& region, std::span<f64 const> values,
+                   f64 rampTime = 0., FadeCurve curve = fadeLinear);
+tzpl_SErr setInput(i64 nodeID, char const* portName, Region const& region,
+                   std::span<f64 const> values, f64 rampTime = 0., FadeCurve curve = fadeLinear);
+tzpl_SErr setInputX(PortAddr dst, Region const& region, std::span<f64 const> values,
+                    f64 xfadeTime, FadeCurve curve = fadeLinear);
+tzpl_SErr impulseInput(PortAddr dst, Region const& region, std::span<f64 const> values);
+tzpl_SErr impulseInput(i64 nodeID, char const* portName, Region const& region,
+                       std::span<f64 const> values);
+
+// Older whole-port forms: set channels [0, numValues) (no broadcasting);
+// xfadeTime > 0 is setInputX.
 tzpl_SErr setInput(PortAddr inPort, int numValues, f32 const* values, f64 xfadeTime = 0., FadeCurve curve = fadeLinear);
 tzpl_SErr setInput(PortAddr inPort, int numValues, f64 const* values, f64 xfadeTime = 0., FadeCurve curve = fadeLinear);
 tzpl_SErr setInput(PortAddr inPort, int numValues, i32 const* values, f64 xfadeTime = 0., FadeCurve curve = fadeLinear);
@@ -338,15 +384,13 @@ tzpl_SharedInput* sharedInput();
 tzpl_SErr setSharedInput(int slot, f32 value);
 f32 getSharedInput(int slot);
 
-// controls
+// DEPRECATED compatibility forms (block-engine branch, removed in M5):
+// controls are inputs. controlID is the input port index (ControlDesc), the
+// name an input name. Values broadcast over the port; set at the bundle time.
 tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, f32 const* values);
 tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, f64 const* values);
 tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, i32 const* values);
 tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, i64 const* values);
-
-// By-name forms: the name is resolved to a controlID at submit, against the
-// def of the node the bundle sees (so a node created earlier in the same
-// bundle works). Unknown names abort the bundle with tzpl_errControlNotFound.
 tzpl_SErr setControl(i64 nodeID, char const* controlName, int numValues, f32 const* values);
 tzpl_SErr setControl(i64 nodeID, char const* controlName, int numValues, f64 const* values);
 tzpl_SErr setControl(i64 nodeID, char const* controlName, int numValues, i32 const* values);
@@ -498,10 +542,22 @@ tzpl_SErr allNotesOff(i64 nodeID);
 tzpl_SErr allNotesOffAll();
 // Panic: drop every beat-scheduled command still pending in the target silo.
 tzpl_SErr clearSched();
-tzpl_SErr noteOn(i64 nodeID, int noteID, int length, f32* paramValues);
+// Notes on voiced nodes (a "notes" input). The engine allocates a voice,
+// splits the node at the onset (resetVoice) and writes the voice's row of
+// `notes`: gate (column 0) and parameters (columns 1..), as steps at the
+// bundle's sample. noteSetParams/Range change a sounding note's parameters,
+// optionally ramping over rampTime seconds.
+tzpl_SErr noteOn(i64 nodeID, int noteID, int length, f32 const* paramValues);
 tzpl_SErr noteOff(i64 nodeID, int noteID);
-tzpl_SErr noteSetParams(i64 nodeID, int noteID, int n, tzpl_ParamPair* params);
-tzpl_SErr noteSetParamRange(i64 nodeID, int noteID, int first, int length, f32* values);
+tzpl_SErr noteSetParams(i64 nodeID, int noteID, int n, tzpl_ParamPair const* params,
+                        f64 rampTime = 0.);
+tzpl_SErr noteSetParamRange(i64 nodeID, int noteID, int first, int length,
+                            f32 const* values, f64 rampTime = 0.);
+
+// The same, applied directly on a silo's RT thread at its current event time
+// (silo tasks). No bundle, no allocation.
+tzpl_SErr rtNoteOn(Silo* s, i64 nodeID, int noteID, int length, f32 const* params);
+tzpl_SErr rtNoteOff(Silo* s, i64 nodeID, int noteID);
 
 // buffers
 tzpl_SErr resizeBuffer(i64 nodeID, i64 bufID, int numChannels, i64 length);
@@ -539,20 +595,11 @@ inline int elemSize(tzpl_ElemType e) {
         case tzpl_kF64 :
             return sizeof(f64);
     }
-}
-
-template <typename T>
-inline T* getIn(tzpl_SynthData* synth, int inletIndex) {
-    return (T*)synth->inlets[inletIndex];
-}
-
-template <typename T>
-inline T* getOut(tzpl_SynthData* synth, int outletIndex) {
-    return (T*)synth->outlets[outletIndex];
+    return 0;
 }
 
 inline int calcByteSize(tzpl_SignalType const& t) {
-    return t.chans * elemSize(t.elem);
+    return tzpl_shapeChans(t.shape) * elemSize(t.elem);
 }
 
 }

@@ -457,9 +457,9 @@ static void test_atomic_abort() {
 static engine::Node* makeTestSource(engine::Engine* e, engine::Silo* silo,
                                      tzpl_SignalType type) {
     tzpl_SynthFuns funs = {0};
-    funs.alloc = []() -> tzpl_SynthData* { return new tzpl_SynthData(); };
+    funs.alloc = [](int32_t) -> tzpl_SynthData* { return new tzpl_SynthData(); };
     funs.free = [](tzpl_SynthData* s) -> tzpl_SErr { delete s; return tzpl_errNone; };
-    funs.processAudio = [](tzpl_SynthData*) {};
+    funs.process = [](tzpl_SynthData*, int32_t, int32_t) {};
 
     engine::NodeDefInfo info;
     memset(&info, 0, sizeof(info));
@@ -478,9 +478,9 @@ static engine::Node* makeTestSource(engine::Engine* e, engine::Silo* silo,
 static engine::Node* makeTestDest(engine::Engine* e, engine::Silo* silo,
                                    tzpl_SignalType type) {
     tzpl_SynthFuns funs = {0};
-    funs.alloc = []() -> tzpl_SynthData* { return new tzpl_SynthData(); };
+    funs.alloc = [](int32_t) -> tzpl_SynthData* { return new tzpl_SynthData(); };
     funs.free = [](tzpl_SynthData* s) -> tzpl_SErr { delete s; return tzpl_errNone; };
-    funs.processAudio = [](tzpl_SynthData*) {};
+    funs.process = [](tzpl_SynthData*, int32_t, int32_t) {};
 
     engine::NodeDefInfo info;
     memset(&info, 0, sizeof(info));
@@ -515,7 +515,7 @@ static void test_mixer_fanin() {
 
     Engine* eng = newEngine(config, params);
     Silo& silo = eng->silos_[0];
-    tzpl_SignalType stereoF32{tzpl_kF32, tzpl_audioRate, 2};
+    tzpl_SignalType stereoF32{tzpl::shapeRow(2), tzpl_kF32, tzpl_audioRate};
 
     // --- Test 1: 2-source fan-in ---
     {

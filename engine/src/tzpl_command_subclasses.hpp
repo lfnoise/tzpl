@@ -31,6 +31,7 @@
 #include "tzpl_mixer.hpp"
 #include "tzpl_chanadapt.hpp"
 #include "tzpl_audio_file.hpp"
+#include "tzpl_note_voicer.hpp"
 
 namespace engine {
 
@@ -63,45 +64,17 @@ struct RemoveNodeCmd : Command
 {
     i64 nodeID_;
     Node* node_ = nullptr;
-    // Mixer nodes that need collapsing after removal (collected pre-disconnect)
-    static constexpr int kMaxMixerCollapse = 8;
-    InPort* mixerDsts_[kMaxMixerCollapse] = {};
-    int numMixerDsts_ = 0;
 
     RemoveNodeCmd(i64 nodeID) : nodeID_(nodeID) {}
 
     void doRT(Silo* s) override {
         Node* node = s->rt_getNode(nodeID_);
-        if (!node) return;
-
-        // Before disconnecting, find any mixer chains this node's outputs
-        // feed. After removeNode, the dstList_ links will be gone.
-        for (auto& out : node->outs) {
-            for (InPort* dst = out.dstList_; dst; dst = dst->next_) {
-                // A hidden sub-node (mixer or xfader): walk up to the
-                // destination InPort that owns the chain it belongs to.
-                InPort* owner = mixerChainOwner(dst->node_);
-                if (!owner) continue;
-                bool seen = false;
-                for (int i = 0; i < numMixerDsts_; ++i) {
-                    if (mixerDsts_[i] == owner) { seen = true; break; }
-                }
-                if (!seen && numMixerDsts_ < kMaxMixerCollapse) {
-                    mixerDsts_[numMixerDsts_++] = owner;
-                }
-            }
-        }
-
-        err_ = s->removeNode(node);
+        if (!node || node->freeing_) return;
+        // Runs up to the event's offset; removed after the block. This
+        // command returns to the NRT thread only after that, so doNRT never
+        // deletes a node the block is still using.
         node_ = node;
-
-        // After removal, check if any collected mixers should collapse
-        for (int i = 0; i < numMixerDsts_; ++i) {
-            InPort* dst = mixerDsts_[i];
-            if (dst->mixerNode_ && countActiveMixerInputs(dst->mixerNode_) <= 1) {
-                collapseMixer(s, dst);
-            }
-        }
+        s->freeNodeAt(node);
     }
     bool doNRT(Silo* s) override {
         if (node_) delete node_;
@@ -122,19 +95,34 @@ struct RemoveAllNodesCmd : Command
     }
 };
 
+// Discard a pre-allocated step fader (a 0-length fade) when the event lands
+// on the block start, where a plain edit is already exact.
+inline Node* useFader(Silo* s, Node*& fader, bool isStep) {
+    Node* f = fader;
+    fader = nullptr;
+    if (f && isStep && s->eventOffset() == 0) {
+        s->pushDeadNode(f);
+        return nullptr;
+    }
+    return f;
+}
+
 struct ConnectCmd : Command
 {
     PortAddr src_;
     PortAddr dst_;
     Node* xfaderNode_;
     Node* mixerNode_;      // pre-allocated mixer (null if not needed)
-    Node* adaptNode_;      // pre-allocated channel adapter (null if types match)
+    Node* adaptNode_;      // pre-allocated fold adapter (null if the shapes broadcast)
     FadeCurve curve_;
+    bool stepFader_;       // xfaderNode_ is a 0-length fade for a mid-block edit
 
     ConnectCmd(PortAddr src, PortAddr dst, Node* xfaderNode, FadeCurve curve,
-               Node* mixerNode = nullptr, Node* adaptNode = nullptr)
+               Node* mixerNode = nullptr, Node* adaptNode = nullptr,
+               bool stepFader = false)
         : src_(src), dst_(dst), xfaderNode_(xfaderNode),
-          mixerNode_(mixerNode), adaptNode_(adaptNode), curve_(curve)
+          mixerNode_(mixerNode), adaptNode_(adaptNode), curve_(curve),
+          stepFader_(stepFader)
     {}
 
     // Never ran: hidden nodes (nodeID -1) are in no table; plain delete.
@@ -146,24 +134,43 @@ struct ConnectCmd : Command
         }
     }
 
+    void discardAll(Silo* s) {
+        if (xfaderNode_) s->pushDeadNode(xfaderNode_);
+        if (mixerNode_) s->pushDeadNode(mixerNode_);
+        if (adaptNode_) s->pushDeadNode(adaptNode_);
+        xfaderNode_ = mixerNode_ = adaptNode_ = nullptr;
+    }
+
     void doRT(Silo* s) override {
         OutPort* src;
         err_ = s->rt_getOutPort(src_, src);
-        if (err_ != tzpl_errNone) return;
+        if (err_ == tzpl_errNone) {
+            InPort* dst;
+            err_ = s->rt_getInPort(dst_, dst);
+            if (err_ == tzpl_errNone) {
+                // Feed-forward only (D1 phase 1). The submit-time check runs on
+                // the graph shadow; this one sees the graph as it really is.
+                if (s->wouldCycle(src->node_, dst->node_)) err_ = tzpl_errCyclicConnection;
+                else connectTo(s, src, dst);
+            }
+        }
+        if (err_ != tzpl_errNone) discardAll(s);
+    }
 
-        InPort* dst;
-        s->rt_getInPort(dst_, dst);
-        if (err_ != tzpl_errNone) return;
+    void connectTo(Silo* s, OutPort* src, InPort* dst) {
+        Node* xfader = useFader(s, xfaderNode_, stepFader_);
 
-        // Differing channel counts: splice the adapter in right at the
-        // source, and let everything downstream see the destination's type.
+        // A source larger than the destination in some dimension: splice the
+        // fold adapter in right at the source, and let everything
+        // downstream see the destination's shape.
         Node* adapter = nullptr;
         if (adaptNode_) {
-            if (src->type_.chans != dst->type_.chans) {
+            if (!tzpl::broadcastsTo(src->type_.shape, dst->type_.shape)) {
                 err_ = s->connect(src, &adaptNode_->ins[0]);
                 if (err_ != tzpl_errNone) {
                     s->pushDeadNode(adaptNode_);
                     adaptNode_ = nullptr;
+                    if (xfader) s->pushDeadNode(xfader);
                     return;
                 }
                 adapter = adaptNode_;
@@ -194,50 +201,53 @@ struct ConnectCmd : Command
             if (!open) {
                 // Every slot is taken. The pre-allocated mixer becomes the
                 // new head of the chain, which frees up its own slots.
-                if (!mixerNode_) { err_ = tzpl_errInternal; return; }
+                if (!mixerNode_) { err_ = tzpl_errInternal; if (xfader) s->pushDeadNode(xfader); return; }
                 err_ = chainMixer(s, dst, mixerNode_);
                 if (err_ != tzpl_errNone) {
                     s->pushDeadNode(mixerNode_);
                     mixerNode_ = nullptr;
+                    if (xfader) s->pushDeadNode(xfader);
                     return;
                 }
                 mixerNode_ = nullptr; // consumed by the chain
                 open = findFreeMixerSlot(dst->mixerNode_);
-                if (!open) { err_ = tzpl_errInternal; return; }
+                if (!open) { err_ = tzpl_errInternal; if (xfader) s->pushDeadNode(xfader); return; }
             }
-            if (xfaderNode_) {
-                err_ = setupXFader(s, xfaderNode_, src, &open.mixer->ins[open.slot], curve_, nullptr);
+            if (xfader) {
+                err_ = setupXFader(s, xfader, src, &open.mixer->ins[open.slot], nullptr);
             } else {
                 err_ = addToMixer(s, open.mixer, src, open.slot);
             }
-            // Discard the pre-allocated mixer (not needed)
             if (mixerNode_) s->pushDeadNode(mixerNode_);
+            mixerNode_ = nullptr;
         } else if (needsFanIn && mixerNode_) {
             // Transition from 1 source to 2: splice in the pre-allocated mixer.
-            if (xfaderNode_) {
+            Node* mixer = mixerNode_;
+            mixerNode_ = nullptr;
+            if (xfader) {
                 // Move the existing source into the mixer before taking over
                 // the destination, so an adapter in its path always has one.
                 OutPort* oldSrc = dst->srcPort_;
-                if (oldSrc) s->connect(oldSrc, &mixerNode_->ins[0]);
-                err_ = s->connect(&mixerNode_->outs[0], dst);
-                if (err_ != tzpl_errNone) { s->pushDeadNode(mixerNode_); return; }
-                dst->mixerNode_ = mixerNode_;
-                err_ = setupXFader(s, xfaderNode_, src, &mixerNode_->ins[1], curve_, nullptr);
+                if (oldSrc) s->connect(oldSrc, &mixer->ins[0]);
+                err_ = s->connect(&mixer->outs[0], dst);
+                if (err_ != tzpl_errNone) { s->pushDeadNode(mixer); s->pushDeadNode(xfader); return; }
+                dst->mixerNode_ = mixer;
+                err_ = setupXFader(s, xfader, src, &mixer->ins[1], nullptr);
             } else {
-                err_ = spliceMixer(s, mixerNode_, src, dst);
+                err_ = spliceMixer(s, mixer, src, dst);
                 // A rejected splice leaves the graph as it was; the mixer
                 // never entered it, so it has to be reclaimed here.
-                if (err_ != tzpl_errNone) s->pushDeadNode(mixerNode_);
+                if (err_ != tzpl_errNone) s->pushDeadNode(mixer);
             }
         } else {
             // No fan-in: first connection (or destination was empty).
-            if (xfaderNode_) {
-                err_ = setupXFader(s, xfaderNode_, src, dst, curve_, nullptr);
+            if (xfader) {
+                err_ = setupXFader(s, xfader, src, dst, nullptr);
             } else {
                 err_ = s->connect(src, dst);
             }
-            // Discard the pre-allocated mixer (not needed)
             if (mixerNode_) s->pushDeadNode(mixerNode_);
+            mixerNode_ = nullptr;
         }
     }
 };
@@ -248,28 +258,40 @@ struct ReconnectOutputCmd : Command
     PortAddr newSrc_;
     Node* xfaderNode_;
     FadeCurve curve_;
-    
-    ReconnectOutputCmd(PortAddr oldSrc, PortAddr newSrc, Node* xfaderNode, FadeCurve curve)
-        : oldSrc_(oldSrc), newSrc_(newSrc), xfaderNode_(xfaderNode), curve_(curve)
+    bool stepFader_;
+
+    ReconnectOutputCmd(PortAddr oldSrc, PortAddr newSrc, Node* xfaderNode, FadeCurve curve,
+                       bool stepFader = false)
+        : oldSrc_(oldSrc), newSrc_(newSrc), xfaderNode_(xfaderNode), curve_(curve),
+          stepFader_(stepFader)
     {}
 
     ~ReconnectOutputCmd() override { if (stage_ == 0) delete xfaderNode_; }
-    
+
     void doRT(Silo* s) override {
         OutPort* oldSrc;
-        err_ = s->rt_getOutPort(oldSrc_, oldSrc);
-        if (err_ != tzpl_errNone) return;
-        
         OutPort* newSrc;
-        err_ = s->rt_getOutPort(newSrc_, newSrc);
-        if (err_ != tzpl_errNone) return;
-
-        if (xfaderNode_) {
-            err_ = setupXFader(s, xfaderNode_, oldSrc, newSrc, curve_);
+        err_ = s->rt_getOutPort(oldSrc_, oldSrc);
+        if (err_ == tzpl_errNone) err_ = s->rt_getOutPort(newSrc_, newSrc);
+        if (err_ == tzpl_errNone) {
+            for (InPort* dst = oldSrc->dstList_; dst; dst = dst->next_) {
+                if (dst->node_ != newSrc->node_ && s->wouldCycle(newSrc->node_, dst->node_)) {
+                    err_ = tzpl_errCyclicConnection;
+                    break;
+                }
+            }
+        }
+        if (err_ != tzpl_errNone) {
+            if (xfaderNode_) s->pushDeadNode(xfaderNode_);
+            xfaderNode_ = nullptr;
+            return;
+        }
+        Node* xfader = useFader(s, xfaderNode_, stepFader_);
+        if (xfader) {
+            err_ = setupXFader(s, xfader, oldSrc, newSrc);
         } else {
             err_ = s->reconnectOutput(oldSrc, newSrc);
         }
-        //printf("connect RT err %d\n", err_);
     }
 };
 
@@ -278,9 +300,10 @@ struct DisconnectInputCmd : Command
     PortAddr dst_;
     Node* xfaderNode_;
     FadeCurve curve_;
+    bool stepFader_;
 
-    DisconnectInputCmd(PortAddr dst, Node* xfaderNode, FadeCurve curve)
-        : dst_(dst), xfaderNode_(xfaderNode), curve_(curve)
+    DisconnectInputCmd(PortAddr dst, Node* xfaderNode, FadeCurve curve, bool stepFader = false)
+        : dst_(dst), xfaderNode_(xfaderNode), curve_(curve), stepFader_(stepFader)
     {}
 
     ~DisconnectInputCmd() override { if (stage_ == 0) delete xfaderNode_; }
@@ -288,13 +311,19 @@ struct DisconnectInputCmd : Command
     void doRT(Silo* s) override {
         InPort* dst;
         err_ = s->rt_getInPort(dst_, dst);
-        if (err_ != tzpl_errNone) return;
+        if (err_ != tzpl_errNone) {
+            if (xfaderNode_) s->pushDeadNode(xfaderNode_);
+            xfaderNode_ = nullptr;
+            return;
+        }
+        Node* xfader = useFader(s, xfaderNode_, stepFader_);
 
         // Tear down the hidden mixer chain if present
         freeMixerChain(s, dst);
 
-        if (xfaderNode_) {
-            err_ = setupXFader(s, xfaderNode_, nullptr, dst, curve_, dst->dataBuffer_);
+        if (xfader) {
+            // Fade out to the input's own stage values.
+            err_ = setupXFader(s, xfader, nullptr, dst, nullptr);
         } else {
             err_ = s->disconnect(dst);
         }
@@ -307,26 +336,31 @@ struct DisconnectSourceCmd : Command
     PortAddr dst_;
     Node* xfaderNode_;
     FadeCurve curve_;
+    bool stepFader_;
 
-    DisconnectSourceCmd(PortAddr src, PortAddr dst, Node* xfaderNode, FadeCurve curve)
-        : src_(src), dst_(dst), xfaderNode_(xfaderNode), curve_(curve)
+    DisconnectSourceCmd(PortAddr src, PortAddr dst, Node* xfaderNode, FadeCurve curve,
+                        bool stepFader = false)
+        : src_(src), dst_(dst), xfaderNode_(xfaderNode), curve_(curve), stepFader_(stepFader)
     {}
 
     ~DisconnectSourceCmd() override { if (stage_ == 0) delete xfaderNode_; }
 
     void doRT(Silo* s) override {
         OutPort* src;
-        err_ = s->rt_getOutPort(src_, src);
-        if (err_ != tzpl_errNone) return;
-
         InPort* dst;
-        err_ = s->rt_getInPort(dst_, dst);
-        if (err_ != tzpl_errNone) return;
+        err_ = s->rt_getOutPort(src_, src);
+        if (err_ == tzpl_errNone) err_ = s->rt_getInPort(dst_, dst);
+        if (err_ != tzpl_errNone) {
+            if (xfaderNode_) s->pushDeadNode(xfaderNode_);
+            xfaderNode_ = nullptr;
+            return;
+        }
+        Node* xfader = useFader(s, xfaderNode_, stepFader_);
 
         if (!dst->mixerNode_) {
             // No mixer -- just disconnect the direct connection
-            if (xfaderNode_) {
-                err_ = setupXFader(s, xfaderNode_, nullptr, dst, curve_, dst->dataBuffer_);
+            if (xfader) {
+                err_ = setupXFader(s, xfader, nullptr, dst, nullptr);
             } else {
                 err_ = s->disconnect(dst);
             }
@@ -335,16 +369,15 @@ struct DisconnectSourceCmd : Command
 
         // Has a mixer chain -- remove this specific source from it
         Node* mixer = dst->mixerNode_;
-        if (xfaderNode_) {
+        if (xfader) {
             // Find the slot the source feeds, anywhere in the chain, and
-            // fade it out.
+            // fade it out to the slot's constant 0.
             MixerSlot found = findMixerSlot(mixer, src);
             if (found) {
                 InPort* slot = &found.mixer->ins[found.slot];
-                err_ = setupXFader(s, xfaderNode_, nullptr, slot,
-                                   curve_, slot->dataBuffer_);
+                err_ = setupXFader(s, xfader, nullptr, slot, nullptr);
             } else {
-                s->pushDeadNode(xfaderNode_); // nothing to fade out
+                s->pushDeadNode(xfader); // nothing to fade out
             }
             // Mixer collapse after xfade is deferred (dead slot sums zero)
         } else {
@@ -391,54 +424,56 @@ struct DisconnectNodeCmd : Command
     }
 };
 
-template <class T>
+// Value-stage operation on (some channels of) one input: a step, a ramp, an
+// impulse, or a crossfade to constants. Channels and values are resolved at
+// submit (regions flattened, values broadcast, converted to f64).
 struct SetInputCmd : Command
 {
-    PortAddr dst_;
-    std::vector<T> values_;
-    Node* xfaderNode_;
-    FadeCurve curve_;
+    enum Mode : u8 { set, impulse };
 
-    SetInputCmd(PortAddr dst, usize numValues,  T* values,
-            Node* xfaderNode = nullptr, FadeCurve curve = fadeLinear)
-        : dst_(dst), values_(numValues), xfaderNode_(xfaderNode), curve_(curve)
-    {
-        memcpy(&values_[0], values, numValues*sizeof(T));
-    }
+    PortAddr dst_;
+    std::vector<int> chans_;
+    std::vector<f64> values_;
+    i64 rampCount_;
+    FadeCurve curve_;
+    Node* xfaderNode_;   // whole-port fade, used if the input is connected
+    Mode mode_;
+
+    SetInputCmd(PortAddr dst, std::vector<int> chans, std::vector<f64> values,
+                i64 rampCount, FadeCurve curve, Node* xfaderNode, Mode mode)
+        : dst_(dst), chans_(std::move(chans)), values_(std::move(values)),
+          rampCount_(rampCount), curve_(curve), xfaderNode_(xfaderNode), mode_(mode)
+    {}
 
     ~SetInputCmd() override { if (stage_ == 0) delete xfaderNode_; }
 
     void doRT(Silo* s) override {
         InPort* dst;
         err_ = s->rt_getInPort(dst_, dst);
-        if (err_ != tzpl_errNone) return;
-        
-        if (xfaderNode_) {
-            err_ = setupXFader(s, xfaderNode_, nullptr, dst, curve_, &values_[0]);
+        if (err_ != tzpl_errNone) {
+            if (xfaderNode_) s->pushDeadNode(xfaderNode_);
+            xfaderNode_ = nullptr;
+            return;
         }
-        s->setInput(dst, int(values_.size()), &values_[0]);
-    }
-};
-
-template <class T>
-struct SetControlCmd : Command
-{
-    i64 nodeID_;
-    i64 controlID_;
-    std::vector<T> values_;
-
-    SetControlCmd(i64 nodeID, i64 controlID, int numValues,  T* values)
-        : nodeID_(nodeID), controlID_(controlID), values_(numValues)
-    {
-        memcpy(&values_[0], values, numValues*sizeof(T));
-    }
-
-    void doRT(Silo* s) override {
-        Node* node = s->rt_getNode(nodeID_);
-        if (node) {
-            int len = int(values_.size());
-            s->setControl(node, controlID_, len, &values_[0]);
+        int n = (int)chans_.size();
+        if (mode_ == impulse) {
+            s->impulseInputValues(dst, n, chans_.data(), values_.data());
+            return;
         }
+        if (xfaderNode_ && dst->srcPort_ && !dst->mixerNode_) {
+            // A connected input: crossfade its signal out to the new
+            // constants, which become its stage values once the fade is done.
+            Node* xfader = xfaderNode_;
+            xfaderNode_ = nullptr;
+            s->setInputValues(dst, n, chans_.data(), values_.data(), 0, curve_);
+            err_ = setupXFader(s, xfader, nullptr, dst, nullptr);
+            return;
+        }
+        if (xfaderNode_) s->pushDeadNode(xfaderNode_);
+        xfaderNode_ = nullptr;
+        // Unconnected (or fed by a mixer, which keeps playing): a crossfade
+        // between constants is a ramp on the curve.
+        s->setInputValues(dst, n, chans_.data(), values_.data(), rampCount_, curve_);
     }
 };
 
@@ -448,10 +483,10 @@ struct NoteOnCmd : Command
     int noteID_;
     std::vector<f32> values_;
 
-    NoteOnCmd(i64 nodeID, int noteID, int numValues, f32* values)
+    NoteOnCmd(i64 nodeID, int noteID, int numValues, f32 const* values)
         : nodeID_(nodeID), noteID_(noteID), values_(numValues)
     {
-        if (values)
+        if (values && numValues > 0)
             memcpy(&values_[0], values, numValues*sizeof(f32));
     }
 
@@ -461,16 +496,9 @@ struct NoteOnCmd : Command
         Node* node = s->rt_getNode(nodeID_);
         if (!node) {
             err_ = tzpl_errNodeNotFound;
-            printf("NoteOnCmd node not found.\n");
-        } else {
-            i64 now = s->sampleTime_;
-            int len = int(values_.size());
-            node->funs.noteOn(node->synth, now, noteID_, len, &values_[0]);
-            // Note events are event-rate seeds: flag the node so the next
-            // runNodes() -- later this same sample, before the voice's audio --
-            // runs processEvents and recomputes noteParam-derived iso-groups.
-            node->triggered = true;
+            return;
         }
+        err_ = s->rt_noteOn(node, noteID_, int(values_.size()), values_.data());
     }
 };
 
@@ -478,7 +506,6 @@ struct NoteOffCmd : Command
 {
     i64 nodeID_;
     int noteID_;
-
 
     NoteOffCmd(i64 nodeID, int noteID)
         : nodeID_(nodeID), noteID_(noteID)
@@ -490,12 +517,9 @@ struct NoteOffCmd : Command
         Node* node = s->rt_getNode(nodeID_);
         if (!node) {
             err_ = tzpl_errNodeNotFound;
-            printf("NoteOffCmd node not found\n");
-        } else {
-            i64 now = s->sampleTime_;
-            node->funs.noteOff(node->synth, now, noteID_);
-            node->triggered = true;
+            return;
         }
+        err_ = s->rt_noteOff(node, noteID_);
     }
 };
 
@@ -511,35 +535,29 @@ struct AllNotesOffCmd : Command {
         if (!node) {
             err_ = tzpl_errNodeNotFound;
         } else {
-            i64 now = s->sampleTime_;
-            node->funs.allNotesOff(node->synth, now);
-            node->triggered = true;
+            s->rt_allNotesOff(node);
         }
     }
 };
 
-// Panic variant: every note-capable node in the silo releases everything it
-// holds. Non-voicer synths leave funs.allNotesOff null and are skipped.
+// Panic variant: every voiced node in the silo releases everything it holds.
 struct AllNotesOffAllCmd : Command {
     void doRT(Silo* s) override {
-        i64 now = s->sampleTime_;
-        for (Node* n = s->rt_sortedNodeList_; n; n = n->sorted_next) {
-            if (n->funs.allNotesOff) {
-                n->funs.allNotesOff(n->synth, now);
-                n->triggered = true;
+        for (Node* head : s->rt_nodeTable_) {
+            for (Node* n = head; n; n = n->rt_list.next) {
+                if (n->voicer_) s->rt_allNotesOff(n);
             }
         }
     }
 };
 
-// Panic: drop every beat-scheduled command still waiting in the silo's
-// scheduler queue. doRT unlinks them (no deletion on the RT thread); doNRT
-// disposes of the chain, the same way an aborted bundle deletes never-run
-// commands.
+// Panic: drop every beat-scheduled command still waiting on the silo's tempo
+// clocks. doRT unlinks them (no deletion on the RT thread); doNRT disposes of
+// the chain, the same way an aborted bundle deletes never-run commands.
 struct ClearSchedCmd : Command {
     Command* taken_ = nullptr;
     void doRT(Silo* s) override {
-        taken_ = s->sched_.takeAll();
+        taken_ = s->takeAllScheduled();
     }
     bool doNRT(Silo*) override {
         while (taken_) {
@@ -551,47 +569,27 @@ struct ClearSchedCmd : Command {
     }
 };
 
-struct NoteSetParamRangeCmd : Command {
-    i64 nodeID_;
-    int noteID_;
-    int first_;
-    std::vector<f32> values_;
-
-    NoteSetParamRangeCmd(i64 nodeID, int noteID, int first, int length,  f32* values)
-        : nodeID_(nodeID), noteID_(noteID), first_(first), values_(length)
-    {
-        memcpy(&values_[0], values, length*sizeof(f32));
-    }
-
-    void doRT(Silo* s) override {
-        Node* node = s->rt_getNode(nodeID_);
-        if (node) {
-            int len = int(values_.size());
-            node->funs.noteSetParamRange(node->synth, noteID_, first_, len, &values_[0]);
-            node->triggered = true;
-        }
-    }
-};
-
+// Set note parameters of a sounding note: (index, value) pairs, each a step
+// or a ramp of rampCount samples on the voice's `notes` row.
 struct NoteSetParamsCmd : Command {
     i64 nodeID_;
     int noteID_;
     std::vector<tzpl_ParamPair> values_;
+    i64 rampCount_;
 
-    NoteSetParamsCmd(i64 nodeID, int noteID, int length, tzpl_ParamPair* values)
-        : nodeID_(nodeID), noteID_(noteID), values_(length)
-    {
-        memcpy(&values_[0], values, length*sizeof(tzpl_ParamPair));
-    }
+    NoteSetParamsCmd(i64 nodeID, int noteID, std::vector<tzpl_ParamPair> values, i64 rampCount)
+        : nodeID_(nodeID), noteID_(noteID), values_(std::move(values)), rampCount_(rampCount)
+    {}
 
     void doRT(Silo* s) override {
         Node* node = s->rt_getNode(nodeID_);
-        if (node) {
-            int len = int(values_.size());
-            node->funs.noteSetParams(node->synth, noteID_, len, &values_[0]);
-            node->triggered = true;
-        } else {
+        if (!node) {
             err_ = tzpl_errNodeNotFound;
+            return;
+        }
+        for (tzpl_ParamPair const& p : values_) {
+            tzpl_SErr err = s->rt_noteSetParam(node, noteID_, p.index, p.value, rampCount_);
+            if (err != tzpl_errNone) err_ = err;
         }
     }
 };
@@ -847,7 +845,7 @@ struct SetClockTempoCmd : Command
 
     void doRT(Silo* s) override {
         if (clock_ >= 0 && clock_ < (int)s->tempoClocks_.size()) {
-            s->tempoClocks_[clock_].setTempoNow(bps_, s->sampleTime_);
+            s->tempoClocks_[clock_].setTempoNow(bps_, s->blockStart_ + s->eventOffset());
         }
     }
 };

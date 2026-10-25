@@ -100,8 +100,7 @@ static juce::String portLabel(graph::PortVM const& p) {
         char const* elem = p.elem == tzpl_kI32 ? "i32"
                          : p.elem == tzpl_kI64 ? "i64"
                          : p.elem == tzpl_kF64 ? "f64" : "f32";
-        char rate = p.rate == tzpl_eventRate ? 'e'
-                  : p.rate == tzpl_constRate ? 'c'
+        char rate = p.rate == tzpl_constRate ? 'c'
                   : p.rate == tzpl_initRate  ? 'i'
                   : p.rate == tzpl_resetRate ? 'r' : 'a';
         s << " " << elem << juce::String::charToString((juce::juce_wchar)rate);

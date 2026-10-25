@@ -104,6 +104,8 @@ static char const* errName(tzpl_SErr err) {
         case tzpl_errTooLate:                return "errTooLate";
         case tzpl_errClockOutOfRange:        return "errClockOutOfRange";
         case tzpl_errResourceLimit:          return "errResourceLimit";
+        case tzpl_errBadSampleBank:          return "errBadSampleBank";
+        case tzpl_errRegionOutOfRange:       return "errRegionOutOfRange";
     }
     return "errUnknown";
 }
@@ -762,10 +764,13 @@ static void ffi_listSynthDefs(ts::VM& vm, u16 dst, u16, u16) {
 // ---------------------------------------------------------------------------
 //
 // `spawn(clock, coro)` (silo-side) adds a `fn() Float` trampoline (resumes the
-// coroutine, returns the next beat-delta) to the owning silo's pool. The silo's
-// per-sample taskTickFn_ fires every task whose beat (on its tempo clock) has
-// arrived: it calls the handler, and reschedules at beat + returned-delta, or
-// drops it when the delta is <= 0 (coroutine done / explicit stop). No RT
+// coroutine, returns the next beat-delta) to the owning silo's pool. Once per
+// block the silo merges task wakeups with its scheduled commands in time
+// order (Silo::taskNextFn_ / taskRunFn_): each task fires at the exact
+// (fractional) sample its beat falls on, with the silo's event time set
+// there, so the notes it plays land on that sample. A task is rescheduled at
+// its beat + the returned delta (no jitter accumulates), or dropped when the
+// delta is <= 0 (coroutine done / explicit stop). No RT
 // allocation: entries come from a fixed pool. Handlers are GC-rooted via a root
 // scanner registered on the silo VM (markRoots).
 
@@ -807,6 +812,7 @@ struct SiloTaskScheduler {
     Entry* free_ = nullptr;
     Entry* active_ = nullptr;
     ts::Obj* inFlight_ = nullptr;     // handler mid-call (GC root)
+    i64    actorsBlock_ = -1;         // block whose ready actors already ran
     i64    nextId_ = 1;
     ts::VM* vm_ = nullptr;
     // Outbound actor messages: pushed by this silo's RT thread, drained by the
@@ -847,22 +853,42 @@ struct SiloTaskScheduler {
         }
     }
 
-    // Called per sample from the silo loop (gCurrentSilo already set by the
-    // tick wrapper). Fires due tasks and reschedules them.
-    void tick(i64 sampleTime, engine::Silo* s) {
+    // The absolute fractional sample time of the next task wakeup or actor
+    // timer, +inf if none.
+    f64 nextTime(engine::Silo* s) {
+        f64 t = INFINITY;
+        int nclk = (int)s->tempoClocks_.size();
+        for (Entry* e = active_; e; e = e->next) {
+            if (e->clock < 0 || e->clock >= nclk) continue;
+            t = std::min(t, s->tempoClocks_[e->clock].sampleAtBeat(e->beatTime));
+        }
+        if (vm_ && nclk > 0) {
+            // Ready actors resume once at the start of each block.
+            if (vm_->hasReadyActors() && actorsBlock_ != s->blockStart_)
+                t = std::min(t, (f64)s->blockStart_);
+            f64 b = vm_->nextActorTimerBeat();
+            if (b < INFINITY) t = std::min(t, s->tempoClocks_[0].sampleAtBeat(b));
+        }
+        return t;
+    }
+
+    // Fire every task due at or before `time` (gCurrentSilo already set by
+    // the wrapper; the silo's event time is `time`).
+    void run(f64 time, engine::Silo* s) {
+        int nclk = (int)s->tempoClocks_.size();
+        constexpr f64 kEps = 1e-7;
         Entry** pp = &active_;
         while (*pp) {
             Entry* e = *pp;
-            bool badClock = e->clock < 0 || e->clock >= (int)s->tempoClocks_.size();
-            f64 beat = badClock ? 0.0 : s->tempoClocks_[e->clock].beatAtSample(sampleTime);
-            if (!badClock && beat >= e->beatTime) {
+            bool badClock = e->clock < 0 || e->clock >= nclk;
+            if (!badClock && s->tempoClocks_[e->clock].sampleAtBeat(e->beatTime) <= time + kEps) {
                 inFlight_ = e->handler;
                 vm_->makeCurrent();
                 ts::Word r = vm_->callCallable(e->handler, nullptr, 0);
                 inFlight_ = nullptr;
                 f64 delta = r.f;
                 if (delta > 0.0 && std::isfinite(delta)) {
-                    e->beatTime = beat + delta;     // reschedule
+                    e->beatTime += delta;     // reschedule from its own beat
                     pp = &e->next;
                 } else {
                     *pp = e->next; e->handler = nullptr; e->next = free_; free_ = e;
@@ -873,12 +899,14 @@ struct SiloTaskScheduler {
         }
 
         // Drive any actors living in this silo's VM against tempo clock 0, so a
-        // silo actor's `await delay(n)` resolves sample-accurately on the audio
-        // beat. Bounded per sample so a burst can't overrun the block.
-        if (vm_ && !s->tempoClocks_.empty()) {
-            f64 beat = s->tempoClocks_[0].beatAtSample(sampleTime);
+        // silo actor's `await delay(n)` resolves on the audio beat. Bounded so
+        // a burst can't overrun the block.
+        if (vm_ && nclk > 0) {
+            engine::TempoClock const& clk = s->tempoClocks_[0];
+            f64 beat = clk.ramp_.secondsToBeats((time - (f64)clk.epochSample_) / clk.sampleRate_);
+            actorsBlock_ = s->blockStart_;
             vm_->makeCurrent();
-            vm_->tickActors(beat, /*budget=*/64);
+            vm_->tickActors(beat + kEps, /*budget=*/64);
         }
     }
 
@@ -890,12 +918,17 @@ struct SiloTaskScheduler {
     }
 };
 
-// Silo loop calls this per sample (matches Silo::TaskTickFn).
-static void siloTaskTick(void* sched, i64 sampleTime, engine::Silo* s) {
+// Silo block-loop hooks (match Silo::TaskNextFn / TaskRunFn).
+static f64 siloTaskNext(void* sched, engine::Silo* s) {
+    if (!sched) return INFINITY;
+    return static_cast<SiloTaskScheduler*>(sched)->nextTime(s);
+}
+
+static void siloTaskRun(void* sched, engine::Silo* s, f64 time) {
     if (!sched) return;
     engine::Silo* prev = gCurrentSilo;
     gCurrentSilo = s;
-    static_cast<SiloTaskScheduler*>(sched)->tick(sampleTime, s);
+    static_cast<SiloTaskScheduler*>(sched)->run(time, s);
     gCurrentSilo = prev;
 }
 
@@ -1022,14 +1055,15 @@ struct ClearSiloTasksCmd : engine::Command {
     bool doNRT(engine::Silo*) override { return true; }
 };
 
-// Installs the per-silo task scheduler + per-sample tick onto the silo (RT
+// Installs the per-silo task scheduler + block-loop hooks onto the silo (RT
 // thread). The scheduler itself is owned by SiloVMState and freed on detach.
 struct SetSiloTaskSchedCmd : engine::Command {
     SiloTaskScheduler* sched_;
     explicit SetSiloTaskSchedCmd(SiloTaskScheduler* sched) : sched_(sched) {}
     void doRT(engine::Silo* s) override {
         s->taskSched_ = sched_;
-        s->taskTickFn_ = &siloTaskTick;
+        s->taskNextFn_ = &siloTaskNext;
+        s->taskRunFn_ = &siloTaskRun;
     }
     bool doNRT(engine::Silo*) override { return true; }
 };
@@ -1555,11 +1589,7 @@ static void ffi_playNote(ts::VM& vm, u16 dst, u16, u16 argBase) {
     if (len > 64) len = 64;
     engine::f32 params[64];
     for (int i = 0; i < len; ++i) params[i] = (engine::f32)ts::arrayGetFloat(arr, i);
-    engine::Node* node = s->rt_getNode(nodeID);
-    if (!node) { vm.reg(dst).i = (i64)tzpl_errNodeNotFound; return; }
-    node->funs.noteOn(node->synth, s->sampleTime_, noteID, len, params);
-    node->triggered = true;
-    vm.reg(dst).i = (i64)tzpl_errNone;
+    vm.reg(dst).i = (i64)engine::rtNoteOn(s, nodeID, noteID, len, params);
 }
 
 // fn releaseNote(node Int, noteID Int) Int  -- silo-side, immediate noteOff
@@ -1568,11 +1598,7 @@ static void ffi_releaseNote(ts::VM& vm, u16 dst, u16, u16 argBase) {
     if (!s) { vm.reg(dst).i = (i64)tzpl_errNodeNotFound; return; }
     i64 nodeID = vm.reg(argBase).i;
     int noteID = static_cast<int>(vm.reg(argBase + 1).i);
-    engine::Node* node = s->rt_getNode(nodeID);
-    if (!node) { vm.reg(dst).i = (i64)tzpl_errNodeNotFound; return; }
-    node->funs.noteOff(node->synth, s->sampleTime_, noteID);
-    node->triggered = true;
-    vm.reg(dst).i = (i64)tzpl_errNone;
+    vm.reg(dst).i = (i64)engine::rtNoteOff(s, nodeID, noteID);
 }
 
 // fn readFile(path String) String  -- read a text file into a String.

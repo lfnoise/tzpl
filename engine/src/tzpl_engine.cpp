@@ -184,6 +184,7 @@ Engine::Engine(EngineConfig const& config, AudioStreamParameters& asp,
     streamParams_(asp)
 {
     numTempoClocks_ = std::max(1, config.numTempoClocks);
+    blockSize_ = std::clamp((config.blockSize + 3) & ~3, 4, 1024);
     { int i = 0; for (Silo& s : silos_) {
         s.engine_ = this;
         s.index_ = i;
@@ -219,6 +220,7 @@ Engine::Engine(EngineConfig const& config, AudioStreamParameters& asp, bool /*nr
     streamParams_(asp)
 {
     numTempoClocks_ = std::max(1, config.numTempoClocks);
+    blockSize_ = std::clamp((config.blockSize + 3) & ~3, 4, 1024);
     { int i = 0; for (Silo& s : silos_) {
         s.engine_ = this;
         s.index_ = i;
@@ -262,6 +264,7 @@ void Engine::postInit() {
         for (int k = 0; k < numTempoClocks_; ++k) {
             s.tempoClocks_.emplace_back(60.0, streamParams_.sampleRate, 0);
         }
+        s.dueLists_.assign(numTempoClocks_, CommandList{});
     }
 
     // start work loops
@@ -320,60 +323,41 @@ f64 Engine::getStreamTime() {
     return backend_->streamTime();
 }
 
-void plugInAudioNoOp(tzpl_SynthData*) {}
+void plugInProcessNoOp(tzpl_SynthData*, int32_t, int32_t) {}
 
-struct OutputNode : tzpl_SynthData {
-    f32* data;
-};
-
-tzpl_SynthData* OutputNode_alloc() {
-    return (tzpl_SynthData*)new OutputNode();
+tzpl_SynthData* IONode_alloc(int32_t) {
+    return new tzpl_SynthData();
 }
 
-tzpl_SErr OutputNode_free(tzpl_SynthData* synth) {
-    delete (OutputNode*)synth;
+tzpl_SErr IONode_free(tzpl_SynthData* synth) {
+    delete synth;
     return tzpl_errNone;
 }
 
-tzpl_SErr OutputNode_init(tzpl_SynthData* synth) {
-    OutputNode* o = (OutputNode*)synth;
-    Engine* e = (Engine*)o->engine;
-    o->data = new f32[e->streamParams_.channels];
-    return tzpl_errNone;
-}
+static NodeDef* registerIODef(Engine* e, char const* name, int numIns, int numOuts, int chans) {
+    // The port table must outlive the def (NodeDefInfo holds raw pointers).
+    PortInfo* port = new PortInfo{numIns ? "in" : "out",
+                                  {tzpl::shapeRow(chans), tzpl_kF32, tzpl_audioRate}};
+    NodeDefInfo info{};
+    info.name = name;
+    info.num_ins = numIns;
+    info.num_outs = numOuts;
+    info.ins = numIns ? port : nullptr;
+    info.outs = numOuts ? port : nullptr;
+    info.funs.alloc = IONode_alloc;
+    info.funs.free = IONode_free;
+    info.funs.process = plugInProcessNoOp;
 
-tzpl_SErr OutputNode_uninit(tzpl_SynthData* synth) {
-    OutputNode* o = (OutputNode*)synth;
-    delete [] o->data;
-    return tzpl_errNone;
+    NodeDef* def = new NodeDef(info);
+    u32 bin = def->hash_ & kHashMask;
+    def->next_ = e->defs_[bin];
+    e->defs_[bin] = def;
+    return def;
 }
 
 void Engine::defOutputNode(int numChannels) {
     // called only from Engine constructor
-    NodeDefInfo nodeDefInfo;
-    memset(&nodeDefInfo, 0, sizeof(NodeDefInfo));
-
-    nodeDefInfo.name = "Audio Out";
-    nodeDefInfo.num_ins = 1;
-
-    PortInfo inputPortInfo{"in", {tzpl_kF32, tzpl_audioRate, numChannels}};
-    nodeDefInfo.ins = (PortInfo*)calloc(1, sizeof(PortInfo));
-    nodeDefInfo.ins[0] = inputPortInfo;
-
-    nodeDefInfo.funs.alloc  = OutputNode_alloc;
-    nodeDefInfo.funs.free   = OutputNode_free;
-    nodeDefInfo.funs.init   = OutputNode_init;
-    nodeDefInfo.funs.uninit = OutputNode_uninit;
-    nodeDefInfo.funs.reset  = nullptr;
-    nodeDefInfo.funs.event  = nullptr;
-    nodeDefInfo.funs.processAudio    = plugInAudioNoOp;
-
-    NodeDef* def = new NodeDef(nodeDefInfo);
-
-    u32 bin = def->hash_ & kHashMask;
-    def->next_ = defs_[bin];
-    defs_[bin] = def;
-
+    NodeDef* def = registerIODef(this, "Audio Out", 1, 0, numChannels);
     for (Silo& s : silos_) {
         s.outputNode_ = new Node(this, &s, def, 0);
         s.addNode(s.outputNode_);
@@ -381,84 +365,15 @@ void Engine::defOutputNode(int numChannels) {
     }
 }
 
-struct InputNode : tzpl_SynthData {};
-
-tzpl_SynthData* InputNode_alloc() {
-    return (tzpl_SynthData*)new InputNode();
-}
-
-tzpl_SErr InputNode_free(tzpl_SynthData* synth) {
-    delete (InputNode*)synth;
-    return tzpl_errNone;
-}
-
 void Engine::defInputNode(int inputChannels) {
     // called only from Engine constructor
-    NodeDefInfo nodeDefInfo;
-    memset(&nodeDefInfo, 0, sizeof(NodeDefInfo));
-
-    nodeDefInfo.name = "Audio In";
-
-    if (inputChannels > 0) {
-        nodeDefInfo.num_outs = 1;
-        PortInfo outputPortInfo{"out", {tzpl_kF32, tzpl_audioRate, inputChannels}};
-        nodeDefInfo.outs = (PortInfo*)calloc(1, sizeof(PortInfo));
-        nodeDefInfo.outs[0] = outputPortInfo;
-    }
-
-    nodeDefInfo.funs.alloc  = InputNode_alloc;
-    nodeDefInfo.funs.free   = InputNode_free;
-    nodeDefInfo.funs.init   = nullptr;
-    nodeDefInfo.funs.uninit = nullptr;
-    nodeDefInfo.funs.reset  = nullptr;
-    nodeDefInfo.funs.event  = nullptr;
-    nodeDefInfo.funs.processAudio = plugInAudioNoOp;
-
-    NodeDef* def = new NodeDef(nodeDefInfo);
-
-    u32 bin = def->hash_ & kHashMask;
-    def->next_ = defs_[bin];
-    defs_[bin] = def;
-
+    NodeDef* def = registerIODef(this, "Audio In", 0, inputChannels > 0 ? 1 : 0,
+                                 inputChannels);
     for (Silo& s : silos_) {
         s.inputNode_ = new Node(this, &s, def, 1);
         s.addNode(s.inputNode_);
         s.shadow_.nodes[1] = "Audio In"; // Engine ctor: no locking needed yet
     }
-}
-
-void Engine::defXFaderNode() {
-    // called only from Engine constructor
-    NodeDefInfo nodeDefInfo;
-    memset(&nodeDefInfo, 0, sizeof(NodeDefInfo));
-    
-    nodeDefInfo.name = "XFaderF32";
-    nodeDefInfo.num_ins = 2;
-    nodeDefInfo.num_outs = 1;
-    
-    PortInfo a{"a", {tzpl_kF32, tzpl_audioRate, 0}}; // actual number of channels may vary
-    PortInfo b{"b", {tzpl_kF32, tzpl_audioRate, 0}}; // actual number of channels may vary
-    nodeDefInfo.ins = (PortInfo*)calloc(nodeDefInfo.num_ins, sizeof(PortInfo));
-    nodeDefInfo.ins[0] = a;
-    nodeDefInfo.ins[0] = b;
-
-    PortInfo out{"out", {tzpl_kF32, tzpl_audioRate, 0}};
-    nodeDefInfo.outs = (PortInfo*)calloc(nodeDefInfo.num_outs, sizeof(PortInfo));
-    nodeDefInfo.outs[0] = out;
-    
-//    nodeDefInfo.funs.alloc  = OutputNode_alloc;
-//    nodeDefInfo.funs.free   = OutputNode_free;
-//    nodeDefInfo.funs.init   = OutputNode_init;
-//    nodeDefInfo.funs.uninit = OutputNode_uninit;
-//    nodeDefInfo.funs.reset  = nullptr;
-//    nodeDefInfo.funs.processAudio   = plugInAudioNoOp;
-//    nodeDefInfo.funs.push   = nullptr;
-    
-    NodeDef* def = new NodeDef(nodeDefInfo);
-
-    u32 bin = def->hash_ & kHashMask;
-    def->next_ = defs_[bin];
-    defs_[bin] = def;
 }
 
 //=============================================================================================

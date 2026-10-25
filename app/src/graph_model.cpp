@@ -26,7 +26,7 @@
 namespace graph {
 
 static PortVM portVM(engine::PortDesc const& p) {
-    return {p.name, p.type.chans, (int)p.type.elem, (int)p.type.rate};
+    return {p.name, tzpl_shapeChans(p.type.shape), (int)p.type.elem, (int)p.type.rate};
 }
 
 void buildViewModel(engine::GraphDesc const& g, int silo,

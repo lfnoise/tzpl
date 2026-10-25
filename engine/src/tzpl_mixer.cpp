@@ -21,52 +21,37 @@
 namespace engine {
 
 // ---------------------------------------------------------------------------
-// MixerData -- extends tzpl_SynthData with channel count
+// The sum node
 // ---------------------------------------------------------------------------
 
-struct MixerData : tzpl_SynthData {
-    int numChannels;
-};
-
-// ---------------------------------------------------------------------------
-// SynthFuns callbacks
-// ---------------------------------------------------------------------------
-
-static tzpl_SynthData* Mixer_alloc() {
-    return (tzpl_SynthData*)new MixerData();
+static tzpl_SynthData* Mixer_alloc(int32_t) {
+    return new tzpl_SynthData();
 }
 
 static tzpl_SErr Mixer_free(tzpl_SynthData* synth) {
-    delete (MixerData*)synth;
+    delete synth;
     return tzpl_errNone;
 }
 
-static tzpl_SErr Mixer_init(tzpl_SynthData* synth) {
-    return tzpl_errNone;
-}
+static tzpl_SErr Mixer_init(tzpl_SynthData*) { return tzpl_errNone; }
 
-static tzpl_SErr Mixer_uninit(tzpl_SynthData* synth) {
-    return tzpl_errNone;
-}
-
-// Sum all inputs to a single output.
-// Disconnected inputs point to zeroed fallback buffers, so it is always
-// safe to sum every slot without checking srcPort_.
+// Sum all inputs to the output. Disconnected inputs hold constant 0 stages,
+// so it is always safe to sum every slot without checking srcPort_.
 template <typename T>
-static void Mixer_processAudio(tzpl_SynthData* synth) {
-    MixerData* m = (MixerData*)synth;
-    T* out = getOut<T>(synth, 0);
-    int nc = m->numChannels;
+static void Mixer_process(tzpl_SynthData* synth, int32_t off, int32_t n) {
+    Node* node = (Node*)synth->node;
+    int nc = node->outs[0].chans_;
     int ni = synth->num_ins;
-
-    // Zero the output
-    for (int c = 0; c < nc; ++c) out[c] = T(0);
-
-    // Accumulate all inputs
-    for (int i = 0; i < ni; ++i) {
-        T const* in = getIn<T>(synth, i);
-        for (int c = 0; c < nc; ++c) {
-            out[c] += in[c];
+    for (int c = 0; c < nc; ++c) {
+        T* out = outChan<T>(synth, 0, c) + off;
+        T const* in0 = inChan<T>(synth, 0, c) + off;
+        for (int k = 0; k < n; ++k) out[k] = in0[k];
+        for (int i = 1; i < ni; ++i) {
+            InPort& p = node->ins[i];
+            // A free slot holds a constant 0: skip it.
+            if (!p.srcPort_ && p.isConst_[c] && p.stages_[c].value == 0.) continue;
+            T const* in = inChan<T>(synth, i, c) + off;
+            for (int k = 0; k < n; ++k) out[k] += in[k];
         }
     }
 }
@@ -80,41 +65,28 @@ Node* newMixerNode(Engine* e, Silo* silo, tzpl_SignalType type, int capacity) {
     funs.alloc  = Mixer_alloc;
     funs.free   = Mixer_free;
     funs.init   = Mixer_init;
-    funs.uninit = Mixer_uninit;
 
     switch (type.elem) {
-        case tzpl_kF32: funs.processAudio = Mixer_processAudio<f32>; break;
-        case tzpl_kF64: funs.processAudio = Mixer_processAudio<f64>; break;
-        case tzpl_kI32: funs.processAudio = Mixer_processAudio<i32>; break;
-        case tzpl_kI64: funs.processAudio = Mixer_processAudio<i64>; break;
+        case tzpl_kF32: funs.process = Mixer_process<f32>; break;
+        case tzpl_kF64: funs.process = Mixer_process<f64>; break;
+        case tzpl_kI32: funs.process = Mixer_process<i32>; break;
+        case tzpl_kI64: funs.process = Mixer_process<i64>; break;
     }
 
-    NodeDefInfo info;
-    memset(&info, 0, sizeof(info));
-
+    NodeDefInfo info{};
     info.name = "mixer";
     info.num_ins = capacity;
     info.num_outs = 1;
     info.funs = funs;
 
     // All input ports share the same type as the destination
-    info.ins = (PortInfo*)calloc(capacity, sizeof(PortInfo));
-    for (int i = 0; i < capacity; ++i) {
-        info.ins[i] = PortInfo{"in", type};
-    }
-
-    info.outs = (PortInfo*)calloc(1, sizeof(PortInfo));
-    info.outs[0] = PortInfo{"out", type};
+    std::vector<PortInfo> ins(capacity, PortInfo{"in", type});
+    PortInfo out{"out", type};
+    info.ins = ins.data();
+    info.outs = &out;
 
     Node* mixer = new Node(e, silo, info);
     mixer->isMixer_ = true;
-
-    free(info.ins);
-    free(info.outs);
-
-    MixerData* md = (MixerData*)mixer->synth;
-    md->numChannels = type.chans;
-
     return mixer;
 }
 

@@ -21,6 +21,7 @@
 
 #include "plugin_browser_window.hpp"
 #include "plugin_tags.hpp"
+#include "tzpl_shape.hpp"
 #include "tzpl_app_context.hpp"
 #include "tzpl_client_interface.hpp"
 #include "tzpl_fonts.hpp"
@@ -51,14 +52,13 @@ char const* rateName(tzpl_Rate r) {
         case tzpl_constRate: return "const";
         case tzpl_initRate:  return "init";
         case tzpl_resetRate: return "reset";
-        case tzpl_eventRate: return "event";
         case tzpl_audioRate: return "audio";
     }
     return "?";
 }
 
 String typeText(tzpl_SignalType const& t) {
-    return String(t.chans) + "ch " + elemName(t.elem) + " " + rateName(t.rate);
+    return String(tzpl::shapeString(t.shape, "\xc3\x97")) + " " + elemName(t.elem) + " " + rateName(t.rate);
 }
 
 String numText(double v) {

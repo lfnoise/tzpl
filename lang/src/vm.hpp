@@ -638,6 +638,14 @@ public:
     // actors are clocked -- `await delay(n)` resolves when the audio beat reaches
     // it. No host allocation beyond the VM's TLSF heap; safe on the RT thread.
     void tickActors(double beat, int budget);
+    // For a block-rate driver: the earliest beat a pending delay() timer is
+    // waiting for (+inf if none), and whether any actor is ready to resume.
+    double nextActorTimerBeat() const {
+        double b = __builtin_inf();
+        for (auto const& t : asyncTimers_) if (t.beat < b) b = t.beat;
+        return b;
+    }
+    bool hasReadyActors() const { return !asyncReady_.empty(); }
 
     // Panic: drop every pending delay() timer and every ready-to-resume
     // coroutine, halting all delay-driven silo activity (a generative actor's

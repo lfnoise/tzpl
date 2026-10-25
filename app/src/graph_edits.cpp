@@ -28,9 +28,9 @@
 namespace graph {
 
 bool canConnect(PortVM const& src, PortVM const& dst, long long) {
-    if (src.rate != dst.rate) return false;
+    // Rates are informational in the block engine: any input can be patched.
     if (src.elem != dst.elem) return false;
-    return true; // channel counts are adapted by the engine
+    return true; // shapes broadcast or fold in the engine
 }
 
 long long nextFreeNodeID(GraphViewModel const& vm) {
@@ -57,6 +57,7 @@ std::string errText(int err) {
         case tzpl_errNumPortsMismatch:   return "port count mismatch";
         case tzpl_errNoActiveBundle:     return "no active command bundle";
         case tzpl_errTooLate:            return "scheduled too late";
+        case tzpl_errRegionOutOfRange:   return "region out of range";
         default:
             return "engine error " + std::to_string(err);
     }

@@ -60,6 +60,11 @@ struct TempoClock
         return ramp_.secondsToBeats(secondsAtSample(sample));
     }
 
+    // The fractional sample time at which the clock reaches `beat`.
+    f64 sampleAtBeat(f64 beat) const {
+        return (f64)epochSample_ + ramp_.beatsToSeconds(beat) * sampleRate_;
+    }
+
     // Current tempo (beats per second) at a given sample time.
     f64 tempoAtSample(i64 sample) const {
         return ramp_.secondsToTempo(secondsAtSample(sample));
@@ -84,11 +89,6 @@ struct TempoClock
         f64 currentTempo = ramp_.beatsToTempo(atBeat);
         ramp_ = ts::TempoRamp(currentTempo, atBeat, seconds, targetBPS, rampBeats);
     }
-
-    // Pop and run every command whose beatTime_ has been reached at this
-    // sample, then ship them back to the NRT thread for stage-2 cleanup.
-    // Defined in tzpl_silo.cpp (needs the full Silo definition).
-    void process(i64 sampleTime, Silo* s);
 
     void clear() { queue_.clear(); }
 };
