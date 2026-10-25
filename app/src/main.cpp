@@ -929,8 +929,12 @@ int main(int argc, const char* argv[]) {
 
         // Feed the shared-input mouse slots (GUI and headless alike). The
         // poller writes a process-global, never the engine, so its lifetime
-        // is independent of the engine's.
-        MousePoller mousePoller;
+        // is independent of the engine's. Not for --nrt renders: they run
+        // faster than real time, so the live mouse would only make the
+        // result depend on where the pointer happened to be; scripts set the
+        // slots themselves (setSharedInput).
+        std::optional<MousePoller> mousePoller;
+        if (!nrtMode) mousePoller.emplace();
 
         if (startAudio) {
             engine::startAudio(eng);

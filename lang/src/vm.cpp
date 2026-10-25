@@ -277,9 +277,16 @@ VM::VM(VMConfig const& config, TypeUniverse& typeUniverse, const VMTarget& targe
     , target_(target)
 {
     gcStepBudgetNanos_ = config.gcStepBudgetNanos;
-    // Seed the RNG from std::random_device (unique per VM instance)
-    std::random_device rd;
-    rng_.seed(((u64)rd() << 32) | rd());
+    // Seed the RNG from std::random_device (unique per VM instance), or from
+    // TZPL_LANG_SEED when set, so test renders whose scripts draw random
+    // numbers (e.g. delay times picked while building a synthdef graph) are
+    // reproducible. The synth-side counterpart is TZPL_RNG_SEED.
+    if (char const* seedEnv = std::getenv("TZPL_LANG_SEED")) {
+        rng_.seed(std::strtoull(seedEnv, nullptr, 0));
+    } else {
+        std::random_device rd;
+        rng_.seed(((u64)rd() << 32) | rd());
+    }
 
     // Set gCurrentVM and gCurrentAllocator
     gCurrentVM = this;
