@@ -174,18 +174,22 @@ OUT 0 out f32 2x2
     TREE 3    [1 2] Block  Broadcast f32     1
       0    6 [5 0             ]  2  1 Block    None      f32     1 /
       1    7 [6               ]  1  1 Block    Broadcast f32     1 sin
+  LOOP  2 [] Block  4
+    TREE 4    [] Block  Input     f32   2x2
+      0    1 [                ]  0  1 Block    Input     f32   2x2 control(gains)
+  LOOP  3 [] Block  1
     TREE 5    [] Block  Input     f32     1
       0    3 [                ]  0  1 Block    Input     f32     1 control(mute)
     TREE 6    [5] Block  Broadcast f32     1
       0    9 [                ]  0  1 Const    None      f32     1 1.0f
       1   10 [9 3             ]  2  1 Block    Broadcast f32     1 -
+  LOOP  4 [] Block  1
     TREE 7    [] Block  Input     f32     1
       0    2 [                ]  0  1 Block    Input     f32     1 control(trig)
+  LOOP  5 [] Block  1
     TREE 8    [] Block  Input     f32     1
       0    4 [                ]  0  1 Block    Input     f32     1 control(mode)
-  LOOP  2 [1] Block  4
-    TREE 4    [] Block  Input     f32   2x2
-      0    1 [                ]  0  1 Block    Input     f32   2x2 control(gains)
+  LOOP  6 [1 2 3 4 5] Block  4
     TREE 9    [3 4 6 7 8] Block  Rate      f32   2x2
       0    8 [7 1             ]  2  1 Block    None      f32   2x2 *
       1   11 [8 10            ]  2  1 Block    None      f32   2x2 *
@@ -193,7 +197,7 @@ OUT 0 out f32 2x2
       3   13 [12 4            ]  2  1 Block    Rate      f32   2x2 +
 -- AUDIO
 GRAPH 0
-  LOOP  3 [2] Audio  4
+  LOOP  7 [6] Audio  4
     TREE 10   [9] Audio  Sink      f32   2x2
       0   14 [13              ]  1  0 Audio    Sink      f32   2x2 outlet
 -- PARAMETER GROUPS
@@ -269,11 +273,13 @@ OUT 0 out f32 2
       2   11 [10 4            ]  2  1 Init     Rate      f32     1 /
 -- RESET
 -- BLOCK
-  LOOP  2 [1] Block  1
+  LOOP  2 [] Block  1
     TREE 3    [] Block  Input     f32     1
       0    0 [                ]  0  1 Block    Input     f32     1 control(cutoff)
+  LOOP  3 [] Block  1
     TREE 4    [] Block  Input     f32     1
       0    1 [                ]  0  1 Block    Input     f32     1 control(q)
+  LOOP  4 [1 2 3] Block  1
     TREE 5    [2 3 4] Block  Rate      f32     1
       0   12 [11 0            ]  2  1 Block    None      f32     1 *
       1   15 [12              ]  1  1 Block    None      f32     1 -
@@ -284,7 +290,7 @@ OUT 0 out f32 2
       1   20 [19 17           ]  2  1 Block    Rate      f32     1 -
 -- AUDIO
 GRAPH 0
-  LOOP  0 [2] Audio  2
+  LOOP  0 [4] Audio  2
     TREE 1    [] Audio  Input     f32     2
       0   18 [                ]  0  1 Audio    Input     f32     2 inlet(in)
     TREE 7    [1 6 5] Audio  FanOut    f32     2
@@ -567,23 +573,24 @@ OUT 0 out f32 1
       0    1 [                ]  0  1 Block    Input     f32     1 noteParam(freq@1)
     TREE 4    [2 3] Block  Rate      f32     1
       0    7 [6 1             ]  2  1 Block    Rate      f32     1 *
+  LOOP  3 [] Block  1
     TREE 6    [] Block  Input     f32     1
       0    0 [                ]  0  1 Block    Input     f32     1 noteParam(gate@0)
-  LOOP  3 [] Block  2
+  LOOP  4 [] Block  2
     TREE 8    [] Block  Input     f32     2
       0    2 [                ]  0  1 Block    Input     f32     2 noteParam(pan@2)
 -- AUDIO
 GRAPH 0
-  LOOP  5 [4] Audio  8
+  LOOP  6 [5] Audio  8
     TREE 11   [10*] Audio  Temp      f32   4x2
       0   19 [                ]  0  1 Audio    Temp      f32   4x2 voicer
-  LOOP  6 [5] Audio  1
+  LOOP  7 [6] Audio  1
     TREE 12   [11*] Audio  SeparateLoop f32     1
       0   21 [19              ]  1  1 Audio    SeparateLoop f32     1 reduce(+, 1)
     TREE 13   [12] Audio  Sink      f32     1
       0   22 [21              ]  1  0 Audio    Sink      f32     1 outlet
 GRAPH 1
-  LOOP  0 [2] Audio  1
+  LOOP  0 [2 3] Audio  1
     TREE 1    [] Audio  FanOut    f32     1
       0    8 [                ]  0  2 Audio    FanOut    f32     1 delay_fix_read(1)
     TREE 5    [1 4] Audio  Sink      f32     1
@@ -596,7 +603,7 @@ GRAPH 1
       1   14 [8 13            ]  2  1 Audio    None      f32     1 *
       2   15 [14              ]  1  1 Audio    None      f32     1 sin
       3   16 [15 0            ]  2  1 Audio    Broadcast f32     1 *
-  LOOP  4 [0 3] Audio  2
+  LOOP  5 [0 4] Audio  2
     TREE 9    [7 8] Audio  Temp      f32     2
       0   17 [16 2            ]  2  1 Audio    Temp      f32     2 *
     TREE 10   [9] Audio  Phi       f32     2

@@ -118,18 +118,20 @@ OUT 0 out f32 1
       0    2 [                ]  0  1 Init     Rate      f32     1 fs
 -- RESET
 -- BLOCK
-  LOOP  1 [0] Block  1
+  LOOP  1 [] Block  1
     TREE 2    [] Block  Input     f32     1
       0    0 [                ]  0  1 Block    Input     f32     1 control(freq)
+  LOOP  2 [] Block  1
     TREE 3    [] Block  Input     f32     1
       0    1 [                ]  0  1 Block    Input     f32     1 control(amp)
+  LOOP  3 [0 1 2] Block  1
     TREE 4    [1 2 3] Block  Rate      f32     1
       0    3 [2 0             ]  2  1 Block    None      f32     1 /
       1    4 [3               ]  1  1 Block    None      f32     1 sin
       2    5 [4 1             ]  2  1 Block    Rate      f32     1 *
 -- AUDIO
 GRAPH 0
-  LOOP  2 [1] Audio  1
+  LOOP  4 [3] Audio  1
     TREE 5    [4] Audio  Sink      f32     1
       0    6 [5               ]  1  0 Audio    Sink      f32     1 outlet
 -- PARAMETER GROUPS

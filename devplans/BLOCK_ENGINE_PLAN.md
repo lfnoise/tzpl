@@ -1285,10 +1285,70 @@ Deviations and notes:
 - The formant bank in `effects.x` keeps four formants (now only so it sounds as it
   did).
 
-**M6: Parameter groups and change detection (§4.5).**
+**M6: Parameter groups and change detection (§4.5) (done 2026-10-25)**
 - Group detection, caching keyed on version, and `{ptr, stride}` plumbing.
 - Benchmark: CPU per node for an idle-knob synth versus `main`'s event-rate build. Target
   at most 1.1×.
+
+What landed:
+- **Placement.** `block` survives in the codegen pipeline (the M4 demotion is gone) in
+  the root graph and in a flat-voice voicer body (`restrictBlockRate`,
+  `paramgroups.x`). Elsewhere it is demoted to audio, as in M4: control-flow bodies,
+  spectral frames and AoS voices.
+- **Groups and loops:**
+  - A group is keyed by (source set, graph), so a voice body's groups cache per voice
+    and the root's once.
+  - `ParamGroup` carries structured sources: the input port serials and the `notes`
+    columns.
+  - `treesToLoops` keeps one group per block loop (`Loop.group`).
+- **Storage.** Every materialized block value is an instance variable
+  (`blockValuesToInstVars`), so a skipped group's consumers read its cached value. This
+  is the stride-0/stride-1 plumbing in the serial generator: the value is either still
+  cached or rewritten every sample.
+- **Change detection at the top of `process`:**
+  - Each watched input channel is classified against its cached version:
+    0 = constant and unchanged, 1 = constant with a new version, 2 = not constant this
+    block. A non-constant channel caches an invalid version, so its groups recompute
+    once when it settles.
+  - A group's mode is the largest over its sources, per voice for a voice group (the
+    voice's `notes` columns).
+  - In the sample loop, mode 0 skips the group, 1 runs it at the first sample, and 2
+    runs it every sample.
+  - Voice block loops use the single-voice loop forms for each due voice, behind an
+    any-voice check.
+  - `init` marks everything due once (`pg_first`), and `resetVoice` marks the voice due
+    (`pg_vforce`).
+- **Fixes:** the synthc dump test filters Linux realtime-setup warnings from stderr;
+  they had failed every golden on the CI runner.
+
+Results:
+- **Benchmark** (`/tmp`-local script: N nodes rendered for 61 s minus 1 s, ms of CPU per
+  node-second, the `main` event-rate build first):
+
+  | synth | main | M6 | ratio |
+  |---|---|---|---|
+  | idle-knob filter (4 controls, two RLPFs on noise) | 0.284 | 0.267 | 0.94× |
+  | `fxChorus` | 1.083 | 0.911 | 0.84× |
+  | `resonBank`, 4 of 8 voices sounding | 2.523 | 2.578 | 1.02× |
+
+  Before the any-voice check, the bank was 1.32×.
+- **Corpus, `TZPL_POW2_CHANS=1` against the patched oracle: 111 of 118** (M5: 107).
+  instrument_test, fxPingPong and fxMultiTap now pass.
+  - The two expected changes.
+  - Precision-level differences: live_nrt_render (-88), music_fx_demos (-63), sc2_3
+    (-98) and sc2_8 (-70 dBFS). The oracle computed some per-note values with SIMD
+    transcendentals in its event loops; the new code computes them with scalar ones.
+  - Slow resonator drift in sc2_7 and sc2_9.
+  - The oracle's own silence defect in sc2_6.
+- **Unchanged:** every `run_*.sh` passes except `run_live_test.sh` (MF). The dump
+  goldens are regenerated: block loops now split by group, and groups by graph. All 158
+  dump graphs compile and load.
+
+Deviations and notes:
+- **Units are inputs and `notes` columns, not channels.** A group recomputes when any
+  channel of a source input changes. Per-channel provenance (§4.2 step 1a) would narrow
+  that to one element of a control tensor; it is left for the fused block code (M8).
+- **Inputs are still gathered every sample**, cached groups included.
 
 **M7: Recurrence analysis (D3, §4.7).**
 - Minimal-cycle extraction, linear-form classification, wrap recognition.

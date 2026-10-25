@@ -43,13 +43,16 @@ OUT 0 out f32 1
       0    3 [                ]  0  1 Init     Rate      f32     1 fs
 -- RESET
 -- BLOCK
-  LOOP  1 [0] Block  1
+  LOOP  1 [] Block  1
     TREE 2    [] Block  Input     f32     1
       0    2 [                ]  0  1 Block    Input     f32     1 noteParam(freq@2)
+  LOOP  2 [] Block  1
     TREE 3    [] Block  Input     f32     1
       0    0 [                ]  0  1 Block    Input     f32     1 noteParam(gate@0)
+  LOOP  3 [] Block  1
     TREE 4    [] Block  Input     f32     1
       0    1 [                ]  0  1 Block    Input     f32     1 noteParam(amp@1)
+  LOOP  4 [0 1 2 3] Block  1
     TREE 5    [1 2 3 4] Block  Rate      f32     1
       0    4 [3 2             ]  2  1 Block    None      f32     1 /
       1    5 [4               ]  1  1 Block    None      f32     1 sin
@@ -57,16 +60,16 @@ OUT 0 out f32 1
       3    7 [6 1             ]  2  1 Block    Rate      f32     1 *
 -- AUDIO
 GRAPH 0
-  LOOP  3 [2] Audio  2
+  LOOP  6 [5] Audio  2
     TREE 7    [6*] Audio  Temp      f32     2
       0    9 [                ]  0  1 Audio    Temp      f32     2 voicer
-  LOOP  4 [3] Audio  1
+  LOOP  7 [6] Audio  1
     TREE 8    [7*] Audio  SeparateLoop f32     1
       0   11 [9               ]  1  1 Audio    SeparateLoop f32     1 reduce(+, 1)
     TREE 9    [8] Audio  Sink      f32     1
       0   12 [11              ]  1  0 Audio    Sink      f32     1 outlet
 GRAPH 1
-  LOOP  2 [1] Audio  1
+  LOOP  5 [4] Audio  1
     TREE 6    [5] Audio  Phi       f32     1
       0    8 [7               ]  1  0 Audio    Phi       f32     1 PhiNode
 -- PARAMETER GROUPS
@@ -141,12 +144,16 @@ OUT 0 out f32 1
       0    1 [                ]  0  1 Block    Input     f32     1 noteParam(freq@1)
     TREE 3    [1 2] Block  FanOut    f32     1
       0    5 [4 1             ]  2  2 Block    FanOut    f32     1 /
+  LOOP  2 [] Block  1
     TREE 4    [] Block  Input     f32     1
       0    0 [                ]  0  1 Block    Input     f32     1 noteParam(gate@0)
+  LOOP  3 [] Block  1
     TREE 5    [] Block  Input     f32     1
       0    2 [                ]  0  1 Block    Input     f32     1 noteParam(amp@2)
+  LOOP  4 [] Block  1
     TREE 6    [] Block  Input     f32     1
       0    3 [                ]  0  1 Block    Input     f32     1 noteParam(det@3)
+  LOOP  5 [1 2 3 4] Block  1
     TREE 7    [3 4 5 6] Block  Rate      f32     1
       0    6 [5               ]  1  1 Block    None      f32     1 sin
       1    7 [6 0             ]  2  1 Block    None      f32     1 *
@@ -158,16 +165,16 @@ OUT 0 out f32 1
       7   15 [13 14           ]  2  1 Block    Rate      f32     1 *
 -- AUDIO
 GRAPH 0
-  LOOP  3 [2] Audio  8
+  LOOP  7 [6] Audio  8
     TREE 9    [8*] Audio  Temp      f32     8
       0   17 [                ]  0  1 Audio    Temp      f32     8 voicer
-  LOOP  4 [3] Audio  1
+  LOOP  8 [7] Audio  1
     TREE 10   [9*] Audio  SeparateLoop f32     1
       0   19 [17              ]  1  1 Audio    SeparateLoop f32     1 reduce(+, 1)
     TREE 11   [10] Audio  Sink      f32     1
       0   20 [19              ]  1  0 Audio    Sink      f32     1 outlet
 GRAPH 1
-  LOOP  2 [1] Audio  1
+  LOOP  6 [5] Audio  1
     TREE 8    [7] Audio  Phi       f32     1
       0   16 [15              ]  1  0 Audio    Phi       f32     1 PhiNode
 -- PARAMETER GROUPS
@@ -416,9 +423,10 @@ OUT 0 out f32 1
       1   47 [46              ]  1  0 Init     Sink      f32     0 delay_init
 -- RESET
 -- BLOCK
-  LOOP  2 [0] Block  1
+  LOOP  2 [] Block  1
     TREE 6    [] Block  Input     f32     1
       0    0 [                ]  0  1 Block    Input     f32     1 noteParam(gate@0)
+  LOOP  4 [0] Block  1
     TREE 13   [] Block  Input     f32     1
       0    1 [                ]  0  1 Block    Input     f32     1 noteParam(pitch@1)
     TREE 15   [13 14] Block  Rate      f64     1
@@ -431,20 +439,21 @@ OUT 0 out f32 1
       6   45 [44 43           ]  2  1 Block    None      f32     1 *
       7   49 [45              ]  1  1 Block    None      f64     1 cast_f64
       8   52 [49 51           ]  2  1 Block    Rate      f64     1 *
+  LOOP  5 [] Block  1
     TREE 19   [] Block  Input     f32     1
       0    2 [                ]  0  1 Block    Input     f32     1 noteParam(amp@2)
 -- AUDIO
 GRAPH 0
-  LOOP  4 [1] Audio  32
+  LOOP  6 [1] Audio  32
     TREE 22   [21*] Audio  Temp      f32    32
       0   67 [                ]  0  1 Audio    Temp      f32    32 voicer
-  LOOP  5 [4] Audio  1
+  LOOP  7 [6] Audio  1
     TREE 23   [22*] Audio  SeparateLoop f32     1
       0   69 [67              ]  1  1 Audio    SeparateLoop f32     1 reduce(+, 1)
     TREE 24   [23] Audio  Sink      f32     1
       0   70 [69              ]  1  0 Audio    Sink      f32     1 outlet
 GRAPH 1
-  LOOP  1 [0 2] Audio  1
+  LOOP  1 [0 2 4 5] Audio  1
     TREE 3    [2] Audio  FanOut    f64     1
       0   12 [                ]  0  1 Const    None      f64     1 1.0
       1   10 [                ]  0  1 Audio    None      f64     1 delay_fix_read(1)
@@ -647,7 +656,7 @@ OUT 0 out f32 1
       3   20 [19 18           ]  2  1 Init     Rate      f32     1 pow
 -- RESET
 -- BLOCK
-  LOOP  0 [2] Block  1
+  LOOP  0 [] Block  1
     TREE 1    [] Block  Input     f32     1
       0    0 [                ]  0  2 Block    Input     f32     1 noteParam(gate@0)
     TREE 2    [1] Block  Rate      f32     1
@@ -658,26 +667,29 @@ OUT 0 out f32 1
       1   39 [0 38            ]  2  1 Block    None      f32     1 >
       2   40 [                ]  0  1 Const    None      f32     1 2.0f
       3   41 [39 40           ]  2  1 Block    Rate      f32     1 *
+  LOOP  3 [] Block  1
     TREE 14   [] Block  Input     f32     1
       0    1 [                ]  0  1 Block    Input     f32     1 noteParam(freq@1)
+  LOOP  4 [] Block  1
     TREE 15   [] Block  Input     f32     1
       0    2 [                ]  0  1 Block    Input     f32     1 noteParam(amp@2)
+  LOOP  5 [2 3 4] Block  1
     TREE 16   [8 14 15] Block  Rate      f32     1
       0   54 [3 1             ]  2  1 Block    None      f32     1 /
       1   55 [54              ]  1  1 Block    None      f32     1 sin
       2   58 [55 2            ]  2  1 Block    Rate      f32     1 *
 -- AUDIO
 GRAPH 0
-  LOOP  3 [1] Audio  8
+  LOOP  6 [1] Audio  8
     TREE 19   [18*] Audio  Temp      f32     8
       0   61 [                ]  0  1 Audio    Temp      f32     8 voicer
-  LOOP  4 [3] Audio  1
+  LOOP  7 [6] Audio  1
     TREE 20   [19*] Audio  SeparateLoop f32     1
       0   63 [61              ]  1  1 Audio    SeparateLoop f32     1 reduce(+, 1)
     TREE 21   [20] Audio  Sink      f32     1
       0   64 [63              ]  1  0 Audio    Sink      f32     1 outlet
 GRAPH 1
-  LOOP  1 [0 2] Audio  1
+  LOOP  1 [0 2 5] Audio  1
     TREE 3    [] Audio  FanOut    f32     1
       0   30 [                ]  0  2 Audio    FanOut    f32     1 delay_fix_read(1)
     TREE 5    [2 3 4] Audio  FanOut    i32     1
@@ -776,11 +788,13 @@ OUT 0 out f32 1
   LOOP  2 [] Block  1
     TREE 3    [] Block  Input     f32     1
       0    1 [                ]  0  1 Block    Input     f32     1 noteParam(freq@1)
+  LOOP  3 [] Block  1
     TREE 4    [] Block  Input     f32     1
       0    0 [                ]  0  1 Block    Input     f32     1 noteParam(gate@0)
+  LOOP  4 [] Block  1
     TREE 5    [] Block  Input     f32     1
       0    2 [                ]  0  1 Block    Input     f32     1 noteParam(amp@2)
-  LOOP  3 [1 2] Block  2
+  LOOP  5 [1 2 3 4] Block  2
     TREE 6    [2 3 4 5] Block  Rate      f32     2
       0   11 [10 1            ]  2  1 Block    None      f32     2 /
       1   12 [11              ]  1  1 Block    None      f32     2 sin
@@ -788,16 +802,16 @@ OUT 0 out f32 1
       3   14 [13 2            ]  2  1 Block    Rate      f32     2 *
 -- AUDIO
 GRAPH 0
-  LOOP  5 [4] Audio  8
+  LOOP  7 [6] Audio  8
     TREE 8    [7*] Audio  Temp      f32   4x2
       0   16 [                ]  0  1 Audio    Temp      f32   4x2 voicer
-  LOOP  6 [5] Audio  1
+  LOOP  8 [7] Audio  1
     TREE 9    [8*] Audio  SeparateLoop f32     1
       0   18 [16              ]  1  1 Audio    SeparateLoop f32     1 reduce(+, 1)
     TREE 10   [9] Audio  Sink      f32     1
       0   19 [18              ]  1  0 Audio    Sink      f32     1 outlet
 GRAPH 1
-  LOOP  4 [3] Audio  2
+  LOOP  6 [5] Audio  2
     TREE 7    [6] Audio  Phi       f32     2
       0   15 [14              ]  1  0 Audio    Phi       f32     2 PhiNode
 -- PARAMETER GROUPS
@@ -887,20 +901,21 @@ OUT 0 out f32 1
   LOOP  2 [] Block  1
     TREE 5    [] Block  Input     f32     1
       0    0 [                ]  0  1 Block    Input     f32     1 noteParam(gate@0)
+  LOOP  3 [] Block  1
     TREE 6    [] Block  Input     f32     1
       0    1 [                ]  0  1 Block    Input     f32     1 noteParam(amp@1)
 -- AUDIO
 GRAPH 0
-  LOOP  3 [1] Audio  4
+  LOOP  4 [1] Audio  4
     TREE 9    [8*] Audio  Temp      f32     4
       0   25 [                ]  0  1 Audio    Temp      f32     4 voicer
-  LOOP  4 [3] Audio  1
+  LOOP  5 [4] Audio  1
     TREE 10   [9*] Audio  SeparateLoop f32     1
       0   27 [25              ]  1  1 Audio    SeparateLoop f32     1 reduce(+, 1)
     TREE 11   [10] Audio  Sink      f32     1
       0   28 [27              ]  1  0 Audio    Sink      f32     1 outlet
 GRAPH 1
-  LOOP  1 [0 2] Audio  1
+  LOOP  1 [0 2 3] Audio  1
     TREE 2    [1] Audio  FanOut    f64     1
       0   12 [                ]  0  1 Const    None      f64     1 1.0
       1   10 [                ]  0  1 Audio    None      f64     1 delay_fix_read(1)
@@ -1016,14 +1031,15 @@ OUT 0 out f32 1
   LOOP  2 [] Block  1
     TREE 6    [] Block  Input     f32     1
       0    0 [                ]  0  1 Block    Input     f32     1 noteParam(gate@0)
+  LOOP  3 [] Block  1
     TREE 8    [] Block  Input     f32     1
       0    1 [                ]  0  1 Block    Input     f32     1 noteParam(amp@1)
 -- AUDIO
 GRAPH 0
-  LOOP  4 [3] Audio  8
+  LOOP  5 [4] Audio  8
     TREE 11   [10*] Audio  Temp      f32   4x2
       0   27 [                ]  0  1 Audio    Temp      f32   4x2 voicer
-  LOOP  5 [4] Audio  1
+  LOOP  6 [5] Audio  1
     TREE 12   [11*] Audio  SeparateLoop f32     1
       0   29 [27              ]  1  1 Audio    SeparateLoop f32     1 reduce(+, 1)
     TREE 13   [12] Audio  Sink      f32     1
@@ -1046,7 +1062,7 @@ GRAPH 1
       0   19 [18 18           ]  2  1 Audio    None      f32     1 *
       1   20 [19 18           ]  2  1 Audio    None      f32     1 *
       2   21 [20 0            ]  2  1 Audio    Broadcast f32     1 *
-  LOOP  3 [1 2] Audio  2
+  LOOP  4 [1 3] Audio  2
     TREE 9    [4 7 8] Audio  Temp      f32     2
       0    3 [                ]  0  1 Const    None      f32     2 {1.0f, 1.0f}
       1    4 [3 2             ]  2  1 Audio    None      f32     2 *
@@ -1199,22 +1215,24 @@ OUT 0 out f32 1
   LOOP  2 [] Block  1
     TREE 3    [] Block  Input     f32     1
       0    1 [                ]  0  1 Block    Input     f32     1 noteParam(freq@1)
-    TREE 15   [] Block  Input     f32     1
-      0    0 [                ]  0  1 Block    Input     f32     1 noteParam(gate@0)
-    TREE 16   [] Block  Input     f32     1
-      0    2 [                ]  0  1 Block    Input     f32     1 noteParam(amp@2)
   LOOP  4 [2 3] Block  7
     TREE 6    [3 5] Block  Rate      f64     7
       0    3 [                ]  0  1 Const    None      f32     7 {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 8.0f}
       1    5 [1 3             ]  2  1 Block    None      f32     7 *
       2    9 [5               ]  1  1 Block    None      f64     7 cast_f64
       3   12 [9 11            ]  2  1 Block    Rate      f64     7 *
+  LOOP  6 [] Block  1
+    TREE 15   [] Block  Input     f32     1
+      0    0 [                ]  0  1 Block    Input     f32     1 noteParam(gate@0)
+  LOOP  7 [] Block  1
+    TREE 16   [] Block  Input     f32     1
+      0    2 [                ]  0  1 Block    Input     f32     1 noteParam(amp@2)
 -- AUDIO
 GRAPH 0
-  LOOP  6 [5] Audio  8
+  LOOP  8 [5] Audio  8
     TREE 19   [18*] Audio  Temp      f32     8
       0   46 [                ]  0  1 Audio    Temp      f32     8 voicer
-  LOOP  7 [6] Audio  1
+  LOOP  9 [8] Audio  1
     TREE 20   [19*] Audio  SeparateLoop f32     1
       0   48 [46              ]  1  1 Audio    SeparateLoop f32     1 reduce(+, 1)
     TREE 21   [20] Audio  Sink      f32     1
@@ -1236,7 +1254,7 @@ GRAPH 1
       3   21 [20              ]  1  1 Audio    None      f32     7 sinpi
       4    4 [                ]  0  1 Const    None      f32     7 {1.0f, 0.7f, 0.5f, 0.4f, 0.25f, 0.2f, 0.15f}
       5   22 [21 4            ]  2  1 Audio    Temp      f32     7 *
-  LOOP  5 [0 2 3] Audio  1
+  LOOP  5 [0 3 6 7] Audio  1
     TREE 10   [9] Audio  FanOut    f64     1
       0   33 [                ]  0  1 Const    None      f64     1 1.0
       1   31 [                ]  0  1 Audio    None      f64     1 delay_fix_read(1)
@@ -1358,22 +1376,24 @@ OUT 0 out f32 1
       0   10 [                ]  0  1 Const    None      f32     1 20.0f
       1   11 [1 10            ]  2  1 Block    None      f32     1 max
       2   12 [3 11            ]  2  1 Block    Rate      f32     1 /
+  LOOP  3 [] Block  1
     TREE 6    [] Block  Input     f32     1
       0    0 [                ]  0  1 Block    Input     f32     1 noteParam(gate@0)
+  LOOP  4 [] Block  1
     TREE 8    [] Block  Input     f32     1
       0    2 [                ]  0  1 Block    Input     f32     1 noteParam(amp@2)
 -- AUDIO
 GRAPH 0
-  LOOP  3 [2] Audio  4
+  LOOP  5 [2] Audio  4
     TREE 11   [10*] Audio  Temp      f32     4
       0   22 [                ]  0  1 Audio    Temp      f32     4 voicer
-  LOOP  4 [3] Audio  1
+  LOOP  6 [5] Audio  1
     TREE 12   [11*] Audio  SeparateLoop f32     1
       0   24 [22              ]  1  1 Audio    SeparateLoop f32     1 reduce(+, 1)
     TREE 13   [12] Audio  Sink      f32     1
       0   25 [24              ]  1  0 Audio    Sink      f32     1 outlet
 GRAPH 1
-  LOOP  2 [1] Audio  1
+  LOOP  2 [1 3 4] Audio  1
     TREE 4    [3] Audio  FanOut    f32     1
       0   13 [12              ]  1  2 Audio    FanOut    f32     1 delay_var_read
     TREE 7    [6 4] Audio  Sink      f32     1
@@ -1572,11 +1592,10 @@ OUT 0 out f32 1
   LOOP  2 [] Block  1
     TREE 6    [] Block  Input     f32     1
       0    0 [                ]  0  1 Block    Input     f32     1 noteParam(gate@0)
+  LOOP  4 [] Block  1
     TREE 11   [] Block  Input     f32     1
       0    1 [                ]  0  1 Block    Input     f32     1 noteParam(freq@1)
-    TREE 19   [] Block  Input     f32     1
-      0    2 [                ]  0  1 Block    Input     f32     1 noteParam(amp@2)
-  LOOP  4 [0 2 3] Block  6
+  LOOP  5 [0 3 4] Block  6
     TREE 12   [10 11 1] Block  Rate      f32     6
       0    3 [                ]  0  1 Const    None      f32     6 {0.5f, 1.0f, 2.0f, 2.76f, 5.4f, 8.93f}
       1   25 [1 3             ]  2  1 Block    None      f32     6 *
@@ -1585,12 +1604,15 @@ OUT 0 out f32 1
       4   40 [38 7            ]  2  1 Block    None      f32     6 *
       5   41 [40              ]  1  1 Block    None      f32     6 cos
       6   48 [47 41           ]  2  1 Block    Rate      f32     6 *
+  LOOP  8 [] Block  1
+    TREE 19   [] Block  Input     f32     1
+      0    2 [                ]  0  1 Block    Input     f32     1 noteParam(amp@2)
 -- AUDIO
 GRAPH 0
-  LOOP  7 [6] Audio  4
+  LOOP  9 [7] Audio  4
     TREE 22   [21*] Audio  Temp      f32     4
       0   69 [                ]  0  1 Audio    Temp      f32     4 voicer
-  LOOP  8 [7] Audio  1
+  LOOP 10 [9] Audio  1
     TREE 23   [22*] Audio  SeparateLoop f32     1
       0   71 [69              ]  1  1 Audio    SeparateLoop f32     1 reduce(+, 1)
     TREE 24   [23] Audio  Sink      f32     1
@@ -1620,7 +1642,7 @@ GRAPH 1
       1   52 [                ]  0  1 Audio    None      f32     1 delay_fix_read(2)
       2   53 [24 52           ]  2  1 Audio    None      f32     1 -
       3   55 [54 53           ]  2  1 Audio    Broadcast f32     1 *
-  LOOP  5 [1 3 4] Audio  6
+  LOOP  6 [1 3 5] Audio  6
     TREE 15   [9 12 14] Audio  FanOut    f32     6
       0   56 [                ]  0  1 Audio    None      f32     6 delay_fix_read(1)
       1   57 [48 56           ]  2  1 Audio    None      f32     6 *
@@ -1633,7 +1655,7 @@ GRAPH 1
     TREE 17   [15] Audio  Temp      f32     6
       0    4 [                ]  0  1 Const    None      f32     6 {0.5f, 1.0f, 0.6f, 0.4f, 0.25f, 0.15f}
       1   63 [61 4            ]  2  1 Audio    Temp      f32     6 *
-  LOOP  6 [2 5] Audio  1
+  LOOP  7 [6 8] Audio  1
     TREE 18   [17*] Audio  SeparateLoop f32     1
       0   64 [63              ]  1  1 Audio    SeparateLoop f32     1 reduce(+, 1)
     TREE 20   [18 19] Audio  Temp      f32     1
@@ -1701,20 +1723,21 @@ OUT 0 out f32 1
   LOOP  0 [] Block  1
     TREE 1    [] Block  Input     f32     1
       0    2 [                ]  0  1 Block    Input     f32     1 noteParam(gate@0)
+  LOOP  1 [] Block  1
     TREE 2    [] Block  Input     f32     1
       0    1 [                ]  0  1 Block    Input     f32     1 noteParam(amp@2)
 -- AUDIO
 GRAPH 0
-  LOOP  2 [1] Audio  8
+  LOOP  3 [2] Audio  8
     TREE 5    [4*] Audio  Temp      f32     8
       0    9 [                ]  0  1 Audio    Temp      f32     8 voicer
-  LOOP  3 [2] Audio  1
+  LOOP  4 [3] Audio  1
     TREE 6    [5*] Audio  SeparateLoop f32     1
       0   11 [9               ]  1  1 Audio    SeparateLoop f32     1 reduce(+, 1)
     TREE 7    [6] Audio  Sink      f32     1
       0   12 [11              ]  1  0 Audio    Sink      f32     1 outlet
 GRAPH 1
-  LOOP  1 [0] Audio  1
+  LOOP  2 [0 1] Audio  1
     TREE 3    [1 2] Audio  Temp      f32     1
       0    3 [                ]  0  1 Audio    None      f32     1 birand
       1    4 [3 2             ]  2  1 Audio    None      f32     1 *

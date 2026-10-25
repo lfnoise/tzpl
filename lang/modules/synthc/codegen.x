@@ -1625,7 +1625,8 @@ fn _genVoicer(ctx Ctx, root NIdx, mv Int) String {
 	var `cgVoiceCount Int = mv;
 	var `cgVoiceGraph Int = bg;
 	var `cgVoiceChans Int = ctx.chans[ctx.ins[ctx.subs[root][0]][0]];
-	_tabs(`cgIndent) $ genLoops(ctx, ctx.graphs[bg].audioLoops) $ ctx genDelayAdvance(bg)
+	ctx genVoiceBlockLoops(bg) $ _tabs(`cgIndent) $ genLoops(ctx, ctx.graphs[bg].audioLoops)
+		$ ctx genDelayAdvance(bg)
 }
 
 ---------------------------------------------------------------------------
@@ -2982,6 +2983,7 @@ fn genInitFun(ctx Ctx, name String) String {
 	for (li : ctx.resetLoops) {
 		if (ctx _isVoiceGraph(_loopRootGraph(ctx, li))) { s = s $ genLoop(ctx, li); }
 	}
+	s = s $ ctx genParamGroupInit;
 	s = s $ "\treturn tzpl_errNone;\n}\n\n";
 	s
 }
@@ -3003,6 +3005,8 @@ fn genVoicerNoteFuns(ctx Ctx, name String) String {
 	s = s $ "tzpl_SErr %^_resetVoice(%^* p, i32 vi, i32 off) {\n" fmt(name, name);
 	s = s $ "\tif (vi < 0 || vi >= %^) return tzpl_errNoteNotFound;\n" fmt(ctx _voicerMaxVoices(v));
 	s = s $ "\t%^_gather(p, off);\n" fmt(name);
+	-- The voice's parameter-group values are recomputed for the new note.
+	if (ctx _pgActive) { s = s $ "\tp->pg_vforce[vi] = 1;\n"; }
 	if (!`cgFlatVoice) {
 		-- AoS: per-field reset (p->voice_state[vi]. members), preserving
 		-- init-rate state. Mirrors the C++ genNoteFuns AoS branch.
@@ -3428,13 +3432,193 @@ fn genGatherFun(ctx Ctx, name String) String {
 	s $ "}\n\n"
 }
 
+
+---------------------------------------------------------------------------
+-- Parameter groups (block-engine M6, plan 4.5). Block-placed loops hold one
+-- group each and run only when the group's sources change. At the top of
+-- process, each source input channel is classified against the version
+-- cached from the last call: 0 = constant and unchanged, 1 = constant but a
+-- new value (a step), 2 = not constant this block. A group's mode is the
+-- largest over its sources (per voice for groups fed by `notes` columns):
+-- 0 keeps the cached values, 1 computes once at the first sample, 2 computes
+-- every sample. A non-constant channel caches an invalid version, so the
+-- group recomputes once when it settles.
+
+fn _pgLoops(ctx Ctx, g Int) [Int] {
+	var out [Int] = [];
+	for (li : ctx.blockLoops) { if (_loopRootGraph(ctx, li) == g) { out push!(li); } }
+	out
+}
+
+fn _pgInlet(ctx Ctx, sn Int) NIdx {
+	for (x : ctx.inlets) { match (ctx.kind[x]) { inletK(_, s2, _): { if (s2 == sn) { return x; } } _: {} } }
+	NONE
+}
+
+-- The `notes` input's port serial, or -1 without a voicer (cgNotesSn
+-- defaults to 0, a real input's serial).
+fn _pgNotesSn(ctx Ctx) Int = ctx.notesInlets length > 0 ? `cgNotesSn : -1;
+
+-- The input port serials whose versions the groups watch (not `notes`).
+fn _pgInputs(ctx Ctx) [Int] {
+	let ns = ctx _pgNotesSn;
+	var out [Int] = [];
+	for (pg : ctx.paramGroups) {
+		for (sn : pg.inputs) { if (sn != ns && !(out contains(sn))) { out push!(sn); } }
+	}
+	out
+}
+
+fn _pgUsesNotes(ctx Ctx) Bool {
+	for (pg : ctx.paramGroups) { if (pg.noteCols length > 0) { return true; } }
+	false
+}
+
+fn _pgVoices(ctx Ctx) Int {
+	let vs = ctx _voicerNodes;
+	vs length > 0 ? ctx _voicerMaxVoices(vs[0]) : 0
+}
+
+fn _pgActive(ctx Ctx) Bool = ctx.blockLoops length > 0;
+
+fn genParamGroupDecls(ctx Ctx) String {
+	if (!(ctx _pgActive)) { return ""; }
+	var s = "\t// parameter groups: cached source versions\n";
+	for (sn : ctx _pgInputs) {
+		s = s $ "\tu32 pgv%^[%^];\n" fmt(sn, ctx.chans[ctx _pgInlet(sn)]);
+	}
+	if (ctx _pgUsesNotes) {
+		s = s $ "\tu32 pgv%^[%^];\n" fmt(`cgNotesSn, ctx.chans[ctx _pgInlet(`cgNotesSn)]);
+	}
+	s = s $ "\tu8 pg_first;\n";
+	let mv = ctx _pgVoices;
+	if (mv > 0) { s = s $ "\tu8 pg_vforce[%^];\n" fmt(mv); }
+	s $ "\n"
+}
+
+-- In init: every cached version invalid and every group due once.
+fn genParamGroupInit(ctx Ctx) String {
+	if (!(ctx _pgActive)) { return ""; }
+	var s = "";
+	for (sn : ctx _pgInputs) { s = s $ "\tmemset(p->pgv%^, 0xff, sizeof(p->pgv%^));\n" fmt(sn, sn); }
+	if (ctx _pgUsesNotes) {
+		s = s $ "\tmemset(p->pgv%^, 0xff, sizeof(p->pgv%^));\n" fmt(`cgNotesSn, `cgNotesSn);
+	}
+	s = s $ "\tp->pg_first = 1;\n";
+	if (ctx _pgVoices > 0) { s = s $ "\tmemset(p->pg_vforce, 1, sizeof(p->pg_vforce));\n"; }
+	s
+}
+
+-- Classify one input's channels (into a per-input u8, or with `perChan` a
+-- per-channel array) and refresh the cache.
+fn _pgClassify(ctx Ctx, sn Int, chans Int, perChan Bool) String {
+	var s = "";
+	if (perChan) { s = s $ "\tu8 pgd%^[%^];\n" fmt(sn, chans); } else { s = s $ "\tu8 pgd%^ = 0;\n" fmt(sn); }
+	s = s $ "\tfor (int c = 0; c < %^; ++c) {\n" fmt(chans);
+	s = s $ "\t\tbool k = p->ins[%^].isConst[c];\n" fmt(sn);
+	s = s $ "\t\tu32 v = p->ins[%^].version[c];\n" fmt(sn);
+	s = s $ "\t\tu8 d = !k ? 2 : (v != p->pgv%^[c] ? 1 : 0);\n" fmt(sn);
+	if (perChan) { s = s $ "\t\tpgd%^[c] = d;\n" fmt(sn); } else { s = s $ "\t\tif (d > pgd%^) pgd%^ = d;\n" fmt(sn, sn); }
+	s = s $ "\t\tp->pgv%^[c] = k ? v : 0xffffffffu;\n" fmt(sn);
+	s $ "\t}\n"
+}
+
+-- The top of process: classify the sources, then each group's mode.
+fn genParamGroupModes(ctx Ctx) String {
+	if (!(ctx _pgActive)) { return ""; }
+	var s = "\t// parameter groups: 0 cached, 1 compute once, 2 every sample\n";
+	for (sn : ctx _pgInputs) { s = s $ ctx _pgClassify(sn, ctx.chans[ctx _pgInlet(sn)], false); }
+	if (ctx _pgUsesNotes) {
+		s = s $ ctx _pgClassify(`cgNotesSn, ctx.chans[ctx _pgInlet(`cgNotesSn)], true);
+	}
+	let mv = ctx _pgVoices;
+	var g = 0;
+	while (g < ctx.paramGroups length) {
+		let pg = ctx.paramGroups[g];
+		var terms = ["p->pg_first"];
+		for (sn : pg.inputs) { if (sn != ctx _pgNotesSn) { terms push!("pgd%^" fmt(sn)); } }
+		if (_pgGroupIsVoiced(ctx, g) && mv > 0) {
+			terms push!("p->pg_vforce[v]");
+			s = s $ "\tu8 pg%^[%^];\n\tu8 pg%^_any = 0;\n" fmt(g, mv, g);
+			s = s $ "\tfor (int v = 0; v < %^; ++v) {\n" fmt(mv);
+			s = s $ "\t\tu8 m = std::max<u8>({%^});\n" fmt(terms join(", "));
+			for (c : pg.noteCols) {
+				s = s $ "\t\tm = std::max(m, pgd%^[v * %^ + %^]);\n" fmt(`cgNotesSn, `cgNotesCols, c);
+			}
+			s = s $ "\t\tpg%^[v] = m;\n" fmt(g);
+			s = s $ "\t\tif (m > pg%^_any) pg%^_any = m;\n\t}\n" fmt(g, g);
+		} else {
+			s = s $ "\tu8 pg%^ = std::max<u8>({%^});\n" fmt(g, terms join(", "));
+		}
+		g = g + 1;
+	}
+	s
+}
+
+-- A group whose nodes live in the voice body runs per voice.
+fn _pgGroupIsVoiced(ctx Ctx, g Int) Bool {
+	let nodes = ctx.paramGroups[g].nodes;
+	nodes length > 0 && ctx _isVoiceGraph(ctx.graphOf[nodes[0]])
+}
+
+fn _pgDue(m String) String = "(%^ == 2 || (%^ == 1 && bi == off))" fmt(m, m);
+
+-- The root graph's block loops, each guarded by its group's mode.
+fn genRootBlockLoops(ctx Ctx) String {
+	var s = "";
+	for (li : ctx _pgLoops(0)) { s = s $ ctx _guardedRootLoop(li); }
+	s
+}
+
+-- A loop of only input trees (the gathered ports themselves) emits nothing.
+fn _pgLoopCode(ctx Ctx, li Int) String {
+	let code = genLoop(ctx, li);
+	var body = false;
+	for (t : ctx.loops[li].trees) {
+		match (ctx.kind[ctx.trees[t].root]) { inletK(_, _, _): {} _: { body = true; } }
+	}
+	body ? code : ""
+}
+
+fn _guardedRootLoop(ctx Ctx, li Int) String {
+	let g = ctx.loops[li].group;
+	let head = _tabs(`cgIndent) $ "if %^ {\n" fmt(_pgDue("pg%^" fmt(g)));
+	var `cgIndent Int = `cgIndent + 1;
+	let code = ctx _pgLoopCode(li);
+	if (code length == 0) { return ""; }
+	head $ code $ _tabs(`cgIndent - 1) $ "}\n"
+}
+
+-- A flat voice body's block loops: per voice, for the voices whose group is
+-- due (single-voice loop forms, voice `vi`).
+fn genVoiceBlockLoops(ctx Ctx, bg Int) String {
+	var s = "";
+	for (li : ctx _pgLoops(bg)) { s = s $ ctx _guardedVoiceLoop(li); }
+	s
+}
+
+fn _guardedVoiceLoop(ctx Ctx, li Int) String {
+	let g = ctx.loops[li].group;
+	-- Skip the whole voice scan when no voice's group is due.
+	let head = _tabs(`cgIndent) $ "if %^\n" fmt(_pgDue("pg%^_any" fmt(g)))
+		$ _tabs(`cgIndent) $ "for (int vi = 0; vi < %^; ++vi) {\n" fmt(`cgVoiceCount);
+	var `cgIndent Int = `cgIndent + 1;
+	var `cgSingleVoice Bool = true;
+	let code = ctx _pgLoopCode(li);
+	if (code length == 0) { return ""; }
+	head $ _tabs(`cgIndent) $ "if (!%^) continue;\n" fmt(_pgDue("pg%^[vi]" fmt(g)))
+		$ code $ _tabs(`cgIndent - 1) $ "}\n"
+}
+
 -- process(p, off, n): the per-sample body once per sample of [off, off+n).
 fn genTickFun(ctx Ctx, name String) String {
 	var s = "void %^_process(%^* p, i32 off, i32 n) {\n" fmt(name, name);
+	s = s $ ctx genParamGroupModes;
 	s = s $ "\tfor (i32 bi = off; bi < off + n; ++bi) {\n";
 	s = s $ "\t%^_gather(p, bi);\n" fmt(name);
-	-- Root graph's audio loops; subgraph loops are emitted inside their
-	-- control-flow blocks.
+	-- Root graph's block loops (parameter groups), then its audio loops;
+	-- subgraph loops are emitted inside their control-flow blocks.
+	s = s $ ctx genRootBlockLoops;
 	s = s $ genLoops(ctx, ctx.graphs[0].audioLoops);
 	s = s $ genDelayAdvance(ctx, 0);
 	for (n : ctx.outlets) {
@@ -3447,7 +3631,12 @@ fn genTickFun(ctx Ctx, name String) String {
 			_: {}
 		}
 	}
-	s = s $ "\t}\n}\n\n";
+	s = s $ "\t}\n";
+	if (ctx _pgActive) {
+		s = s $ "\tp->pg_first = 0;\n";
+		if (ctx _pgVoices > 0) { s = s $ "\tmemset(p->pg_vforce, 0, sizeof(p->pg_vforce));\n"; }
+	}
+	s = s $ "}\n\n";
 	s
 }
 
@@ -3856,6 +4045,7 @@ fn genCpp(ctx Ctx, name String, simdWidth Int = 0) String {
 	s = s $ "\tdouble fs, sd; // sample rate, sample dur\n\n";
 	s = s $ genDeclConstVars(ctx);
 	s = s $ genDeclInstVars(ctx);
+	s = s $ ctx genParamGroupDecls;
 	s = s $ "} %^;\n\n" fmt(name);
 	s = s $ genAllocFun(ctx, name);
 	s = s $ genFreeFun(ctx, name);

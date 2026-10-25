@@ -405,6 +405,8 @@ struct ParamGroup {
 	sources [String],      -- input names / note columns, sorted
 	nodes [NIdx],          -- in sorted order
 	perVoice Bool,         -- fed by note parameters: runs per voice
+	inputs [Int],          -- the source inputs' port serials (not `notes`)
+	noteCols [Int],        -- the source `notes` columns
 }
 
 ---------------------------------------------------------------------------
@@ -427,6 +429,7 @@ struct Loop {
 	antecedents [Int],        -- loop serials
 	graphOf Int,              -- graph index this loop runs in (0 = root)
 	serial Int,
+	group Int,                -- block loops: the parameter group, else NONE
 }
 
 -- A graph: the root (index 0) plus one per control-flow branch/body subgraph

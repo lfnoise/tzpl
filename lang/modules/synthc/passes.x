@@ -1090,15 +1090,20 @@ fn _intListHas(lst [Int], x Int) Bool {
 	false
 }
 
-fn _newLoop(ctx Ctx, rate Rate, chans Int, isCF Bool, graphOf Int) Int {
+fn _newLoop(ctx Ctx, rate Rate, chans Int, isCF Bool, graphOf Int, group Int = NONE) Int {
 	let li = ctx.loops length;
 	ctx.loops push!(Loop {
 		trees: [Int](), rate: rate, chans: chans,
 		isControlFlow: isCF, antecedents: [Int](),
-		graphOf: graphOf, serial: li,
+		graphOf: graphOf, serial: li, group: group,
 	});
 	li
 }
+
+-- The parameter group a tree's loop must belong to: a block tree's root's
+-- group (a block loop runs, or is skipped, as one group), else NONE.
+fn _treeGroup(ctx Ctx, root NIdx) Int =
+	(ctx.nrate[root] == Rate.block && ctx.groupOf length > root) ? ctx.groupOf[root] : NONE;
 
 fn _loopAddTree(ctx Ctx, li Int, treeIdx Int) Void {
 	ctx.loops[li].trees push!(treeIdx);
@@ -1158,11 +1163,12 @@ fn treesToLoops(ctx Ctx) Void {
 		let rate = ctx.nrate[root];
 		let chans = ctx.chans[root];
 		let go = ctx.graphOf[root];
+		let grp = ctx _treeGroup(root);
 		if (ctx.kind[root] isControlFlowKind) {
-			let li = _newLoop(ctx, rate, chans, true, go);
+			let li = _newLoop(ctx, rate, chans, true, go, grp);
 			_loopAddTree(ctx, li, treeIdx);
 		} else if (outputMustBeSeparateLoop(ctx.kind[root])) {
-			let li = _newLoop(ctx, rate, chans, false, go);
+			let li = _newLoop(ctx, rate, chans, false, go, grp);
 			_loopAddTree(ctx, li, treeIdx);
 		} else {
 			var placed = false;
@@ -1170,7 +1176,7 @@ fn treesToLoops(ctx Ctx) Void {
 			while (li < ctx.loops length && !placed) {
 				let lp = ctx.loops[li];
 				if (!lp.isControlFlow && lp.rate == rate && lp.chans == chans
-					&& lp.graphOf == go) {
+					&& lp.graphOf == go && lp.group == grp) {
 					if (_canAccessAllAntecedents(ctx, li, treeIdx)
 						&& _hasNoSeparateLoopConstraints(ctx, li, treeIdx)) {
 						_loopAddTree(ctx, li, treeIdx);
@@ -1180,7 +1186,7 @@ fn treesToLoops(ctx Ctx) Void {
 				li = li + 1;
 			}
 			if (!placed) {
-				let nl = _newLoop(ctx, rate, chans, false, go);
+				let nl = _newLoop(ctx, rate, chans, false, go, grp);
 				_loopAddTree(ctx, nl, treeIdx);
 			}
 		}
@@ -1271,10 +1277,21 @@ fn addDelayOrdering(ctx Ctx) Void {
 	}
 }
 
--- The pipeline the serial code generator runs on.
+-- The pipeline the serial code generator runs on. Block placement survives
+-- where parameter groups run (restrictBlockRate, paramgroups.x); the
+-- groups are found before loops form, since a block loop holds one group.
 fn analyzeForCodegen(ctx Ctx) Ctx {
-	ctx demoteBlockRate;
-	ctx analyzeTypes;
+	ctx mergeDelays;
+	ctx topologicalSortExprs;
+	ctx collectConsumers;
+	ctx calcDelayLengths;
+	ctx shapeInference;
+	ctx typeInferenceWithWidening;
+	ctx setNonConcreteTypesToDefault;
+	ctx restrictBlockRate;
+	ctx findGraphCuts;
+	ctx blockValuesToInstVars;
+	ctx findParamGroups;
 	ctx cutGraphToTrees;
 	ctx removeDeadCode;
 	ctx inplaceDelayOps;

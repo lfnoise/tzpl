@@ -2804,7 +2804,8 @@ GRAPH 2
     TREE 13   [12] Audio  Phi       f32     1
       0   41 [40              ]  1  0 Audio    Phi       f32     1 PhiNode
 -- PARAMETER GROUPS
-GROUP 0 sources [amp] nodes [0 30 32]
+GROUP 0 sources [amp] nodes [0]
+GROUP 1 sources [amp] nodes [30 32]
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [3 9 10 11] delays [3<-11:1]
 DELAY 0 f64 1
@@ -2921,8 +2922,6 @@ OUT 0 out f32 1
   LOOP  3 [] Block  1
     TREE 7    [] Block  Input     f32     1
       0    0 [                ]  0  2 Block    Input     f32     1 control(a)
-    TREE 12   [] Block  Input     f32     1
-      0    1 [                ]  0  2 Block    Input     f32     1 control(b)
   LOOP  4 [3] Block  1
     TREE 8    [7] Block  Rate      f32     1
       0   24 [                ]  0  3 Const    None      f32     1 0.6f
@@ -2930,7 +2929,10 @@ OUT 0 out f32 1
     TREE 9    [7] Block  Rate      f32     1
       0   26 [                ]  0  3 Const    None      f32     1 -0.3f
       1   33 [0 26            ]  2  1 Block    Rate      f32     1 *
-  LOOP  6 [3] Block  1
+  LOOP  6 [] Block  1
+    TREE 12   [] Block  Input     f32     1
+      0    1 [                ]  0  2 Block    Input     f32     1 control(b)
+  LOOP  7 [6] Block  1
     TREE 13   [12] Block  Rate      f32     1
       0   24 [                ]  0  3 Const    None      f32     1 0.6f
       1   37 [1 24            ]  2  1 Block    Rate      f32     1 *
@@ -2950,7 +2952,7 @@ GRAPH 0
       2   13 [12              ]  1  0 Audio    Sink      f64     1 delay_write
     TREE 6    [1] Audio  Graph     f32     1
       0   15 [4               ]  1  3 Audio    Graph     f32     1 cast_f32
-  LOOP  8 [0 5 7] Audio  1
+  LOOP  9 [0 5 8] Audio  1
     TREE 17   [6 11* 16*] Audio  ControlFlow f32     1
       0   24 [                ]  0  3 Const    None      f32     1 0.6f
       1   25 [24 15           ]  2  1 Audio    None      f32     1 *
@@ -2959,7 +2961,7 @@ GRAPH 0
       4   28 [                ]  0  1 Const    None      f32     1 0.0f
       5   29 [27 28           ]  2  1 Audio    None      i32     1 >
       6   42 [29              ]  1  1 Audio    ControlFlow f32     1 if_else
-  LOOP  9 [8] Audio  1
+  LOOP 10 [9] Audio  1
     TREE 18   [17] Audio  Sink      f32     1
       0   43 [42              ]  1  0 Audio    Sink      f32     1 outlet
 GRAPH 1
@@ -2970,15 +2972,17 @@ GRAPH 1
     TREE 11   [10] Audio  Phi       f32     1
       0   35 [34              ]  1  0 Audio    Phi       f32     1 PhiNode
 GRAPH 2
-  LOOP  7 [0 6] Audio  1
+  LOOP  8 [0 7] Audio  1
     TREE 15   [13 6 14] Audio  Temp      f32     1
       0   38 [37 15           ]  2  1 Audio    None      f32     1 *
       1   40 [38 39           ]  2  1 Audio    Temp      f32     1 +
     TREE 16   [15] Audio  Phi       f32     1
       0   41 [40              ]  1  0 Audio    Phi       f32     1 PhiNode
 -- PARAMETER GROUPS
-GROUP 0 sources [a] nodes [0 31 33]
-GROUP 1 sources [b] nodes [1 37 39]
+GROUP 0 sources [a] nodes [0]
+GROUP 1 sources [a] nodes [31 33]
+GROUP 2 sources [b] nodes [1]
+GROUP 3 sources [b] nodes [37 39]
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [4 10 11 12] delays [4<-12:1]
 DELAY 0 f64 1

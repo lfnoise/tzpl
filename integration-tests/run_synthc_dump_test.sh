@@ -19,7 +19,10 @@ for x in "$DIR"/*.x; do
     exp="$DIR/$name.expected"
     # Some graphs draw language random numbers while they are built (e.g.
     # effects' delay times): seed them so the dumps are stable.
-    out="$(TZPL_LANG_SEED=0x7a91 "$APP" --nogui --no-audio "${MODS[@]}" "$x" 2>&1)" || true
+    # Linux runners print realtime-setup warnings (mlockall, thread
+    # priority) to stderr; they are not part of the dump.
+    out="$(TZPL_LANG_SEED=0x7a91 "$APP" --nogui --no-audio "${MODS[@]}" "$x" 2>&1 \
+           | grep -v -e '^mlockall failed' -e '^Failed to change thread priority')" || true
     if [ "$UPDATE" = 1 ]; then
         printf '%s\n' "$out" > "$exp"
         echo "updated $name"
