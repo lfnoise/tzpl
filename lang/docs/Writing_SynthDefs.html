@@ -1499,7 +1499,7 @@ noteOff(<span class="hl-num">100</span>, <span class="hl-num">1</span>);</code><
                 <tr><td><code>asr(gate, a, s, r)</code></td><td>Attack-sustain-release envelope driven by a gate: exponential attack over <code>a</code> seconds toward sustain level <code>s</code>; exponential release over <code>r</code> seconds when the gate falls. (A segment time is the time to close 99% of the distance to its goal; see <code>decay40dB</code>.)</td></tr>
                 <tr><td><code>adsr(gate, a, d, s, r)</code></td><td>Attack-decay-sustain-release: full-scale attack over <code>a</code> seconds, decay to sustain <code>s</code> over <code>d</code> seconds, release over <code>r</code> seconds on gate-off.</td></tr>
                 <tr><td><code>lag(x, t)</code> / <code>lag2</code> / <code>lag3</code></td><td>Exponential smoothing toward <code>x</code> with time constant <code>t</code> seconds (one, two, or three cascaded stages &mdash; higher orders are smoother). The standard control de-zipper.</td></tr>
-                <tr><td><code>lag(x, u, d)</code> / <code>lag2(x, u, d)</code> / <code>lag3(x, u, d)</code></td><td>Lag with separate up/down time constants &mdash; envelope followers, attack/release ballistics.</td></tr>
+                <tr><td><code>lag(x, u, d)</code> / <code>lag2(x, u, d)</code> / <code>lag3(x, u, d)</code></td><td>Lag with separate time constants in seconds: <code>u</code> while the input rises, <code>d</code> while it falls &mdash; envelope followers, attack/release ballistics.</td></tr>
                 <tr><td><code>onepole(x, a)</code></td><td>One-pole lowpass with raw coefficient <code>a</code> (0..1; higher = slower).</td></tr>
                 <tr><td><code>onezero(x, a)</code></td><td>One-zero filter <code>x + a&middot;(z1(x) - x)</code>.</td></tr>
                 <tr><td><code>leaky(x, a)</code></td><td>Leaky integrator <code>y = x + a&middot;y(1)</code>.</td></tr>
@@ -1545,7 +1545,7 @@ linen(gate(), <span class="hl-num">0.05</span>, <span class="hl-num">0.5</span>)
                 <tr><td><code>izigzag(x)</code> / <code>ozigzag(x)</code></td><td>Zigzag shapes moving inward / outward (after the Intellijel Rubicon).</td></tr>
                 <tr><td><code>bbtri(x)</code></td><td>Bipolar ramp &rarr; bipolar triangle.</td></tr>
                 <tr><td><code>par(x)</code></td><td>Unipolar ramp &rarr; parabola.</td></tr>
-                <tr><td><code>vartri(x, pwm)</code> / <code>varsaw(x, pwm)</code></td><td>Variable-symmetry triangle/saw: <code>pwm</code> morphs saw-up &harr; triangle &harr; saw-down.</td></tr>
+                <tr><td><code>vartri(x, pwm)</code> / <code>varsaw(x, pwm)</code></td><td>Variable-symmetry triangle/saw: <code>pwm</code> morphs saw-up &harr; triangle &harr; saw-down. <code>varsaw</code> is bipolar (&minus;1..1), <code>vartri</code> unipolar (0..1).</td></tr>
                 <tr><td><code>usquare(x)</code> / <code>bsquare(x)</code></td><td>50% square waves, unipolar / bipolar.</td></tr>
                 <tr><td>Windows: <code>han</code>, <code>ham</code>, <code>sinwin</code>, <code>sincwin</code>, <code>triwin</code>, <code>welwin</code>, <code>quadwin</code>, <code>octwin</code>, <code>trapezwin</code></td><td>Hanning, Hamming, sine (cosine), sinc, triangle, Welch, quartic, octic, and trapezoid windows over a 0..1 phase &mdash; grain envelopes, spectral windows.</td></tr>
             </table>

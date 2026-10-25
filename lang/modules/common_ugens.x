@@ -611,30 +611,31 @@ fn lag2(x S, t AsSignal) S {
 }
 fn lag3(x S, t AsSignal) S {
     let a = decay40dB(t/3 * fs());
-	x _lag(a) _lag(a)
+	x _lag(a) _lag(a) _lag(a)
 }
 
--- lag with different up and down time constants
+-- lag with different up and down time constants, in seconds: u while the
+-- input is above the output (rising), d otherwise
 fn _lag(x S, u AsSignal, d AsSignal) S {
 	let y = delayVar();
-	let a = select2(x < y(1), u, d);
+	let a = select2(x > y(1), u, d);
     y <- x + a * (y(1) - x)
 }
 
 fn lag(x S, u AsSignal, d AsSignal) S {
-	let u = u decay40dB;
-	let d = d decay40dB;
-	x _lag(u, d)
+	let cu = decay40dB(u * fs());
+	let cd = decay40dB(d * fs());
+	x _lag(cu, cd)
 }
 fn lag2(x S, u AsSignal, d AsSignal) S {
-	let u = decay40dB(u/2);
-	let d = decay40dB(d/2);
-	x _lag(u, d) _lag(u, d)
+	let cu = decay40dB(u/2 * fs());
+	let cd = decay40dB(d/2 * fs());
+	x _lag(cu, cd) _lag(cu, cd)
 }
 fn lag3(x S, u AsSignal, d AsSignal) S {
-	let u = decay40dB(u/3);
-	let d = decay40dB(d/3);
-	x _lag(u, d) _lag(u, d) _lag(u, d)
+	let cu = decay40dB(u/3 * fs());
+	let cd = decay40dB(d/3 * fs());
+	x _lag(cu, cd) _lag(cu, cd) _lag(cu, cd)
 }
 
  
@@ -1061,8 +1062,8 @@ fn bbtri(x) = abs(2 * x - 4 * x uni floor) - 1;
     -- variable triangle and saw
     -- an amplitude scaled difference of parabolas
 fn par(x) = x bi sq;   -- unipolar ramp to parabola
-fn vartri(x, pwm) = (0.25 / (pwm - sq(pwm))) * (par(x) - par(frac(x - pwm)));
-fn varsaw(x, pwm) = bi(vartri(x, pwm));
+fn varsaw(x, pwm) = (0.25 / (pwm - sq(pwm))) * (par(x) - par(frac(x - pwm)));  -- bipolar
+fn vartri(x, pwm) = uni(varsaw(x, pwm));  -- unipolar
 
 fn usquare(x) = x < 0.5;
 fn bsquare(x) = (x < 0.5) bi;

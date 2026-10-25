@@ -203,8 +203,7 @@ fn crossover(in S, freq AsSignal) (S, S) = (in lpf2(freq), in hpf2(freq));
 
 -- ringing filter
 fn ring(x S, freq AsSignal, ringTime AsSignal) S {
-	let K = kLog001 * T();
-	let R = 1 + K / ringTime;
+	let R = decay60dB(ringTime * fs());  -- exp(ln(0.001) / (ringTime fs))
 	let cs = freq hzw cos;
 	let a1 = 2 * R * cs;
 	let a2 = -(R sq);

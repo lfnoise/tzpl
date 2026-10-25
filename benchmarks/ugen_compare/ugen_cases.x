@@ -29,8 +29,6 @@ let k40of60 = 0.01 log / 0.001 log;    -- 2/3
 
 -- TU's n samples (60 dB) as our seconds (40 dB).
 fn secs(n Float) Float = n / kFs * k40of60;
--- ... and as our samples, for lag(x, u, d), which takes samples.
-fn samps(n Float) Float = n * k40of60;
 
 -- The bandwidth in octaves whose alpha equals the cookbook's sin(w0) / (2 Q).
 fn bwOfQ(fc Float, q Float) Float {
@@ -62,7 +60,7 @@ let filtNames = ["lag", "lag3", "lagud", "decay", "decay2", "leakdc", "leaky",
 let filtFns = [
 	fn(x S) S { x lag(secs(480.0)) },
 	fn(x S) S { x lag3(3.0 * secs(480.0)) },
-	fn(x S) S { x lag(scalar(samps(48.0)), scalar(samps(4800.0))) },
+	fn(x S) S { x lag(secs(48.0), secs(4800.0)) },
 	fn(x S) S { x decay(secs(4800.0)) },
 	fn(x S) S { x decay2(secs(48.0), secs(4800.0)) },
 	fn(x S) S { x leakdc(0.995) },
