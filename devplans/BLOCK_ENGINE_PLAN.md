@@ -452,6 +452,8 @@ test plugins (`tzpl_test_plugins.cpp`, rewritten for v3), covering:
   are each refused with `errCycle`, and the graph is left unchanged. Phase 2 (MF) adds
   these: a 2-node cycle with `feedbackMode=sample` must equal the old one-sample
   semantics, and `block` mode gives a one-block delay;
+- silo RT task wakeups at sample offsets within a block (`playNote` from a task lands
+  at the task's wake time), since the corpus can't render silo task scripts;
 - multi-silo mixdown; taps; the safety limiter; engine stop clearing state (keeping the
   regressions in [[engine-stop-clears-buffers]] and [[engine-stopped-mode-sorted-list-uaf]]
   fixed).
@@ -802,14 +804,38 @@ The full inventory is in the survey notes in §11.
 Each milestone ends green on its own tests, with a commit series on `block-engine`.
 `main` stays releasable throughout; the branch is merged once, at M10.
 
-**M0: Baseline and scaffolding**
-- Decide D1–D9.
-- Capture a **reference render corpus** from `main`: every `integration-tests/run_*`
-  render, the `examples/` demos, the effects and instruments libraries (one note or
-  impulse each), and the cookbook sound examples. These are NRT WAVs at 48 kHz, plus a
-  manifest of which ones are expected to change by design (inter-node feedback,
-  which is refused until MF; anything driven by `setControl` timing).
-- Script: `tools/block_engine/render_corpus.sh`.
+**M0: Baseline and scaffolding (done 2026-10-25)**
+- D1, D2, D7 and D10 are decided. The milestones assume the recommendations for the
+  rest.
+- **Reference render corpus** in `tools/block_engine/`:
+  - `corpus.tsv` lists 118 entries, about 74 minutes of audio:
+    - integration-test renders;
+    - the music libraries and `music_fx_demos.x`;
+    - 29 `example_synthdefs.x` defs, and `instrumentTest.x`;
+    - all 27 `effects.x` effects, each on a test source;
+    - the 12 SC2 conversion files (about 140 examples).
+  - Each entry is marked `same` or `change`.
+  - `render_corpus.py` renders it with fixed engine flags (48 kHz, `--buffer-frames 64`,
+    stereo, 4 silos), seeded synth and language RNGs (`TZPL_RNG_SEED`,
+    `TZPL_LANG_SEED`), and a private plugin build directory per worker.
+    - It writes the WAVs and a `manifest.tsv` (peak, RMS, non-finite count, SHA-256)
+      to `~/tzpl-build/block_engine_corpus/<dir>`, outside git.
+    - `--buffer-frames 64` makes NRT's quantization of immediate commands to buffer
+      boundaries match the future block size.
+  - `compare_corpus.py` compares two renders, by tolerance or byte-exact
+    (`--exact`). Two full renders from the same commit are byte-identical.
+  - Two fixes on the branch made this possible:
+    - **`TZPL_LANG_SEED`** in `lang/src/vm.cpp`. Scripts draw language random
+      numbers while building graphs, e.g. `apverb`'s delay times.
+    - **No mouse poller in `--nrt` mode** (`app/src/main.cpp`). It wrote the live
+      desktop mouse into the shared-input slots that `mouseX` and `mouseY` read,
+      which made every mouse-reading render depend on the pointer position.
+- **Not in the corpus:**
+  - the `silo_*_audible.x` scripts, which hang under `--nrt`; the per-block task
+    tick is covered by `test_block_engine` instead;
+  - `pat_nrt.x`, which renders silence on main;
+  - the cookbook notebooks, which are binary `.tzd` files that depend on silos and
+    interactive cells. Their libraries are covered by other entries.
 
 **M1: Runtime support library (§5).**
 - Independent of everything else, so it can run in parallel with M2.

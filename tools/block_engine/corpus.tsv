@@ -1,0 +1,153 @@
+# Block-engine reference corpus (devplans/BLOCK_ENGINE_PLAN.md, M0).
+#
+# Rendered from main by render_corpus.py before the block engine work, and
+# re-rendered on the block-engine branch (M5 onward) for compare_corpus.py.
+#
+# Columns, tab separated:
+#   name      unique; also the WAV and log file name
+#   duration  NRT render length in seconds (--duration)
+#   env       space-separated KEY=VALUE pairs for the render, or -
+#   includes  extra module directories (comma separated, repo-relative), or -;
+#             lang/modules and bridge/modules are always included
+#   entry     a .x file (repo-relative), or driver:<module>:<code>, which runs
+#             a generated script `import <module>.*; <code>;`
+#   expect    same   -- the block engine must reproduce it within tolerance
+#             change -- expected to differ by design (reported, never fails)
+#   note      free text
+#
+# Scripts that use setControl, noteOn and friends are ported to the new API
+# in M5; the expectation is about the audio, not the script text.
+
+# --- integration-test renders (synthc variants; the C++ variants are bit-identical)
+ab_audio	0.1	-	-	integration-tests/scripts/synthc_render_ab_synthc.x	same	
+ab_ctrl	0.1	-	-	integration-tests/scripts/synthc_render_ab_ctrl_synthc.x	same	
+ab_vdelay	0.1	-	-	integration-tests/scripts/synthc_render_ab_vdelay_synthc.x	same	
+ab_bubbles	0.1	-	-	integration-tests/scripts/synthc_render_ab_bubbles_synthc.x	same	
+ab_cf	0.1	-	-	integration-tests/scripts/synthc_render_ab_cf_synthc.x	same	
+ab_merge	0.1	-	-	integration-tests/scripts/synthc_render_ab_merge_synthc.x	same	
+ab_rng	0.1	-	-	integration-tests/scripts/synthc_render_ab_rng_synthc.x	same	
+ab_voicer12	0.1	-	-	integration-tests/scripts/synthc_render_ab_voicer12_synthc.x	same	
+ab_spectral	0.3	-	-	integration-tests/scripts/synthc_render_ab_spectral_synthc.x	same	
+widen_0	0.25	TZPL_WIDEN_MODE=x TZPL_WIDEN_FORM=widened TZPL_WIDEN_CASE=0	-	integration-tests/scripts/widen_render.x	same	
+widen_1	0.25	TZPL_WIDEN_MODE=x TZPL_WIDEN_FORM=widened TZPL_WIDEN_CASE=1	-	integration-tests/scripts/widen_render.x	same	
+widen_2	0.25	TZPL_WIDEN_MODE=x TZPL_WIDEN_FORM=widened TZPL_WIDEN_CASE=2	-	integration-tests/scripts/widen_render.x	same	
+widen_3	0.25	TZPL_WIDEN_MODE=x TZPL_WIDEN_FORM=widened TZPL_WIDEN_CASE=3	-	integration-tests/scripts/widen_render.x	same	
+widen_4	0.25	TZPL_WIDEN_MODE=x TZPL_WIDEN_FORM=widened TZPL_WIDEN_CASE=4	-	integration-tests/scripts/widen_render.x	same	
+widen_5	0.25	TZPL_WIDEN_MODE=x TZPL_WIDEN_FORM=widened TZPL_WIDEN_CASE=5	-	integration-tests/scripts/widen_render.x	same	
+widen_6	0.25	TZPL_WIDEN_MODE=x TZPL_WIDEN_FORM=widened TZPL_WIDEN_CASE=6	-	integration-tests/scripts/widen_render.x	same	
+widen_7	0.25	TZPL_WIDEN_MODE=x TZPL_WIDEN_FORM=widened TZPL_WIDEN_CASE=7	-	integration-tests/scripts/widen_render.x	same	
+widen_8	0.25	TZPL_WIDEN_MODE=x TZPL_WIDEN_FORM=widened TZPL_WIDEN_CASE=8	-	integration-tests/scripts/widen_render.x	same	
+widen_9	0.25	TZPL_WIDEN_MODE=x TZPL_WIDEN_FORM=widened TZPL_WIDEN_CASE=9	-	integration-tests/scripts/widen_render.x	same	
+widen_10	0.25	TZPL_WIDEN_MODE=x TZPL_WIDEN_FORM=widened TZPL_WIDEN_CASE=10	-	integration-tests/scripts/widen_render.x	same	
+negabs_negconst	0.1	TZPL_ABS_MODE=x TZPL_ABS_CASE=negconst	-	integration-tests/scripts/neg_abs_rewrite.x	same	
+negabs_negctl	0.1	TZPL_ABS_MODE=x TZPL_ABS_CASE=negctl	-	integration-tests/scripts/neg_abs_rewrite.x	same	
+negabs_posconst	0.1	TZPL_ABS_MODE=x TZPL_ABS_CASE=posconst	-	integration-tests/scripts/neg_abs_rewrite.x	same	
+const_outlet	0.05	TZPL_CONST_MODE=x	-	integration-tests/scripts/const_outlet.x	same	
+event_to_audio	0.15	-	-	integration-tests/scripts/event_to_audio.x	same	control-set timing; becomes input steps and impulses in M5
+noteparam_event	0.15	-	-	integration-tests/scripts/noteparam_event_rate.x	same	noteSetParams becomes a notes-row element set (D2)
+linen_envelope	1.6	-	-	integration-tests/scripts/linen_envelope.x	same	
+fill_buffer_sine_ref	0.1	-	-	integration-tests/scripts/fill_buffer_sine_ref.x	same	
+fill_buffer_sine_tab	0.1	-	-	integration-tests/scripts/fill_buffer_sine_tab.x	same	
+fill_buffer_wrap6	0.1	-	-	integration-tests/scripts/fill_buffer_wrap6.x	same	
+fill_buffer_wrap12	0.1	-	-	integration-tests/scripts/fill_buffer_wrap12.x	same	
+osc_sine_ref	0.1	-	-	integration-tests/scripts/osc_sine_ref.x	same	
+osc_sine_bank	0.1	-	-	integration-tests/scripts/osc_sine_bank.x	same	
+osc_sweep	0.1	-	-	integration-tests/scripts/osc_sweep.x	same	
+samplebank_fixture_lo	0.1	-	-	integration-tests/scripts/samplebank_fixture_lo.x	same	
+samplebank_fixture_hi	0.1	-	-	integration-tests/scripts/samplebank_fixture_hi.x	same	
+samplebank_lo	0.1	SB_PITCH=60	-	integration-tests/scripts/samplebank_sampler.x	same	
+samplebank_hi	0.1	SB_PITCH=72	-	integration-tests/scripts/samplebank_sampler.x	same	
+samplebank_vel_lo	0.1	SB_LAYOUT=vel SB_PITCH=60 SB_VEL=40	-	integration-tests/scripts/samplebank_sampler.x	same	
+samplebank_vel_hi	0.1	SB_LAYOUT=vel SB_PITCH=60 SB_VEL=100	-	integration-tests/scripts/samplebank_sampler.x	same	
+samplebank_aos_lo	0.1	SB_PITCH=60	-	integration-tests/scripts/samplebank_sampler_aos.x	same	non-flat (AoS) voice mode
+samplebank_aos_hi	0.1	SB_PITCH=72	-	integration-tests/scripts/samplebank_sampler_aos.x	same	non-flat (AoS) voice mode
+live_nrt_render	10	-	-	integration-tests/scripts/live_nrt_render.x	same	live proxies: ndef, <-, crossfades
+nrt_await	3	-	-	integration-tests/scripts/nrt_await_check.x	same	
+
+# --- music libraries
+pat_music	20	-	-	integration-tests/scripts/pat_audible.x	same	
+media_music	20	-	-	integration-tests/scripts/media_audible.x	same	
+shape_music	20	-	-	integration-tests/scripts/shape_audible.x	same	
+spans_music	20	-	-	integration-tests/scripts/spans_audible.x	same	
+music_fx_demos	215	-	examples	examples/music_fx_demos.x	same	instruments.x (wtLead, ksPluck12, resonBank) through effects.x chains; three music dialects
+
+# --- silo tasks and actors: not in the corpus. silo_task_audible.x and the
+# other silo_*_audible.x scripts hang under --nrt (they need the live engine's
+# RT silo VMs), so the per-block task tick (plan 3.5) is covered by
+# test_block_engine instead. pat_nrt.x is left out too: it calls newNode
+# before its defSynth compile finishes, so it renders silence on main.
+
+# --- examples/example_synthdefs.x, one synthdef each (durations from playExamples)
+ex_bubbles	5	CORPUS_ITEM=bubbles	examples	tools/block_engine/scripts/corpus_example.x	same	
+ex_seqTest	24	CORPUS_ITEM=seqTest	examples	tools/block_engine/scripts/corpus_example.x	same	
+ex_smoothSquareTest	5	CORPUS_ITEM=smoothSquareTest	examples	tools/block_engine/scripts/corpus_example.x	same	
+ex_smoothSawTest	5	CORPUS_ITEM=smoothSawTest	examples	tools/block_engine/scripts/corpus_example.x	same	
+ex_blipTest	20	CORPUS_ITEM=blipTest	examples	tools/block_engine/scripts/corpus_example.x	same	
+ex_usinWinUsinTest	5	CORPUS_ITEM=usinWinUsinTest	examples	tools/block_engine/scripts/corpus_example.x	same	
+ex_usinWinSinTest	5	CORPUS_ITEM=usinWinSinTest	examples	tools/block_engine/scripts/corpus_example.x	same	
+ex_sawWinUsinTest	5	CORPUS_ITEM=sawWinUsinTest	examples	tools/block_engine/scripts/corpus_example.x	same	
+ex_sawWinSinTest	5	CORPUS_ITEM=sawWinSinTest	examples	tools/block_engine/scripts/corpus_example.x	same	
+ex_init_urand_test	5	CORPUS_ITEM=init_urand_test	examples	tools/block_engine/scripts/corpus_example.x	same	
+ex_dust1	5	CORPUS_ITEM=dust1	examples	tools/block_engine/scripts/corpus_example.x	same	
+ex_dustone	5	CORPUS_ITEM=dustone	examples	tools/block_engine/scripts/corpus_example.x	same	
+ex_apverbTest	10	CORPUS_ITEM=apverbTest	examples	tools/block_engine/scripts/corpus_example.x	same	
+ex_pause_bubbles	5	CORPUS_ITEM=pause_bubbles	examples	tools/block_engine/scripts/corpus_example.x	same	
+ex_tog_pause	5	CORPUS_ITEM=tog_pause	examples	tools/block_engine/scripts/corpus_example.x	same	
+ex_pull_nested	5	CORPUS_ITEM=pull_nested	examples	tools/block_engine/scripts/corpus_example.x	same	
+ex_pulltwo	5	CORPUS_ITEM=pulltwo	examples	tools/block_engine/scripts/corpus_example.x	same	
+ex_pch_seq	5	CORPUS_ITEM=pch_seq	examples	tools/block_engine/scripts/corpus_example.x	same	
+ex_sahtone1	5	CORPUS_ITEM=sahtone1	examples	tools/block_engine/scripts/corpus_example.x	same	
+ex_sahtone2	5	CORPUS_ITEM=sahtone2	examples	tools/block_engine/scripts/corpus_example.x	same	
+ex_mod1_test	5	CORPUS_ITEM=mod1_test	examples	tools/block_engine/scripts/corpus_example.x	same	
+ex_mod4_test	5	CORPUS_ITEM=mod4_test	examples	tools/block_engine/scripts/corpus_example.x	same	
+ex_mod5_test	5	CORPUS_ITEM=mod5_test	examples	tools/block_engine/scripts/corpus_example.x	same	
+ex_violet_test	5	CORPUS_ITEM=violet_test	examples	tools/block_engine/scripts/corpus_example.x	same	
+ex_blue_test	5	CORPUS_ITEM=blue_test	examples	tools/block_engine/scripts/corpus_example.x	same	
+ex_white_test	5	CORPUS_ITEM=white_test	examples	tools/block_engine/scripts/corpus_example.x	same	
+ex_pink_test	5	CORPUS_ITEM=pink_test	examples	tools/block_engine/scripts/corpus_example.x	same	
+ex_red_test	5	CORPUS_ITEM=red_test	examples	tools/block_engine/scripts/corpus_example.x	same	
+ex_gray_test	5	CORPUS_ITEM=gray_test	examples	tools/block_engine/scripts/corpus_example.x	same	
+instrument_test	32	-	examples	examples/instrumentTest.x	same	the ten voicer instruments of examples/instrument_synthdefs.x
+
+# --- effects.x, each effect on a stereo test source (scripts/corpus_fx.x)
+fxTremolo	6	CORPUS_ITEM=fxTremolo	-	tools/block_engine/scripts/corpus_fx.x	same	
+fxVibrato	6	CORPUS_ITEM=fxVibrato	-	tools/block_engine/scripts/corpus_fx.x	same	
+fxFlanger	6	CORPUS_ITEM=fxFlanger	-	tools/block_engine/scripts/corpus_fx.x	same	
+fxChorus	6	CORPUS_ITEM=fxChorus	-	tools/block_engine/scripts/corpus_fx.x	same	
+fxPhaser	6	CORPUS_ITEM=fxPhaser	-	tools/block_engine/scripts/corpus_fx.x	same	
+fxWah	6	CORPUS_ITEM=fxWah	-	tools/block_engine/scripts/corpus_fx.x	same	
+fxAutoWah	6	CORPUS_ITEM=fxAutoWah	-	tools/block_engine/scripts/corpus_fx.x	same	
+fxRotary	6	CORPUS_ITEM=fxRotary	-	tools/block_engine/scripts/corpus_fx.x	same	
+fxEcho	6	CORPUS_ITEM=fxEcho	-	tools/block_engine/scripts/corpus_fx.x	same	
+fxPingPong	6	CORPUS_ITEM=fxPingPong	-	tools/block_engine/scripts/corpus_fx.x	same	
+fxMultiTap	6	CORPUS_ITEM=fxMultiTap	-	tools/block_engine/scripts/corpus_fx.x	same	
+fxMatrixDelay	6	CORPUS_ITEM=fxMatrixDelay	-	tools/block_engine/scripts/corpus_fx.x	same	
+fxDiffuser	6	CORPUS_ITEM=fxDiffuser	-	tools/block_engine/scripts/corpus_fx.x	same	
+fxReverb	6	CORPUS_ITEM=fxReverb	-	tools/block_engine/scripts/corpus_fx.x	same	
+fxSympathetic	6	CORPUS_ITEM=fxSympathetic	-	tools/block_engine/scripts/corpus_fx.x	same	
+fxCompressor	6	CORPUS_ITEM=fxCompressor	-	tools/block_engine/scripts/corpus_fx.x	same	
+fxLimiter	6	CORPUS_ITEM=fxLimiter	-	tools/block_engine/scripts/corpus_fx.x	same	
+fxExpander	6	CORPUS_ITEM=fxExpander	-	tools/block_engine/scripts/corpus_fx.x	same	
+fxNoiseGate	6	CORPUS_ITEM=fxNoiseGate	-	tools/block_engine/scripts/corpus_fx.x	same	
+fxBooster	6	CORPUS_ITEM=fxBooster	-	tools/block_engine/scripts/corpus_fx.x	same	
+fxSwell	6	CORPUS_ITEM=fxSwell	-	tools/block_engine/scripts/corpus_fx.x	same	
+fxDistortion	6	CORPUS_ITEM=fxDistortion	-	tools/block_engine/scripts/corpus_fx.x	same	
+fxLoFi	6	CORPUS_ITEM=fxLoFi	-	tools/block_engine/scripts/corpus_fx.x	same	
+fxFilter	6	CORPUS_ITEM=fxFilter	-	tools/block_engine/scripts/corpus_fx.x	same	
+fxPitchShift	6	CORPUS_ITEM=fxPitchShift	-	tools/block_engine/scripts/corpus_fx.x	same	
+fxGranulator	6	CORPUS_ITEM=fxGranulator	-	tools/block_engine/scripts/corpus_fx.x	same	
+fxFormant	6	CORPUS_ITEM=fxFormant	-	tools/block_engine/scripts/corpus_fx.x	same	
+
+# --- examples/sc_conversions: the SC2 example corpus, each file's playAllScN driver (~140 examples)
+sc2_1	320	-	examples,examples/sc_conversions	driver:sc2_examples_1:playAllSc1()	same	
+sc2_2	700	-	examples,examples/sc_conversions	driver:sc2_examples_2:playAllSc2()	same	
+sc2_3	240	-	examples,examples/sc_conversions	driver:sc2_examples_3:playAllSc3()	same	
+sc2_4	200	-	examples,examples/sc_conversions	driver:sc2_examples_4:playAllSc4()	same	
+sc2_5	200	-	examples,examples/sc_conversions	driver:sc2_examples_5:playAllSc5()	same	
+sc2_6	420	-	examples,examples/sc_conversions	driver:sc2_examples_6:playAllSc6()	same	
+sc2_7	240	-	examples,examples/sc_conversions	driver:sc2_examples_7:playAllSc7()	same	
+sc2_8	160	-	examples,examples/sc_conversions	driver:sc2_examples_8:playAllSc8()	same	
+sc2_9	420	-	examples,examples/sc_conversions	driver:sc2_examples_9:playAllSc9()	same	
+sc2_10	300	-	examples,examples/sc_conversions	driver:sc2_examples_10:playAllSc10()	same	
+sc2_11	160	-	examples,examples/sc_conversions	driver:sc2_examples_11:playAllSc11()	same	
+sc2_12	400	-	examples,examples/sc_conversions	driver:sc2_examples_12:playAllSc12()	same	
