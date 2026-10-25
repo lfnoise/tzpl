@@ -3882,6 +3882,13 @@ fn rootBufNodes(ctx Ctx) [NIdx] {
 fn blockTempNodes(ctx Ctx) [NIdx] {
 	let regions = ctx rootRegions;
 	var out [NIdx] = [];
+	-- a state space's outputs: the block form writes them for the block
+	for (k : ctx.blockCycles) {
+		if (ctx _blockCycleForm(k) != "statespace") { continue; }
+		for (o : ctx stateSpaceModel(ctx.cycles[k]).outputs) {
+			if (ctx.cut[o] isTempVarCut && ctx.graphOf[o] == 0 && !(out contains(o))) { out push!(o); }
+		}
+	}
 	for (li : ctx.graphs[0].audioLoops) {
 		let own = _regionOfLoop(regions, li);
 		for (t : ctx.loops[li].trees) {
@@ -3892,7 +3899,7 @@ fn blockTempNodes(ctx Ctx) [NIdx] {
 				let cl = ctx _rootLoopOfNode(c);
 				if (cl != NONE && _regionOfLoop(regions, cl) != own) { cross = true; }
 			}
-			if (cross) { out push!(x); }
+			if (cross && !(out contains(x))) { out push!(x); }
 		}
 	}
 	out
@@ -3913,7 +3920,9 @@ fn genBlockBufDecls(ctx Ctx) String {
 		let ty = ctx _blockCycleType(k);
 		for (part : ["x", "a", "b", "w"]) { s = s $ "\t%^* rc%^_%^;\n" fmt(ty, k, part); }
 		if (ctx _blockCycleForm(k) == "statespace") {
-			s = s $ "\ttzpl::dsp::BlockStateSpace<%^, %^> ss%^;\n\tu8 ssv%^;\n" fmt(ty, ctx.cycles[k].readers length, k, k);
+			let m = ctx stateSpaceModel(ctx.cycles[k]);
+			s = s $ "\ttzpl::dsp::BlockStateSpaceIO<%^, %^, %^, %^> ss%^[%^];\n\tu8 ssv%^;\n"
+				fmt(ty, m.nstates, m.inputs length, m.outputs length, k, m.chans, k);
 		}
 	}
 	for (x : `cgRootBuf) { s = s $ "\t%^* bk%^;\n" fmt(cppType(ctx.typ[x]), ctx.serial[x]); }
@@ -4026,17 +4035,90 @@ fn _blockCycleType(ctx Ctx, k Int) String = cppType(ctx.typ[ctx.dsrc[ctx.cycles[
 
 fn _blockCycleForm(ctx Ctx, k Int) String = ctx blockFormOf(ctx.cycles[k], (ctx classifyRecurrences)[k]);
 
--- The block cycle a region consists of, or NONE.
+-- The block cycle a region consists of, or NONE. Its loops are the cycle's
+-- (group key -(10 + k)); a state-space cycle's region may also hold other
+-- loops that share no state with them (regionExtras).
 fn _regionBlockCycle(ctx Ctx, region [Int]) Int {
 	var k = NONE;
 	for (li : region) {
+		if (ctx _codelessLoop(li)) { continue; }
 		let g = ctx.loops[li].group;
-		if (g > -10) { return NONE; }
-		let kk = -10 - g;
-		if (k != NONE && kk != k) { return NONE; }
-		k = kk;
+		if (g <= -10) {
+			let kk = -10 - g;
+			if (k != NONE && kk != k) { return NONE; }
+			k = kk;
+		}
 	}
-	k
+	if (k == NONE) { return NONE; }
+	var extras = false;
+	for (li : region) { if (ctx.loops[li].group != -(10 + k) && !(ctx _codelessLoop(li))) { extras = true; } }
+	if (!extras) { return k; }
+	if (ctx _blockCycleForm(k) != "statespace") { return NONE; }
+	ctx _regionExtras(region, k).ok ? k : NONE
+}
+
+-- A loop of input-port trees only: it emits no code (a port is read where
+-- it is used), so it belongs to whichever region it lands in.
+fn _codelessLoop(ctx Ctx, li Int) Bool {
+	for (t : ctx.loops[li].trees) {
+		match (ctx.kind[ctx.trees[t].root]) { inletK(_, _, _): {} _: { return false; } }
+	}
+	true
+}
+
+struct RegionExtras {
+	ok Bool,
+	pre [Int],     -- loops that run before the state space (no dependence on it)
+	post [Int],    -- loops that run after it (they depend on it)
+}
+
+-- The loops of a state-space cycle's region that are not the cycle's: each
+-- shares no state with the cycle's loops; one that depends on them (through
+-- the region) runs after the block, one that doesn't before it, and none
+-- may do both (feed the cycle and depend on it).
+fn _regionExtras(ctx Ctx, region [Int], k Int) RegionExtras {
+	let g = -(10 + k);
+	let keys = ctx loopStateKeys;
+	var mine [String] = [];
+	for (li : region) { if (ctx.loops[li].group == g) { for (key : keys[li]) { if (!(mine contains(key))) { mine push!(key); } } } }
+	let n = region length;
+	var dep [Bool] = false repeat(n);     -- depends on the cycle's loops
+	var feeds [Bool] = false repeat(n);   -- the cycle's loops depend on it
+	var i = 0;
+	while (i < n) {
+		let li = region[i];
+		var j = 0;
+		while (j < i) {
+			let lj = region[j];
+			if (ctx.loops[li].antecedents contains(ctx.loops[lj].serial) && (ctx.loops[lj].group == g || dep[j])) { dep[i] = true; }
+			j = j + 1;
+		}
+		i = i + 1;
+	}
+	i = n - 1;
+	while (i >= 0) {
+		let li = region[i];
+		var j = i + 1;
+		while (j < n) {
+			let lj = region[j];
+			if (ctx.loops[lj].antecedents contains(ctx.loops[li].serial) && (ctx.loops[lj].group == g || feeds[j])) { feeds[i] = true; }
+			j = j + 1;
+		}
+		i = i - 1;
+	}
+	var pre [Int] = [];
+	var post [Int] = [];
+	i = 0;
+	while (i < n) {
+		let li = region[i];
+		if (ctx.loops[li].group != g && !(ctx _codelessLoop(li))) {
+			for (key : keys[li]) { if (mine contains(key)) { return RegionExtras { ok: false, pre: pre, post: post }; } }
+			if (dep[i] && feeds[i]) { return RegionExtras { ok: false, pre: pre, post: post }; }
+			if (dep[i]) { post push!(li); } else { pre push!(li); }
+		}
+		i = i + 1;
+	}
+	RegionExtras { ok: true, pre: pre, post: post }
 }
 
 fn _mulS(a String, x String) String = a == "0" ? "0" : (a == "1" ? x : "(%^ * %^)" fmt(a, x));
@@ -4092,7 +4174,9 @@ fn _genBlockCycle(ctx Ctx, k Int, region [Int]) String {
 	let ser = ctx.delays[d].serial;
 	let v = ctx.dsrc[r];
 	let ty = ctx _blockCycleType(k);
-	let form = ctx blockFormOf(cy, (ctx classifyRecurrences)[k]);
+	-- a state space's varying form is the affine scan
+	let form0 = ctx blockFormOf(cy, (ctx classifyRecurrences)[k]);
+	let form = form0 == "statespace" ? "affine" : form0;
 	var `cgIndent Int = 2;
 	var `cgRoot Int = NONE;    -- no tree is being emitted: every root is a reference
 	-- pass 1
@@ -4130,34 +4214,35 @@ fn _genBlockCycle(ctx Ctx, k Int, region [Int]) String {
 	s
 }
 
--- Block state space (plan 4.7, "Affine, block-constant coefficients"):
--- the cycle as a step function of its states s[j] (the reads of its
--- single-value delays) and its one outside audio input x, returning its one
--- output. When every coefficient's parameter group is cached or computed
--- once this call, the matrices (rebuilt when a group recomputed) run the
--- whole block; while any group computes every sample, the block runs as the
--- plain recurrence (the region code) -- the state layout is shared, so
--- either form continues the other.
-
--- The cycle node n as an expression over the states and x.
-fn _cycExpr(ctx Ctx, cy CycleInfo, e NIdx, n NIdx) String {
-	var j = 0;
-	while (j < cy.readers length) {
-		if (cy.readers[j] == n) { return "s[%^]" fmt(j); }
-		j = j + 1;
+-- Block state space (plan 4.7, "Affine, block-constant coefficients"; the
+-- model is recurrence.x stateSpaceModel): the cycle as a step function of
+-- its state taps s[] and its inputs x[], writing its outputs y[]. An
+-- expression over them, rebuilding the cycle's nodes and inlined inputs:
+fn _ssExpr(ctx Ctx, cy CycleInfo, m SSModel, n NIdx, cel String) String {
+	let inside = cy.nodes contains(n) || m.chain contains(n);
+	let d = inside ? ctx readDelayOf(n) : NONE;
+	if (d != NONE) {
+		var j = 0;
+		while (j < m.delays length) {
+			if (m.delays[j] == d) { return "s[%^]" fmt(m.base[j] + ctx.dweight[n] - 1); }
+			j = j + 1;
+		}
 	}
-	if (n == e) { return "x"; }
-	-- An outside value: lower rate (a coefficient) or materialized, read as
-	-- is; an inlined audio-rate expression is rebuilt over x.
-	let inlinedAudio = !(cy.nodes contains(n)) && ctx.nrate[n] == Rate.audio && !(ctx isMaterialized(n));
-	if (!(cy.nodes contains(n)) && !inlinedAudio) {
-		return "(%^)" fmt(ctx _isRootNode(n) ? _varRef(ctx, n, "0") : genExpr(ctx, n, "0"));
+	var i = 0;
+	while (i < m.inputs length) {
+		if (m.inputs[i] == n) { return "x[%^]" fmt(i); }
+		i = i + 1;
+	}
+	-- An outside value (a coefficient at block rate or lower) is read as is;
+	-- the cycle's nodes and the inlined input expressions are rebuilt.
+	if (!inside) {
+		return "(%^)" fmt(ctx _isRootNode(n) ? _varRef(ctx, n, cel) : genExpr(ctx, n, cel));
 	}
 	let ins = ctx.ins[n];
 	match (ctx.kind[n]) {
 		binopK(op): {
-			let a = ctx _cycExpr(cy, e, ins[0]);
-			let b = ctx _cycExpr(cy, e, ins[1]);
+			let a = ctx _ssExpr(cy, m, ins[0], cel);
+			let b = ctx _ssExpr(cy, m, ins[1], cel);
 			match (op) {
 				add: { return "(%^ + %^)" fmt(a, b); }
 				sub: { return "(%^ - %^)" fmt(a, b); }
@@ -4166,31 +4251,20 @@ fn _cycExpr(ctx Ctx, cy CycleInfo, e NIdx, n NIdx) String {
 				_: {}
 			}
 		}
-		unopK(op): { match (op) { neg: { return "(-%^)" fmt(ctx _cycExpr(cy, e, ins[0])); } _: {} } }
-		castopK(t): { return "W(%^)" fmt(ctx _cycExpr(cy, e, ins[0])); }
+		unopK(op): { match (op) { neg: { return "(-%^)" fmt(ctx _ssExpr(cy, m, ins[0], cel)); } _: {} } }
+		castopK(t): { return "W(%^)" fmt(ctx _ssExpr(cy, m, ins[0], cel)); }
 		_: {}
 	}
-	"W(0)"   -- not reached: the cycle classified affine
+	"W(0)"   -- not reached: the model admits only these
 }
 
--- A block pointer to the samples of node n, or "" if it has none.
-fn _blockPtr(ctx Ctx, n NIdx) String {
-	match (ctx.kind[n]) {
-		inletK(_, sn, _): { return ctx.chans[n] == 1 ? "(%^*)p->ins[%^].chans[0]" fmt(cppType(ctx.typ[n]), sn) : ""; }
-		_: {}
-	}
-	if (ctx.chans[n] != 1) { return ""; }
-	if (ctx _isBlockTemp(n)) { return "p->bt%^" fmt(ctx.serial[n]); }
-	if (ctx _isRootBuf(n) && ctx.nrate[n] == Rate.audio) { return "p->bk%^" fmt(ctx.serial[n]); }
-	""
-}
-
--- The parameter groups of the block-rate values a cycle reads.
-fn _cycleGroups(ctx Ctx, cy CycleInfo) [Int] {
+-- The parameter groups of the block-rate values a cycle (and its inlined
+-- inputs, nodes) reads.
+fn _cycleGroups(ctx Ctx, nodes [NIdx]) [Int] {
 	var out [Int] = [];
-	for (x : cy.nodes) {
+	for (x : nodes) {
 		for (i : ctx.ins[x]) {
-			if (!(cy.nodes contains(i)) && ctx.nrate[i] == Rate.block) {
+			if (!(nodes contains(i)) && ctx.nrate[i] == Rate.block) {
 				let g = ctx.groupOf[i];
 				if (g != NONE && !(out contains(g))) { out push!(g); }
 			}
@@ -4199,53 +4273,198 @@ fn _cycleGroups(ctx Ctx, cy CycleInfo) [Int] {
 	out
 }
 
+-- A delay tap as a C++ lvalue/rvalue: tap w (1..) of delay d, channel c
+-- ("c", or "" for a one-channel delay), with the write position advanced by
+-- `adv` ("" or " + u64(n)").
+fn _tapRef(ctx Ctx, d Int, w Int, c String, adv String) String {
+	let di = ctx.delays[d];
+	let ci = c length > 0 ? "[%^]" fmt(c) : "";
+	if (di.allocSize == 1) { return "p->d%^%^" fmt(di.serial, ci); }
+	"p->d%^%^[(p->d%^_wrpos%^ - u64(%^)) & %^]" fmt(di.serial, ci, di.serial, adv, w, _delayMask(di))
+}
+
+-- A block buffer of node n for the state space: (pointer, row stride in
+-- elements), or ("", 0). Channel c of a multichannel buffer is at element c
+-- of each row.
+fn _ssBuf(ctx Ctx, n NIdx) (String, Int) {
+	let c = ctx.chans[n];
+	match (ctx.kind[n]) {
+		inletK(_, sn, _): {
+			return c == 1 ? ("(%^*)p->ins[%^].chans[0]" fmt(cppType(ctx.typ[n]), sn), 1)
+			              : ("p->bin%^" fmt(sn), ctx _portElems(n));
+		}
+		_: {}
+	}
+	if (ctx _isBlockTemp(n)) { return ("p->bt%^" fmt(ctx.serial[n]), ctx _rowElems(n)); }
+	if (ctx _isRootBuf(n) && ctx.nrate[n] == Rate.audio) { return ("p->bk%^" fmt(ctx.serial[n]), ctx _rowElems(n)); }
+	("", 0)
+}
+
+-- A block state space (stateSpaceModel): the region runs as the plain
+-- recurrence (or, first order, the affine scan) while a coefficient group
+-- recomputes every sample, else over the block's samples through matrices
+-- rebuilt when a group changed, one state space per channel.
 fn _genStateSpace(ctx Ctx, k Int, region [Int], delays [DelayInfo]) String {
 	let cy = ctx.cycles[k];
-	let e = ctx stateSpaceInput(cy);
-	let o = ctx stateSpaceOutput(cy);
+	let m = ctx stateSpaceModel(cy);
 	let ty = ctx _blockCycleType(k);
-	let xp = ctx _blockPtr(e);
-	let yp = ctx _blockPtr(o);
+	let C = m.chans;
 	let serial = ctx _genRegion(region, delays);
-	if (xp length == 0 || yp length == 0 || ctx.typ[e].0 != ctx.typ[o].0 || cppType(ctx.typ[o]) != ty) {
-		return serial;    -- no block buffers to run over: the plain recurrence
+	-- each input and output: pointer, stride, and whether it has C channels
+	var xbufs [(String, Int)] = [];
+	for (e : m.inputs) { xbufs push!(ctx _ssBuf(e)); if (cppType(ctx.typ[e]) != ty) { return serial; } }
+	var ybufs [(String, Int)] = [];
+	for (o : m.outputs) { ybufs push!(ctx _ssBuf(o)); if (cppType(ctx.typ[o]) != ty) { return serial; } }
+	-- no block buffers to run over
+	for (b : xbufs $ ybufs) { if (b.0 length == 0) { return serial; } }
+	-- the region's other loops run around the block form (regionExtras),
+	-- each with the ring delays it owns
+	let g = -(10 + k);
+	var hasExtras = false;
+	for (li : region) { if (ctx.loops[li].group != g && !(ctx _codelessLoop(li))) { hasExtras = true; } }
+	let ex = hasExtras ? ctx _regionExtras(region, k) : RegionExtras { ok: true, pre: [Int](), post: [Int]() };
+	if (!ex.ok) { return serial; }
+	var preDelays [DelayInfo] = [];
+	var postDelays [DelayInfo] = [];
+	for (di : delays) {
+		var inModel = false;
+		for (d : m.delays) { if (ctx.delays[d].serial == di.serial) { inModel = true; } }
+		if (inModel) { continue; }
+		var inPost = false;
+		var inPre = false;
+		for (x : ctx _delayMembers(di)) {
+			let li = ctx _rootLoopOfNode(x);
+			if (ex.post contains(li)) { inPost = true; }
+			if (ex.pre contains(li)) { inPre = true; }
+		}
+		if (inPost) { postDelays push!(di); } else if (inPre) { preDelays push!(di); } else { return serial; }
 	}
-	let nst = cy.readers length;
+	let nst = m.nstates;
+	let cv = C == 1 ? "" : "c";       -- the channel index in C++
+	let cel = C == 1 ? "0" : "c";
 	var `cgIndent Int = 2;
 	var `cgRoot Int = NONE;
-	-- the step: next states from the old ones, then the output
+	var `cgSimdW Int = 0;
+	var `cgVoiceCount Int = 0;
+	var `cgLoopChans Int = C;
+	var `cgDstShape Shape = ctx.shape[cy.nodes[0]];
+	-- the step: every delay's new value and the outputs from the old state,
+	-- then the taps shift
 	var stepBody = "";
 	var j = 0;
-	while (j < nst) {
-		stepBody = stepBody $ "\t\t\tW n%^ = W(%^);\n" fmt(j, ctx _cycExpr(cy, e, ctx.dsrc[cy.readers[j]]));
+	while (j < m.delays length) {
+		let d = m.delays[j];
+		let src = ctx.dsrc[ctx.delays[d].fixReaders[0]];
+		stepBody = stepBody $ "\t\t\tW n%^ = W(%^);\n" fmt(j, ctx _ssExpr(cy, m, src, cel));
 		j = j + 1;
 	}
-	stepBody = stepBody $ "\t\t\tW y = W(%^);\n" fmt(ctx _cycExpr(cy, e, o));
+	var o = 0;
+	while (o < m.outputs length) {
+		stepBody = stepBody $ "\t\t\ty[%^] = W(%^);\n" fmt(o, ctx _ssExpr(cy, m, m.outputs[o], cel));
+		o = o + 1;
+	}
 	j = 0;
-	while (j < nst) { stepBody = stepBody $ "\t\t\ts[%^] = n%^;\n" fmt(j, j); j = j + 1; }
+	while (j < m.delays length) {
+		var w = m.depth[j] - 1;
+		while (w >= 1) { stepBody = stepBody $ "\t\t\ts[%^] = s[%^];\n" fmt(m.base[j] + w, m.base[j] + w - 1); w = w - 1; }
+		stepBody = stepBody $ "\t\t\ts[%^] = n%^;\n" fmt(m.base[j], j);
+		j = j + 1;
+	}
 	let rl = ctx _rowLocalsFor("bi", stepBody);
-	let groups = ctx _cycleGroups(cy);
+	var gnodes = cy.nodes copy;
+	gnodes append!(m.chain);
+	let groups = ctx _cycleGroups(gnodes);
 	var varying [String] = [];
 	var changed [String] = ["!p->ssv%^" fmt(k)];
 	for (g : groups) { varying push!("pgS%^" fmt(g)); changed push!("pg%^ == 1" fmt(g)); }
-	var s = "\t{ // recurrence %^: block state space (%^ states)\n" fmt(k, nst);
+	let ni = m.inputs length;
+	let no = m.outputs length;
+	var s = "\t{ // recurrence %^: block state space (%^ states, %^ in, %^ out, %^ chans)\n" fmt(k, nst, ni, no, C);
 	s = s $ "\tif (%^) {\n" fmt(varying length > 0 ? varying join(" || ") : "false");
-	s = s $ serial;
-	s = s $ "\t} else {\n" $ rl.bases $ "\t\ti32 bi = off;\n" $ rl.rows;
-	s = s $ "\t\tauto step = [&](auto* s, auto x) {\n";
-	s = s $ "\t\t\tusing W = std::remove_pointer_t<decltype(s)>;\n" $ stepBody $ "\t\t\treturn y;\n\t\t};\n";
-	s = s $ "\t\tif (%^) {\n\t\t\tp->ss%^ = tzpl::dsp::BlockStateSpace<%^, %^>::build(step);\n\t\t\tp->ssv%^ = 1;\n\t\t}\n"
-		fmt(changed join(" || "), k, ty, nst, k);
-	s = s $ "\t\t%^ s[%^] = {" fmt(ty, nst);
-	var states [String] = [];
-	for (r : cy.readers) {
-		let d = match (ctx.kind[r]) { delayFixReadK(di, _): di; _: 0; };
-		states push!("p->d%^" fmt(ctx.delays[d].serial));
-	}
-	s = s $ states join(", ") $ "};\n";
-	s = s $ "\t\ttzpl::dsp::runStateSpace(p->ss%^, step, s, %^ + off, 1, %^ + off, n);\n" fmt(k, xp, yp);
+	-- the varying form: a first-order cycle's affine scan, else the recurrence
+	let cls = (ctx classifyRecurrences)[k];
+	let order1 = match (cls) { affineBlock(o1): o1 == 1; _: false; };
+	s = s $ (varying length > 0 && order1 && !hasExtras && ctx firstOrderScanOK(cy) ? ctx _genBlockCycle(k, region) : serial);
+	s = s $ "\t} else {\n";
+	if (ex.pre length > 0) { s = s $ ctx _genRegion(ex.pre, preDelays); }
+	s = s $ "\t{\n" $ rl.bases $ "\t\ti32 bi = off;\n" $ rl.rows;
+	s = s $ "\t\tbool rebuild = %^;\n" fmt(changed join(" || "));
+	let ind = C == 1 ? "\t\t" : "\t\t\t";
+	if (C > 1) { s = s $ "\t\tfor (int c = 0; c < %^; ++c) {\n" fmt(C); }
+	let ssRef = C == 1 ? "p->ss%^[0]" fmt(k) : "p->ss%^[c]" fmt(k);
+	s = s $ ind $ "auto step = [&](auto* s, auto const* x, auto* y) {\n";
+	s = s $ "\t\t\tusing W = std::remove_pointer_t<decltype(s)>;\n\t\t\t(void)x;\n" $ stepBody $ ind $ "};\n";
+	s = s $ ind $ "if (rebuild) %^ = tzpl::dsp::BlockStateSpaceIO<%^, %^, %^, %^>::build(step);\n"
+		fmt(ssRef, ty, nst, ni, no);
+	-- the state from the delays: tap w of a ring is its read at weight w
+	var loads [String] = [];
 	j = 0;
-	while (j < nst) { s = s $ "\t\t%^ = s[%^];\n" fmt(states[j], j); j = j + 1; }
+	while (j < m.delays length) {
+		let d = m.delays[j];
+		let di = ctx.delays[d];
+		var w = 1;
+		while (w <= m.depth[j]) {
+			var rd = ctx _tapRef(d, w, cv, "");
+			if (di.allocSize != 1 && _delayZeroGuarded(di)) {
+				rd = "(p->d%^_wrpos >= u64(%^) ? %^ : %^)" fmt(di.serial, w, rd, _zeroLit(di.typ));
+			}
+			loads push!(rd);
+			w = w + 1;
+		}
+		j = j + 1;
+	}
+	s = s $ ind $ "%^ s[%^] = {%^};\n" fmt(ty, nst, loads join(", "));
+	var xs [String] = [];
+	var incs [String] = [];
+	var i = 0;
+	while (i < ni) {
+		let b = xbufs[i];
+		let e = m.inputs[i];
+		let portSn = match (ctx.kind[e]) { inletK(_, sn, _): sn; _: NONE; };
+		if (C > 1 && portSn != NONE && ctx.chans[e] > 1) {
+			-- a multichannel port: its channel straight from the engine's pointer table
+			xs push!("(%^*)p->ins[%^].chans[c] + off" fmt(ty, portSn));
+			incs push!("1");
+		} else {
+			let chOff = C > 1 && ctx.chans[e] > 1 ? " + c" : "";
+			xs push!("%^ + off * %^%^" fmt(b.0, b.1, chOff));
+			incs push!(b.1 toString);
+		}
+		i = i + 1;
+	}
+	var ys [String] = [];
+	var yincs [String] = [];
+	o = 0;
+	while (o < no) {
+		let b = ybufs[o];
+		ys push!("%^ + off * %^%^" fmt(b.0, b.1, C > 1 ? " + c" : ""));
+		yincs push!(b.1 toString);
+		o = o + 1;
+	}
+	s = s $ ind $ "%^ const* xin[%^] = {%^};\n" fmt(ty, ni, xs join(", "));
+	s = s $ ind $ "int xinc[%^] = {%^};\n" fmt(ni, incs join(", "));
+	s = s $ ind $ "%^* yout[%^] = {%^};\n" fmt(ty, no, ys join(", "));
+	s = s $ ind $ "int yinc[%^] = {%^};\n" fmt(no, yincs join(", "));
+	s = s $ ind $ "tzpl::dsp::runStateSpaceIO(%^, step, s, xin, xinc, yout, yinc, n);\n" fmt(ssRef);
+	-- back to the delays: a ring holds the taps at its position after the
+	-- block, then advances (once, for all channels)
+	j = 0;
+	while (j < m.delays length) {
+		let d = m.delays[j];
+		var w = 1;
+		while (w <= m.depth[j]) {
+			s = s $ ind $ "%^ = s[%^];\n" fmt(ctx _tapRef(d, w, cv, " + u64(n)"), m.base[j] + w - 1);
+			w = w + 1;
+		}
+		j = j + 1;
+	}
+	if (C > 1) { s = s $ "\t\t}\n"; }
+	for (d : m.delays) {
+		let di = ctx.delays[d];
+		if (di.allocSize != 1) { s = s $ "\t\tp->d%^_wrpos += u64(n);\n" fmt(di.serial); }
+	}
+	s = s $ "\t\tp->ssv%^ = 1;\n\t}\n" fmt(k);
+	if (ex.post length > 0) { s = s $ ctx _genRegion(ex.post, postDelays); }
 	s = s $ "\t}\n\t}\n";
 	s
 }
@@ -4406,9 +4625,16 @@ fn genTickFun(ctx Ctx, name String) String {
 	}
 	var texts [String] = [];
 	var plain [Bool] = [];
+	-- A block cycle runs once per call: should its loops ever span two
+	-- regions, all of them run as plain regions instead.
+	var regionCycle [Int] = [];
+	for (r : regions) { regionCycle push!(ctx _regionBlockCycle(r)); }
 	var ri = 0;
 	while (ri < regions length) {
-		let k = ctx _regionBlockCycle(regions[ri]);
+		let kk = regionCycle[ri];
+		var seen = 0;
+		for (x : regionCycle) { if (x == kk) { seen = seen + 1; } }
+		let k = kk != NONE && seen > 1 ? NONE : kk;
 		texts push!(k == NONE ? ctx _genRegion(regions[ri], owned[ri])
 		            : (ctx _blockCycleForm(k) == "statespace" ? ctx _genStateSpace(k, regions[ri], owned[ri])
 		                                                       : ctx _genBlockCycle(k, regions[ri])));

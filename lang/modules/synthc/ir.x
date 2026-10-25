@@ -485,6 +485,7 @@ struct Ctx {
 	dweight [Int],            -- per node: that edge's delay weight
 	cycles [CycleInfo],
 	blockCycles [Int],        -- cycles run in block form (recurrence.x), by index
+	blockMembers [[NIdx]],    -- per block cycle: the nodes whose trees form its loops
 	paramGroups [ParamGroup],
 	groupOf [Int],            -- per node: its parameter group, NONE if none
 	delayAllocs [Int],        -- delay indices needing runtime allocation
@@ -540,6 +541,7 @@ fn newCtx(name String) Ctx {
 		dweight: [Int](),
 		cycles: [CycleInfo](),
 		blockCycles: [Int](),
+		blockMembers: [[NIdx]](),
 		paramGroups: [ParamGroup](),
 		groupOf: [Int](),
 		delayAllocs: [Int](),

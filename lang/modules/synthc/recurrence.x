@@ -204,29 +204,61 @@ fn blockFormOf(ctx Ctx, cy CycleInfo, c RecClass) String {
 		_:                  "";
 	};
 	if (kind length == 0) { return ""; }
-	if (kind == "statespace") { return ctx _stateSpaceOK(cy) ? kind : ""; }
-	if (cy.readers length != 1) { return ""; }
+	-- Block-rate coefficients (any order): the state space, which checks per
+	-- block whether its coefficient groups vary (codegen: then the first-order
+	-- scan when firstOrderScanOK, else the plain recurrence).
+	let ss = match (c) { affineBlock(_): ctx stateSpaceModel(cy).ok; _: false; };
+	if (ss) { return "statespace"; }
+	if (kind == "statespace") { return ""; }
+	-- Scans and audio-rate first-order affine maps: the two-pass scan.
+	ctx firstOrderScanOK(cy) ? kind : ""
+}
+
+-- Can a first-order cycle run as the two-pass block scan? Not when its
+-- inputs read another delay: that delay's loop would share the region.
+fn firstOrderScanOK(ctx Ctx, cy CycleInfo) Bool =
+	ctx _firstOrderOK(cy) && !(ctx _inputsReadDelays(cy));
+
+fn _firstOrderOK(ctx Ctx, cy CycleInfo) Bool {
+	if (cy.readers length != 1) { return false; }
 	let r = cy.readers[0];
-	if (ctx.dweight[r] != 1) { return ""; }
+	if (ctx.dweight[r] != 1) { return false; }
 	for (x : cy.nodes) {
-		if (ctx.graphOf[x] != 0 || ctx.chans[x] != 1) { return ""; }
+		if (ctx.graphOf[x] != 0 || ctx.chans[x] != 1) { return false; }
 	}
 	let d = match (ctx.kind[r]) { delayFixReadK(di, _): di; _: NONE; };
-	if (d == NONE) { return ""; }
+	if (d == NONE) { return false; }
 	let di = ctx.delays[d];
-	if (di.allocSize != 1 || di.fixReaders length != 1 || di.varReaders length != 0) { return ""; }
-	if (di.writer == NONE || ctx.chans[di.writer] > 1) { return ""; }
+	if (di.allocSize != 1 || di.fixReaders length != 1 || di.varReaders length != 0) { return false; }
+	if (di.writer == NONE || ctx.chans[di.writer] > 1) { return false; }
 	-- float state only (the scans and affine maps are float)
 	let t = ctx.typ[ctx.dsrc[r]];
-	if (!(t.0 == 4 || t.0 == 8)) { return ""; }
+	if (!(t.0 == 4 || t.0 == 8)) { return false; }
 	-- The two passes each evaluate the cycle's inputs; a random draw inlined
 	-- into them would be drawn twice.
 	for (x : cy.nodes) {
 		for (i : ctx.ins[x]) {
-			if (!(cy.nodes contains(i)) && ctx _inlinedDraw(i)) { return ""; }
+			if (!(cy.nodes contains(i)) && ctx _inlinedDraw(i)) { return false; }
 		}
 	}
-	kind
+	true
+}
+
+-- Do the cycle's inlined outside inputs read a delay?
+fn _inputsReadDelays(ctx Ctx, cy CycleInfo) Bool {
+	for (x : cy.nodes) {
+		for (i : ctx.ins[x]) {
+			if (!(cy.nodes contains(i)) && ctx _inlinedReadsDelay(i)) { return true; }
+		}
+	}
+	false
+}
+
+fn _inlinedReadsDelay(ctx Ctx, n NIdx) Bool {
+	if (ctx isMaterialized(n) || ctx.nrate[n] != Rate.audio) { return false; }
+	if (ctx readDelayOf(n) != NONE) { return true; }
+	for (i : ctx.ins[n]) { if (ctx _inlinedReadsDelay(i)) { return true; } }
+	false
 }
 
 -- Does the value of n, as inlined into its consumer (single consumer,
@@ -247,11 +279,46 @@ fn _inlinedDraw(ctx Ctx, n NIdx) Bool {
 fn selectBlockCycles(ctx Ctx) Void {
 	let classes = ctx classifyRecurrences;
 	ctx.blockCycles clear!;
+	ctx.blockMembers clear!;
 	var i = 0;
 	while (i < ctx.cycles length) {
-		if (ctx blockFormOf(ctx.cycles[i], classes[i]) length > 0) { ctx.blockCycles push!(i); }
+		let form = ctx blockFormOf(ctx.cycles[i], classes[i]);
+		if (form length > 0) {
+			ctx.blockCycles push!(i);
+			ctx.blockMembers push!(ctx _blockMembers(ctx.cycles[i], form));
+		}
 		i = i + 1;
 	}
+}
+
+-- The nodes whose trees make up a block cycle's loops: its own nodes and
+-- the writers of its delays, and for a state space the inlined input
+-- expressions and the input delays' writers too.
+fn _blockMembers(ctx Ctx, cy CycleInfo, form String) [NIdx] {
+	var out = cy.nodes copy;
+	var delays [Int] = [];
+	if (form == "statespace") {
+		let m = ctx stateSpaceModel(cy);
+		out append!(m.chain);
+		delays = m.delays;
+	} else {
+		for (r : cy.readers) { let d = ctx readDelayOf(r); if (d != NONE && !(delays contains(d))) { delays push!(d); } }
+	}
+	for (d : delays) {
+		let w = ctx.delays[d].writer;
+		if (w != NONE && !(out contains(w))) { out push!(w); }
+	}
+	-- input ports read by them: a port's tree holds no code, but the loop it
+	-- lands in would otherwise be an antecedent of the cycle's
+	var ports [NIdx] = [];
+	for (x : out) {
+		for (i : ctx.ins[x]) {
+			let isPort = match (ctx.kind[i]) { inletK(_, _, _): true; _: false; };
+			if (isPort && !(out contains(i)) && !(ports contains(i))) { ports push!(i); }
+		}
+	}
+	out append!(ports);
+	out
 }
 
 -- Record each cycle's class and strategy for the analysis dump: "block"
@@ -272,52 +339,74 @@ fn annotateRecurrences(ctx Ctx) Void {
 	}
 }
 
--- Block state space (affine, block-rate coefficients, 2 to 8 states): every
--- state a weight-1 read of its own single-value delay (allocSize 1, no other
--- reader), one channel, root graph; exactly one audio-rate input from
--- outside the cycle (materialized), every other outside input at block rate
--- or lower; and exactly one cycle value used outside the cycle (the output).
-fn _stateSpaceOK(ctx Ctx, cy CycleInfo) Bool {
-	let nst = cy.readers length;
-	if (nst < 2 || nst > 8) { return false; }
-	for (x : cy.nodes) { if (ctx.graphOf[x] != 0 || ctx.chans[x] != 1) { return false; } }
-	let t = ctx.typ[ctx.dsrc[cy.readers[0]]];
-	if (!(t.0 == 4 || t.0 == 8)) { return false; }
-	for (r : cy.readers) {
-		if (ctx.dweight[r] != 1) { return false; }
-		let d = match (ctx.kind[r]) { delayFixReadK(di, _): di; _: NONE; };
-		if (d == NONE) { return false; }
-		let di = ctx.delays[d];
-		if (di.allocSize != 1 || di.fixReaders length != 1 || di.varReaders length != 0) { return false; }
-		if (ctx.typ[ctx.dsrc[r]].0 != t.0) { return false; }
-	}
-	ctx stateSpaceInput(cy) != NONE && ctx stateSpaceOutput(cy) != NONE
+-- Block state space (affine, block-rate coefficients): the cycle as
+-- s' = Ss s + Sx x, y = Ys s + Yx x over a state vector of delay taps.
+--  - Each delay read by the cycle contributes its taps y[-1] .. y[-K], K its
+--    largest read weight, as a shift register: a single value (K = 1) or an
+--    inline ring of at least K samples. Every read of it is in the cycle.
+--  - The cycle's outside audio inputs are linear expressions (+, -, * or /
+--    by a lower-rate value, negation, float casts), inlined into it, over
+--    materialized audio values (the inputs, read from block buffers) and
+--    reads of input delays: delays outside the cycle whose every read feeds
+--    the cycle this way and whose written value is again such an expression.
+--    An input delay contributes its taps as well (a biquad's x[-1], x[-2] in
+--    direct form I, ring's x z2).
+--  - The outputs are the cycle values used outside it (other than by its
+--    delays' writers).
+-- Root graph, float states of one type; 1 to 8 states, 1 to 4 inputs and
+-- outputs. Every cycle node and delay has the same channel count C, and
+-- each channel runs as its own state space (inputs and inlined expressions
+-- have C channels or 1, broadcast).
+struct SSModel {
+	ok Bool,
+	delays [Int],      -- delay indices: the cycle's own, then input delays
+	depth [Int],       -- taps per delay
+	base [Int],        -- first state index per delay
+	inputs [NIdx],     -- materialized audio values (block buffers)
+	outputs [NIdx],    -- cycle values used outside
+	chain [NIdx],      -- inlined outside nodes rebuilt in the step (incl. input delay reads)
+	nstates Int,
+	chans Int,         -- C: channels, each its own state space
 }
 
--- The state-space cycle's one audio-rate outside input, or NONE: the single
--- materialized audio value its outside inputs reach through inlined
--- audio-rate expressions (e.g. the b0*x, b1*x, b2*x of a biquad), which
--- must be linear in it (+, -, * or / by a lower-rate value, negation, float
--- casts).
-fn stateSpaceInput(ctx Ctx, cy CycleInfo) NIdx {
-	var leaves [NIdx] = [];
-	for (x : cy.nodes) {
-		for (i : ctx.ins[x]) {
-			if (cy.nodes contains(i) || ctx.nrate[i] != Rate.audio) { continue; }
-			if (!(ctx _audioLeaves(i, leaves))) { return NONE; }
-		}
+fn _noModel() SSModel = SSModel { ok: false, delays: [Int](), depth: [Int](), base: [Int](),
+	inputs: [NIdx](), outputs: [NIdx](), chain: [NIdx](), nstates: 0, chans: 0 };
+
+fn readDelayOf(ctx Ctx, n NIdx) Int = match (ctx.kind[n]) { delayFixReadK(di, _): di; _: NONE; };
+
+-- A delay usable as state: C channels, root graph, fixed reads only, of
+-- weight 1..allocSize (1 for a single value); returns its depth or 0.
+fn _delayDepth(ctx Ctx, d Int, t NumType, C Int) Int {
+	let di = ctx.delays[d];
+	if (di.varReaders length != 0 || di.writer == NONE || di.allocSize < 1) { return 0; }
+	if (di.chans != C || ctx.chans[di.writer] != C || ctx.graphOf[di.writer] != 0) { return 0; }
+	var k = 0;
+	for (r : di.fixReaders) {
+		if (ctx.chans[r] != C || ctx.graphOf[r] != 0) { return 0; }
+		if (ctx.typ[ctx.dsrc[r]].0 != t.0) { return 0; }
+		let w = ctx.dweight[r];
+		if (w < 1 || w > di.allocSize) { return 0; }
+		if (w > k) { k = w; }
 	}
-	leaves length == 1 ? leaves[0] : NONE
+	k
 }
 
-fn isMaterialized(ctx Ctx, n NIdx) Bool =
-	match (ctx.kind[n]) { inletK(_, _, _): true; _: !(ctx.cut[n] isNoneCut); };
-
--- Collect the materialized audio leaves under n; false if an inlined node on
--- the way is not linear.
-fn _audioLeaves(ctx Ctx, n NIdx, leaves [NIdx]) Bool {
+-- Walk an outside audio value n feeding the model: collect inputs, chain
+-- nodes and input delays. False if it is not linear over them.
+fn _ssExplore(ctx Ctx, cy CycleInfo, n NIdx, m SSModel, inDelays [Int]) Bool {
+	if (m.chain contains(n) || m.inputs contains(n)) { return true; }
+	if (ctx.chans[n] != 1 && ctx.chans[n] != m.chans) { return false; }
+	let d = ctx readDelayOf(n);
+	if (d != NONE && !(ctx isMaterialized(n))) {
+		m.chain push!(n);
+		if (inDelays contains(d)) { return true; }
+		inDelays push!(d);
+		let src = ctx.dsrc[n];
+		if (ctx.nrate[src] != Rate.audio) { return true; }
+		return ctx _ssExplore(cy, src, m, inDelays);
+	}
 	if (ctx isMaterialized(n)) {
-		if (!(leaves contains(n))) { leaves push!(n); }
+		m.inputs push!(n);
 		return true;
 	}
 	let linear = match (ctx.kind[n]) {
@@ -327,14 +416,16 @@ fn _audioLeaves(ctx Ctx, n NIdx, leaves [NIdx]) Bool {
 		_: false;
 	};
 	if (!linear) { return false; }
+	m.chain push!(n);
 	var audioIns = 0;
 	for (i : ctx.ins[n]) {
 		if (ctx.nrate[i] == Rate.audio) {
+			if (cy.nodes contains(i)) { return false; }
 			audioIns = audioIns + 1;
-			if (!(ctx _audioLeaves(i, leaves))) { return false; }
+			if (!(ctx _ssExplore(cy, i, m, inDelays))) { return false; }
 		}
 	}
-	-- a product or quotient of two audio values is not linear in the input
+	-- a product or quotient of two audio values is not linear in the inputs
 	match (ctx.kind[n]) {
 		binopK(op): { match (op) { mul: { if (audioIns > 1) { return false; } } div: { if (ctx.nrate[ctx.ins[n][1]] == Rate.audio) { return false; } } _: {} } }
 		_: {}
@@ -342,17 +433,125 @@ fn _audioLeaves(ctx Ctx, n NIdx, leaves [NIdx]) Bool {
 	true
 }
 
--- The state-space cycle's one value used outside it, or NONE.
-fn stateSpaceOutput(ctx Ctx, cy CycleInfo) NIdx {
-	var o = NONE;
+-- The block state-space model of a cycle; ok is false when it doesn't fit.
+fn stateSpaceModel(ctx Ctx, cy CycleInfo) SSModel {
+	var m = _noModel();
+	if (cy.readers length == 0) { return m; }
+	let C = ctx.chans[cy.nodes[0]];
+	for (x : cy.nodes) { if (ctx.graphOf[x] != 0 || ctx.chans[x] != C) { return m; } }
+	m = SSModel { ...m, chans: C };
+	let t = ctx.typ[ctx.dsrc[cy.readers[0]]];
+	if (!(t.0 == 4 || t.0 == 8)) { return m; }
+	-- the cycle's own delays
+	var own [Int] = [];
+	for (r : cy.readers) {
+		let d = ctx readDelayOf(r);
+		if (d == NONE) { return m; }
+		if (!(own contains(d))) { own push!(d); }
+	}
+	for (d : own) {
+		for (r : ctx.delays[d].fixReaders) { if (!(cy.readers contains(r))) { return m; } }
+	}
+	-- the inputs
+	var inDelays [Int] = [];
 	for (x : cy.nodes) {
-		for (c : ctx.consumers[x]) {
-			let isWriter = match (ctx.kind[c]) { delayWriteK(_): true; _: false; };
-			if (!(cy.nodes contains(c)) && !isWriter) {
-				if (o != NONE && o != x) { return NONE; }
-				o = x;
-			}
+		for (i : ctx.ins[x]) {
+			if (cy.nodes contains(i) || ctx.nrate[i] != Rate.audio) { continue; }
+			if (!(ctx _ssExplore(cy, i, m, inDelays))) { return _noModel(); }
 		}
 	}
-	o
+	-- every read of an input delay is in the chain, so nothing else needs its
+	-- per-sample values; a chain node's one consumer is the cycle or the chain
+	for (d : inDelays) {
+		if (own contains(d)) { return _noModel(); }
+		for (r : ctx.delays[d].fixReaders) { if (!(m.chain contains(r))) { return _noModel(); } }
+	}
+	for (c : m.chain) {
+		for (u : ctx.consumers[c]) {
+			let isWriter = match (ctx.kind[u]) { delayWriteK(_): true; _: false; };
+			if (!(cy.nodes contains(u)) && !(m.chain contains(u)) && !isWriter) { return _noModel(); }
+		}
+	}
+	-- the state layout
+	var n = 0;
+	for (d : own $ inDelays) {
+		let k = ctx _delayDepth(d, t, C);
+		if (k == 0) { return _noModel(); }
+		m.delays push!(d);
+		m.depth push!(k);
+		m.base push!(n);
+		n = n + k;
+	}
+	-- the outputs
+	for (x : cy.nodes) {
+		for (u : ctx.consumers[x]) {
+			let isWriter = match (ctx.kind[u]) { delayWriteK(_): true; _: false; };
+			if (!(cy.nodes contains(u)) && !isWriter && !(m.outputs contains(x))) { m.outputs push!(x); }
+		}
+	}
+	if (n < 1 || n > 8 || m.inputs length < 1 || m.inputs length > 4
+	    || m.outputs length < 1 || m.outputs length > 4) { return _noModel(); }
+	SSModel { ...m, ok: true, nstates: n }
+}
+
+-- The model's input delays (outside the cycle).
+fn ssInputDelays(ctx Ctx, cy CycleInfo, m SSModel) [Int] {
+	var out [Int] = [];
+	for (d : m.delays) {
+		var mine = false;
+		for (r : cy.readers) { if (ctx readDelayOf(r) == d) { mine = true; } }
+		if (!mine) { out push!(d); }
+	}
+	out
+}
+
+fn isMaterialized(ctx Ctx, n NIdx) Bool =
+	match (ctx.kind[n]) { inletK(_, _, _): true; _: !(ctx.cut[n] isNoneCut); };
+
+
+-- The state each loop touches, by loop index: "d<delay>" for a delay it
+-- reads or writes, "rng" for a random draw, "b<buffer>" for a buffer (root
+-- loops, through enclosing control-flow or voicer nodes).
+fn loopStateKeys(ctx Ctx) [[String]] {
+	var keys [[String]] = [];
+	for (li : ctx.loops) { keys push!([String]()); }
+	var di = 0;
+	while (di < ctx.delays length) {
+		let d = ctx.delays[di];
+		var members [NIdx] = d.fixReaders copy;
+		members append!(d.varReaders);
+		if (d.writer != NONE) { members push!(d.writer); }
+		for (x : members) { ctx _addLoopKey(keys, x, "d%^" fmt(di)); }
+		di = di + 1;
+	}
+	for (x : ctx.sorted) {
+		match (ctx.kind[x]) {
+			urandK(_): { ctx _addLoopKey(keys, x, "rng"); }
+			birandK(_): { ctx _addLoopKey(keys, x, "rng"); }
+			rand64K(_): { ctx _addLoopKey(keys, x, "rng"); }
+			bufWriteK(b, _, _): { ctx _addLoopKey(keys, x, "b%^" fmt(b)); }
+			bufFixReadK(b, _, _, _): { ctx _addLoopKey(keys, x, "b%^" fmt(b)); }
+			bufVarReadK(b, _, _, _): { ctx _addLoopKey(keys, x, "b%^" fmt(b)); }
+			_: {}
+		}
+	}
+	keys
+}
+
+fn _addLoopKey(ctx Ctx, keys [[String]], x NIdx, k String) Void {
+	var cur = x;
+	while (cur != NONE && ctx.graphOf[cur] != 0) { cur = ctx _ownerOfGraph(ctx.graphOf[cur]); }
+	if (cur == NONE) { return; }
+	let t = ctx.treeOf[cur];
+	if (t == NONE) { return; }
+	let li = ctx.trees[t].loopOf;
+	if (li == NONE || keys[li] contains(k)) { return; }
+	keys[li] push!(k);
+}
+
+fn _ownerOfGraph(ctx Ctx, g Int) NIdx {
+	for (x : ctx.sorted) {
+		for (sub : ctx.subs[x]) { if (ctx.graphOf[sub] == g) { return x; } }
+	}
+	NONE
 }

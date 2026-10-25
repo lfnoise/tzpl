@@ -1358,7 +1358,7 @@ Deviations and notes:
   accuracy and speed.
 - The corpus re-renders within the tolerance contracts.
 
-Progress (2026-10-25; M7 is in progress):
+Progress (2026-10-25; M7 is done, with the multichannel layout work left for M8):
 - **Classification (`synthc/recurrence.x`):**
   - Each weight 1–3 cycle is walked with linear forms over its state (the in-cycle
     delay reads), tracking the largest rate of any coefficient that multiplies state.
@@ -1398,20 +1398,44 @@ Progress (2026-10-25; M7 is in progress):
     one channel; root graph; one weight-1 read of a delay with no other reader, kept
     as a single value; no random draw inlined into the cycle's inputs.
   - In the dump corpus: 96 scans and 13 first-order affine cycles.
-- **Block state space** (`tzpl_dsp::BlockStateSpace`) runs affine cycles with block-rate
-  coefficients and 2–8 states.
-  - **Shape:** each state is a weight-1 read of its own single-value delay. There is
-    one outside audio input, reached through inlined linear expressions such as a
-    biquad's `b0·x`, `b1·x` and `b2·x`, and one output used outside the cycle.
-  - **The step function** is the cycle's equations over `s[]` and `x`, emitted as a
-    generic lambda, so f32 matrices are built in f64.
+- **Block state space** (`tzpl_dsp::BlockStateSpaceIO<Z, N, I, O>`) runs every affine
+  cycle with block-rate coefficients, of any order (`recurrence.x stateSpaceModel`):
+  - **States are delay taps.** Each delay the cycle reads gives its taps y[−1] .. y[−K]
+    (K its largest read weight) as a shift register: a single value, or an inline ring
+    of at least K samples. So `ring`'s `y(1)`, `y(2)` are two states of one delay.
+  - **Input delays** are delays outside the cycle whose every read feeds it through
+    inlined linear expressions, and whose written value is such an expression: their
+    taps are states too (`ring`'s `x z2`, `leakdc`'s `x z1`).
+  - **Inputs** are the materialized audio values those expressions reach (block
+    buffers, up to 4); **outputs** are the cycle values used outside it (up to 4).
+    `brf`'s shared `b0·x` temp is a second input.
+  - **Channels:** every cycle node and delay has C channels; each channel runs its own
+    state space (inputs of 1 channel broadcast). Buffers are read at their row stride;
+    a multichannel input port is read straight from its channel pointer.
+  - **The step function** is the cycle's equations over `s[]`, `x[]`, writing `y[]`,
+    emitted as a generic lambda per channel, so f32 matrices are built in f64.
   - **Per block, at run time:** while any coefficient group recomputes every sample,
-    the block runs as the plain recurrence. Otherwise the block runs on the matrices,
-    rebuilt when a group recomputed once (or on first use). The state layout is
-    shared, so either form continues the other.
-  - **Coverage:** mono RBJ biquads (`rlpf` and kin). In the dump corpus only 2 cycles
-    qualify; the others are multichannel, and those already run 4 channels or voices
-    to a vector.
+    the block runs as the plain recurrence; a first-order cycle runs its two-pass
+    affine scan instead (the plan's stride check: "one cycle, two forms"). Otherwise
+    the block runs on the matrices, rebuilt when a group recomputed once (or on first
+    use). The state layout is shared, so the forms continue each other.
+  - **Regions:** a state space's region may hold loops that share no state with it.
+    Those that depend on it run after the block, the others before it; one that does
+    both makes the region run sample by sample. Its outputs are always block temps.
+  - **First-order scans** (`scan+`, `scan+wrap`, audio-rate affine) keep the two-pass
+    form, unless their inputs read another delay; affine cycles with block-rate
+    coefficients go to the state space even at order 1 (0.22 ns/sample for a one-pole
+    against 0.69 as a scan).
+- **Loop order** (`passes.x hoistBlockLoops`): root loops that share state form one
+  region spanning everything between them, so a block cycle's loops are made
+  contiguous: each moves as early as dependences and shared state allow, and loops
+  caught between them move after them where they can. A loop of input-port trees
+  emits no code and joins whichever region it lands in. Should a cycle still span two
+  regions, both run as plain regions (never the block form twice).
+- **Dump and codegen agree:** over the 158 dump graphs, every cycle the analysis dump
+  marks "block" runs in block form (checked by comparing the dump's STRATEGY lines
+  with the generated `// recurrence k: block` comments). Counts: 94 `scan+wrap`, 2
+  `scan+`, 12 first-order `affine` (audio-rate), 11 state space.
 - **`TZPL_STRICT_RECURRENCES=1`** turns block forms off: every recurrence runs in
   its own order. This is the plan's `strictRecurrences`, as an environment variable
   for now.
@@ -1433,11 +1457,13 @@ Status:
   knobs 0.305 → 0.333, chorus 0.973 → 1.026, bank 2.612 → 2.330. Block forms gain
   little yet: most loops still compute one sample at a time between them, and
   vectorizing those over samples is M8's fusion.
-- **Not done yet:**
-  - block forms for multichannel cycles (planar block buffers, which come with M8's
-    layouts), and state space for cycles with several inputs or outputs;
-  - the stride check for the first-order affine forms. They always run as scans;
-    state space already chooses per block.
+- **Left for M8:**
+  - Multichannel cycles run one state space per channel through interleaved block
+    buffers. At 4 channels the one-pole filters spend most of their time in the
+    interleave copies (0.7–1.2 ns against TU's 0.15–0.45); M8's planar layouts
+    remove them.
+  - Multichannel scans (phasors) run the channel-vector recurrence, the plan's form
+    for 4 or more channels, but through the same copies.
 
 Reference-ugen comparison (2026-10-25), `benchmarks/ugen_compare/`:
 - **How it runs:**
@@ -1454,45 +1480,61 @@ Reference-ugen comparison (2026-10-25), `benchmarks/ugen_compare/`:
     compared one sample later);
   - lag, decay, decay2, leaky and leakdc −108 to −127 dB;
   - all RBJ biquads −98 to −120 dB.
-- **Bugs found in our ugens, still to be fixed:**
-  - `lag3(x, t)` runs two poles, not three (−5 dB).
-  - `lag(x, u, d)` uses the up time while the output falls and the down time while it
-    rises (+6 dB). Its times are in samples, while `lag(x, t)` takes seconds.
-  - `lfvsaw` applies `bi` to an already bipolar shape, so it spans −3..1 (+6 dB).
-  - `ring`/`pling` approximate the pole radius as 1 + K/t, not exp(K/t): −66 dB at a
-    0.1 s ring, but −42 dB for `pling`'s 1 ms attack. Audio-rate `ring` is −41 dB.
+- **Bugs found in our ugens, fixed:**
+  - `lag3(x, t)` ran two poles, not three (was −5 dB, now −112 dB).
+  - `lag(x, u, d)` used the up time while the output fell and the down time while it
+    rose (+6 dB). It now takes seconds, like `lag(x, t)` (was samples); `lag2`/`lag3`
+    with up/down times likewise. Now −132 dB.
+  - `varsaw` applied `bi` to an already bipolar shape, so `lfvsaw` spanned −3..1
+    (+6 dB). `varsaw` is now the bipolar shape and `vartri` its unipolar form, as in
+    tensor-ugens. Now −88 dB.
+  - `ring`/`pling` approximated the pole radius as 1 + K/t, not exp(K/t) (−66 dB, and
+    −42 dB for a 1 ms attack). Now `decay60dB(t·fs)`: −83 dB, the f32 floor for a pole
+    at radius 0.9986 run as a state space.
+  - Audio-rate `ring` stays at −41 dB: ours is direct form I, TU's transposed direct
+    form II, and the two differ while the frequency moves. Not a bug.
 - **Fixed while building it:**
   - `lag(x, u, d)` and its kin never compiled: a lang bug hid every template overload
     of a private function after the first one, when a template from another module
     instantiated it. The scope merge deduplicated by global slot, which is 0 for every
     template. Fixed, with a test.
   - `pling` had a typo (`freq atkTime`).
-- **Speed:** we are 1.2–2.6× TU at 1 channel and 1.1–6× at 4 channels, against the
-  1.25× target. We are faster only for `sinosc` (4 ch) and audio-rate `rlpf` (4 ch).
-  The worst cases:
-  - **Serial recurrences kept their state in the synth struct** (`p->d0`) inside the
-    loop. The compiler can't rule out that the output stores alias it, so the state went
-    through memory every sample: 1-channel `leakdc` 7×, `brf` 8.5×, `ring` 7.7×.
-    **Fixed** (`_localizeDelays` in codegen.x), 1-channel, in each plain region:
-    - a one-channel root delay (a single value, or an inline ring of 2–8 samples with
-      its write position) used only by that region is loaded into a local before the
-      sample loop and stored after it;
-    - instance values the region only reads are loaded once.
+- **Regression check:** `run_ugen_compare.sh --check` runs the accuracy comparison
+  only and fails above −80 dB (−35 dB for audio-rate `ring`); it runs in macOS CI.
+  It caught a state space emitted twice that the corpus never exercised.
+- **Speed, ns per sample per channel, ours vs TU (final run):**
 
-    Results:
-    - `leakdc` 3.5 → 0.95 ns, `brf` 4.4 → 2.1, `lagud` 3.2 → 2.05, audio-rate `rlpf`
-      7.2 → 3.3 (now 0.74× TU).
-    - Corpus against the previous codegen: 101/118 identical. The rest differ by
-      −103 to −163 dBFS (more FMA contraction), except `sc2_2` and `sc2_7`, which
-      differ between two renders of the same code.
-    - App benchmarks barely move (knobs 0.333 → 0.324, chorus 1.026 → 1.004, bank
-      2.330 → 2.327): their state is mostly multichannel.
-  - `brf` and `ring` classify as affine order 2 and 3, but run serially, not as state
-    space. `ring` stays at 6× even with its rings in locals; the fix is state space.
-  - Multichannel delay state still lives in the struct.
-  - `leakdc`'s dump says block (affine), but its generated code is serial: the dump's
-    STRATEGY and codegen disagree there.
-  - 4-channel ports pay the temporary interleave copy (M8 removes it).
+  | | 1 channel | 4 channels |
+  |---|---|---|
+  | one-pole (`lag`, `decay`, `leaky`) | 0.21–0.30 vs 0.32–0.42 | 0.75–0.93 vs 0.22–0.38 |
+  | `lag3`, `decay2`, `leakdc` | 0.48–0.62 vs 0.63–0.77 | 0.88–1.44 vs 0.29–0.45 |
+  | RBJ biquads | 0.43–0.62 vs 0.51–0.67 | 0.92–1.29 vs 0.98–1.19 |
+  | `ringz` / `formlet` | 0.85 / 1.71 vs 0.63 / 1.05 | 1.42 / 2.17 vs 0.66 / 0.70 |
+  | audio-rate `rlpf` | 3.26 vs 4.74 | 2.14 vs 3.79 |
+  | phasor oscillators | 0.98–2.72 vs 0.78–1.77 | 0.67–1.13 vs 0.57–1.58 |
+  | `lagud` (nonlinear) | 2.33 vs 2.12 | 1.13 vs 0.67 |
+  | noises | 2.2–2.3 vs 1.0–1.3 | 1.4–2.5 vs 0.5–1.2 |
+
+  At one channel every linear filter but `ringz`/`formlet` is now faster than TU
+  (they were 1.2–8.5× slower). The 4-channel gap is the interleave copying (M8).
+- **How the speed came:**
+  - **Serial regions keep state in locals** (`_localizeDelays` in codegen.x): through
+    `p`, the compiler couldn't rule out that output stores alias delay state and
+    coefficients, so they went through memory every sample (1-channel `leakdc` 7×,
+    `brf` 8.5×). A one-channel root delay (a single value or an inline ring of 2–8
+    samples) used by one plain region is loaded before its sample loop and stored
+    after; values the region only reads are loaded once.
+  - **The generalized state space** (above) took `brf`, `ring`, `pling` and `leakdc`
+    off the serial path, and with the stride check every one-pole with block-rate
+    coefficients.
+- **Corpus, block forms against strict recurrences:** 101/118 within −60 dBFS. The
+  rest are the previous comparison's set at the same levels (rounding amplified by
+  gates, delay times, quantizers and high-Q filters: `fxLoFi`'s −42.1 dBFS is one
+  8-bit step), plus `sc2_2`, `sc2_7` and `sc2_12`, which differ between two renders
+  of the same code.
+- **App benchmarks** (ms of CPU per node-second, start of M7 → now): knobs 0.333 →
+  0.300, chorus 1.026 → 1.018, bank 2.330 → 2.359 (noise): their loops are mostly
+  multichannel.
 
 **M8: Strategy and fusion optimiser (§4.2 steps 6–8).**
 - Serial-loop isolation of short cycles, the cost table, loop formation of all three

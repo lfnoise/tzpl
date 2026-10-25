@@ -1105,17 +1105,14 @@ fn _newLoop(ctx Ctx, rate Rate, chans Int, isCF Bool, graphOf Int, group Int = N
 -- group (a block loop runs, or is skipped, as one group), else NONE.
 fn _treeGroup(ctx Ctx, root NIdx) Int {
 	if (ctx.nrate[root] == Rate.block && ctx.groupOf length > root) { return ctx.groupOf[root]; }
-	-- A block-form cycle's trees (any tree holding one of its nodes, and its
-	-- delay writer) form loops of their own: key -(10 + cycle index).
-	for (k : ctx.blockCycles) {
-		let cy = ctx.cycles[k];
-		let t = ctx.treeOf[root];
-		for (x : cy.nodes) { if (ctx.treeOf[x] == t) { return -(10 + k); } }
-		let r = cy.readers[0];
-		match (ctx.kind[r]) {
-			delayFixReadK(d, _): { if (ctx.delays[d].writer == root) { return -(10 + k); } }
-			_: {}
-		}
+	-- A block-form cycle's trees (any tree holding one of its members: its
+	-- nodes, its delay writers, a state space's inlined inputs) form loops of their
+	-- own: key -(10 + cycle index).
+	let t = ctx.treeOf[root];
+	var j = 0;
+	while (j < ctx.blockCycles length) {
+		for (x : ctx.blockMembers[j]) { if (ctx.treeOf[x] == t) { return -(10 + ctx.blockCycles[j]); } }
+		j = j + 1;
 	}
 	NONE
 }
@@ -1317,7 +1314,80 @@ fn analyzeForCodegen(ctx Ctx) Ctx {
 	ctx sortTrees;
 	ctx treesToLoops;
 	ctx splitRates;
+	ctx hoistBlockLoops;
 	ctx
+}
+
+-- Make each block cycle's root loops contiguous, so they form a region of
+-- their own. First move each block-cycle loop as early as it can go: past
+-- every loop it doesn't depend on and shares no state with (a delay, the
+-- random generator, a written buffer). Root loops that share state run
+-- together sample by sample as a region spanning everything between them
+-- (codegen rootRegions), so a block cycle left between two such loops would
+-- run sample by sample too. Earlier loops never depend on a later one, so
+-- the move keeps every dependence.
+fn hoistBlockLoops(ctx Ctx) Void {
+	if (ctx.blockCycles length == 0 || ctx.graphs length == 0) { return; }
+	var order = ctx.graphs[0].audioLoops copy;
+	let keys = ctx loopStateKeys;
+	var p = 0;
+	while (p < order length) {
+		let li = order[p];
+		if (ctx.loops[li].group <= -10) {
+			var q = p;
+			while (q > 0) {
+				let prev = order[q - 1];
+				if (ctx.loops[li].antecedents contains(ctx.loops[prev].serial)) { break; }
+				var shared = false;
+				for (k : keys[li]) { if (keys[prev] contains(k)) { shared = true; } }
+				if (shared) { break; }
+				q = q - 1;
+			}
+			if (q < p) {
+				var j = p;
+				while (j > q) { order[j] = order[j - 1]; j = j - 1; }
+				order[q] = li;
+			}
+		}
+		p = p + 1;
+	}
+	-- A loop between two loops of one block cycle (e.g. one reading a delay
+	-- the cycle writes later) would tie the cycle's region to it: move it
+	-- to just after the cycle's last loop, if nothing it passes depends on
+	-- it or shares state with it. Later loops may depend on earlier ones,
+	-- never the reverse, so moving a loop later keeps its own dependences.
+	for (k : ctx.blockCycles) {
+		let g = -(10 + k);
+		var last = -1;
+		var first = -1;
+		var i = 0;
+		while (i < order length) {
+			if (ctx.loops[order[i]].group == g) { if (first < 0) { first = i; } last = i; }
+			i = i + 1;
+		}
+		var q = last - 1;
+		while (q > first) {
+			let li = order[q];
+			if (ctx.loops[li].group != g) {
+				var ok = true;
+				var j = q + 1;
+				while (ok && j <= last) {
+					let lj = order[j];
+					if (ctx.loops[lj].antecedents contains(ctx.loops[li].serial)) { ok = false; }
+					for (key : keys[li]) { if (keys[lj] contains(key)) { ok = false; } }
+					j = j + 1;
+				}
+				if (ok) {
+					j = q;
+					while (j < last) { order[j] = order[j + 1]; j = j + 1; }
+					order[last] = li;
+					last = last - 1;
+				}
+			}
+			q = q - 1;
+		}
+	}
+	ctx.graphs[0].audioLoops clear! append!(order);
 }
 
 -- The full analysis pipeline.

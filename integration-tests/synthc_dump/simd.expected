@@ -437,7 +437,7 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [3 5 6] delays [3<-6:1]
-  CLASS affine-block order 1 STRATEGY serial
+  CLASS affine-block order 1 STRATEGY block (statespace)
 DELAY 0 f32 8
      2 f32 0 delay_init
      3 f32 8 delay_fix_read(1)
@@ -594,7 +594,7 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 3 recurrence nodes [3 7 8] delays [3<-8:3]
-  CLASS affine-block order 3 STRATEGY serial
+  CLASS affine-block order 3 STRATEGY block (statespace)
 DELAY 0 f32 4
      2 f32 0 delay_init
      3 f32 4 delay_fix_read(3)

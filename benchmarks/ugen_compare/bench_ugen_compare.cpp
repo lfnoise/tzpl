@@ -17,7 +17,10 @@
 //    as in bench_tensor_ugens.
 // Noises have no common sequence, so they are timed only.
 //
-// Usage: bench_ugen_compare PLUGIN_DIR [case-substring]
+// Usage: bench_ugen_compare [--check] PLUGIN_DIR [case-substring]
+//   --check: accuracy only, no timing; exits 1 if any case's error is above
+//   its limit (-80 dB; -35 dB for ringz_af, whose direct form I differs from
+//   TU's transposed form under a moving frequency).
 
 #include <dlfcn.h>
 
@@ -29,6 +32,7 @@
 #include <cstring>
 #include <functional>
 #include <print>
+#include <string_view>
 #include <string>
 #include <vector>
 
@@ -341,19 +345,23 @@ double errDb(std::vector<std::vector<double>> const& ref,
 }  // namespace
 
 int main(int argc, char** argv) {
+    bool checkOnly = argc > 1 && std::string_view(argv[1]) == "--check";
+    if (checkOnly) { ++argv; --argc; }
     if (argc < 2) {
-        std::println(stderr, "usage: bench_ugen_compare PLUGIN_DIR [case-substring]");
+        std::println(stderr, "usage: bench_ugen_compare [--check] PLUGIN_DIR [case-substring]");
         return 2;
     }
     initialize();
     std::string dir = argv[1];
     char const* filter = argc > 2 ? argv[2] : nullptr;
+    int failures = 0;
     int const chanCounts[] = {1, 4};
 
     std::println("ours (synthc, f32) vs tensor-ugens (f64), block {}, ns per sample per channel",
                  kBlock);
-    std::println("{:<10}{:>10}{:>7}  {:>8}{:>8}{:>7}  {:>8}{:>8}{:>7}", "ugen", "err dB",
-                 "shift", "ours 1", "TU 1", "ratio", "ours 4", "TU 4", "ratio");
+    if (checkOnly) std::println("{:<10}{:>10}{:>7}", "ugen", "err dB", "shift");
+    else std::println("{:<10}{:>10}{:>7}  {:>8}{:>8}{:>7}  {:>8}{:>8}{:>7}", "ugen", "err dB",
+                      "shift", "ours 1", "TU 1", "ratio", "ours 4", "TU 4", "ratio");
     for (Case const& c : cases()) {
         if (filter && c.name.find(filter) == std::string::npos) continue;
         std::string errCol = "-", shiftCol = "";
@@ -379,9 +387,16 @@ int main(int argc, char** argv) {
                 auto ref = runTU(c, x);
                 double e0 = errDb(ref, ours, 0), e1 = errDb(ref, ours, 1);
                 bool s = e1 < e0 - 20;
-                errCol = std::format("{:.1f}", s ? e1 : e0);
+                double e = s ? e1 : e0;
+                errCol = std::format("{:.1f}", e);
                 shiftCol = s ? "1" : "0";
+                double limit = c.name == "ringz_af" ? -35 : -80;
+                if (!(e <= limit)) {
+                    errCol += " FAIL";
+                    ++failures;
+                }
             }
+            if (checkOnly) continue;
             long b = 0;
             double ours = bestNs([&] {
                 pl.runBlock(x, b);
@@ -390,8 +405,13 @@ int main(int argc, char** argv) {
             double tu = timeTU(c, x);
             speed += std::format("  {:>8.3f}{:>8.3f}{:>7.2f}", ours, tu, ours / tu);
         }
-        if (!failed) std::println("{:<10}{:>10}{:>7}{}", c.name, errCol, shiftCol, speed);
+        if (failed) ++failures;
+        else std::println("{:<10}{:>10}{:>7}{}", c.name, errCol, shiftCol, speed);
         std::fflush(stdout);
     }
-    return 0;
+    if (checkOnly) {
+        if (failures) std::println("UGEN COMPARE FAIL ({})", failures);
+        else std::println("UGEN COMPARE PASS");
+    }
+    return failures && checkOnly ? 1 : 0;
 }

@@ -80,6 +80,11 @@ jobs:
           cmake --build build --target test_block_engine -j$(sysctl -n hw.ncpu)
           ./build/integration-tests/test_block_engine
 
+      # common_ugens.x / filters.x ugens against their tensor-ugens references
+      # (plan M7): accuracy only, through the synthc plugins they compile to.
+      - name: Reference ugen comparison
+        run: TZPL_BUILD_DIR=build bash benchmarks/ugen_compare/run_ugen_compare.sh --check
+
       - name: JUCE headless self-test
         run: |
           BIN=./build/app/tzpl_app_juce_artefacts/Release/Tzopilotl.app/Contents/MacOS/Tzopilotl

@@ -1442,7 +1442,7 @@ OUT 0 out f32 1
       6   16 [                ]  0  1 Const    None      f32     1 0.01f
       7   14 [                ]  0  1 Const    None      f32     1 1.0f
       8    1 [                ]  0  1 Block    Input     f32     1 control(release)
-      9    6 [                ]  0  4 Init     Rate      f32     1 fs
+      9    6 [                ]  0  5 Init     Rate      f32     1 fs
      10   13 [1 6             ]  2  1 Block    None      f32     1 *
      11   15 [14 13           ]  2  1 Block    None      f32     1 /
      12   17 [16 15           ]  2  1 Block    None      f32     1 pow
@@ -1469,54 +1469,55 @@ OUT 0 out f32 1
      33   43 [42              ]  1  1 Block    None      f32     1 sqrt
      34   45 [44 43           ]  2  1 Block    Rate      f32     1 /
      35   46 [32 45           ]  2  2 Audio    FanOut    f32     1 *
-     36   67 [                ]  0  1 Audio    None      f32     1 delay_fix_read(2)
-     37   66 [46              ]  1  0 Audio    Sink      f32     1 delay_write
-     38   69 [                ]  0  1 Const    None      f32     1 0.5f
-     39   68 [46 67           ]  2  1 Audio    None      f32     1 -
-     40   70 [69 68           ]  2  1 Audio    Broadcast f32     1 *
+     36   69 [                ]  0  1 Audio    None      f32     1 delay_fix_read(2)
+     37   68 [46              ]  1  0 Audio    Sink      f32     1 delay_write
+     38   71 [                ]  0  1 Const    None      f32     1 0.5f
+     39   70 [46 69           ]  2  1 Audio    None      f32     1 -
+     40   72 [71 70           ]  2  1 Audio    Broadcast f32     1 *
      41   61 [                ]  0  1 Const    None      f32     1 2.0f
-     42   54 [                ]  0  1 Const    None      f32     1 1.0f
-     43   51 [                ]  0  1 Const    None      f32     1 -6.9077554f
-     44   50 [                ]  0  2 Init     Rate      f32     1 sd
-     45   52 [51 50           ]  2  1 Init     Rate      f32     1 *
-     46   48 [                ]  0  1 Const    None      f32     8 {1.0f, 0.78f, 0.62f, 0.5f, 0.42f, 0.36f, 0.31f, 0.27f}
-     47   49 [34 48           ]  2  1 Block    None      f32     8 *
-     48   53 [52 49           ]  2  1 Block    None      f32     8 /
-     49   55 [54 53           ]  2  3 Block    FanOut    f32     8 +
-     50   62 [61 55           ]  2  1 Block    None      f32     8 *
-     51    3 [                ]  0  1 Block    Input     f32     1 noteParam(freq@1)
-     52   35 [                ]  0  1 Const    None      f32     8 {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f}
-     53   36 [3 35            ]  2  2 Block    FanOut    f32     8 *
-     54   38 [                ]  0  1 Const    None      f32     1 0.45f
-     55   39 [38 6            ]  2  2 Init     Rate      f32     1 *
-     56   47 [36 39           ]  2  1 Block    None      f32     8 min
-     57   56 [                ]  0  1 Const    None      f32     1 6.2831855f
-     58   57 [47 56           ]  2  1 Block    None      f32     8 *
-     59   59 [57 50           ]  2  1 Block    None      f32     8 *
+     42   54 [                ]  0  2 Const    None      f32     1 0.001f
+     43   52 [                ]  0  1 Const    None      f32     1 1.0f
+     44   48 [                ]  0  1 Const    None      f32     8 {1.0f, 0.78f, 0.62f, 0.5f, 0.42f, 0.36f, 0.31f, 0.27f}
+     45   49 [34 48           ]  2  1 Block    None      f32     8 *
+     46   51 [49 6            ]  2  1 Block    None      f32     8 *
+     47   53 [52 51           ]  2  3 Block    FanOut    f32     8 /
+     48   55 [54 53           ]  2  1 Block    None      f32     8 pow
+     49   62 [61 55           ]  2  1 Block    None      f32     8 *
+     50    3 [                ]  0  1 Block    Input     f32     1 noteParam(freq@1)
+     51   35 [                ]  0  1 Const    None      f32     8 {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f}
+     52   36 [3 35            ]  2  2 Block    FanOut    f32     8 *
+     53   38 [                ]  0  1 Const    None      f32     1 0.45f
+     54   39 [38 6            ]  2  2 Init     Rate      f32     1 *
+     55   47 [36 39           ]  2  1 Block    None      f32     8 min
+     56   56 [                ]  0  1 Const    None      f32     1 6.2831855f
+     57   57 [47 56           ]  2  1 Block    None      f32     8 *
+     58   58 [                ]  0  1 Init     Rate      f32     1 sd
+     59   59 [57 58           ]  2  1 Block    None      f32     8 *
      60   60 [59              ]  1  1 Block    None      f32     8 cos
      61   63 [62 60           ]  2  1 Block    Rate      f32     8 *
-     62   74 [                ]  0  1 Audio    None      f32     8 delay_fix_read(2)
-     63   71 [                ]  0  1 Audio    None      f32     8 delay_fix_read(1)
-     64   72 [63 71           ]  2  1 Audio    None      f32     8 *
-     65   73 [70 72           ]  2  1 Audio    None      f32     8 +
-     66   64 [55 55           ]  2  1 Block    None      f32     8 *
-     67   65 [64              ]  1  1 Block    Rate      f32     8 -
-     68   75 [65 74           ]  2  1 Audio    None      f32     8 *
-     69   76 [73 75           ]  2  2 Audio    FanOut    f32     8 +
-     70   77 [76              ]  1  0 Audio    Sink      f32     8 delay_write
-     71   78 [                ]  0  1 Const    None      f32     8 {1.0f, 0.62f, 0.45f, 0.35f, 0.28f, 0.22f, 0.18f, 0.15f}
-     72   79 [76 78           ]  2  1 Audio    None      f32     8 *
-     73   40 [36 39           ]  2  1 Block    Rate      f32     8 <
-     74   80 [79 40           ]  2  1 Audio    Temp      f32     8 *
-     75   81 [80              ]  1  1 Audio    SeparateLoop f32     1 reduce(+, 1)
-     76    4 [                ]  0  1 Block    Input     f32     1 noteParam(amp@2)
-     77   82 [81 4            ]  2  1 Audio    None      f32     1 *
-     78   83 [                ]  0  1 Const    None      f32     1 0.7f
-     79   84 [82 83           ]  2  1 Audio    Temp      f32     1 *
-     80   85 [84              ]  1  0 Audio    Phi       f32     1 PhiNode
-     81   86 [                ]  0  1 Audio    Temp      f32     8 voicer
-     82   88 [86              ]  1  1 Audio    SeparateLoop f32     1 reduce(+, 1)
-     83   89 [88              ]  1  0 Audio    Sink      f32     1 outlet
+     62   76 [                ]  0  1 Audio    None      f32     8 delay_fix_read(2)
+     63   73 [                ]  0  1 Audio    None      f32     8 delay_fix_read(1)
+     64   74 [63 73           ]  2  1 Audio    None      f32     8 *
+     65   75 [72 74           ]  2  1 Audio    None      f32     8 +
+     66   65 [53 53           ]  2  1 Block    None      f32     8 +
+     67   66 [54 65           ]  2  1 Block    None      f32     8 pow
+     68   67 [66              ]  1  1 Block    Rate      f32     8 -
+     69   77 [67 76           ]  2  1 Audio    None      f32     8 *
+     70   78 [75 77           ]  2  2 Audio    FanOut    f32     8 +
+     71   79 [78              ]  1  0 Audio    Sink      f32     8 delay_write
+     72   80 [                ]  0  1 Const    None      f32     8 {1.0f, 0.62f, 0.45f, 0.35f, 0.28f, 0.22f, 0.18f, 0.15f}
+     73   81 [78 80           ]  2  1 Audio    None      f32     8 *
+     74   40 [36 39           ]  2  1 Block    Rate      f32     8 <
+     75   82 [81 40           ]  2  1 Audio    Temp      f32     8 *
+     76   83 [82              ]  1  1 Audio    SeparateLoop f32     1 reduce(+, 1)
+     77    4 [                ]  0  1 Block    Input     f32     1 noteParam(amp@2)
+     78   84 [83 4            ]  2  1 Audio    None      f32     1 *
+     79   85 [                ]  0  1 Const    None      f32     1 0.7f
+     80   86 [84 85           ]  2  1 Audio    Temp      f32     1 *
+     81   87 [86              ]  1  0 Audio    Phi       f32     1 PhiNode
+     82   88 [                ]  0  1 Audio    Temp      f32     8 voicer
+     83   90 [88              ]  1  1 Audio    SeparateLoop f32     1 reduce(+, 1)
+     84   91 [90              ]  1  0 Audio    Sink      f32     1 outlet
 -- TREES
     TREE 1    [] Block  Input     f32     1
       0    5 [                ]  0  1 Block    Input     f32     1 noteParam(gate@0)
@@ -1530,7 +1531,7 @@ OUT 0 out f32 1
     TREE 4    [] Block  Input     f32     1
       0    1 [                ]  0  1 Block    Input     f32     1 control(release)
     TREE 5    [] Init   Rate      f32     1
-      0    6 [                ]  0  4 Init     Rate      f32     1 fs
+      0    6 [                ]  0  5 Init     Rate      f32     1 fs
     TREE 6    [] Block  Input     f32     1
       0    0 [                ]  0  1 Block    Input     f32     1 control(attack)
     TREE 7    [2 4 5 6] Block  Rate      f32     1
@@ -1569,86 +1570,84 @@ OUT 0 out f32 1
       1   32 [31 29           ]  2  1 Audio    None      f32     1 *
       2   46 [32 45           ]  2  2 Audio    FanOut    f32     1 *
     TREE 15   [14] Audio  Sink      f32     1
-      0   66 [46              ]  1  0 Audio    Sink      f32     1 delay_write
+      0   68 [46              ]  1  0 Audio    Sink      f32     1 delay_write
     TREE 16   [14] Audio  Broadcast f32     1
-      0   69 [                ]  0  1 Const    None      f32     1 0.5f
-      1   67 [                ]  0  1 Audio    None      f32     1 delay_fix_read(2)
-      2   68 [46 67           ]  2  1 Audio    None      f32     1 -
-      3   70 [69 68           ]  2  1 Audio    Broadcast f32     1 *
-    TREE 17   [] Init   Rate      f32     1
-      0   50 [                ]  0  2 Init     Rate      f32     1 sd
-    TREE 18   [17] Init   Rate      f32     1
-      0   51 [                ]  0  1 Const    None      f32     1 -6.9077554f
-      1   52 [51 50           ]  2  1 Init     Rate      f32     1 *
-    TREE 19   [18 12] Block  FanOut    f32     8
-      0   54 [                ]  0  1 Const    None      f32     1 1.0f
+      0   71 [                ]  0  1 Const    None      f32     1 0.5f
+      1   69 [                ]  0  1 Audio    None      f32     1 delay_fix_read(2)
+      2   70 [46 69           ]  2  1 Audio    None      f32     1 -
+      3   72 [71 70           ]  2  1 Audio    Broadcast f32     1 *
+    TREE 17   [12 5] Block  FanOut    f32     8
+      0   52 [                ]  0  1 Const    None      f32     1 1.0f
       1   48 [                ]  0  1 Const    None      f32     8 {1.0f, 0.78f, 0.62f, 0.5f, 0.42f, 0.36f, 0.31f, 0.27f}
       2   49 [34 48           ]  2  1 Block    None      f32     8 *
-      3   53 [52 49           ]  2  1 Block    None      f32     8 /
-      4   55 [54 53           ]  2  3 Block    FanOut    f32     8 +
-    TREE 20   [] Block  Input     f32     1
+      3   51 [49 6            ]  2  1 Block    None      f32     8 *
+      4   53 [52 51           ]  2  3 Block    FanOut    f32     8 /
+    TREE 18   [] Block  Input     f32     1
       0    3 [                ]  0  1 Block    Input     f32     1 noteParam(freq@1)
-    TREE 21   [20] Block  FanOut    f32     8
+    TREE 19   [18] Block  FanOut    f32     8
       0   35 [                ]  0  1 Const    None      f32     8 {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f}
       1   36 [3 35            ]  2  2 Block    FanOut    f32     8 *
-    TREE 22   [5] Init   Rate      f32     1
+    TREE 20   [5] Init   Rate      f32     1
       0   38 [                ]  0  1 Const    None      f32     1 0.45f
       1   39 [38 6            ]  2  2 Init     Rate      f32     1 *
-    TREE 23   [19 21 22 17] Block  Rate      f32     8
+    TREE 21   [] Init   Rate      f32     1
+      0   58 [                ]  0  1 Init     Rate      f32     1 sd
+    TREE 22   [17 19 20 21] Block  Rate      f32     8
       0   61 [                ]  0  1 Const    None      f32     1 2.0f
-      1   62 [61 55           ]  2  1 Block    None      f32     8 *
-      2   47 [36 39           ]  2  1 Block    None      f32     8 min
-      3   56 [                ]  0  1 Const    None      f32     1 6.2831855f
-      4   57 [47 56           ]  2  1 Block    None      f32     8 *
-      5   59 [57 50           ]  2  1 Block    None      f32     8 *
-      6   60 [59              ]  1  1 Block    None      f32     8 cos
-      7   63 [62 60           ]  2  1 Block    Rate      f32     8 *
-    TREE 24   [19] Block  Rate      f32     8
-      0   64 [55 55           ]  2  1 Block    None      f32     8 *
-      1   65 [64              ]  1  1 Block    Rate      f32     8 -
-    TREE 25   [16 23 24] Audio  FanOut    f32     8
-      0   71 [                ]  0  1 Audio    None      f32     8 delay_fix_read(1)
-      1   72 [63 71           ]  2  1 Audio    None      f32     8 *
-      2   73 [70 72           ]  2  1 Audio    None      f32     8 +
-      3   74 [                ]  0  1 Audio    None      f32     8 delay_fix_read(2)
-      4   75 [65 74           ]  2  1 Audio    None      f32     8 *
-      5   76 [73 75           ]  2  2 Audio    FanOut    f32     8 +
-    TREE 26   [25] Audio  Sink      f32     8
-      0   77 [76              ]  1  0 Audio    Sink      f32     8 delay_write
-    TREE 27   [21 22] Block  Rate      f32     8
+      1   54 [                ]  0  2 Const    None      f32     1 0.001f
+      2   55 [54 53           ]  2  1 Block    None      f32     8 pow
+      3   62 [61 55           ]  2  1 Block    None      f32     8 *
+      4   47 [36 39           ]  2  1 Block    None      f32     8 min
+      5   56 [                ]  0  1 Const    None      f32     1 6.2831855f
+      6   57 [47 56           ]  2  1 Block    None      f32     8 *
+      7   59 [57 58           ]  2  1 Block    None      f32     8 *
+      8   60 [59              ]  1  1 Block    None      f32     8 cos
+      9   63 [62 60           ]  2  1 Block    Rate      f32     8 *
+    TREE 23   [17] Block  Rate      f32     8
+      0   54 [                ]  0  2 Const    None      f32     1 0.001f
+      1   65 [53 53           ]  2  1 Block    None      f32     8 +
+      2   66 [54 65           ]  2  1 Block    None      f32     8 pow
+      3   67 [66              ]  1  1 Block    Rate      f32     8 -
+    TREE 24   [16 22 23] Audio  FanOut    f32     8
+      0   73 [                ]  0  1 Audio    None      f32     8 delay_fix_read(1)
+      1   74 [63 73           ]  2  1 Audio    None      f32     8 *
+      2   75 [72 74           ]  2  1 Audio    None      f32     8 +
+      3   76 [                ]  0  1 Audio    None      f32     8 delay_fix_read(2)
+      4   77 [67 76           ]  2  1 Audio    None      f32     8 *
+      5   78 [75 77           ]  2  2 Audio    FanOut    f32     8 +
+    TREE 25   [24] Audio  Sink      f32     8
+      0   79 [78              ]  1  0 Audio    Sink      f32     8 delay_write
+    TREE 26   [19 20] Block  Rate      f32     8
       0   40 [36 39           ]  2  1 Block    Rate      f32     8 <
-    TREE 28   [25 27] Audio  Temp      f32     8
-      0   78 [                ]  0  1 Const    None      f32     8 {1.0f, 0.62f, 0.45f, 0.35f, 0.28f, 0.22f, 0.18f, 0.15f}
-      1   79 [76 78           ]  2  1 Audio    None      f32     8 *
-      2   80 [79 40           ]  2  1 Audio    Temp      f32     8 *
-    TREE 29   [28*] Audio  SeparateLoop f32     1
-      0   81 [80              ]  1  1 Audio    SeparateLoop f32     1 reduce(+, 1)
-    TREE 30   [] Block  Input     f32     1
+    TREE 27   [24 26] Audio  Temp      f32     8
+      0   80 [                ]  0  1 Const    None      f32     8 {1.0f, 0.62f, 0.45f, 0.35f, 0.28f, 0.22f, 0.18f, 0.15f}
+      1   81 [78 80           ]  2  1 Audio    None      f32     8 *
+      2   82 [81 40           ]  2  1 Audio    Temp      f32     8 *
+    TREE 28   [27*] Audio  SeparateLoop f32     1
+      0   83 [82              ]  1  1 Audio    SeparateLoop f32     1 reduce(+, 1)
+    TREE 29   [] Block  Input     f32     1
       0    4 [                ]  0  1 Block    Input     f32     1 noteParam(amp@2)
-    TREE 31   [29 30] Audio  Temp      f32     1
-      0   82 [81 4            ]  2  1 Audio    None      f32     1 *
-      1   83 [                ]  0  1 Const    None      f32     1 0.7f
-      2   84 [82 83           ]  2  1 Audio    Temp      f32     1 *
-    TREE 32   [31] Audio  Phi       f32     1
-      0   85 [84              ]  1  0 Audio    Phi       f32     1 PhiNode
-    TREE 33   [32*] Audio  Temp      f32     8
-      0   86 [                ]  0  1 Audio    Temp      f32     8 voicer
-    TREE 34   [33*] Audio  SeparateLoop f32     1
-      0   88 [86              ]  1  1 Audio    SeparateLoop f32     1 reduce(+, 1)
-    TREE 35   [34] Audio  Sink      f32     1
-      0   89 [88              ]  1  0 Audio    Sink      f32     1 outlet
+    TREE 30   [28 29] Audio  Temp      f32     1
+      0   84 [83 4            ]  2  1 Audio    None      f32     1 *
+      1   85 [                ]  0  1 Const    None      f32     1 0.7f
+      2   86 [84 85           ]  2  1 Audio    Temp      f32     1 *
+    TREE 31   [30] Audio  Phi       f32     1
+      0   87 [86              ]  1  0 Audio    Phi       f32     1 PhiNode
+    TREE 32   [31*] Audio  Temp      f32     8
+      0   88 [                ]  0  1 Audio    Temp      f32     8 voicer
+    TREE 33   [32*] Audio  SeparateLoop f32     1
+      0   90 [88              ]  1  1 Audio    SeparateLoop f32     1 reduce(+, 1)
+    TREE 34   [33] Audio  Sink      f32     1
+      0   91 [90              ]  1  0 Audio    Sink      f32     1 outlet
 -- INIT
   LOOP  2 [] Init   1
     TREE 5    [] Init   Rate      f32     1
-      0    6 [                ]  0  4 Init     Rate      f32     1 fs
-    TREE 17   [] Init   Rate      f32     1
-      0   50 [                ]  0  2 Init     Rate      f32     1 sd
-    TREE 18   [17] Init   Rate      f32     1
-      0   51 [                ]  0  1 Const    None      f32     1 -6.9077554f
-      1   52 [51 50           ]  2  1 Init     Rate      f32     1 *
-    TREE 22   [5] Init   Rate      f32     1
+      0    6 [                ]  0  5 Init     Rate      f32     1 fs
+    TREE 20   [5] Init   Rate      f32     1
       0   38 [                ]  0  1 Const    None      f32     1 0.45f
       1   39 [38 6            ]  2  2 Init     Rate      f32     1 *
+    TREE 21   [] Init   Rate      f32     1
+      0   58 [                ]  0  1 Init     Rate      f32     1 sd
 -- RESET
 -- BLOCK
   LOOP  0 [] Block  1
@@ -1695,47 +1694,51 @@ OUT 0 out f32 1
       2   43 [42              ]  1  1 Block    None      f32     1 sqrt
       3   45 [44 43           ]  2  1 Block    Rate      f32     1 /
   LOOP  8 [2 7] Block  8
-    TREE 19   [18 12] Block  FanOut    f32     8
-      0   54 [                ]  0  1 Const    None      f32     1 1.0f
+    TREE 17   [12 5] Block  FanOut    f32     8
+      0   52 [                ]  0  1 Const    None      f32     1 1.0f
       1   48 [                ]  0  1 Const    None      f32     8 {1.0f, 0.78f, 0.62f, 0.5f, 0.42f, 0.36f, 0.31f, 0.27f}
       2   49 [34 48           ]  2  1 Block    None      f32     8 *
-      3   53 [52 49           ]  2  1 Block    None      f32     8 /
-      4   55 [54 53           ]  2  3 Block    FanOut    f32     8 +
-    TREE 24   [19] Block  Rate      f32     8
-      0   64 [55 55           ]  2  1 Block    None      f32     8 *
-      1   65 [64              ]  1  1 Block    Rate      f32     8 -
+      3   51 [49 6            ]  2  1 Block    None      f32     8 *
+      4   53 [52 51           ]  2  3 Block    FanOut    f32     8 /
+    TREE 23   [17] Block  Rate      f32     8
+      0   54 [                ]  0  2 Const    None      f32     1 0.001f
+      1   65 [53 53           ]  2  1 Block    None      f32     8 +
+      2   66 [54 65           ]  2  1 Block    None      f32     8 pow
+      3   67 [66              ]  1  1 Block    Rate      f32     8 -
   LOOP  9 [] Block  1
-    TREE 20   [] Block  Input     f32     1
+    TREE 18   [] Block  Input     f32     1
       0    3 [                ]  0  1 Block    Input     f32     1 noteParam(freq@1)
   LOOP 10 [2 9] Block  8
-    TREE 21   [20] Block  FanOut    f32     8
+    TREE 19   [18] Block  FanOut    f32     8
       0   35 [                ]  0  1 Const    None      f32     8 {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f}
       1   36 [3 35            ]  2  2 Block    FanOut    f32     8 *
-    TREE 27   [21 22] Block  Rate      f32     8
+    TREE 26   [19 20] Block  Rate      f32     8
       0   40 [36 39           ]  2  1 Block    Rate      f32     8 <
   LOOP 11 [2 8 10] Block  8
-    TREE 23   [19 21 22 17] Block  Rate      f32     8
+    TREE 22   [17 19 20 21] Block  Rate      f32     8
       0   61 [                ]  0  1 Const    None      f32     1 2.0f
-      1   62 [61 55           ]  2  1 Block    None      f32     8 *
-      2   47 [36 39           ]  2  1 Block    None      f32     8 min
-      3   56 [                ]  0  1 Const    None      f32     1 6.2831855f
-      4   57 [47 56           ]  2  1 Block    None      f32     8 *
-      5   59 [57 50           ]  2  1 Block    None      f32     8 *
-      6   60 [59              ]  1  1 Block    None      f32     8 cos
-      7   63 [62 60           ]  2  1 Block    Rate      f32     8 *
+      1   54 [                ]  0  2 Const    None      f32     1 0.001f
+      2   55 [54 53           ]  2  1 Block    None      f32     8 pow
+      3   62 [61 55           ]  2  1 Block    None      f32     8 *
+      4   47 [36 39           ]  2  1 Block    None      f32     8 min
+      5   56 [                ]  0  1 Const    None      f32     1 6.2831855f
+      6   57 [47 56           ]  2  1 Block    None      f32     8 *
+      7   59 [57 58           ]  2  1 Block    None      f32     8 *
+      8   60 [59              ]  1  1 Block    None      f32     8 cos
+      9   63 [62 60           ]  2  1 Block    Rate      f32     8 *
   LOOP 14 [] Block  1
-    TREE 30   [] Block  Input     f32     1
+    TREE 29   [] Block  Input     f32     1
       0    4 [                ]  0  1 Block    Input     f32     1 noteParam(amp@2)
 -- AUDIO
 GRAPH 0
   LOOP 15 [13] Audio  8
-    TREE 33   [32*] Audio  Temp      f32     8
-      0   86 [                ]  0  1 Audio    Temp      f32     8 voicer
+    TREE 32   [31*] Audio  Temp      f32     8
+      0   88 [                ]  0  1 Audio    Temp      f32     8 voicer
   LOOP 16 [15] Audio  1
-    TREE 34   [33*] Audio  SeparateLoop f32     1
-      0   88 [86              ]  1  1 Audio    SeparateLoop f32     1 reduce(+, 1)
-    TREE 35   [34] Audio  Sink      f32     1
-      0   89 [88              ]  1  0 Audio    Sink      f32     1 outlet
+    TREE 33   [32*] Audio  SeparateLoop f32     1
+      0   90 [88              ]  1  1 Audio    SeparateLoop f32     1 reduce(+, 1)
+    TREE 34   [33] Audio  Sink      f32     1
+      0   91 [90              ]  1  0 Audio    Sink      f32     1 outlet
 GRAPH 1
   LOOP  5 [0 4 7] Audio  1
     TREE 9    [3 7 8] Audio  FanOut    f32     1
@@ -1750,35 +1753,35 @@ GRAPH 1
       1   32 [31 29           ]  2  1 Audio    None      f32     1 *
       2   46 [32 45           ]  2  2 Audio    FanOut    f32     1 *
     TREE 15   [14] Audio  Sink      f32     1
-      0   66 [46              ]  1  0 Audio    Sink      f32     1 delay_write
+      0   68 [46              ]  1  0 Audio    Sink      f32     1 delay_write
     TREE 16   [14] Audio  Broadcast f32     1
-      0   69 [                ]  0  1 Const    None      f32     1 0.5f
-      1   67 [                ]  0  1 Audio    None      f32     1 delay_fix_read(2)
-      2   68 [46 67           ]  2  1 Audio    None      f32     1 -
-      3   70 [69 68           ]  2  1 Audio    Broadcast f32     1 *
+      0   71 [                ]  0  1 Const    None      f32     1 0.5f
+      1   69 [                ]  0  1 Audio    None      f32     1 delay_fix_read(2)
+      2   70 [46 69           ]  2  1 Audio    None      f32     1 -
+      3   72 [71 70           ]  2  1 Audio    Broadcast f32     1 *
   LOOP 12 [5 8 10 11] Audio  8
-    TREE 25   [16 23 24] Audio  FanOut    f32     8
-      0   71 [                ]  0  1 Audio    None      f32     8 delay_fix_read(1)
-      1   72 [63 71           ]  2  1 Audio    None      f32     8 *
-      2   73 [70 72           ]  2  1 Audio    None      f32     8 +
-      3   74 [                ]  0  1 Audio    None      f32     8 delay_fix_read(2)
-      4   75 [65 74           ]  2  1 Audio    None      f32     8 *
-      5   76 [73 75           ]  2  2 Audio    FanOut    f32     8 +
-    TREE 26   [25] Audio  Sink      f32     8
-      0   77 [76              ]  1  0 Audio    Sink      f32     8 delay_write
-    TREE 28   [25 27] Audio  Temp      f32     8
-      0   78 [                ]  0  1 Const    None      f32     8 {1.0f, 0.62f, 0.45f, 0.35f, 0.28f, 0.22f, 0.18f, 0.15f}
-      1   79 [76 78           ]  2  1 Audio    None      f32     8 *
-      2   80 [79 40           ]  2  1 Audio    Temp      f32     8 *
+    TREE 24   [16 22 23] Audio  FanOut    f32     8
+      0   73 [                ]  0  1 Audio    None      f32     8 delay_fix_read(1)
+      1   74 [63 73           ]  2  1 Audio    None      f32     8 *
+      2   75 [72 74           ]  2  1 Audio    None      f32     8 +
+      3   76 [                ]  0  1 Audio    None      f32     8 delay_fix_read(2)
+      4   77 [67 76           ]  2  1 Audio    None      f32     8 *
+      5   78 [75 77           ]  2  2 Audio    FanOut    f32     8 +
+    TREE 25   [24] Audio  Sink      f32     8
+      0   79 [78              ]  1  0 Audio    Sink      f32     8 delay_write
+    TREE 27   [24 26] Audio  Temp      f32     8
+      0   80 [                ]  0  1 Const    None      f32     8 {1.0f, 0.62f, 0.45f, 0.35f, 0.28f, 0.22f, 0.18f, 0.15f}
+      1   81 [78 80           ]  2  1 Audio    None      f32     8 *
+      2   82 [81 40           ]  2  1 Audio    Temp      f32     8 *
   LOOP 13 [12 14] Audio  1
-    TREE 29   [28*] Audio  SeparateLoop f32     1
-      0   81 [80              ]  1  1 Audio    SeparateLoop f32     1 reduce(+, 1)
-    TREE 31   [29 30] Audio  Temp      f32     1
-      0   82 [81 4            ]  2  1 Audio    None      f32     1 *
-      1   83 [                ]  0  1 Const    None      f32     1 0.7f
-      2   84 [82 83           ]  2  1 Audio    Temp      f32     1 *
-    TREE 32   [31] Audio  Phi       f32     1
-      0   85 [84              ]  1  0 Audio    Phi       f32     1 PhiNode
+    TREE 28   [27*] Audio  SeparateLoop f32     1
+      0   83 [82              ]  1  1 Audio    SeparateLoop f32     1 reduce(+, 1)
+    TREE 30   [28 29] Audio  Temp      f32     1
+      0   84 [83 4            ]  2  1 Audio    None      f32     1 *
+      1   85 [                ]  0  1 Const    None      f32     1 0.7f
+      2   86 [84 85           ]  2  1 Audio    Temp      f32     1 *
+    TREE 31   [30] Audio  Phi       f32     1
+      0   87 [86              ]  1  0 Audio    Phi       f32     1 PhiNode
 -- PARAMETER GROUPS
 GROUP 0 sources [notes[0]] per-voice nodes [5 20 23 26]
 GROUP 1 sources [release] nodes [1]
@@ -1787,25 +1790,25 @@ GROUP 3 sources [attack] nodes [0]
 GROUP 4 sources [attack] nodes [7 9 11]
 GROUP 5 sources [attack notes[0] release] per-voice nodes [24]
 GROUP 6 sources [decay] nodes [2]
-GROUP 7 sources [decay] nodes [34 42 43 45 49 53 55 62 64 65]
+GROUP 7 sources [decay] nodes [34 42 43 45 49 51 53 55 62 65 66 67]
 GROUP 8 sources [notes[1]] per-voice nodes [3 36 47 57 59 60 40]
 GROUP 9 sources [decay notes[1]] per-voice nodes [63]
 GROUP 10 sources [notes[2]] per-voice nodes [4]
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [18 27 28 29] delays [18<-29:1]
   CLASS affine-block order 1 STRATEGY serial
-CYCLE 1 weight 1 recurrence nodes [74 71 72 73 75 76] delays [74<-76:2 71<-76:1]
+CYCLE 1 weight 1 recurrence nodes [76 73 74 75 77 78] delays [76<-78:2 73<-78:1]
   CLASS affine-block order 3 STRATEGY serial
 DELAY 0 f32 1
     18 f32 1 delay_fix_read(1)
     30 f32 1 delay_write
 DELAY 1 f32 1
-    67 f32 1 delay_fix_read(2)
-    66 f32 1 delay_write
+    69 f32 1 delay_fix_read(2)
+    68 f32 1 delay_write
 DELAY 2 f32 8
-    71 f32 8 delay_fix_read(1)
-    74 f32 8 delay_fix_read(2)
-    77 f32 8 delay_write
+    73 f32 8 delay_fix_read(1)
+    76 f32 8 delay_fix_read(2)
+    79 f32 8 delay_write
 
 SYNTH lib_smpPerc
 -- PORTS
@@ -2598,7 +2601,7 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 2 recurrence nodes [3 5 6] delays [3<-6:2]
-  CLASS affine-block order 2 STRATEGY serial
+  CLASS affine-block order 2 STRATEGY block (statespace)
 DELAY 0 f32 4
      2 f32 0 delay_init
      3 f32 4 delay_fix_read(2)
@@ -4482,7 +4485,7 @@ OUT 0 out f32 2
       2   11 [                ]  0  1 Const    None      f32     1 3.75f
       3    6 [                ]  0  5 Init     FanOut    f32     1 fs
       4   12 [11 6            ]  2  1 Init     None      f32     1 /
-      5   14 [13 12           ]  2  2 Init     Rate      f32     1 pow
+      5   14 [13 12           ]  2  3 Init     Rate      f32     1 pow
       6   17 [1               ]  1  1 Block    Rate      f32     1 -
       7   15 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
       8   18 [17 15           ]  2  1 Audio    None      f32     1 +
@@ -4494,285 +4497,290 @@ OUT 0 out f32 2
      14   24 [14 23           ]  2  1 Audio    None      f32     1 *
      15   25 [20 24           ]  2  3 Audio    FanOut    f32     1 +
      16   26 [25              ]  1  0 Audio    Sink      f32     1 delay_write
-     17   36 [                ]  0  1 Const    None      f32     1 1.0f
-     18   28 [                ]  0  1 Const    None      f32     1 5026.5483f
-     19   27 [                ]  0  3 Init     FanOut    f32     1 sd
-     20   29 [28 27           ]  2  2 Init     FanOut    f32     1 *
-     21   31 [29              ]  1  2 Init     FanOut    f32     1 cos
-     22   37 [36 31           ]  2  3 Init     FanOut    f32     1 -
-     23   48 [                ]  0  1 Const    None      f32     1 1.0f
-     24   42 [                ]  0  1 Const    None      f32     1 1.0f
-     25   30 [29              ]  1  1 Init     None      f32     1 sin
-     26   32 [                ]  0  1 Const    None      f32     1 1.4142135f
-     27   33 [30 32           ]  2  1 Init     None      f32     1 *
-     28   34 [                ]  0  1 Const    None      f32     1 0.5f
-     29   35 [33 34           ]  2  2 Init     FanOut    f32     1 *
-     30   43 [42 35           ]  2  1 Init     None      f32     1 +
-     31   49 [48 43           ]  2  5 Init     FanOut    f32     1 /
-     32   51 [37 49           ]  2  2 Init     Rate      f32     1 *
-     33    0 [                ]  0  3 Audio    Input     f32     2 inlet(in)
-     34    3 [0               ]  1  1 Audio    SeparateLoop f32     1 reduce(+, 1)
-     35    4 [                ]  0  1 Const    None      f32     1 0.7f
-     36    5 [3 4             ]  2  8 Audio    Broadcast f32     1 *
-     37   58 [51 5            ]  2  1 Audio    None      f32     1 *
-     38   44 [                ]  0  1 Const    None      f32     1 -2.0f
-     39   45 [44 31           ]  2  1 Init     None      f32     1 *
-     40   53 [45 49           ]  2  2 Init     Rate      f32     1 *
-     41   38 [                ]  0  1 Const    None      f32     1 0.5f
-     42   39 [37 38           ]  2  1 Init     None      f32     1 *
-     43   50 [39 49           ]  2  2 Init     Rate      f32     1 *
-     44   55 [50 5            ]  2  1 Audio    None      f32     1 *
-     45   56 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
-     46   57 [55 56           ]  2  5 Audio    FanOut    f32     1 +
-     47   59 [53 57           ]  2  1 Audio    None      f32     1 *
-     48   60 [58 59           ]  2  1 Audio    None      f32     1 -
-     49   61 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
-     50   62 [60 61           ]  2  1 Audio    None      f32     1 +
-     51   63 [62              ]  1  0 Audio    Sink      f32     1 delay_write
-     52   40 [                ]  0  1 Const    None      f32     1 0.5f
-     53   41 [37 40           ]  2  1 Init     None      f32     1 *
-     54   52 [41 49           ]  2  2 Init     Rate      f32     1 *
-     55   64 [52 5            ]  2  1 Audio    None      f32     1 *
-     56   46 [                ]  0  1 Const    None      f32     1 1.0f
-     57   47 [46 35           ]  2  1 Init     None      f32     1 -
-     58   54 [47 49           ]  2  2 Init     Rate      f32     1 *
-     59   65 [54 57           ]  2  1 Audio    None      f32     1 *
-     60   66 [64 65           ]  2  1 Audio    None      f32     1 -
-     61   67 [66              ]  1  0 Audio    Sink      f32     1 delay_write
-     62   71 [51 57           ]  2  1 Audio    None      f32     1 *
-     63   68 [50 57           ]  2  1 Audio    None      f32     1 *
-     64   69 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
-     65   70 [68 69           ]  2  3 Audio    FanOut    f32     1 +
-     66   72 [53 70           ]  2  1 Audio    None      f32     1 *
-     67   73 [71 72           ]  2  1 Audio    None      f32     1 -
-     68   74 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
-     69   75 [73 74           ]  2  1 Audio    None      f32     1 +
-     70   76 [75              ]  1  0 Audio    Sink      f32     1 delay_write
-     71   77 [52 57           ]  2  1 Audio    None      f32     1 *
-     72   78 [54 70           ]  2  1 Audio    None      f32     1 *
-     73   79 [77 78           ]  2  1 Audio    None      f32     1 -
-     74   80 [79              ]  1  0 Audio    Sink      f32     1 delay_write
-     75   90 [                ]  0  1 Const    None      f32     1 1.0f
-     76   82 [                ]  0  1 Const    None      f32     1 5026.5483f
-     77   83 [82 27           ]  2  2 Init     FanOut    f32     1 *
-     78   85 [83              ]  1  2 Init     FanOut    f32     1 cos
-     79   91 [90 85           ]  2  3 Init     FanOut    f32     1 +
-     80   94 [91              ]  1  1 Init     None      f32     1 -
-     81  103 [                ]  0  1 Const    None      f32     1 1.0f
-     82   97 [                ]  0  1 Const    None      f32     1 1.0f
-     83   84 [83              ]  1  1 Init     None      f32     1 sin
-     84   86 [                ]  0  1 Const    None      f32     1 1.4142135f
-     85   87 [84 86           ]  2  1 Init     None      f32     1 *
-     86   88 [                ]  0  1 Const    None      f32     1 0.5f
-     87   89 [87 88           ]  2  2 Init     FanOut    f32     1 *
-     88   98 [97 89           ]  2  1 Init     None      f32     1 +
-     89  104 [103 98          ]  2  5 Init     FanOut    f32     1 /
-     90  106 [94 104          ]  2  2 Init     Rate      f32     1 *
-     91  113 [106 5           ]  2  1 Audio    None      f32     1 *
-     92   99 [                ]  0  1 Const    None      f32     1 -2.0f
-     93  100 [99 85           ]  2  1 Init     None      f32     1 *
-     94  108 [100 104         ]  2  2 Init     Rate      f32     1 *
-     95   92 [                ]  0  1 Const    None      f32     1 0.5f
-     96   93 [91 92           ]  2  1 Init     None      f32     1 *
-     97  105 [93 104          ]  2  2 Init     Rate      f32     1 *
-     98  110 [105 5           ]  2  1 Audio    None      f32     1 *
-     99  111 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
-    100  112 [110 111         ]  2  5 Audio    FanOut    f32     1 +
-    101  114 [108 112         ]  2  1 Audio    None      f32     1 *
-    102  115 [113 114         ]  2  1 Audio    None      f32     1 -
-    103  116 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
-    104  117 [115 116         ]  2  1 Audio    None      f32     1 +
-    105  118 [117             ]  1  0 Audio    Sink      f32     1 delay_write
-    106   95 [                ]  0  1 Const    None      f32     1 0.5f
-    107   96 [91 95           ]  2  1 Init     None      f32     1 *
-    108  107 [96 104          ]  2  2 Init     Rate      f32     1 *
-    109  119 [107 5           ]  2  1 Audio    None      f32     1 *
-    110  101 [                ]  0  1 Const    None      f32     1 1.0f
-    111  102 [101 89          ]  2  1 Init     None      f32     1 -
-    112  109 [102 104         ]  2  2 Init     Rate      f32     1 *
-    113  120 [109 112         ]  2  1 Audio    None      f32     1 *
-    114  121 [119 120         ]  2  1 Audio    None      f32     1 -
-    115  122 [121             ]  1  0 Audio    Sink      f32     1 delay_write
-    116  126 [106 112         ]  2  1 Audio    None      f32     1 *
-    117  123 [105 112         ]  2  1 Audio    None      f32     1 *
-    118  124 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
-    119  125 [123 124         ]  2  3 Audio    FanOut    f32     1 +
-    120  127 [108 125         ]  2  1 Audio    None      f32     1 *
-    121  128 [126 127         ]  2  1 Audio    None      f32     1 -
-    122  129 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
-    123  130 [128 129         ]  2  1 Audio    None      f32     1 +
-    124  131 [130             ]  1  0 Audio    Sink      f32     1 delay_write
-    125  132 [107 112         ]  2  1 Audio    None      f32     1 *
-    126  133 [109 125         ]  2  1 Audio    None      f32     1 *
-    127  134 [132 133         ]  2  1 Audio    None      f32     1 -
-    128  135 [134             ]  1  0 Audio    Sink      f32     1 delay_write
-    129  136 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
-    130  137 [25              ]  1  1 Audio    None      f64     1 cast_f64
-    131  139 [27              ]  1  2 Init     Rate      f64     1 cast_f64
-    132  140 [137 139         ]  2  1 Audio    None      f64     1 *
-    133  141 [136 140         ]  2  2 Audio    FanOut    f64     1 +
-    134  142 [141             ]  1  1 Audio    None      f64     1 floor
-    135  143 [141 142         ]  2  1 Audio    None      f64     1 -
-    136  144 [143             ]  1  0 Audio    Sink      f64     1 delay_write
-    137  148 [                ]  0  1 Const    None      f32     1 0.004f
-    138  149 [148 6           ]  2  1 Init     None      f32     1 *
-    139  165 [                ]  0  1 Const    None      f32     1 2.0f
-    140  153 [                ]  0  1 Const    None      f32     1 0.0009f
-    141  154 [153 6           ]  2  1 Init     Rate      f32     1 *
-    142  162 [                ]  0  1 Const    None      f32     1 1.0f
-    143  160 [                ]  0  1 Const    None      f32     1 0.5f
-    144  158 [                ]  0  1 Const    None      f32     1 0.5f
-    145  155 [                ]  0  1 Const    None      f32     1 2.0f
-    146  146 [136             ]  1  3 Audio    FanOut    f32     1 cast_f32
-    147  156 [155 146         ]  2  1 Audio    None      f32     1 *
-    148  157 [156             ]  1  1 Audio    None      f32     1 cospi
-    149  159 [158 157         ]  2  1 Audio    None      f32     1 *
-    150  161 [160 159         ]  2  1 Audio    None      f32     1 +
-    151  163 [162 161         ]  2  1 Audio    None      f32     1 -
-    152  164 [154 163         ]  2  1 Audio    None      f32     1 *
-    153  166 [165 164         ]  2  1 Audio    None      f32     1 +
-    154  167 [166             ]  1  1 Audio    None      f32     1 delay_var_read
-    155  150 [149             ]  1  0 Init     Sink      f32     1 max_delay
-    156  151 [125             ]  1  0 Audio    Sink      f32     1 delay_write
-    157  228 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
-    158  226 [                ]  0  1 Const    None      f32     1 0.87f
-    159  227 [25 226          ]  2  1 Audio    None      f32     1 *
-    160  229 [227             ]  1  1 Audio    None      f64     1 cast_f64
-    161  232 [229 139         ]  2  1 Audio    None      f64     1 *
-    162  233 [228 232         ]  2  2 Audio    FanOut    f64     1 +
-    163  234 [233             ]  1  1 Audio    None      f64     1 floor
-    164  235 [233 234         ]  2  1 Audio    None      f64     1 -
-    165  236 [235             ]  1  0 Audio    Sink      f64     1 delay_write
-    166  240 [                ]  0  1 Const    None      f32     1 0.003f
-    167  241 [240 6           ]  2  1 Init     None      f32     1 *
-    168  257 [                ]  0  1 Const    None      f32     1 2.0f
-    169  245 [                ]  0  1 Const    None      f32     1 0.0004f
-    170  246 [245 6           ]  2  1 Init     Rate      f32     1 *
-    171  254 [                ]  0  1 Const    None      f32     1 1.0f
-    172  252 [                ]  0  1 Const    None      f32     1 0.5f
-    173  250 [                ]  0  1 Const    None      f32     1 0.5f
-    174  247 [                ]  0  1 Const    None      f32     1 2.0f
-    175  238 [228             ]  1  3 Audio    FanOut    f32     1 cast_f32
-    176  248 [247 238         ]  2  1 Audio    None      f32     1 *
-    177  249 [248             ]  1  1 Audio    None      f32     1 cospi
-    178  251 [250 249         ]  2  1 Audio    None      f32     1 *
-    179  253 [252 251         ]  2  1 Audio    None      f32     1 +
-    180  255 [254 253         ]  2  1 Audio    None      f32     1 -
-    181  256 [246 255         ]  2  1 Audio    None      f32     1 *
-    182  258 [257 256         ]  2  1 Audio    None      f32     1 +
-    183  259 [258             ]  1  1 Audio    None      f32     1 delay_var_read
-    184  242 [241             ]  1  0 Init     Sink      f32     1 max_delay
-    185  243 [70              ]  1  0 Audio    Sink      f32     1 delay_write
-    186    2 [                ]  0  1 Block    Input     f32     1 control(mix)
-    187  183 [                ]  0  1 Const    None      f32     1 0.55f
-    188  181 [                ]  0  1 Const    None      f32     1 0.45f
-    189  179 [                ]  0  1 Const    None      f32     1 1.0f
-    190  177 [                ]  0  1 Const    None      f32     1 0.5f
-    191  175 [                ]  0  1 Const    None      f32     1 0.5f
-    192  172 [                ]  0  1 Const    None      f32     1 2.0f
-    193  168 [                ]  0  1 Const    None      f32     1 0.25f
-    194  169 [146 168         ]  2  2 Audio    FanOut    f32     1 +
-    195  170 [169             ]  1  1 Audio    None      f32     1 floor
-    196  171 [169 170         ]  2  1 Audio    None      f32     1 -
-    197  173 [172 171         ]  2  1 Audio    None      f32     1 *
-    198  174 [173             ]  1  1 Audio    None      f32     1 cospi
-    199  176 [175 174         ]  2  1 Audio    None      f32     1 *
-    200  178 [177 176         ]  2  1 Audio    None      f32     1 +
-    201  180 [179 178         ]  2  1 Audio    None      f32     1 -
-    202  182 [181 180         ]  2  1 Audio    None      f32     1 *
-    203  184 [183 182         ]  2  1 Audio    None      f32     1 +
-    204  185 [167 184         ]  2  2 Audio    FanOut    f32     1 *
-    205  211 [                ]  0  1 Const    None      f32     1 1.0f
-    206  193 [                ]  0  1 Const    None      f32     1 0.5f
-    207  191 [                ]  0  1 Const    None      f32     1 0.5f
-    208  186 [                ]  0  1 Const    None      f32     1 2.0f
-    209  187 [186 146         ]  2  1 Audio    None      f32     1 *
-    210  188 [187             ]  1  1 Audio    None      f32     1 sinpi
-    211  189 [                ]  0  1 Const    None      f32     1 0.85f
-    212  190 [188 189         ]  2  2 Audio    FanOut    f32     1 *
-    213  192 [191 190         ]  2  1 Audio    None      f32     1 *
-    214  194 [193 192         ]  2  3 Audio    FanOut    f32     1 +
-    215  208 [                ]  0  1 Const    None      f32     1 -0.003064942f
-    216  205 [                ]  0  2 Const    None      f32     1 -1.1656365f
-    217  199 [                ]  0  2 Const    None      f32     1 0.1687015f
-    218  200 [199 190         ]  2  1 Audio    None      f32     1 *
-    219  206 [205 200         ]  2  1 Audio    None      f32     1 +
-    220  207 [194 206         ]  2  1 Audio    None      f32     1 *
-    221  209 [208 207         ]  2  1 Audio    None      f32     1 +
-    222  210 [194 209         ]  2  1 Audio    None      f32     1 *
-    223  212 [211 210         ]  2  1 Audio    None      f32     1 +
-    224  223 [185 212         ]  2  1 Audio    Temp      f32     1 *
-    225  221 [                ]  0  1 Const    None      f32     1 1.0f
-    226  195 [                ]  0  1 Const    None      f32     1 1.0f
-    227  196 [195 194         ]  2  3 Audio    FanOut    f32     1 -
-    228  218 [                ]  0  1 Const    None      f32     1 -0.003064942f
-    229  215 [                ]  0  1 Const    None      f32     1 -1.3343381f
-    230  213 [                ]  0  1 Const    None      f32     1 0.337403f
-    231  214 [196 213         ]  2  1 Audio    None      f32     1 *
-    232  216 [215 214         ]  2  1 Audio    None      f32     1 +
-    233  217 [196 216         ]  2  1 Audio    None      f32     1 *
-    234  219 [218 217         ]  2  1 Audio    None      f32     1 +
-    235  220 [196 219         ]  2  1 Audio    None      f32     1 *
-    236  222 [221 220         ]  2  1 Audio    None      f32     1 +
-    237  224 [185 222         ]  2  1 Audio    Temp      f32     1 *
-    238  225 [223 224         ]  2  1 Audio    SeparateLoop f32     2 vec_join
-    239  275 [                ]  0  1 Const    None      f32     1 0.8f
-    240  273 [                ]  0  1 Const    None      f32     1 0.2f
-    241  271 [                ]  0  1 Const    None      f32     1 1.0f
-    242  269 [                ]  0  1 Const    None      f32     1 0.5f
-    243  267 [                ]  0  1 Const    None      f32     1 0.5f
-    244  264 [                ]  0  1 Const    None      f32     1 2.0f
-    245  260 [                ]  0  1 Const    None      f32     1 0.25f
-    246  261 [238 260         ]  2  2 Audio    FanOut    f32     1 +
-    247  262 [261             ]  1  1 Audio    None      f32     1 floor
-    248  263 [261 262         ]  2  1 Audio    None      f32     1 -
-    249  265 [264 263         ]  2  1 Audio    None      f32     1 *
-    250  266 [265             ]  1  1 Audio    None      f32     1 cospi
-    251  268 [267 266         ]  2  1 Audio    None      f32     1 *
-    252  270 [269 268         ]  2  1 Audio    None      f32     1 +
-    253  272 [271 270         ]  2  1 Audio    None      f32     1 -
-    254  274 [273 272         ]  2  1 Audio    None      f32     1 *
-    255  276 [275 274         ]  2  1 Audio    None      f32     1 +
-    256  277 [259 276         ]  2  2 Audio    FanOut    f32     1 *
-    257  303 [                ]  0  1 Const    None      f32     1 1.0f
-    258  285 [                ]  0  1 Const    None      f32     1 0.5f
-    259  283 [                ]  0  1 Const    None      f32     1 0.5f
-    260  278 [                ]  0  1 Const    None      f32     1 2.0f
-    261  279 [278 238         ]  2  1 Audio    None      f32     1 *
-    262  280 [279             ]  1  1 Audio    None      f32     1 sinpi
-    263  281 [                ]  0  1 Const    None      f32     1 0.4f
-    264  282 [280 281         ]  2  2 Audio    FanOut    f32     1 *
-    265  284 [283 282         ]  2  1 Audio    None      f32     1 *
-    266  286 [285 284         ]  2  3 Audio    FanOut    f32     1 +
-    267  300 [                ]  0  1 Const    None      f32     1 -0.003064942f
-    268  292 [199 282         ]  2  1 Audio    None      f32     1 *
-    269  298 [205 292         ]  2  1 Audio    None      f32     1 +
-    270  299 [286 298         ]  2  1 Audio    None      f32     1 *
-    271  301 [300 299         ]  2  1 Audio    None      f32     1 +
-    272  302 [286 301         ]  2  1 Audio    None      f32     1 *
-    273  304 [303 302         ]  2  1 Audio    None      f32     1 +
-    274  315 [277 304         ]  2  1 Audio    Temp      f32     1 *
-    275  313 [                ]  0  1 Const    None      f32     1 1.0f
-    276  287 [                ]  0  1 Const    None      f32     1 1.0f
-    277  288 [287 286         ]  2  3 Audio    FanOut    f32     1 -
-    278  310 [                ]  0  1 Const    None      f32     1 -0.003064942f
-    279  307 [                ]  0  1 Const    None      f32     1 -1.3343381f
-    280  305 [                ]  0  1 Const    None      f32     1 0.337403f
-    281  306 [288 305         ]  2  1 Audio    None      f32     1 *
-    282  308 [307 306         ]  2  1 Audio    None      f32     1 +
-    283  309 [288 308         ]  2  1 Audio    None      f32     1 *
-    284  311 [310 309         ]  2  1 Audio    None      f32     1 +
-    285  312 [288 311         ]  2  1 Audio    None      f32     1 *
-    286  314 [313 312         ]  2  1 Audio    None      f32     1 +
-    287  316 [277 314         ]  2  1 Audio    Temp      f32     1 *
-    288  317 [315 316         ]  2  1 Audio    SeparateLoop f32     2 vec_join
-    289  318 [225 317         ]  2  1 Audio    None      f32     2 +
-    290  319 [318 5           ]  2  1 Audio    None      f32     2 -
-    291  322 [5 319           ]  2  1 Audio    None      f32     2 +
-    292  323 [322 0           ]  2  1 Audio    None      f32     2 -
-    293  324 [2 323           ]  2  1 Audio    None      f32     2 *
-    294  325 [0 324           ]  2  1 Audio    None      f32     2 +
-    295  326 [325             ]  1  0 Audio    Sink      f32     2 outlet
+     17   27 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+     18   28 [27 25           ]  2  1 Audio    None      f32     1 -
+     19   29 [14 28           ]  2  1 Audio    None      f32     1 *
+     20   30 [25 29           ]  2  3 Audio    FanOut    f32     1 +
+     21   31 [30              ]  1  0 Audio    Sink      f32     1 delay_write
+     22   41 [                ]  0  1 Const    None      f32     1 1.0f
+     23   33 [                ]  0  1 Const    None      f32     1 5026.5483f
+     24   32 [                ]  0  3 Init     FanOut    f32     1 sd
+     25   34 [33 32           ]  2  2 Init     FanOut    f32     1 *
+     26   36 [34              ]  1  2 Init     FanOut    f32     1 cos
+     27   42 [41 36           ]  2  3 Init     FanOut    f32     1 -
+     28   53 [                ]  0  1 Const    None      f32     1 1.0f
+     29   47 [                ]  0  1 Const    None      f32     1 1.0f
+     30   35 [34              ]  1  1 Init     None      f32     1 sin
+     31   37 [                ]  0  1 Const    None      f32     1 1.4142135f
+     32   38 [35 37           ]  2  1 Init     None      f32     1 *
+     33   39 [                ]  0  1 Const    None      f32     1 0.5f
+     34   40 [38 39           ]  2  2 Init     FanOut    f32     1 *
+     35   48 [47 40           ]  2  1 Init     None      f32     1 +
+     36   54 [53 48           ]  2  5 Init     FanOut    f32     1 /
+     37   56 [42 54           ]  2  2 Init     Rate      f32     1 *
+     38    0 [                ]  0  3 Audio    Input     f32     2 inlet(in)
+     39    3 [0               ]  1  1 Audio    SeparateLoop f32     1 reduce(+, 1)
+     40    4 [                ]  0  1 Const    None      f32     1 0.7f
+     41    5 [3 4             ]  2  8 Audio    Broadcast f32     1 *
+     42   63 [56 5            ]  2  1 Audio    None      f32     1 *
+     43   49 [                ]  0  1 Const    None      f32     1 -2.0f
+     44   50 [49 36           ]  2  1 Init     None      f32     1 *
+     45   58 [50 54           ]  2  2 Init     Rate      f32     1 *
+     46   43 [                ]  0  1 Const    None      f32     1 0.5f
+     47   44 [42 43           ]  2  1 Init     None      f32     1 *
+     48   55 [44 54           ]  2  2 Init     Rate      f32     1 *
+     49   60 [55 5            ]  2  1 Audio    None      f32     1 *
+     50   61 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+     51   62 [60 61           ]  2  5 Audio    FanOut    f32     1 +
+     52   64 [58 62           ]  2  1 Audio    None      f32     1 *
+     53   65 [63 64           ]  2  1 Audio    None      f32     1 -
+     54   66 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+     55   67 [65 66           ]  2  1 Audio    None      f32     1 +
+     56   68 [67              ]  1  0 Audio    Sink      f32     1 delay_write
+     57   45 [                ]  0  1 Const    None      f32     1 0.5f
+     58   46 [42 45           ]  2  1 Init     None      f32     1 *
+     59   57 [46 54           ]  2  2 Init     Rate      f32     1 *
+     60   69 [57 5            ]  2  1 Audio    None      f32     1 *
+     61   51 [                ]  0  1 Const    None      f32     1 1.0f
+     62   52 [51 40           ]  2  1 Init     None      f32     1 -
+     63   59 [52 54           ]  2  2 Init     Rate      f32     1 *
+     64   70 [59 62           ]  2  1 Audio    None      f32     1 *
+     65   71 [69 70           ]  2  1 Audio    None      f32     1 -
+     66   72 [71              ]  1  0 Audio    Sink      f32     1 delay_write
+     67   76 [56 62           ]  2  1 Audio    None      f32     1 *
+     68   73 [55 62           ]  2  1 Audio    None      f32     1 *
+     69   74 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+     70   75 [73 74           ]  2  3 Audio    FanOut    f32     1 +
+     71   77 [58 75           ]  2  1 Audio    None      f32     1 *
+     72   78 [76 77           ]  2  1 Audio    None      f32     1 -
+     73   79 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+     74   80 [78 79           ]  2  1 Audio    None      f32     1 +
+     75   81 [80              ]  1  0 Audio    Sink      f32     1 delay_write
+     76   82 [57 62           ]  2  1 Audio    None      f32     1 *
+     77   83 [59 75           ]  2  1 Audio    None      f32     1 *
+     78   84 [82 83           ]  2  1 Audio    None      f32     1 -
+     79   85 [84              ]  1  0 Audio    Sink      f32     1 delay_write
+     80   95 [                ]  0  1 Const    None      f32     1 1.0f
+     81   87 [                ]  0  1 Const    None      f32     1 5026.5483f
+     82   88 [87 32           ]  2  2 Init     FanOut    f32     1 *
+     83   90 [88              ]  1  2 Init     FanOut    f32     1 cos
+     84   96 [95 90           ]  2  3 Init     FanOut    f32     1 +
+     85   99 [96              ]  1  1 Init     None      f32     1 -
+     86  108 [                ]  0  1 Const    None      f32     1 1.0f
+     87  102 [                ]  0  1 Const    None      f32     1 1.0f
+     88   89 [88              ]  1  1 Init     None      f32     1 sin
+     89   91 [                ]  0  1 Const    None      f32     1 1.4142135f
+     90   92 [89 91           ]  2  1 Init     None      f32     1 *
+     91   93 [                ]  0  1 Const    None      f32     1 0.5f
+     92   94 [92 93           ]  2  2 Init     FanOut    f32     1 *
+     93  103 [102 94          ]  2  1 Init     None      f32     1 +
+     94  109 [108 103         ]  2  5 Init     FanOut    f32     1 /
+     95  111 [99 109          ]  2  2 Init     Rate      f32     1 *
+     96  118 [111 5           ]  2  1 Audio    None      f32     1 *
+     97  104 [                ]  0  1 Const    None      f32     1 -2.0f
+     98  105 [104 90          ]  2  1 Init     None      f32     1 *
+     99  113 [105 109         ]  2  2 Init     Rate      f32     1 *
+    100   97 [                ]  0  1 Const    None      f32     1 0.5f
+    101   98 [96 97           ]  2  1 Init     None      f32     1 *
+    102  110 [98 109          ]  2  2 Init     Rate      f32     1 *
+    103  115 [110 5           ]  2  1 Audio    None      f32     1 *
+    104  116 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+    105  117 [115 116         ]  2  5 Audio    FanOut    f32     1 +
+    106  119 [113 117         ]  2  1 Audio    None      f32     1 *
+    107  120 [118 119         ]  2  1 Audio    None      f32     1 -
+    108  121 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+    109  122 [120 121         ]  2  1 Audio    None      f32     1 +
+    110  123 [122             ]  1  0 Audio    Sink      f32     1 delay_write
+    111  100 [                ]  0  1 Const    None      f32     1 0.5f
+    112  101 [96 100          ]  2  1 Init     None      f32     1 *
+    113  112 [101 109         ]  2  2 Init     Rate      f32     1 *
+    114  124 [112 5           ]  2  1 Audio    None      f32     1 *
+    115  106 [                ]  0  1 Const    None      f32     1 1.0f
+    116  107 [106 94          ]  2  1 Init     None      f32     1 -
+    117  114 [107 109         ]  2  2 Init     Rate      f32     1 *
+    118  125 [114 117         ]  2  1 Audio    None      f32     1 *
+    119  126 [124 125         ]  2  1 Audio    None      f32     1 -
+    120  127 [126             ]  1  0 Audio    Sink      f32     1 delay_write
+    121  131 [111 117         ]  2  1 Audio    None      f32     1 *
+    122  128 [110 117         ]  2  1 Audio    None      f32     1 *
+    123  129 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+    124  130 [128 129         ]  2  3 Audio    FanOut    f32     1 +
+    125  132 [113 130         ]  2  1 Audio    None      f32     1 *
+    126  133 [131 132         ]  2  1 Audio    None      f32     1 -
+    127  134 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+    128  135 [133 134         ]  2  1 Audio    None      f32     1 +
+    129  136 [135             ]  1  0 Audio    Sink      f32     1 delay_write
+    130  137 [112 117         ]  2  1 Audio    None      f32     1 *
+    131  138 [114 130         ]  2  1 Audio    None      f32     1 *
+    132  139 [137 138         ]  2  1 Audio    None      f32     1 -
+    133  140 [139             ]  1  0 Audio    Sink      f32     1 delay_write
+    134  141 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
+    135  142 [30              ]  1  1 Audio    None      f64     1 cast_f64
+    136  144 [32              ]  1  2 Init     Rate      f64     1 cast_f64
+    137  145 [142 144         ]  2  1 Audio    None      f64     1 *
+    138  146 [141 145         ]  2  2 Audio    FanOut    f64     1 +
+    139  147 [146             ]  1  1 Audio    None      f64     1 floor
+    140  148 [146 147         ]  2  1 Audio    None      f64     1 -
+    141  149 [148             ]  1  0 Audio    Sink      f64     1 delay_write
+    142  153 [                ]  0  1 Const    None      f32     1 0.004f
+    143  154 [153 6           ]  2  1 Init     None      f32     1 *
+    144  170 [                ]  0  1 Const    None      f32     1 2.0f
+    145  158 [                ]  0  1 Const    None      f32     1 0.0009f
+    146  159 [158 6           ]  2  1 Init     Rate      f32     1 *
+    147  167 [                ]  0  1 Const    None      f32     1 1.0f
+    148  165 [                ]  0  1 Const    None      f32     1 0.5f
+    149  163 [                ]  0  1 Const    None      f32     1 0.5f
+    150  160 [                ]  0  1 Const    None      f32     1 2.0f
+    151  151 [141             ]  1  3 Audio    FanOut    f32     1 cast_f32
+    152  161 [160 151         ]  2  1 Audio    None      f32     1 *
+    153  162 [161             ]  1  1 Audio    None      f32     1 cospi
+    154  164 [163 162         ]  2  1 Audio    None      f32     1 *
+    155  166 [165 164         ]  2  1 Audio    None      f32     1 +
+    156  168 [167 166         ]  2  1 Audio    None      f32     1 -
+    157  169 [159 168         ]  2  1 Audio    None      f32     1 *
+    158  171 [170 169         ]  2  1 Audio    None      f32     1 +
+    159  172 [171             ]  1  1 Audio    None      f32     1 delay_var_read
+    160  155 [154             ]  1  0 Init     Sink      f32     1 max_delay
+    161  156 [130             ]  1  0 Audio    Sink      f32     1 delay_write
+    162  233 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
+    163  231 [                ]  0  1 Const    None      f32     1 0.87f
+    164  232 [30 231          ]  2  1 Audio    None      f32     1 *
+    165  234 [232             ]  1  1 Audio    None      f64     1 cast_f64
+    166  237 [234 144         ]  2  1 Audio    None      f64     1 *
+    167  238 [233 237         ]  2  2 Audio    FanOut    f64     1 +
+    168  239 [238             ]  1  1 Audio    None      f64     1 floor
+    169  240 [238 239         ]  2  1 Audio    None      f64     1 -
+    170  241 [240             ]  1  0 Audio    Sink      f64     1 delay_write
+    171  245 [                ]  0  1 Const    None      f32     1 0.003f
+    172  246 [245 6           ]  2  1 Init     None      f32     1 *
+    173  262 [                ]  0  1 Const    None      f32     1 2.0f
+    174  250 [                ]  0  1 Const    None      f32     1 0.0004f
+    175  251 [250 6           ]  2  1 Init     Rate      f32     1 *
+    176  259 [                ]  0  1 Const    None      f32     1 1.0f
+    177  257 [                ]  0  1 Const    None      f32     1 0.5f
+    178  255 [                ]  0  1 Const    None      f32     1 0.5f
+    179  252 [                ]  0  1 Const    None      f32     1 2.0f
+    180  243 [233             ]  1  3 Audio    FanOut    f32     1 cast_f32
+    181  253 [252 243         ]  2  1 Audio    None      f32     1 *
+    182  254 [253             ]  1  1 Audio    None      f32     1 cospi
+    183  256 [255 254         ]  2  1 Audio    None      f32     1 *
+    184  258 [257 256         ]  2  1 Audio    None      f32     1 +
+    185  260 [259 258         ]  2  1 Audio    None      f32     1 -
+    186  261 [251 260         ]  2  1 Audio    None      f32     1 *
+    187  263 [262 261         ]  2  1 Audio    None      f32     1 +
+    188  264 [263             ]  1  1 Audio    None      f32     1 delay_var_read
+    189  247 [246             ]  1  0 Init     Sink      f32     1 max_delay
+    190  248 [75              ]  1  0 Audio    Sink      f32     1 delay_write
+    191    2 [                ]  0  1 Block    Input     f32     1 control(mix)
+    192  188 [                ]  0  1 Const    None      f32     1 0.55f
+    193  186 [                ]  0  1 Const    None      f32     1 0.45f
+    194  184 [                ]  0  1 Const    None      f32     1 1.0f
+    195  182 [                ]  0  1 Const    None      f32     1 0.5f
+    196  180 [                ]  0  1 Const    None      f32     1 0.5f
+    197  177 [                ]  0  1 Const    None      f32     1 2.0f
+    198  173 [                ]  0  1 Const    None      f32     1 0.25f
+    199  174 [151 173         ]  2  2 Audio    FanOut    f32     1 +
+    200  175 [174             ]  1  1 Audio    None      f32     1 floor
+    201  176 [174 175         ]  2  1 Audio    None      f32     1 -
+    202  178 [177 176         ]  2  1 Audio    None      f32     1 *
+    203  179 [178             ]  1  1 Audio    None      f32     1 cospi
+    204  181 [180 179         ]  2  1 Audio    None      f32     1 *
+    205  183 [182 181         ]  2  1 Audio    None      f32     1 +
+    206  185 [184 183         ]  2  1 Audio    None      f32     1 -
+    207  187 [186 185         ]  2  1 Audio    None      f32     1 *
+    208  189 [188 187         ]  2  1 Audio    None      f32     1 +
+    209  190 [172 189         ]  2  2 Audio    FanOut    f32     1 *
+    210  216 [                ]  0  1 Const    None      f32     1 1.0f
+    211  198 [                ]  0  1 Const    None      f32     1 0.5f
+    212  196 [                ]  0  1 Const    None      f32     1 0.5f
+    213  191 [                ]  0  1 Const    None      f32     1 2.0f
+    214  192 [191 151         ]  2  1 Audio    None      f32     1 *
+    215  193 [192             ]  1  1 Audio    None      f32     1 sinpi
+    216  194 [                ]  0  1 Const    None      f32     1 0.85f
+    217  195 [193 194         ]  2  2 Audio    FanOut    f32     1 *
+    218  197 [196 195         ]  2  1 Audio    None      f32     1 *
+    219  199 [198 197         ]  2  3 Audio    FanOut    f32     1 +
+    220  213 [                ]  0  1 Const    None      f32     1 -0.003064942f
+    221  210 [                ]  0  2 Const    None      f32     1 -1.1656365f
+    222  204 [                ]  0  2 Const    None      f32     1 0.1687015f
+    223  205 [204 195         ]  2  1 Audio    None      f32     1 *
+    224  211 [210 205         ]  2  1 Audio    None      f32     1 +
+    225  212 [199 211         ]  2  1 Audio    None      f32     1 *
+    226  214 [213 212         ]  2  1 Audio    None      f32     1 +
+    227  215 [199 214         ]  2  1 Audio    None      f32     1 *
+    228  217 [216 215         ]  2  1 Audio    None      f32     1 +
+    229  228 [190 217         ]  2  1 Audio    Temp      f32     1 *
+    230  226 [                ]  0  1 Const    None      f32     1 1.0f
+    231  200 [                ]  0  1 Const    None      f32     1 1.0f
+    232  201 [200 199         ]  2  3 Audio    FanOut    f32     1 -
+    233  223 [                ]  0  1 Const    None      f32     1 -0.003064942f
+    234  220 [                ]  0  1 Const    None      f32     1 -1.3343381f
+    235  218 [                ]  0  1 Const    None      f32     1 0.337403f
+    236  219 [201 218         ]  2  1 Audio    None      f32     1 *
+    237  221 [220 219         ]  2  1 Audio    None      f32     1 +
+    238  222 [201 221         ]  2  1 Audio    None      f32     1 *
+    239  224 [223 222         ]  2  1 Audio    None      f32     1 +
+    240  225 [201 224         ]  2  1 Audio    None      f32     1 *
+    241  227 [226 225         ]  2  1 Audio    None      f32     1 +
+    242  229 [190 227         ]  2  1 Audio    Temp      f32     1 *
+    243  230 [228 229         ]  2  1 Audio    SeparateLoop f32     2 vec_join
+    244  280 [                ]  0  1 Const    None      f32     1 0.8f
+    245  278 [                ]  0  1 Const    None      f32     1 0.2f
+    246  276 [                ]  0  1 Const    None      f32     1 1.0f
+    247  274 [                ]  0  1 Const    None      f32     1 0.5f
+    248  272 [                ]  0  1 Const    None      f32     1 0.5f
+    249  269 [                ]  0  1 Const    None      f32     1 2.0f
+    250  265 [                ]  0  1 Const    None      f32     1 0.25f
+    251  266 [243 265         ]  2  2 Audio    FanOut    f32     1 +
+    252  267 [266             ]  1  1 Audio    None      f32     1 floor
+    253  268 [266 267         ]  2  1 Audio    None      f32     1 -
+    254  270 [269 268         ]  2  1 Audio    None      f32     1 *
+    255  271 [270             ]  1  1 Audio    None      f32     1 cospi
+    256  273 [272 271         ]  2  1 Audio    None      f32     1 *
+    257  275 [274 273         ]  2  1 Audio    None      f32     1 +
+    258  277 [276 275         ]  2  1 Audio    None      f32     1 -
+    259  279 [278 277         ]  2  1 Audio    None      f32     1 *
+    260  281 [280 279         ]  2  1 Audio    None      f32     1 +
+    261  282 [264 281         ]  2  2 Audio    FanOut    f32     1 *
+    262  308 [                ]  0  1 Const    None      f32     1 1.0f
+    263  290 [                ]  0  1 Const    None      f32     1 0.5f
+    264  288 [                ]  0  1 Const    None      f32     1 0.5f
+    265  283 [                ]  0  1 Const    None      f32     1 2.0f
+    266  284 [283 243         ]  2  1 Audio    None      f32     1 *
+    267  285 [284             ]  1  1 Audio    None      f32     1 sinpi
+    268  286 [                ]  0  1 Const    None      f32     1 0.4f
+    269  287 [285 286         ]  2  2 Audio    FanOut    f32     1 *
+    270  289 [288 287         ]  2  1 Audio    None      f32     1 *
+    271  291 [290 289         ]  2  3 Audio    FanOut    f32     1 +
+    272  305 [                ]  0  1 Const    None      f32     1 -0.003064942f
+    273  297 [204 287         ]  2  1 Audio    None      f32     1 *
+    274  303 [210 297         ]  2  1 Audio    None      f32     1 +
+    275  304 [291 303         ]  2  1 Audio    None      f32     1 *
+    276  306 [305 304         ]  2  1 Audio    None      f32     1 +
+    277  307 [291 306         ]  2  1 Audio    None      f32     1 *
+    278  309 [308 307         ]  2  1 Audio    None      f32     1 +
+    279  320 [282 309         ]  2  1 Audio    Temp      f32     1 *
+    280  318 [                ]  0  1 Const    None      f32     1 1.0f
+    281  292 [                ]  0  1 Const    None      f32     1 1.0f
+    282  293 [292 291         ]  2  3 Audio    FanOut    f32     1 -
+    283  315 [                ]  0  1 Const    None      f32     1 -0.003064942f
+    284  312 [                ]  0  1 Const    None      f32     1 -1.3343381f
+    285  310 [                ]  0  1 Const    None      f32     1 0.337403f
+    286  311 [293 310         ]  2  1 Audio    None      f32     1 *
+    287  313 [312 311         ]  2  1 Audio    None      f32     1 +
+    288  314 [293 313         ]  2  1 Audio    None      f32     1 *
+    289  316 [315 314         ]  2  1 Audio    None      f32     1 +
+    290  317 [293 316         ]  2  1 Audio    None      f32     1 *
+    291  319 [318 317         ]  2  1 Audio    None      f32     1 +
+    292  321 [282 319         ]  2  1 Audio    Temp      f32     1 *
+    293  322 [320 321         ]  2  1 Audio    SeparateLoop f32     2 vec_join
+    294  323 [230 322         ]  2  1 Audio    None      f32     2 +
+    295  324 [323 5           ]  2  1 Audio    None      f32     2 -
+    296  327 [5 324           ]  2  1 Audio    None      f32     2 +
+    297  328 [327 0           ]  2  1 Audio    None      f32     2 -
+    298  329 [2 328           ]  2  1 Audio    None      f32     2 *
+    299  330 [0 329           ]  2  1 Audio    None      f32     2 +
+    300  331 [330             ]  1  0 Audio    Sink      f32     2 outlet
 -- TREES
     TREE 1    [] Block  Input     f32     1
       0    1 [                ]  0  2 Block    Input     f32     1 control(speed)
@@ -4782,7 +4790,7 @@ OUT 0 out f32 2
       0   13 [                ]  0  1 Const    None      f32     1 0.01f
       1   11 [                ]  0  1 Const    None      f32     1 3.75f
       2   12 [11 6            ]  2  1 Init     None      f32     1 /
-      3   14 [13 12           ]  2  2 Init     Rate      f32     1 pow
+      3   14 [13 12           ]  2  3 Init     Rate      f32     1 pow
     TREE 4    [1] Block  Rate      f32     1
       0   17 [1               ]  1  1 Block    Rate      f32     1 -
     TREE 5    [1 3 4] Audio  FanOut    f32     1
@@ -4799,356 +4807,363 @@ OUT 0 out f32 2
       3   25 [20 24           ]  2  3 Audio    FanOut    f32     1 +
     TREE 8    [7] Audio  Sink      f32     1
       0   26 [25              ]  1  0 Audio    Sink      f32     1 delay_write
-    TREE 9    [] Init   FanOut    f32     1
-      0   27 [                ]  0  3 Init     FanOut    f32     1 sd
-    TREE 10   [9] Init   FanOut    f32     1
-      0   28 [                ]  0  1 Const    None      f32     1 5026.5483f
-      1   29 [28 27           ]  2  2 Init     FanOut    f32     1 *
-    TREE 11   [10] Init   FanOut    f32     1
-      0   31 [29              ]  1  2 Init     FanOut    f32     1 cos
+    TREE 9    [7 3] Audio  FanOut    f32     1
+      0   27 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      1   28 [27 25           ]  2  1 Audio    None      f32     1 -
+      2   29 [14 28           ]  2  1 Audio    None      f32     1 *
+      3   30 [25 29           ]  2  3 Audio    FanOut    f32     1 +
+    TREE 10   [9] Audio  Sink      f32     1
+      0   31 [30              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 11   [] Init   FanOut    f32     1
+      0   32 [                ]  0  3 Init     FanOut    f32     1 sd
     TREE 12   [11] Init   FanOut    f32     1
-      0   36 [                ]  0  1 Const    None      f32     1 1.0f
-      1   37 [36 31           ]  2  3 Init     FanOut    f32     1 -
-    TREE 13   [10] Init   FanOut    f32     1
-      0   30 [29              ]  1  1 Init     None      f32     1 sin
-      1   32 [                ]  0  1 Const    None      f32     1 1.4142135f
-      2   33 [30 32           ]  2  1 Init     None      f32     1 *
-      3   34 [                ]  0  1 Const    None      f32     1 0.5f
-      4   35 [33 34           ]  2  2 Init     FanOut    f32     1 *
+      0   33 [                ]  0  1 Const    None      f32     1 5026.5483f
+      1   34 [33 32           ]  2  2 Init     FanOut    f32     1 *
+    TREE 13   [12] Init   FanOut    f32     1
+      0   36 [34              ]  1  2 Init     FanOut    f32     1 cos
     TREE 14   [13] Init   FanOut    f32     1
-      0   48 [                ]  0  1 Const    None      f32     1 1.0f
-      1   42 [                ]  0  1 Const    None      f32     1 1.0f
-      2   43 [42 35           ]  2  1 Init     None      f32     1 +
-      3   49 [48 43           ]  2  5 Init     FanOut    f32     1 /
-    TREE 15   [12 14] Init   Rate      f32     1
-      0   51 [37 49           ]  2  2 Init     Rate      f32     1 *
-    TREE 16   [] Audio  Input     f32     2
+      0   41 [                ]  0  1 Const    None      f32     1 1.0f
+      1   42 [41 36           ]  2  3 Init     FanOut    f32     1 -
+    TREE 15   [12] Init   FanOut    f32     1
+      0   35 [34              ]  1  1 Init     None      f32     1 sin
+      1   37 [                ]  0  1 Const    None      f32     1 1.4142135f
+      2   38 [35 37           ]  2  1 Init     None      f32     1 *
+      3   39 [                ]  0  1 Const    None      f32     1 0.5f
+      4   40 [38 39           ]  2  2 Init     FanOut    f32     1 *
+    TREE 16   [15] Init   FanOut    f32     1
+      0   53 [                ]  0  1 Const    None      f32     1 1.0f
+      1   47 [                ]  0  1 Const    None      f32     1 1.0f
+      2   48 [47 40           ]  2  1 Init     None      f32     1 +
+      3   54 [53 48           ]  2  5 Init     FanOut    f32     1 /
+    TREE 17   [14 16] Init   Rate      f32     1
+      0   56 [42 54           ]  2  2 Init     Rate      f32     1 *
+    TREE 18   [] Audio  Input     f32     2
       0    0 [                ]  0  3 Audio    Input     f32     2 inlet(in)
-    TREE 17   [16*] Audio  SeparateLoop f32     1
+    TREE 19   [18*] Audio  SeparateLoop f32     1
       0    3 [0               ]  1  1 Audio    SeparateLoop f32     1 reduce(+, 1)
-    TREE 18   [17] Audio  Broadcast f32     1
+    TREE 20   [19] Audio  Broadcast f32     1
       0    4 [                ]  0  1 Const    None      f32     1 0.7f
       1    5 [3 4             ]  2  8 Audio    Broadcast f32     1 *
-    TREE 19   [11 14] Init   Rate      f32     1
-      0   44 [                ]  0  1 Const    None      f32     1 -2.0f
-      1   45 [44 31           ]  2  1 Init     None      f32     1 *
-      2   53 [45 49           ]  2  2 Init     Rate      f32     1 *
-    TREE 20   [12 14] Init   Rate      f32     1
-      0   38 [                ]  0  1 Const    None      f32     1 0.5f
-      1   39 [37 38           ]  2  1 Init     None      f32     1 *
-      2   50 [39 49           ]  2  2 Init     Rate      f32     1 *
-    TREE 21   [20 18] Audio  FanOut    f32     1
-      0   55 [50 5            ]  2  1 Audio    None      f32     1 *
-      1   56 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
-      2   57 [55 56           ]  2  5 Audio    FanOut    f32     1 +
-    TREE 22   [15 18 19 21] Audio  Sink      f32     1
-      0   58 [51 5            ]  2  1 Audio    None      f32     1 *
-      1   59 [53 57           ]  2  1 Audio    None      f32     1 *
-      2   60 [58 59           ]  2  1 Audio    None      f32     1 -
-      3   61 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
-      4   62 [60 61           ]  2  1 Audio    None      f32     1 +
-      5   63 [62              ]  1  0 Audio    Sink      f32     1 delay_write
-    TREE 23   [12 14] Init   Rate      f32     1
-      0   40 [                ]  0  1 Const    None      f32     1 0.5f
-      1   41 [37 40           ]  2  1 Init     None      f32     1 *
-      2   52 [41 49           ]  2  2 Init     Rate      f32     1 *
-    TREE 24   [13 14] Init   Rate      f32     1
-      0   46 [                ]  0  1 Const    None      f32     1 1.0f
-      1   47 [46 35           ]  2  1 Init     None      f32     1 -
-      2   54 [47 49           ]  2  2 Init     Rate      f32     1 *
-    TREE 25   [23 18 24 21] Audio  Sink      f32     1
-      0   64 [52 5            ]  2  1 Audio    None      f32     1 *
-      1   65 [54 57           ]  2  1 Audio    None      f32     1 *
-      2   66 [64 65           ]  2  1 Audio    None      f32     1 -
-      3   67 [66              ]  1  0 Audio    Sink      f32     1 delay_write
-    TREE 26   [20 21] Audio  FanOut    f32     1
-      0   68 [50 57           ]  2  1 Audio    None      f32     1 *
-      1   69 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
-      2   70 [68 69           ]  2  3 Audio    FanOut    f32     1 +
-    TREE 27   [15 21 19 26] Audio  Sink      f32     1
-      0   71 [51 57           ]  2  1 Audio    None      f32     1 *
-      1   72 [53 70           ]  2  1 Audio    None      f32     1 *
-      2   73 [71 72           ]  2  1 Audio    None      f32     1 -
-      3   74 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
-      4   75 [73 74           ]  2  1 Audio    None      f32     1 +
-      5   76 [75              ]  1  0 Audio    Sink      f32     1 delay_write
-    TREE 28   [23 21 24 26] Audio  Sink      f32     1
-      0   77 [52 57           ]  2  1 Audio    None      f32     1 *
-      1   78 [54 70           ]  2  1 Audio    None      f32     1 *
-      2   79 [77 78           ]  2  1 Audio    None      f32     1 -
-      3   80 [79              ]  1  0 Audio    Sink      f32     1 delay_write
-    TREE 29   [9] Init   FanOut    f32     1
-      0   82 [                ]  0  1 Const    None      f32     1 5026.5483f
-      1   83 [82 27           ]  2  2 Init     FanOut    f32     1 *
-    TREE 30   [29] Init   FanOut    f32     1
-      0   85 [83              ]  1  2 Init     FanOut    f32     1 cos
-    TREE 31   [30] Init   FanOut    f32     1
-      0   90 [                ]  0  1 Const    None      f32     1 1.0f
-      1   91 [90 85           ]  2  3 Init     FanOut    f32     1 +
-    TREE 32   [29] Init   FanOut    f32     1
-      0   84 [83              ]  1  1 Init     None      f32     1 sin
-      1   86 [                ]  0  1 Const    None      f32     1 1.4142135f
-      2   87 [84 86           ]  2  1 Init     None      f32     1 *
-      3   88 [                ]  0  1 Const    None      f32     1 0.5f
-      4   89 [87 88           ]  2  2 Init     FanOut    f32     1 *
+    TREE 21   [13 16] Init   Rate      f32     1
+      0   49 [                ]  0  1 Const    None      f32     1 -2.0f
+      1   50 [49 36           ]  2  1 Init     None      f32     1 *
+      2   58 [50 54           ]  2  2 Init     Rate      f32     1 *
+    TREE 22   [14 16] Init   Rate      f32     1
+      0   43 [                ]  0  1 Const    None      f32     1 0.5f
+      1   44 [42 43           ]  2  1 Init     None      f32     1 *
+      2   55 [44 54           ]  2  2 Init     Rate      f32     1 *
+    TREE 23   [22 20] Audio  FanOut    f32     1
+      0   60 [55 5            ]  2  1 Audio    None      f32     1 *
+      1   61 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      2   62 [60 61           ]  2  5 Audio    FanOut    f32     1 +
+    TREE 24   [17 20 21 23] Audio  Sink      f32     1
+      0   63 [56 5            ]  2  1 Audio    None      f32     1 *
+      1   64 [58 62           ]  2  1 Audio    None      f32     1 *
+      2   65 [63 64           ]  2  1 Audio    None      f32     1 -
+      3   66 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      4   67 [65 66           ]  2  1 Audio    None      f32     1 +
+      5   68 [67              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 25   [14 16] Init   Rate      f32     1
+      0   45 [                ]  0  1 Const    None      f32     1 0.5f
+      1   46 [42 45           ]  2  1 Init     None      f32     1 *
+      2   57 [46 54           ]  2  2 Init     Rate      f32     1 *
+    TREE 26   [15 16] Init   Rate      f32     1
+      0   51 [                ]  0  1 Const    None      f32     1 1.0f
+      1   52 [51 40           ]  2  1 Init     None      f32     1 -
+      2   59 [52 54           ]  2  2 Init     Rate      f32     1 *
+    TREE 27   [25 20 26 23] Audio  Sink      f32     1
+      0   69 [57 5            ]  2  1 Audio    None      f32     1 *
+      1   70 [59 62           ]  2  1 Audio    None      f32     1 *
+      2   71 [69 70           ]  2  1 Audio    None      f32     1 -
+      3   72 [71              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 28   [22 23] Audio  FanOut    f32     1
+      0   73 [55 62           ]  2  1 Audio    None      f32     1 *
+      1   74 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      2   75 [73 74           ]  2  3 Audio    FanOut    f32     1 +
+    TREE 29   [17 23 21 28] Audio  Sink      f32     1
+      0   76 [56 62           ]  2  1 Audio    None      f32     1 *
+      1   77 [58 75           ]  2  1 Audio    None      f32     1 *
+      2   78 [76 77           ]  2  1 Audio    None      f32     1 -
+      3   79 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      4   80 [78 79           ]  2  1 Audio    None      f32     1 +
+      5   81 [80              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 30   [25 23 26 28] Audio  Sink      f32     1
+      0   82 [57 62           ]  2  1 Audio    None      f32     1 *
+      1   83 [59 75           ]  2  1 Audio    None      f32     1 *
+      2   84 [82 83           ]  2  1 Audio    None      f32     1 -
+      3   85 [84              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 31   [11] Init   FanOut    f32     1
+      0   87 [                ]  0  1 Const    None      f32     1 5026.5483f
+      1   88 [87 32           ]  2  2 Init     FanOut    f32     1 *
+    TREE 32   [31] Init   FanOut    f32     1
+      0   90 [88              ]  1  2 Init     FanOut    f32     1 cos
     TREE 33   [32] Init   FanOut    f32     1
-      0  103 [                ]  0  1 Const    None      f32     1 1.0f
-      1   97 [                ]  0  1 Const    None      f32     1 1.0f
-      2   98 [97 89           ]  2  1 Init     None      f32     1 +
-      3  104 [103 98          ]  2  5 Init     FanOut    f32     1 /
-    TREE 34   [31 33] Init   Rate      f32     1
-      0   94 [91              ]  1  1 Init     None      f32     1 -
-      1  106 [94 104          ]  2  2 Init     Rate      f32     1 *
-    TREE 35   [30 33] Init   Rate      f32     1
-      0   99 [                ]  0  1 Const    None      f32     1 -2.0f
-      1  100 [99 85           ]  2  1 Init     None      f32     1 *
-      2  108 [100 104         ]  2  2 Init     Rate      f32     1 *
-    TREE 36   [31 33] Init   Rate      f32     1
-      0   92 [                ]  0  1 Const    None      f32     1 0.5f
-      1   93 [91 92           ]  2  1 Init     None      f32     1 *
-      2  105 [93 104          ]  2  2 Init     Rate      f32     1 *
-    TREE 37   [36 18] Audio  FanOut    f32     1
-      0  110 [105 5           ]  2  1 Audio    None      f32     1 *
-      1  111 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
-      2  112 [110 111         ]  2  5 Audio    FanOut    f32     1 +
-    TREE 38   [34 18 35 37] Audio  Sink      f32     1
-      0  113 [106 5           ]  2  1 Audio    None      f32     1 *
-      1  114 [108 112         ]  2  1 Audio    None      f32     1 *
-      2  115 [113 114         ]  2  1 Audio    None      f32     1 -
-      3  116 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
-      4  117 [115 116         ]  2  1 Audio    None      f32     1 +
-      5  118 [117             ]  1  0 Audio    Sink      f32     1 delay_write
-    TREE 39   [31 33] Init   Rate      f32     1
-      0   95 [                ]  0  1 Const    None      f32     1 0.5f
-      1   96 [91 95           ]  2  1 Init     None      f32     1 *
-      2  107 [96 104          ]  2  2 Init     Rate      f32     1 *
-    TREE 40   [32 33] Init   Rate      f32     1
-      0  101 [                ]  0  1 Const    None      f32     1 1.0f
-      1  102 [101 89          ]  2  1 Init     None      f32     1 -
-      2  109 [102 104         ]  2  2 Init     Rate      f32     1 *
-    TREE 41   [39 18 40 37] Audio  Sink      f32     1
-      0  119 [107 5           ]  2  1 Audio    None      f32     1 *
-      1  120 [109 112         ]  2  1 Audio    None      f32     1 *
-      2  121 [119 120         ]  2  1 Audio    None      f32     1 -
-      3  122 [121             ]  1  0 Audio    Sink      f32     1 delay_write
-    TREE 42   [36 37] Audio  FanOut    f32     1
-      0  123 [105 112         ]  2  1 Audio    None      f32     1 *
-      1  124 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
-      2  125 [123 124         ]  2  3 Audio    FanOut    f32     1 +
-    TREE 43   [34 37 35 42] Audio  Sink      f32     1
-      0  126 [106 112         ]  2  1 Audio    None      f32     1 *
-      1  127 [108 125         ]  2  1 Audio    None      f32     1 *
-      2  128 [126 127         ]  2  1 Audio    None      f32     1 -
-      3  129 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
-      4  130 [128 129         ]  2  1 Audio    None      f32     1 +
-      5  131 [130             ]  1  0 Audio    Sink      f32     1 delay_write
-    TREE 44   [39 37 40 42] Audio  Sink      f32     1
-      0  132 [107 112         ]  2  1 Audio    None      f32     1 *
-      1  133 [109 125         ]  2  1 Audio    None      f32     1 *
-      2  134 [132 133         ]  2  1 Audio    None      f32     1 -
-      3  135 [134             ]  1  0 Audio    Sink      f32     1 delay_write
-    TREE 45   [] Audio  FanOut    f64     1
-      0  136 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
-    TREE 46   [9] Init   Rate      f64     1
-      0  139 [27              ]  1  2 Init     Rate      f64     1 cast_f64
-    TREE 47   [45 7 46] Audio  FanOut    f64     1
-      0  137 [25              ]  1  1 Audio    None      f64     1 cast_f64
-      1  140 [137 139         ]  2  1 Audio    None      f64     1 *
-      2  141 [136 140         ]  2  2 Audio    FanOut    f64     1 +
-    TREE 48   [47] Audio  Sink      f64     1
-      0  142 [141             ]  1  1 Audio    None      f64     1 floor
-      1  143 [141 142         ]  2  1 Audio    None      f64     1 -
-      2  144 [143             ]  1  0 Audio    Sink      f64     1 delay_write
-    TREE 49   [2] Init   Rate      f32     1
-      0  153 [                ]  0  1 Const    None      f32     1 0.0009f
-      1  154 [153 6           ]  2  1 Init     Rate      f32     1 *
-    TREE 50   [45] Audio  FanOut    f32     1
-      0  146 [136             ]  1  3 Audio    FanOut    f32     1 cast_f32
-    TREE 51   [2] Init   Sink      f32     1
-      0  148 [                ]  0  1 Const    None      f32     1 0.004f
-      1  149 [148 6           ]  2  1 Init     None      f32     1 *
-      2  150 [149             ]  1  0 Init     Sink      f32     1 max_delay
-    TREE 52   [42] Audio  Sink      f32     1
-      0  151 [125             ]  1  0 Audio    Sink      f32     1 delay_write
-    TREE 53   [] Audio  FanOut    f64     1
-      0  228 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
-    TREE 54   [53 7 46] Audio  FanOut    f64     1
-      0  226 [                ]  0  1 Const    None      f32     1 0.87f
-      1  227 [25 226          ]  2  1 Audio    None      f32     1 *
-      2  229 [227             ]  1  1 Audio    None      f64     1 cast_f64
-      3  232 [229 139         ]  2  1 Audio    None      f64     1 *
-      4  233 [228 232         ]  2  2 Audio    FanOut    f64     1 +
-    TREE 55   [54] Audio  Sink      f64     1
-      0  234 [233             ]  1  1 Audio    None      f64     1 floor
-      1  235 [233 234         ]  2  1 Audio    None      f64     1 -
-      2  236 [235             ]  1  0 Audio    Sink      f64     1 delay_write
-    TREE 56   [2] Init   Rate      f32     1
-      0  245 [                ]  0  1 Const    None      f32     1 0.0004f
-      1  246 [245 6           ]  2  1 Init     Rate      f32     1 *
-    TREE 57   [53] Audio  FanOut    f32     1
-      0  238 [228             ]  1  3 Audio    FanOut    f32     1 cast_f32
-    TREE 58   [2] Init   Sink      f32     1
-      0  240 [                ]  0  1 Const    None      f32     1 0.003f
-      1  241 [240 6           ]  2  1 Init     None      f32     1 *
-      2  242 [241             ]  1  0 Init     Sink      f32     1 max_delay
-    TREE 59   [26] Audio  Sink      f32     1
-      0  243 [70              ]  1  0 Audio    Sink      f32     1 delay_write
-    TREE 60   [] Block  Input     f32     1
+      0   95 [                ]  0  1 Const    None      f32     1 1.0f
+      1   96 [95 90           ]  2  3 Init     FanOut    f32     1 +
+    TREE 34   [31] Init   FanOut    f32     1
+      0   89 [88              ]  1  1 Init     None      f32     1 sin
+      1   91 [                ]  0  1 Const    None      f32     1 1.4142135f
+      2   92 [89 91           ]  2  1 Init     None      f32     1 *
+      3   93 [                ]  0  1 Const    None      f32     1 0.5f
+      4   94 [92 93           ]  2  2 Init     FanOut    f32     1 *
+    TREE 35   [34] Init   FanOut    f32     1
+      0  108 [                ]  0  1 Const    None      f32     1 1.0f
+      1  102 [                ]  0  1 Const    None      f32     1 1.0f
+      2  103 [102 94          ]  2  1 Init     None      f32     1 +
+      3  109 [108 103         ]  2  5 Init     FanOut    f32     1 /
+    TREE 36   [33 35] Init   Rate      f32     1
+      0   99 [96              ]  1  1 Init     None      f32     1 -
+      1  111 [99 109          ]  2  2 Init     Rate      f32     1 *
+    TREE 37   [32 35] Init   Rate      f32     1
+      0  104 [                ]  0  1 Const    None      f32     1 -2.0f
+      1  105 [104 90          ]  2  1 Init     None      f32     1 *
+      2  113 [105 109         ]  2  2 Init     Rate      f32     1 *
+    TREE 38   [33 35] Init   Rate      f32     1
+      0   97 [                ]  0  1 Const    None      f32     1 0.5f
+      1   98 [96 97           ]  2  1 Init     None      f32     1 *
+      2  110 [98 109          ]  2  2 Init     Rate      f32     1 *
+    TREE 39   [38 20] Audio  FanOut    f32     1
+      0  115 [110 5           ]  2  1 Audio    None      f32     1 *
+      1  116 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      2  117 [115 116         ]  2  5 Audio    FanOut    f32     1 +
+    TREE 40   [36 20 37 39] Audio  Sink      f32     1
+      0  118 [111 5           ]  2  1 Audio    None      f32     1 *
+      1  119 [113 117         ]  2  1 Audio    None      f32     1 *
+      2  120 [118 119         ]  2  1 Audio    None      f32     1 -
+      3  121 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      4  122 [120 121         ]  2  1 Audio    None      f32     1 +
+      5  123 [122             ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 41   [33 35] Init   Rate      f32     1
+      0  100 [                ]  0  1 Const    None      f32     1 0.5f
+      1  101 [96 100          ]  2  1 Init     None      f32     1 *
+      2  112 [101 109         ]  2  2 Init     Rate      f32     1 *
+    TREE 42   [34 35] Init   Rate      f32     1
+      0  106 [                ]  0  1 Const    None      f32     1 1.0f
+      1  107 [106 94          ]  2  1 Init     None      f32     1 -
+      2  114 [107 109         ]  2  2 Init     Rate      f32     1 *
+    TREE 43   [41 20 42 39] Audio  Sink      f32     1
+      0  124 [112 5           ]  2  1 Audio    None      f32     1 *
+      1  125 [114 117         ]  2  1 Audio    None      f32     1 *
+      2  126 [124 125         ]  2  1 Audio    None      f32     1 -
+      3  127 [126             ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 44   [38 39] Audio  FanOut    f32     1
+      0  128 [110 117         ]  2  1 Audio    None      f32     1 *
+      1  129 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      2  130 [128 129         ]  2  3 Audio    FanOut    f32     1 +
+    TREE 45   [36 39 37 44] Audio  Sink      f32     1
+      0  131 [111 117         ]  2  1 Audio    None      f32     1 *
+      1  132 [113 130         ]  2  1 Audio    None      f32     1 *
+      2  133 [131 132         ]  2  1 Audio    None      f32     1 -
+      3  134 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      4  135 [133 134         ]  2  1 Audio    None      f32     1 +
+      5  136 [135             ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 46   [41 39 42 44] Audio  Sink      f32     1
+      0  137 [112 117         ]  2  1 Audio    None      f32     1 *
+      1  138 [114 130         ]  2  1 Audio    None      f32     1 *
+      2  139 [137 138         ]  2  1 Audio    None      f32     1 -
+      3  140 [139             ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 47   [] Audio  FanOut    f64     1
+      0  141 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
+    TREE 48   [11] Init   Rate      f64     1
+      0  144 [32              ]  1  2 Init     Rate      f64     1 cast_f64
+    TREE 49   [47 9 48] Audio  FanOut    f64     1
+      0  142 [30              ]  1  1 Audio    None      f64     1 cast_f64
+      1  145 [142 144         ]  2  1 Audio    None      f64     1 *
+      2  146 [141 145         ]  2  2 Audio    FanOut    f64     1 +
+    TREE 50   [49] Audio  Sink      f64     1
+      0  147 [146             ]  1  1 Audio    None      f64     1 floor
+      1  148 [146 147         ]  2  1 Audio    None      f64     1 -
+      2  149 [148             ]  1  0 Audio    Sink      f64     1 delay_write
+    TREE 51   [2] Init   Rate      f32     1
+      0  158 [                ]  0  1 Const    None      f32     1 0.0009f
+      1  159 [158 6           ]  2  1 Init     Rate      f32     1 *
+    TREE 52   [47] Audio  FanOut    f32     1
+      0  151 [141             ]  1  3 Audio    FanOut    f32     1 cast_f32
+    TREE 53   [2] Init   Sink      f32     1
+      0  153 [                ]  0  1 Const    None      f32     1 0.004f
+      1  154 [153 6           ]  2  1 Init     None      f32     1 *
+      2  155 [154             ]  1  0 Init     Sink      f32     1 max_delay
+    TREE 54   [44] Audio  Sink      f32     1
+      0  156 [130             ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 55   [] Audio  FanOut    f64     1
+      0  233 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
+    TREE 56   [55 9 48] Audio  FanOut    f64     1
+      0  231 [                ]  0  1 Const    None      f32     1 0.87f
+      1  232 [30 231          ]  2  1 Audio    None      f32     1 *
+      2  234 [232             ]  1  1 Audio    None      f64     1 cast_f64
+      3  237 [234 144         ]  2  1 Audio    None      f64     1 *
+      4  238 [233 237         ]  2  2 Audio    FanOut    f64     1 +
+    TREE 57   [56] Audio  Sink      f64     1
+      0  239 [238             ]  1  1 Audio    None      f64     1 floor
+      1  240 [238 239         ]  2  1 Audio    None      f64     1 -
+      2  241 [240             ]  1  0 Audio    Sink      f64     1 delay_write
+    TREE 58   [2] Init   Rate      f32     1
+      0  250 [                ]  0  1 Const    None      f32     1 0.0004f
+      1  251 [250 6           ]  2  1 Init     Rate      f32     1 *
+    TREE 59   [55] Audio  FanOut    f32     1
+      0  243 [233             ]  1  3 Audio    FanOut    f32     1 cast_f32
+    TREE 60   [2] Init   Sink      f32     1
+      0  245 [                ]  0  1 Const    None      f32     1 0.003f
+      1  246 [245 6           ]  2  1 Init     None      f32     1 *
+      2  247 [246             ]  1  0 Init     Sink      f32     1 max_delay
+    TREE 61   [28] Audio  Sink      f32     1
+      0  248 [75              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 62   [] Block  Input     f32     1
       0    2 [                ]  0  1 Block    Input     f32     1 control(mix)
-    TREE 61   [50] Audio  FanOut    f32     1
-      0  168 [                ]  0  1 Const    None      f32     1 0.25f
-      1  169 [146 168         ]  2  2 Audio    FanOut    f32     1 +
-    TREE 62   [49 50 61] Audio  FanOut    f32     1
-      0  165 [                ]  0  1 Const    None      f32     1 2.0f
-      1  162 [                ]  0  1 Const    None      f32     1 1.0f
-      2  160 [                ]  0  1 Const    None      f32     1 0.5f
-      3  158 [                ]  0  1 Const    None      f32     1 0.5f
-      4  155 [                ]  0  1 Const    None      f32     1 2.0f
-      5  156 [155 146         ]  2  1 Audio    None      f32     1 *
-      6  157 [156             ]  1  1 Audio    None      f32     1 cospi
-      7  159 [158 157         ]  2  1 Audio    None      f32     1 *
-      8  161 [160 159         ]  2  1 Audio    None      f32     1 +
-      9  163 [162 161         ]  2  1 Audio    None      f32     1 -
-     10  164 [154 163         ]  2  1 Audio    None      f32     1 *
-     11  166 [165 164         ]  2  1 Audio    None      f32     1 +
-     12  167 [166             ]  1  1 Audio    None      f32     1 delay_var_read
-     13  183 [                ]  0  1 Const    None      f32     1 0.55f
-     14  181 [                ]  0  1 Const    None      f32     1 0.45f
-     15  179 [                ]  0  1 Const    None      f32     1 1.0f
-     16  177 [                ]  0  1 Const    None      f32     1 0.5f
-     17  175 [                ]  0  1 Const    None      f32     1 0.5f
-     18  172 [                ]  0  1 Const    None      f32     1 2.0f
-     19  170 [169             ]  1  1 Audio    None      f32     1 floor
-     20  171 [169 170         ]  2  1 Audio    None      f32     1 -
-     21  173 [172 171         ]  2  1 Audio    None      f32     1 *
-     22  174 [173             ]  1  1 Audio    None      f32     1 cospi
-     23  176 [175 174         ]  2  1 Audio    None      f32     1 *
-     24  178 [177 176         ]  2  1 Audio    None      f32     1 +
-     25  180 [179 178         ]  2  1 Audio    None      f32     1 -
-     26  182 [181 180         ]  2  1 Audio    None      f32     1 *
-     27  184 [183 182         ]  2  1 Audio    None      f32     1 +
-     28  185 [167 184         ]  2  2 Audio    FanOut    f32     1 *
-    TREE 63   [50] Audio  FanOut    f32     1
-      0  186 [                ]  0  1 Const    None      f32     1 2.0f
-      1  187 [186 146         ]  2  1 Audio    None      f32     1 *
-      2  188 [187             ]  1  1 Audio    None      f32     1 sinpi
-      3  189 [                ]  0  1 Const    None      f32     1 0.85f
-      4  190 [188 189         ]  2  2 Audio    FanOut    f32     1 *
-    TREE 64   [63] Audio  FanOut    f32     1
-      0  193 [                ]  0  1 Const    None      f32     1 0.5f
-      1  191 [                ]  0  1 Const    None      f32     1 0.5f
-      2  192 [191 190         ]  2  1 Audio    None      f32     1 *
-      3  194 [193 192         ]  2  3 Audio    FanOut    f32     1 +
-    TREE 65   [62 64 63] Audio  Temp      f32     1
-      0  211 [                ]  0  1 Const    None      f32     1 1.0f
-      1  208 [                ]  0  1 Const    None      f32     1 -0.003064942f
-      2  205 [                ]  0  2 Const    None      f32     1 -1.1656365f
-      3  199 [                ]  0  2 Const    None      f32     1 0.1687015f
-      4  200 [199 190         ]  2  1 Audio    None      f32     1 *
-      5  206 [205 200         ]  2  1 Audio    None      f32     1 +
-      6  207 [194 206         ]  2  1 Audio    None      f32     1 *
-      7  209 [208 207         ]  2  1 Audio    None      f32     1 +
-      8  210 [194 209         ]  2  1 Audio    None      f32     1 *
-      9  212 [211 210         ]  2  1 Audio    None      f32     1 +
-     10  223 [185 212         ]  2  1 Audio    Temp      f32     1 *
-    TREE 66   [64] Audio  FanOut    f32     1
-      0  195 [                ]  0  1 Const    None      f32     1 1.0f
-      1  196 [195 194         ]  2  3 Audio    FanOut    f32     1 -
-    TREE 67   [62 66] Audio  Temp      f32     1
-      0  221 [                ]  0  1 Const    None      f32     1 1.0f
-      1  218 [                ]  0  1 Const    None      f32     1 -0.003064942f
-      2  215 [                ]  0  1 Const    None      f32     1 -1.3343381f
-      3  213 [                ]  0  1 Const    None      f32     1 0.337403f
-      4  214 [196 213         ]  2  1 Audio    None      f32     1 *
-      5  216 [215 214         ]  2  1 Audio    None      f32     1 +
-      6  217 [196 216         ]  2  1 Audio    None      f32     1 *
-      7  219 [218 217         ]  2  1 Audio    None      f32     1 +
-      8  220 [196 219         ]  2  1 Audio    None      f32     1 *
-      9  222 [221 220         ]  2  1 Audio    None      f32     1 +
-     10  224 [185 222         ]  2  1 Audio    Temp      f32     1 *
-    TREE 68   [65* 67*] Audio  SeparateLoop f32     2
-      0  225 [223 224         ]  2  1 Audio    SeparateLoop f32     2 vec_join
-    TREE 69   [57] Audio  FanOut    f32     1
-      0  260 [                ]  0  1 Const    None      f32     1 0.25f
-      1  261 [238 260         ]  2  2 Audio    FanOut    f32     1 +
-    TREE 70   [56 57 69] Audio  FanOut    f32     1
-      0  257 [                ]  0  1 Const    None      f32     1 2.0f
-      1  254 [                ]  0  1 Const    None      f32     1 1.0f
-      2  252 [                ]  0  1 Const    None      f32     1 0.5f
-      3  250 [                ]  0  1 Const    None      f32     1 0.5f
-      4  247 [                ]  0  1 Const    None      f32     1 2.0f
-      5  248 [247 238         ]  2  1 Audio    None      f32     1 *
-      6  249 [248             ]  1  1 Audio    None      f32     1 cospi
-      7  251 [250 249         ]  2  1 Audio    None      f32     1 *
-      8  253 [252 251         ]  2  1 Audio    None      f32     1 +
-      9  255 [254 253         ]  2  1 Audio    None      f32     1 -
-     10  256 [246 255         ]  2  1 Audio    None      f32     1 *
-     11  258 [257 256         ]  2  1 Audio    None      f32     1 +
-     12  259 [258             ]  1  1 Audio    None      f32     1 delay_var_read
-     13  275 [                ]  0  1 Const    None      f32     1 0.8f
-     14  273 [                ]  0  1 Const    None      f32     1 0.2f
-     15  271 [                ]  0  1 Const    None      f32     1 1.0f
-     16  269 [                ]  0  1 Const    None      f32     1 0.5f
-     17  267 [                ]  0  1 Const    None      f32     1 0.5f
-     18  264 [                ]  0  1 Const    None      f32     1 2.0f
-     19  262 [261             ]  1  1 Audio    None      f32     1 floor
-     20  263 [261 262         ]  2  1 Audio    None      f32     1 -
-     21  265 [264 263         ]  2  1 Audio    None      f32     1 *
-     22  266 [265             ]  1  1 Audio    None      f32     1 cospi
-     23  268 [267 266         ]  2  1 Audio    None      f32     1 *
-     24  270 [269 268         ]  2  1 Audio    None      f32     1 +
-     25  272 [271 270         ]  2  1 Audio    None      f32     1 -
-     26  274 [273 272         ]  2  1 Audio    None      f32     1 *
-     27  276 [275 274         ]  2  1 Audio    None      f32     1 +
-     28  277 [259 276         ]  2  2 Audio    FanOut    f32     1 *
-    TREE 71   [57] Audio  FanOut    f32     1
-      0  278 [                ]  0  1 Const    None      f32     1 2.0f
-      1  279 [278 238         ]  2  1 Audio    None      f32     1 *
-      2  280 [279             ]  1  1 Audio    None      f32     1 sinpi
-      3  281 [                ]  0  1 Const    None      f32     1 0.4f
-      4  282 [280 281         ]  2  2 Audio    FanOut    f32     1 *
-    TREE 72   [71] Audio  FanOut    f32     1
-      0  285 [                ]  0  1 Const    None      f32     1 0.5f
-      1  283 [                ]  0  1 Const    None      f32     1 0.5f
-      2  284 [283 282         ]  2  1 Audio    None      f32     1 *
-      3  286 [285 284         ]  2  3 Audio    FanOut    f32     1 +
-    TREE 73   [70 72 71] Audio  Temp      f32     1
-      0  303 [                ]  0  1 Const    None      f32     1 1.0f
-      1  300 [                ]  0  1 Const    None      f32     1 -0.003064942f
-      2  205 [                ]  0  2 Const    None      f32     1 -1.1656365f
-      3  199 [                ]  0  2 Const    None      f32     1 0.1687015f
-      4  292 [199 282         ]  2  1 Audio    None      f32     1 *
-      5  298 [205 292         ]  2  1 Audio    None      f32     1 +
-      6  299 [286 298         ]  2  1 Audio    None      f32     1 *
-      7  301 [300 299         ]  2  1 Audio    None      f32     1 +
-      8  302 [286 301         ]  2  1 Audio    None      f32     1 *
-      9  304 [303 302         ]  2  1 Audio    None      f32     1 +
-     10  315 [277 304         ]  2  1 Audio    Temp      f32     1 *
-    TREE 74   [72] Audio  FanOut    f32     1
-      0  287 [                ]  0  1 Const    None      f32     1 1.0f
-      1  288 [287 286         ]  2  3 Audio    FanOut    f32     1 -
-    TREE 75   [70 74] Audio  Temp      f32     1
-      0  313 [                ]  0  1 Const    None      f32     1 1.0f
-      1  310 [                ]  0  1 Const    None      f32     1 -0.003064942f
-      2  307 [                ]  0  1 Const    None      f32     1 -1.3343381f
-      3  305 [                ]  0  1 Const    None      f32     1 0.337403f
-      4  306 [288 305         ]  2  1 Audio    None      f32     1 *
-      5  308 [307 306         ]  2  1 Audio    None      f32     1 +
-      6  309 [288 308         ]  2  1 Audio    None      f32     1 *
-      7  311 [310 309         ]  2  1 Audio    None      f32     1 +
-      8  312 [288 311         ]  2  1 Audio    None      f32     1 *
-      9  314 [313 312         ]  2  1 Audio    None      f32     1 +
-     10  316 [277 314         ]  2  1 Audio    Temp      f32     1 *
-    TREE 76   [73* 75*] Audio  SeparateLoop f32     2
-      0  317 [315 316         ]  2  1 Audio    SeparateLoop f32     2 vec_join
-    TREE 77   [16 60 18 68* 76*] Audio  Sink      f32     2
-      0  318 [225 317         ]  2  1 Audio    None      f32     2 +
-      1  319 [318 5           ]  2  1 Audio    None      f32     2 -
-      2  322 [5 319           ]  2  1 Audio    None      f32     2 +
-      3  323 [322 0           ]  2  1 Audio    None      f32     2 -
-      4  324 [2 323           ]  2  1 Audio    None      f32     2 *
-      5  325 [0 324           ]  2  1 Audio    None      f32     2 +
-      6  326 [325             ]  1  0 Audio    Sink      f32     2 outlet
+    TREE 63   [52] Audio  FanOut    f32     1
+      0  173 [                ]  0  1 Const    None      f32     1 0.25f
+      1  174 [151 173         ]  2  2 Audio    FanOut    f32     1 +
+    TREE 64   [51 52 63] Audio  FanOut    f32     1
+      0  170 [                ]  0  1 Const    None      f32     1 2.0f
+      1  167 [                ]  0  1 Const    None      f32     1 1.0f
+      2  165 [                ]  0  1 Const    None      f32     1 0.5f
+      3  163 [                ]  0  1 Const    None      f32     1 0.5f
+      4  160 [                ]  0  1 Const    None      f32     1 2.0f
+      5  161 [160 151         ]  2  1 Audio    None      f32     1 *
+      6  162 [161             ]  1  1 Audio    None      f32     1 cospi
+      7  164 [163 162         ]  2  1 Audio    None      f32     1 *
+      8  166 [165 164         ]  2  1 Audio    None      f32     1 +
+      9  168 [167 166         ]  2  1 Audio    None      f32     1 -
+     10  169 [159 168         ]  2  1 Audio    None      f32     1 *
+     11  171 [170 169         ]  2  1 Audio    None      f32     1 +
+     12  172 [171             ]  1  1 Audio    None      f32     1 delay_var_read
+     13  188 [                ]  0  1 Const    None      f32     1 0.55f
+     14  186 [                ]  0  1 Const    None      f32     1 0.45f
+     15  184 [                ]  0  1 Const    None      f32     1 1.0f
+     16  182 [                ]  0  1 Const    None      f32     1 0.5f
+     17  180 [                ]  0  1 Const    None      f32     1 0.5f
+     18  177 [                ]  0  1 Const    None      f32     1 2.0f
+     19  175 [174             ]  1  1 Audio    None      f32     1 floor
+     20  176 [174 175         ]  2  1 Audio    None      f32     1 -
+     21  178 [177 176         ]  2  1 Audio    None      f32     1 *
+     22  179 [178             ]  1  1 Audio    None      f32     1 cospi
+     23  181 [180 179         ]  2  1 Audio    None      f32     1 *
+     24  183 [182 181         ]  2  1 Audio    None      f32     1 +
+     25  185 [184 183         ]  2  1 Audio    None      f32     1 -
+     26  187 [186 185         ]  2  1 Audio    None      f32     1 *
+     27  189 [188 187         ]  2  1 Audio    None      f32     1 +
+     28  190 [172 189         ]  2  2 Audio    FanOut    f32     1 *
+    TREE 65   [52] Audio  FanOut    f32     1
+      0  191 [                ]  0  1 Const    None      f32     1 2.0f
+      1  192 [191 151         ]  2  1 Audio    None      f32     1 *
+      2  193 [192             ]  1  1 Audio    None      f32     1 sinpi
+      3  194 [                ]  0  1 Const    None      f32     1 0.85f
+      4  195 [193 194         ]  2  2 Audio    FanOut    f32     1 *
+    TREE 66   [65] Audio  FanOut    f32     1
+      0  198 [                ]  0  1 Const    None      f32     1 0.5f
+      1  196 [                ]  0  1 Const    None      f32     1 0.5f
+      2  197 [196 195         ]  2  1 Audio    None      f32     1 *
+      3  199 [198 197         ]  2  3 Audio    FanOut    f32     1 +
+    TREE 67   [64 66 65] Audio  Temp      f32     1
+      0  216 [                ]  0  1 Const    None      f32     1 1.0f
+      1  213 [                ]  0  1 Const    None      f32     1 -0.003064942f
+      2  210 [                ]  0  2 Const    None      f32     1 -1.1656365f
+      3  204 [                ]  0  2 Const    None      f32     1 0.1687015f
+      4  205 [204 195         ]  2  1 Audio    None      f32     1 *
+      5  211 [210 205         ]  2  1 Audio    None      f32     1 +
+      6  212 [199 211         ]  2  1 Audio    None      f32     1 *
+      7  214 [213 212         ]  2  1 Audio    None      f32     1 +
+      8  215 [199 214         ]  2  1 Audio    None      f32     1 *
+      9  217 [216 215         ]  2  1 Audio    None      f32     1 +
+     10  228 [190 217         ]  2  1 Audio    Temp      f32     1 *
+    TREE 68   [66] Audio  FanOut    f32     1
+      0  200 [                ]  0  1 Const    None      f32     1 1.0f
+      1  201 [200 199         ]  2  3 Audio    FanOut    f32     1 -
+    TREE 69   [64 68] Audio  Temp      f32     1
+      0  226 [                ]  0  1 Const    None      f32     1 1.0f
+      1  223 [                ]  0  1 Const    None      f32     1 -0.003064942f
+      2  220 [                ]  0  1 Const    None      f32     1 -1.3343381f
+      3  218 [                ]  0  1 Const    None      f32     1 0.337403f
+      4  219 [201 218         ]  2  1 Audio    None      f32     1 *
+      5  221 [220 219         ]  2  1 Audio    None      f32     1 +
+      6  222 [201 221         ]  2  1 Audio    None      f32     1 *
+      7  224 [223 222         ]  2  1 Audio    None      f32     1 +
+      8  225 [201 224         ]  2  1 Audio    None      f32     1 *
+      9  227 [226 225         ]  2  1 Audio    None      f32     1 +
+     10  229 [190 227         ]  2  1 Audio    Temp      f32     1 *
+    TREE 70   [67* 69*] Audio  SeparateLoop f32     2
+      0  230 [228 229         ]  2  1 Audio    SeparateLoop f32     2 vec_join
+    TREE 71   [59] Audio  FanOut    f32     1
+      0  265 [                ]  0  1 Const    None      f32     1 0.25f
+      1  266 [243 265         ]  2  2 Audio    FanOut    f32     1 +
+    TREE 72   [58 59 71] Audio  FanOut    f32     1
+      0  262 [                ]  0  1 Const    None      f32     1 2.0f
+      1  259 [                ]  0  1 Const    None      f32     1 1.0f
+      2  257 [                ]  0  1 Const    None      f32     1 0.5f
+      3  255 [                ]  0  1 Const    None      f32     1 0.5f
+      4  252 [                ]  0  1 Const    None      f32     1 2.0f
+      5  253 [252 243         ]  2  1 Audio    None      f32     1 *
+      6  254 [253             ]  1  1 Audio    None      f32     1 cospi
+      7  256 [255 254         ]  2  1 Audio    None      f32     1 *
+      8  258 [257 256         ]  2  1 Audio    None      f32     1 +
+      9  260 [259 258         ]  2  1 Audio    None      f32     1 -
+     10  261 [251 260         ]  2  1 Audio    None      f32     1 *
+     11  263 [262 261         ]  2  1 Audio    None      f32     1 +
+     12  264 [263             ]  1  1 Audio    None      f32     1 delay_var_read
+     13  280 [                ]  0  1 Const    None      f32     1 0.8f
+     14  278 [                ]  0  1 Const    None      f32     1 0.2f
+     15  276 [                ]  0  1 Const    None      f32     1 1.0f
+     16  274 [                ]  0  1 Const    None      f32     1 0.5f
+     17  272 [                ]  0  1 Const    None      f32     1 0.5f
+     18  269 [                ]  0  1 Const    None      f32     1 2.0f
+     19  267 [266             ]  1  1 Audio    None      f32     1 floor
+     20  268 [266 267         ]  2  1 Audio    None      f32     1 -
+     21  270 [269 268         ]  2  1 Audio    None      f32     1 *
+     22  271 [270             ]  1  1 Audio    None      f32     1 cospi
+     23  273 [272 271         ]  2  1 Audio    None      f32     1 *
+     24  275 [274 273         ]  2  1 Audio    None      f32     1 +
+     25  277 [276 275         ]  2  1 Audio    None      f32     1 -
+     26  279 [278 277         ]  2  1 Audio    None      f32     1 *
+     27  281 [280 279         ]  2  1 Audio    None      f32     1 +
+     28  282 [264 281         ]  2  2 Audio    FanOut    f32     1 *
+    TREE 73   [59] Audio  FanOut    f32     1
+      0  283 [                ]  0  1 Const    None      f32     1 2.0f
+      1  284 [283 243         ]  2  1 Audio    None      f32     1 *
+      2  285 [284             ]  1  1 Audio    None      f32     1 sinpi
+      3  286 [                ]  0  1 Const    None      f32     1 0.4f
+      4  287 [285 286         ]  2  2 Audio    FanOut    f32     1 *
+    TREE 74   [73] Audio  FanOut    f32     1
+      0  290 [                ]  0  1 Const    None      f32     1 0.5f
+      1  288 [                ]  0  1 Const    None      f32     1 0.5f
+      2  289 [288 287         ]  2  1 Audio    None      f32     1 *
+      3  291 [290 289         ]  2  3 Audio    FanOut    f32     1 +
+    TREE 75   [72 74 73] Audio  Temp      f32     1
+      0  308 [                ]  0  1 Const    None      f32     1 1.0f
+      1  305 [                ]  0  1 Const    None      f32     1 -0.003064942f
+      2  210 [                ]  0  2 Const    None      f32     1 -1.1656365f
+      3  204 [                ]  0  2 Const    None      f32     1 0.1687015f
+      4  297 [204 287         ]  2  1 Audio    None      f32     1 *
+      5  303 [210 297         ]  2  1 Audio    None      f32     1 +
+      6  304 [291 303         ]  2  1 Audio    None      f32     1 *
+      7  306 [305 304         ]  2  1 Audio    None      f32     1 +
+      8  307 [291 306         ]  2  1 Audio    None      f32     1 *
+      9  309 [308 307         ]  2  1 Audio    None      f32     1 +
+     10  320 [282 309         ]  2  1 Audio    Temp      f32     1 *
+    TREE 76   [74] Audio  FanOut    f32     1
+      0  292 [                ]  0  1 Const    None      f32     1 1.0f
+      1  293 [292 291         ]  2  3 Audio    FanOut    f32     1 -
+    TREE 77   [72 76] Audio  Temp      f32     1
+      0  318 [                ]  0  1 Const    None      f32     1 1.0f
+      1  315 [                ]  0  1 Const    None      f32     1 -0.003064942f
+      2  312 [                ]  0  1 Const    None      f32     1 -1.3343381f
+      3  310 [                ]  0  1 Const    None      f32     1 0.337403f
+      4  311 [293 310         ]  2  1 Audio    None      f32     1 *
+      5  313 [312 311         ]  2  1 Audio    None      f32     1 +
+      6  314 [293 313         ]  2  1 Audio    None      f32     1 *
+      7  316 [315 314         ]  2  1 Audio    None      f32     1 +
+      8  317 [293 316         ]  2  1 Audio    None      f32     1 *
+      9  319 [318 317         ]  2  1 Audio    None      f32     1 +
+     10  321 [282 319         ]  2  1 Audio    Temp      f32     1 *
+    TREE 78   [75* 77*] Audio  SeparateLoop f32     2
+      0  322 [320 321         ]  2  1 Audio    SeparateLoop f32     2 vec_join
+    TREE 79   [18 62 20 70* 78*] Audio  Sink      f32     2
+      0  323 [230 322         ]  2  1 Audio    None      f32     2 +
+      1  324 [323 5           ]  2  1 Audio    None      f32     2 -
+      2  327 [5 324           ]  2  1 Audio    None      f32     2 +
+      3  328 [327 0           ]  2  1 Audio    None      f32     2 -
+      4  329 [2 328           ]  2  1 Audio    None      f32     2 *
+      5  330 [0 329           ]  2  1 Audio    None      f32     2 +
+      6  331 [330             ]  1  0 Audio    Sink      f32     2 outlet
 -- INIT
   LOOP  1 [] Init   1
     TREE 2    [] Init   FanOut    f32     1
@@ -5157,100 +5172,100 @@ OUT 0 out f32 2
       0   13 [                ]  0  1 Const    None      f32     1 0.01f
       1   11 [                ]  0  1 Const    None      f32     1 3.75f
       2   12 [11 6            ]  2  1 Init     None      f32     1 /
-      3   14 [13 12           ]  2  2 Init     Rate      f32     1 pow
-    TREE 9    [] Init   FanOut    f32     1
-      0   27 [                ]  0  3 Init     FanOut    f32     1 sd
-    TREE 10   [9] Init   FanOut    f32     1
-      0   28 [                ]  0  1 Const    None      f32     1 5026.5483f
-      1   29 [28 27           ]  2  2 Init     FanOut    f32     1 *
-    TREE 11   [10] Init   FanOut    f32     1
-      0   31 [29              ]  1  2 Init     FanOut    f32     1 cos
+      3   14 [13 12           ]  2  3 Init     Rate      f32     1 pow
+    TREE 11   [] Init   FanOut    f32     1
+      0   32 [                ]  0  3 Init     FanOut    f32     1 sd
     TREE 12   [11] Init   FanOut    f32     1
-      0   36 [                ]  0  1 Const    None      f32     1 1.0f
-      1   37 [36 31           ]  2  3 Init     FanOut    f32     1 -
-    TREE 13   [10] Init   FanOut    f32     1
-      0   30 [29              ]  1  1 Init     None      f32     1 sin
-      1   32 [                ]  0  1 Const    None      f32     1 1.4142135f
-      2   33 [30 32           ]  2  1 Init     None      f32     1 *
-      3   34 [                ]  0  1 Const    None      f32     1 0.5f
-      4   35 [33 34           ]  2  2 Init     FanOut    f32     1 *
+      0   33 [                ]  0  1 Const    None      f32     1 5026.5483f
+      1   34 [33 32           ]  2  2 Init     FanOut    f32     1 *
+    TREE 13   [12] Init   FanOut    f32     1
+      0   36 [34              ]  1  2 Init     FanOut    f32     1 cos
     TREE 14   [13] Init   FanOut    f32     1
-      0   48 [                ]  0  1 Const    None      f32     1 1.0f
-      1   42 [                ]  0  1 Const    None      f32     1 1.0f
-      2   43 [42 35           ]  2  1 Init     None      f32     1 +
-      3   49 [48 43           ]  2  5 Init     FanOut    f32     1 /
-    TREE 15   [12 14] Init   Rate      f32     1
-      0   51 [37 49           ]  2  2 Init     Rate      f32     1 *
-    TREE 19   [11 14] Init   Rate      f32     1
-      0   44 [                ]  0  1 Const    None      f32     1 -2.0f
-      1   45 [44 31           ]  2  1 Init     None      f32     1 *
-      2   53 [45 49           ]  2  2 Init     Rate      f32     1 *
-    TREE 20   [12 14] Init   Rate      f32     1
-      0   38 [                ]  0  1 Const    None      f32     1 0.5f
-      1   39 [37 38           ]  2  1 Init     None      f32     1 *
-      2   50 [39 49           ]  2  2 Init     Rate      f32     1 *
-    TREE 23   [12 14] Init   Rate      f32     1
-      0   40 [                ]  0  1 Const    None      f32     1 0.5f
-      1   41 [37 40           ]  2  1 Init     None      f32     1 *
-      2   52 [41 49           ]  2  2 Init     Rate      f32     1 *
-    TREE 24   [13 14] Init   Rate      f32     1
-      0   46 [                ]  0  1 Const    None      f32     1 1.0f
-      1   47 [46 35           ]  2  1 Init     None      f32     1 -
-      2   54 [47 49           ]  2  2 Init     Rate      f32     1 *
-    TREE 29   [9] Init   FanOut    f32     1
-      0   82 [                ]  0  1 Const    None      f32     1 5026.5483f
-      1   83 [82 27           ]  2  2 Init     FanOut    f32     1 *
-    TREE 30   [29] Init   FanOut    f32     1
-      0   85 [83              ]  1  2 Init     FanOut    f32     1 cos
-    TREE 31   [30] Init   FanOut    f32     1
-      0   90 [                ]  0  1 Const    None      f32     1 1.0f
-      1   91 [90 85           ]  2  3 Init     FanOut    f32     1 +
-    TREE 32   [29] Init   FanOut    f32     1
-      0   84 [83              ]  1  1 Init     None      f32     1 sin
-      1   86 [                ]  0  1 Const    None      f32     1 1.4142135f
-      2   87 [84 86           ]  2  1 Init     None      f32     1 *
-      3   88 [                ]  0  1 Const    None      f32     1 0.5f
-      4   89 [87 88           ]  2  2 Init     FanOut    f32     1 *
+      0   41 [                ]  0  1 Const    None      f32     1 1.0f
+      1   42 [41 36           ]  2  3 Init     FanOut    f32     1 -
+    TREE 15   [12] Init   FanOut    f32     1
+      0   35 [34              ]  1  1 Init     None      f32     1 sin
+      1   37 [                ]  0  1 Const    None      f32     1 1.4142135f
+      2   38 [35 37           ]  2  1 Init     None      f32     1 *
+      3   39 [                ]  0  1 Const    None      f32     1 0.5f
+      4   40 [38 39           ]  2  2 Init     FanOut    f32     1 *
+    TREE 16   [15] Init   FanOut    f32     1
+      0   53 [                ]  0  1 Const    None      f32     1 1.0f
+      1   47 [                ]  0  1 Const    None      f32     1 1.0f
+      2   48 [47 40           ]  2  1 Init     None      f32     1 +
+      3   54 [53 48           ]  2  5 Init     FanOut    f32     1 /
+    TREE 17   [14 16] Init   Rate      f32     1
+      0   56 [42 54           ]  2  2 Init     Rate      f32     1 *
+    TREE 21   [13 16] Init   Rate      f32     1
+      0   49 [                ]  0  1 Const    None      f32     1 -2.0f
+      1   50 [49 36           ]  2  1 Init     None      f32     1 *
+      2   58 [50 54           ]  2  2 Init     Rate      f32     1 *
+    TREE 22   [14 16] Init   Rate      f32     1
+      0   43 [                ]  0  1 Const    None      f32     1 0.5f
+      1   44 [42 43           ]  2  1 Init     None      f32     1 *
+      2   55 [44 54           ]  2  2 Init     Rate      f32     1 *
+    TREE 25   [14 16] Init   Rate      f32     1
+      0   45 [                ]  0  1 Const    None      f32     1 0.5f
+      1   46 [42 45           ]  2  1 Init     None      f32     1 *
+      2   57 [46 54           ]  2  2 Init     Rate      f32     1 *
+    TREE 26   [15 16] Init   Rate      f32     1
+      0   51 [                ]  0  1 Const    None      f32     1 1.0f
+      1   52 [51 40           ]  2  1 Init     None      f32     1 -
+      2   59 [52 54           ]  2  2 Init     Rate      f32     1 *
+    TREE 31   [11] Init   FanOut    f32     1
+      0   87 [                ]  0  1 Const    None      f32     1 5026.5483f
+      1   88 [87 32           ]  2  2 Init     FanOut    f32     1 *
+    TREE 32   [31] Init   FanOut    f32     1
+      0   90 [88              ]  1  2 Init     FanOut    f32     1 cos
     TREE 33   [32] Init   FanOut    f32     1
-      0  103 [                ]  0  1 Const    None      f32     1 1.0f
-      1   97 [                ]  0  1 Const    None      f32     1 1.0f
-      2   98 [97 89           ]  2  1 Init     None      f32     1 +
-      3  104 [103 98          ]  2  5 Init     FanOut    f32     1 /
-    TREE 34   [31 33] Init   Rate      f32     1
-      0   94 [91              ]  1  1 Init     None      f32     1 -
-      1  106 [94 104          ]  2  2 Init     Rate      f32     1 *
-    TREE 35   [30 33] Init   Rate      f32     1
-      0   99 [                ]  0  1 Const    None      f32     1 -2.0f
-      1  100 [99 85           ]  2  1 Init     None      f32     1 *
-      2  108 [100 104         ]  2  2 Init     Rate      f32     1 *
-    TREE 36   [31 33] Init   Rate      f32     1
-      0   92 [                ]  0  1 Const    None      f32     1 0.5f
-      1   93 [91 92           ]  2  1 Init     None      f32     1 *
-      2  105 [93 104          ]  2  2 Init     Rate      f32     1 *
-    TREE 39   [31 33] Init   Rate      f32     1
-      0   95 [                ]  0  1 Const    None      f32     1 0.5f
-      1   96 [91 95           ]  2  1 Init     None      f32     1 *
-      2  107 [96 104          ]  2  2 Init     Rate      f32     1 *
-    TREE 40   [32 33] Init   Rate      f32     1
-      0  101 [                ]  0  1 Const    None      f32     1 1.0f
-      1  102 [101 89          ]  2  1 Init     None      f32     1 -
-      2  109 [102 104         ]  2  2 Init     Rate      f32     1 *
-    TREE 46   [9] Init   Rate      f64     1
-      0  139 [27              ]  1  2 Init     Rate      f64     1 cast_f64
-    TREE 49   [2] Init   Rate      f32     1
-      0  153 [                ]  0  1 Const    None      f32     1 0.0009f
-      1  154 [153 6           ]  2  1 Init     Rate      f32     1 *
-    TREE 51   [2] Init   Sink      f32     1
-      0  148 [                ]  0  1 Const    None      f32     1 0.004f
-      1  149 [148 6           ]  2  1 Init     None      f32     1 *
-      2  150 [149             ]  1  0 Init     Sink      f32     1 max_delay
-    TREE 56   [2] Init   Rate      f32     1
-      0  245 [                ]  0  1 Const    None      f32     1 0.0004f
-      1  246 [245 6           ]  2  1 Init     Rate      f32     1 *
-    TREE 58   [2] Init   Sink      f32     1
-      0  240 [                ]  0  1 Const    None      f32     1 0.003f
-      1  241 [240 6           ]  2  1 Init     None      f32     1 *
-      2  242 [241             ]  1  0 Init     Sink      f32     1 max_delay
+      0   95 [                ]  0  1 Const    None      f32     1 1.0f
+      1   96 [95 90           ]  2  3 Init     FanOut    f32     1 +
+    TREE 34   [31] Init   FanOut    f32     1
+      0   89 [88              ]  1  1 Init     None      f32     1 sin
+      1   91 [                ]  0  1 Const    None      f32     1 1.4142135f
+      2   92 [89 91           ]  2  1 Init     None      f32     1 *
+      3   93 [                ]  0  1 Const    None      f32     1 0.5f
+      4   94 [92 93           ]  2  2 Init     FanOut    f32     1 *
+    TREE 35   [34] Init   FanOut    f32     1
+      0  108 [                ]  0  1 Const    None      f32     1 1.0f
+      1  102 [                ]  0  1 Const    None      f32     1 1.0f
+      2  103 [102 94          ]  2  1 Init     None      f32     1 +
+      3  109 [108 103         ]  2  5 Init     FanOut    f32     1 /
+    TREE 36   [33 35] Init   Rate      f32     1
+      0   99 [96              ]  1  1 Init     None      f32     1 -
+      1  111 [99 109          ]  2  2 Init     Rate      f32     1 *
+    TREE 37   [32 35] Init   Rate      f32     1
+      0  104 [                ]  0  1 Const    None      f32     1 -2.0f
+      1  105 [104 90          ]  2  1 Init     None      f32     1 *
+      2  113 [105 109         ]  2  2 Init     Rate      f32     1 *
+    TREE 38   [33 35] Init   Rate      f32     1
+      0   97 [                ]  0  1 Const    None      f32     1 0.5f
+      1   98 [96 97           ]  2  1 Init     None      f32     1 *
+      2  110 [98 109          ]  2  2 Init     Rate      f32     1 *
+    TREE 41   [33 35] Init   Rate      f32     1
+      0  100 [                ]  0  1 Const    None      f32     1 0.5f
+      1  101 [96 100          ]  2  1 Init     None      f32     1 *
+      2  112 [101 109         ]  2  2 Init     Rate      f32     1 *
+    TREE 42   [34 35] Init   Rate      f32     1
+      0  106 [                ]  0  1 Const    None      f32     1 1.0f
+      1  107 [106 94          ]  2  1 Init     None      f32     1 -
+      2  114 [107 109         ]  2  2 Init     Rate      f32     1 *
+    TREE 48   [11] Init   Rate      f64     1
+      0  144 [32              ]  1  2 Init     Rate      f64     1 cast_f64
+    TREE 51   [2] Init   Rate      f32     1
+      0  158 [                ]  0  1 Const    None      f32     1 0.0009f
+      1  159 [158 6           ]  2  1 Init     Rate      f32     1 *
+    TREE 53   [2] Init   Sink      f32     1
+      0  153 [                ]  0  1 Const    None      f32     1 0.004f
+      1  154 [153 6           ]  2  1 Init     None      f32     1 *
+      2  155 [154             ]  1  0 Init     Sink      f32     1 max_delay
+    TREE 58   [2] Init   Rate      f32     1
+      0  250 [                ]  0  1 Const    None      f32     1 0.0004f
+      1  251 [250 6           ]  2  1 Init     Rate      f32     1 *
+    TREE 60   [2] Init   Sink      f32     1
+      0  245 [                ]  0  1 Const    None      f32     1 0.003f
+      1  246 [245 6           ]  2  1 Init     None      f32     1 *
+      2  247 [246             ]  1  0 Init     Sink      f32     1 max_delay
 -- RESET
 -- BLOCK
   LOOP  0 [] Block  1
@@ -5259,7 +5274,7 @@ OUT 0 out f32 2
     TREE 4    [1] Block  Rate      f32     1
       0   17 [1               ]  1  1 Block    Rate      f32     1 -
   LOOP  5 [] Block  1
-    TREE 60   [] Block  Input     f32     1
+    TREE 62   [] Block  Input     f32     1
       0    2 [                ]  0  1 Block    Input     f32     1 control(mix)
 -- AUDIO
 GRAPH 0
@@ -5278,266 +5293,273 @@ GRAPH 0
       3   25 [20 24           ]  2  3 Audio    FanOut    f32     1 +
     TREE 8    [7] Audio  Sink      f32     1
       0   26 [25              ]  1  0 Audio    Sink      f32     1 delay_write
-    TREE 45   [] Audio  FanOut    f64     1
-      0  136 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
-    TREE 47   [45 7 46] Audio  FanOut    f64     1
-      0  137 [25              ]  1  1 Audio    None      f64     1 cast_f64
-      1  140 [137 139         ]  2  1 Audio    None      f64     1 *
-      2  141 [136 140         ]  2  2 Audio    FanOut    f64     1 +
-    TREE 48   [47] Audio  Sink      f64     1
-      0  142 [141             ]  1  1 Audio    None      f64     1 floor
-      1  143 [141 142         ]  2  1 Audio    None      f64     1 -
-      2  144 [143             ]  1  0 Audio    Sink      f64     1 delay_write
-    TREE 50   [45] Audio  FanOut    f32     1
-      0  146 [136             ]  1  3 Audio    FanOut    f32     1 cast_f32
-    TREE 53   [] Audio  FanOut    f64     1
-      0  228 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
-    TREE 54   [53 7 46] Audio  FanOut    f64     1
-      0  226 [                ]  0  1 Const    None      f32     1 0.87f
-      1  227 [25 226          ]  2  1 Audio    None      f32     1 *
-      2  229 [227             ]  1  1 Audio    None      f64     1 cast_f64
-      3  232 [229 139         ]  2  1 Audio    None      f64     1 *
-      4  233 [228 232         ]  2  2 Audio    FanOut    f64     1 +
-    TREE 55   [54] Audio  Sink      f64     1
-      0  234 [233             ]  1  1 Audio    None      f64     1 floor
-      1  235 [233 234         ]  2  1 Audio    None      f64     1 -
-      2  236 [235             ]  1  0 Audio    Sink      f64     1 delay_write
-    TREE 57   [53] Audio  FanOut    f32     1
-      0  238 [228             ]  1  3 Audio    FanOut    f32     1 cast_f32
-    TREE 61   [50] Audio  FanOut    f32     1
-      0  168 [                ]  0  1 Const    None      f32     1 0.25f
-      1  169 [146 168         ]  2  2 Audio    FanOut    f32     1 +
-    TREE 62   [49 50 61] Audio  FanOut    f32     1
-      0  165 [                ]  0  1 Const    None      f32     1 2.0f
-      1  162 [                ]  0  1 Const    None      f32     1 1.0f
-      2  160 [                ]  0  1 Const    None      f32     1 0.5f
-      3  158 [                ]  0  1 Const    None      f32     1 0.5f
-      4  155 [                ]  0  1 Const    None      f32     1 2.0f
-      5  156 [155 146         ]  2  1 Audio    None      f32     1 *
-      6  157 [156             ]  1  1 Audio    None      f32     1 cospi
-      7  159 [158 157         ]  2  1 Audio    None      f32     1 *
-      8  161 [160 159         ]  2  1 Audio    None      f32     1 +
-      9  163 [162 161         ]  2  1 Audio    None      f32     1 -
-     10  164 [154 163         ]  2  1 Audio    None      f32     1 *
-     11  166 [165 164         ]  2  1 Audio    None      f32     1 +
-     12  167 [166             ]  1  1 Audio    None      f32     1 delay_var_read
-     13  183 [                ]  0  1 Const    None      f32     1 0.55f
-     14  181 [                ]  0  1 Const    None      f32     1 0.45f
-     15  179 [                ]  0  1 Const    None      f32     1 1.0f
-     16  177 [                ]  0  1 Const    None      f32     1 0.5f
-     17  175 [                ]  0  1 Const    None      f32     1 0.5f
-     18  172 [                ]  0  1 Const    None      f32     1 2.0f
-     19  170 [169             ]  1  1 Audio    None      f32     1 floor
-     20  171 [169 170         ]  2  1 Audio    None      f32     1 -
-     21  173 [172 171         ]  2  1 Audio    None      f32     1 *
-     22  174 [173             ]  1  1 Audio    None      f32     1 cospi
-     23  176 [175 174         ]  2  1 Audio    None      f32     1 *
-     24  178 [177 176         ]  2  1 Audio    None      f32     1 +
-     25  180 [179 178         ]  2  1 Audio    None      f32     1 -
-     26  182 [181 180         ]  2  1 Audio    None      f32     1 *
-     27  184 [183 182         ]  2  1 Audio    None      f32     1 +
-     28  185 [167 184         ]  2  2 Audio    FanOut    f32     1 *
-    TREE 63   [50] Audio  FanOut    f32     1
-      0  186 [                ]  0  1 Const    None      f32     1 2.0f
-      1  187 [186 146         ]  2  1 Audio    None      f32     1 *
-      2  188 [187             ]  1  1 Audio    None      f32     1 sinpi
-      3  189 [                ]  0  1 Const    None      f32     1 0.85f
-      4  190 [188 189         ]  2  2 Audio    FanOut    f32     1 *
-    TREE 64   [63] Audio  FanOut    f32     1
-      0  193 [                ]  0  1 Const    None      f32     1 0.5f
-      1  191 [                ]  0  1 Const    None      f32     1 0.5f
-      2  192 [191 190         ]  2  1 Audio    None      f32     1 *
-      3  194 [193 192         ]  2  3 Audio    FanOut    f32     1 +
-    TREE 65   [62 64 63] Audio  Temp      f32     1
-      0  211 [                ]  0  1 Const    None      f32     1 1.0f
-      1  208 [                ]  0  1 Const    None      f32     1 -0.003064942f
-      2  205 [                ]  0  2 Const    None      f32     1 -1.1656365f
-      3  199 [                ]  0  2 Const    None      f32     1 0.1687015f
-      4  200 [199 190         ]  2  1 Audio    None      f32     1 *
-      5  206 [205 200         ]  2  1 Audio    None      f32     1 +
-      6  207 [194 206         ]  2  1 Audio    None      f32     1 *
-      7  209 [208 207         ]  2  1 Audio    None      f32     1 +
-      8  210 [194 209         ]  2  1 Audio    None      f32     1 *
-      9  212 [211 210         ]  2  1 Audio    None      f32     1 +
-     10  223 [185 212         ]  2  1 Audio    Temp      f32     1 *
-    TREE 66   [64] Audio  FanOut    f32     1
-      0  195 [                ]  0  1 Const    None      f32     1 1.0f
-      1  196 [195 194         ]  2  3 Audio    FanOut    f32     1 -
-    TREE 67   [62 66] Audio  Temp      f32     1
-      0  221 [                ]  0  1 Const    None      f32     1 1.0f
-      1  218 [                ]  0  1 Const    None      f32     1 -0.003064942f
-      2  215 [                ]  0  1 Const    None      f32     1 -1.3343381f
-      3  213 [                ]  0  1 Const    None      f32     1 0.337403f
-      4  214 [196 213         ]  2  1 Audio    None      f32     1 *
-      5  216 [215 214         ]  2  1 Audio    None      f32     1 +
-      6  217 [196 216         ]  2  1 Audio    None      f32     1 *
-      7  219 [218 217         ]  2  1 Audio    None      f32     1 +
-      8  220 [196 219         ]  2  1 Audio    None      f32     1 *
-      9  222 [221 220         ]  2  1 Audio    None      f32     1 +
-     10  224 [185 222         ]  2  1 Audio    Temp      f32     1 *
-    TREE 69   [57] Audio  FanOut    f32     1
-      0  260 [                ]  0  1 Const    None      f32     1 0.25f
-      1  261 [238 260         ]  2  2 Audio    FanOut    f32     1 +
-    TREE 70   [56 57 69] Audio  FanOut    f32     1
-      0  257 [                ]  0  1 Const    None      f32     1 2.0f
-      1  254 [                ]  0  1 Const    None      f32     1 1.0f
-      2  252 [                ]  0  1 Const    None      f32     1 0.5f
-      3  250 [                ]  0  1 Const    None      f32     1 0.5f
-      4  247 [                ]  0  1 Const    None      f32     1 2.0f
-      5  248 [247 238         ]  2  1 Audio    None      f32     1 *
-      6  249 [248             ]  1  1 Audio    None      f32     1 cospi
-      7  251 [250 249         ]  2  1 Audio    None      f32     1 *
-      8  253 [252 251         ]  2  1 Audio    None      f32     1 +
-      9  255 [254 253         ]  2  1 Audio    None      f32     1 -
-     10  256 [246 255         ]  2  1 Audio    None      f32     1 *
-     11  258 [257 256         ]  2  1 Audio    None      f32     1 +
-     12  259 [258             ]  1  1 Audio    None      f32     1 delay_var_read
-     13  275 [                ]  0  1 Const    None      f32     1 0.8f
-     14  273 [                ]  0  1 Const    None      f32     1 0.2f
-     15  271 [                ]  0  1 Const    None      f32     1 1.0f
-     16  269 [                ]  0  1 Const    None      f32     1 0.5f
-     17  267 [                ]  0  1 Const    None      f32     1 0.5f
-     18  264 [                ]  0  1 Const    None      f32     1 2.0f
-     19  262 [261             ]  1  1 Audio    None      f32     1 floor
-     20  263 [261 262         ]  2  1 Audio    None      f32     1 -
-     21  265 [264 263         ]  2  1 Audio    None      f32     1 *
-     22  266 [265             ]  1  1 Audio    None      f32     1 cospi
-     23  268 [267 266         ]  2  1 Audio    None      f32     1 *
-     24  270 [269 268         ]  2  1 Audio    None      f32     1 +
-     25  272 [271 270         ]  2  1 Audio    None      f32     1 -
-     26  274 [273 272         ]  2  1 Audio    None      f32     1 *
-     27  276 [275 274         ]  2  1 Audio    None      f32     1 +
-     28  277 [259 276         ]  2  2 Audio    FanOut    f32     1 *
-    TREE 71   [57] Audio  FanOut    f32     1
-      0  278 [                ]  0  1 Const    None      f32     1 2.0f
-      1  279 [278 238         ]  2  1 Audio    None      f32     1 *
-      2  280 [279             ]  1  1 Audio    None      f32     1 sinpi
-      3  281 [                ]  0  1 Const    None      f32     1 0.4f
-      4  282 [280 281         ]  2  2 Audio    FanOut    f32     1 *
-    TREE 72   [71] Audio  FanOut    f32     1
-      0  285 [                ]  0  1 Const    None      f32     1 0.5f
-      1  283 [                ]  0  1 Const    None      f32     1 0.5f
-      2  284 [283 282         ]  2  1 Audio    None      f32     1 *
-      3  286 [285 284         ]  2  3 Audio    FanOut    f32     1 +
-    TREE 73   [70 72 71] Audio  Temp      f32     1
-      0  303 [                ]  0  1 Const    None      f32     1 1.0f
-      1  300 [                ]  0  1 Const    None      f32     1 -0.003064942f
-      2  205 [                ]  0  2 Const    None      f32     1 -1.1656365f
-      3  199 [                ]  0  2 Const    None      f32     1 0.1687015f
-      4  292 [199 282         ]  2  1 Audio    None      f32     1 *
-      5  298 [205 292         ]  2  1 Audio    None      f32     1 +
-      6  299 [286 298         ]  2  1 Audio    None      f32     1 *
-      7  301 [300 299         ]  2  1 Audio    None      f32     1 +
-      8  302 [286 301         ]  2  1 Audio    None      f32     1 *
-      9  304 [303 302         ]  2  1 Audio    None      f32     1 +
-     10  315 [277 304         ]  2  1 Audio    Temp      f32     1 *
-    TREE 74   [72] Audio  FanOut    f32     1
-      0  287 [                ]  0  1 Const    None      f32     1 1.0f
-      1  288 [287 286         ]  2  3 Audio    FanOut    f32     1 -
-    TREE 75   [70 74] Audio  Temp      f32     1
-      0  313 [                ]  0  1 Const    None      f32     1 1.0f
-      1  310 [                ]  0  1 Const    None      f32     1 -0.003064942f
-      2  307 [                ]  0  1 Const    None      f32     1 -1.3343381f
-      3  305 [                ]  0  1 Const    None      f32     1 0.337403f
-      4  306 [288 305         ]  2  1 Audio    None      f32     1 *
-      5  308 [307 306         ]  2  1 Audio    None      f32     1 +
-      6  309 [288 308         ]  2  1 Audio    None      f32     1 *
-      7  311 [310 309         ]  2  1 Audio    None      f32     1 +
-      8  312 [288 311         ]  2  1 Audio    None      f32     1 *
-      9  314 [313 312         ]  2  1 Audio    None      f32     1 +
-     10  316 [277 314         ]  2  1 Audio    Temp      f32     1 *
+    TREE 9    [7 3] Audio  FanOut    f32     1
+      0   27 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      1   28 [27 25           ]  2  1 Audio    None      f32     1 -
+      2   29 [14 28           ]  2  1 Audio    None      f32     1 *
+      3   30 [25 29           ]  2  3 Audio    FanOut    f32     1 +
+    TREE 10   [9] Audio  Sink      f32     1
+      0   31 [30              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 47   [] Audio  FanOut    f64     1
+      0  141 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
+    TREE 49   [47 9 48] Audio  FanOut    f64     1
+      0  142 [30              ]  1  1 Audio    None      f64     1 cast_f64
+      1  145 [142 144         ]  2  1 Audio    None      f64     1 *
+      2  146 [141 145         ]  2  2 Audio    FanOut    f64     1 +
+    TREE 50   [49] Audio  Sink      f64     1
+      0  147 [146             ]  1  1 Audio    None      f64     1 floor
+      1  148 [146 147         ]  2  1 Audio    None      f64     1 -
+      2  149 [148             ]  1  0 Audio    Sink      f64     1 delay_write
+    TREE 52   [47] Audio  FanOut    f32     1
+      0  151 [141             ]  1  3 Audio    FanOut    f32     1 cast_f32
+    TREE 55   [] Audio  FanOut    f64     1
+      0  233 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
+    TREE 56   [55 9 48] Audio  FanOut    f64     1
+      0  231 [                ]  0  1 Const    None      f32     1 0.87f
+      1  232 [30 231          ]  2  1 Audio    None      f32     1 *
+      2  234 [232             ]  1  1 Audio    None      f64     1 cast_f64
+      3  237 [234 144         ]  2  1 Audio    None      f64     1 *
+      4  238 [233 237         ]  2  2 Audio    FanOut    f64     1 +
+    TREE 57   [56] Audio  Sink      f64     1
+      0  239 [238             ]  1  1 Audio    None      f64     1 floor
+      1  240 [238 239         ]  2  1 Audio    None      f64     1 -
+      2  241 [240             ]  1  0 Audio    Sink      f64     1 delay_write
+    TREE 59   [55] Audio  FanOut    f32     1
+      0  243 [233             ]  1  3 Audio    FanOut    f32     1 cast_f32
+    TREE 63   [52] Audio  FanOut    f32     1
+      0  173 [                ]  0  1 Const    None      f32     1 0.25f
+      1  174 [151 173         ]  2  2 Audio    FanOut    f32     1 +
+    TREE 64   [51 52 63] Audio  FanOut    f32     1
+      0  170 [                ]  0  1 Const    None      f32     1 2.0f
+      1  167 [                ]  0  1 Const    None      f32     1 1.0f
+      2  165 [                ]  0  1 Const    None      f32     1 0.5f
+      3  163 [                ]  0  1 Const    None      f32     1 0.5f
+      4  160 [                ]  0  1 Const    None      f32     1 2.0f
+      5  161 [160 151         ]  2  1 Audio    None      f32     1 *
+      6  162 [161             ]  1  1 Audio    None      f32     1 cospi
+      7  164 [163 162         ]  2  1 Audio    None      f32     1 *
+      8  166 [165 164         ]  2  1 Audio    None      f32     1 +
+      9  168 [167 166         ]  2  1 Audio    None      f32     1 -
+     10  169 [159 168         ]  2  1 Audio    None      f32     1 *
+     11  171 [170 169         ]  2  1 Audio    None      f32     1 +
+     12  172 [171             ]  1  1 Audio    None      f32     1 delay_var_read
+     13  188 [                ]  0  1 Const    None      f32     1 0.55f
+     14  186 [                ]  0  1 Const    None      f32     1 0.45f
+     15  184 [                ]  0  1 Const    None      f32     1 1.0f
+     16  182 [                ]  0  1 Const    None      f32     1 0.5f
+     17  180 [                ]  0  1 Const    None      f32     1 0.5f
+     18  177 [                ]  0  1 Const    None      f32     1 2.0f
+     19  175 [174             ]  1  1 Audio    None      f32     1 floor
+     20  176 [174 175         ]  2  1 Audio    None      f32     1 -
+     21  178 [177 176         ]  2  1 Audio    None      f32     1 *
+     22  179 [178             ]  1  1 Audio    None      f32     1 cospi
+     23  181 [180 179         ]  2  1 Audio    None      f32     1 *
+     24  183 [182 181         ]  2  1 Audio    None      f32     1 +
+     25  185 [184 183         ]  2  1 Audio    None      f32     1 -
+     26  187 [186 185         ]  2  1 Audio    None      f32     1 *
+     27  189 [188 187         ]  2  1 Audio    None      f32     1 +
+     28  190 [172 189         ]  2  2 Audio    FanOut    f32     1 *
+    TREE 65   [52] Audio  FanOut    f32     1
+      0  191 [                ]  0  1 Const    None      f32     1 2.0f
+      1  192 [191 151         ]  2  1 Audio    None      f32     1 *
+      2  193 [192             ]  1  1 Audio    None      f32     1 sinpi
+      3  194 [                ]  0  1 Const    None      f32     1 0.85f
+      4  195 [193 194         ]  2  2 Audio    FanOut    f32     1 *
+    TREE 66   [65] Audio  FanOut    f32     1
+      0  198 [                ]  0  1 Const    None      f32     1 0.5f
+      1  196 [                ]  0  1 Const    None      f32     1 0.5f
+      2  197 [196 195         ]  2  1 Audio    None      f32     1 *
+      3  199 [198 197         ]  2  3 Audio    FanOut    f32     1 +
+    TREE 67   [64 66 65] Audio  Temp      f32     1
+      0  216 [                ]  0  1 Const    None      f32     1 1.0f
+      1  213 [                ]  0  1 Const    None      f32     1 -0.003064942f
+      2  210 [                ]  0  2 Const    None      f32     1 -1.1656365f
+      3  204 [                ]  0  2 Const    None      f32     1 0.1687015f
+      4  205 [204 195         ]  2  1 Audio    None      f32     1 *
+      5  211 [210 205         ]  2  1 Audio    None      f32     1 +
+      6  212 [199 211         ]  2  1 Audio    None      f32     1 *
+      7  214 [213 212         ]  2  1 Audio    None      f32     1 +
+      8  215 [199 214         ]  2  1 Audio    None      f32     1 *
+      9  217 [216 215         ]  2  1 Audio    None      f32     1 +
+     10  228 [190 217         ]  2  1 Audio    Temp      f32     1 *
+    TREE 68   [66] Audio  FanOut    f32     1
+      0  200 [                ]  0  1 Const    None      f32     1 1.0f
+      1  201 [200 199         ]  2  3 Audio    FanOut    f32     1 -
+    TREE 69   [64 68] Audio  Temp      f32     1
+      0  226 [                ]  0  1 Const    None      f32     1 1.0f
+      1  223 [                ]  0  1 Const    None      f32     1 -0.003064942f
+      2  220 [                ]  0  1 Const    None      f32     1 -1.3343381f
+      3  218 [                ]  0  1 Const    None      f32     1 0.337403f
+      4  219 [201 218         ]  2  1 Audio    None      f32     1 *
+      5  221 [220 219         ]  2  1 Audio    None      f32     1 +
+      6  222 [201 221         ]  2  1 Audio    None      f32     1 *
+      7  224 [223 222         ]  2  1 Audio    None      f32     1 +
+      8  225 [201 224         ]  2  1 Audio    None      f32     1 *
+      9  227 [226 225         ]  2  1 Audio    None      f32     1 +
+     10  229 [190 227         ]  2  1 Audio    Temp      f32     1 *
+    TREE 71   [59] Audio  FanOut    f32     1
+      0  265 [                ]  0  1 Const    None      f32     1 0.25f
+      1  266 [243 265         ]  2  2 Audio    FanOut    f32     1 +
+    TREE 72   [58 59 71] Audio  FanOut    f32     1
+      0  262 [                ]  0  1 Const    None      f32     1 2.0f
+      1  259 [                ]  0  1 Const    None      f32     1 1.0f
+      2  257 [                ]  0  1 Const    None      f32     1 0.5f
+      3  255 [                ]  0  1 Const    None      f32     1 0.5f
+      4  252 [                ]  0  1 Const    None      f32     1 2.0f
+      5  253 [252 243         ]  2  1 Audio    None      f32     1 *
+      6  254 [253             ]  1  1 Audio    None      f32     1 cospi
+      7  256 [255 254         ]  2  1 Audio    None      f32     1 *
+      8  258 [257 256         ]  2  1 Audio    None      f32     1 +
+      9  260 [259 258         ]  2  1 Audio    None      f32     1 -
+     10  261 [251 260         ]  2  1 Audio    None      f32     1 *
+     11  263 [262 261         ]  2  1 Audio    None      f32     1 +
+     12  264 [263             ]  1  1 Audio    None      f32     1 delay_var_read
+     13  280 [                ]  0  1 Const    None      f32     1 0.8f
+     14  278 [                ]  0  1 Const    None      f32     1 0.2f
+     15  276 [                ]  0  1 Const    None      f32     1 1.0f
+     16  274 [                ]  0  1 Const    None      f32     1 0.5f
+     17  272 [                ]  0  1 Const    None      f32     1 0.5f
+     18  269 [                ]  0  1 Const    None      f32     1 2.0f
+     19  267 [266             ]  1  1 Audio    None      f32     1 floor
+     20  268 [266 267         ]  2  1 Audio    None      f32     1 -
+     21  270 [269 268         ]  2  1 Audio    None      f32     1 *
+     22  271 [270             ]  1  1 Audio    None      f32     1 cospi
+     23  273 [272 271         ]  2  1 Audio    None      f32     1 *
+     24  275 [274 273         ]  2  1 Audio    None      f32     1 +
+     25  277 [276 275         ]  2  1 Audio    None      f32     1 -
+     26  279 [278 277         ]  2  1 Audio    None      f32     1 *
+     27  281 [280 279         ]  2  1 Audio    None      f32     1 +
+     28  282 [264 281         ]  2  2 Audio    FanOut    f32     1 *
+    TREE 73   [59] Audio  FanOut    f32     1
+      0  283 [                ]  0  1 Const    None      f32     1 2.0f
+      1  284 [283 243         ]  2  1 Audio    None      f32     1 *
+      2  285 [284             ]  1  1 Audio    None      f32     1 sinpi
+      3  286 [                ]  0  1 Const    None      f32     1 0.4f
+      4  287 [285 286         ]  2  2 Audio    FanOut    f32     1 *
+    TREE 74   [73] Audio  FanOut    f32     1
+      0  290 [                ]  0  1 Const    None      f32     1 0.5f
+      1  288 [                ]  0  1 Const    None      f32     1 0.5f
+      2  289 [288 287         ]  2  1 Audio    None      f32     1 *
+      3  291 [290 289         ]  2  3 Audio    FanOut    f32     1 +
+    TREE 75   [72 74 73] Audio  Temp      f32     1
+      0  308 [                ]  0  1 Const    None      f32     1 1.0f
+      1  305 [                ]  0  1 Const    None      f32     1 -0.003064942f
+      2  210 [                ]  0  2 Const    None      f32     1 -1.1656365f
+      3  204 [                ]  0  2 Const    None      f32     1 0.1687015f
+      4  297 [204 287         ]  2  1 Audio    None      f32     1 *
+      5  303 [210 297         ]  2  1 Audio    None      f32     1 +
+      6  304 [291 303         ]  2  1 Audio    None      f32     1 *
+      7  306 [305 304         ]  2  1 Audio    None      f32     1 +
+      8  307 [291 306         ]  2  1 Audio    None      f32     1 *
+      9  309 [308 307         ]  2  1 Audio    None      f32     1 +
+     10  320 [282 309         ]  2  1 Audio    Temp      f32     1 *
+    TREE 76   [74] Audio  FanOut    f32     1
+      0  292 [                ]  0  1 Const    None      f32     1 1.0f
+      1  293 [292 291         ]  2  3 Audio    FanOut    f32     1 -
+    TREE 77   [72 76] Audio  Temp      f32     1
+      0  318 [                ]  0  1 Const    None      f32     1 1.0f
+      1  315 [                ]  0  1 Const    None      f32     1 -0.003064942f
+      2  312 [                ]  0  1 Const    None      f32     1 -1.3343381f
+      3  310 [                ]  0  1 Const    None      f32     1 0.337403f
+      4  311 [293 310         ]  2  1 Audio    None      f32     1 *
+      5  313 [312 311         ]  2  1 Audio    None      f32     1 +
+      6  314 [293 313         ]  2  1 Audio    None      f32     1 *
+      7  316 [315 314         ]  2  1 Audio    None      f32     1 +
+      8  317 [293 316         ]  2  1 Audio    None      f32     1 *
+      9  319 [318 317         ]  2  1 Audio    None      f32     1 +
+     10  321 [282 319         ]  2  1 Audio    Temp      f32     1 *
   LOOP  3 [] Audio  2
-    TREE 16   [] Audio  Input     f32     2
+    TREE 18   [] Audio  Input     f32     2
       0    0 [                ]  0  3 Audio    Input     f32     2 inlet(in)
   LOOP  4 [1 3] Audio  1
-    TREE 17   [16*] Audio  SeparateLoop f32     1
+    TREE 19   [18*] Audio  SeparateLoop f32     1
       0    3 [0               ]  1  1 Audio    SeparateLoop f32     1 reduce(+, 1)
-    TREE 18   [17] Audio  Broadcast f32     1
+    TREE 20   [19] Audio  Broadcast f32     1
       0    4 [                ]  0  1 Const    None      f32     1 0.7f
       1    5 [3 4             ]  2  8 Audio    Broadcast f32     1 *
-    TREE 21   [20 18] Audio  FanOut    f32     1
-      0   55 [50 5            ]  2  1 Audio    None      f32     1 *
-      1   56 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
-      2   57 [55 56           ]  2  5 Audio    FanOut    f32     1 +
-    TREE 22   [15 18 19 21] Audio  Sink      f32     1
-      0   58 [51 5            ]  2  1 Audio    None      f32     1 *
-      1   59 [53 57           ]  2  1 Audio    None      f32     1 *
-      2   60 [58 59           ]  2  1 Audio    None      f32     1 -
-      3   61 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
-      4   62 [60 61           ]  2  1 Audio    None      f32     1 +
-      5   63 [62              ]  1  0 Audio    Sink      f32     1 delay_write
-    TREE 25   [23 18 24 21] Audio  Sink      f32     1
-      0   64 [52 5            ]  2  1 Audio    None      f32     1 *
-      1   65 [54 57           ]  2  1 Audio    None      f32     1 *
-      2   66 [64 65           ]  2  1 Audio    None      f32     1 -
-      3   67 [66              ]  1  0 Audio    Sink      f32     1 delay_write
-    TREE 26   [20 21] Audio  FanOut    f32     1
-      0   68 [50 57           ]  2  1 Audio    None      f32     1 *
-      1   69 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
-      2   70 [68 69           ]  2  3 Audio    FanOut    f32     1 +
-    TREE 27   [15 21 19 26] Audio  Sink      f32     1
-      0   71 [51 57           ]  2  1 Audio    None      f32     1 *
-      1   72 [53 70           ]  2  1 Audio    None      f32     1 *
-      2   73 [71 72           ]  2  1 Audio    None      f32     1 -
-      3   74 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
-      4   75 [73 74           ]  2  1 Audio    None      f32     1 +
-      5   76 [75              ]  1  0 Audio    Sink      f32     1 delay_write
-    TREE 28   [23 21 24 26] Audio  Sink      f32     1
-      0   77 [52 57           ]  2  1 Audio    None      f32     1 *
-      1   78 [54 70           ]  2  1 Audio    None      f32     1 *
-      2   79 [77 78           ]  2  1 Audio    None      f32     1 -
-      3   80 [79              ]  1  0 Audio    Sink      f32     1 delay_write
-    TREE 37   [36 18] Audio  FanOut    f32     1
-      0  110 [105 5           ]  2  1 Audio    None      f32     1 *
-      1  111 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
-      2  112 [110 111         ]  2  5 Audio    FanOut    f32     1 +
-    TREE 38   [34 18 35 37] Audio  Sink      f32     1
-      0  113 [106 5           ]  2  1 Audio    None      f32     1 *
-      1  114 [108 112         ]  2  1 Audio    None      f32     1 *
-      2  115 [113 114         ]  2  1 Audio    None      f32     1 -
-      3  116 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
-      4  117 [115 116         ]  2  1 Audio    None      f32     1 +
-      5  118 [117             ]  1  0 Audio    Sink      f32     1 delay_write
-    TREE 41   [39 18 40 37] Audio  Sink      f32     1
-      0  119 [107 5           ]  2  1 Audio    None      f32     1 *
-      1  120 [109 112         ]  2  1 Audio    None      f32     1 *
-      2  121 [119 120         ]  2  1 Audio    None      f32     1 -
-      3  122 [121             ]  1  0 Audio    Sink      f32     1 delay_write
-    TREE 42   [36 37] Audio  FanOut    f32     1
-      0  123 [105 112         ]  2  1 Audio    None      f32     1 *
-      1  124 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
-      2  125 [123 124         ]  2  3 Audio    FanOut    f32     1 +
-    TREE 43   [34 37 35 42] Audio  Sink      f32     1
-      0  126 [106 112         ]  2  1 Audio    None      f32     1 *
-      1  127 [108 125         ]  2  1 Audio    None      f32     1 *
-      2  128 [126 127         ]  2  1 Audio    None      f32     1 -
-      3  129 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
-      4  130 [128 129         ]  2  1 Audio    None      f32     1 +
-      5  131 [130             ]  1  0 Audio    Sink      f32     1 delay_write
-    TREE 44   [39 37 40 42] Audio  Sink      f32     1
-      0  132 [107 112         ]  2  1 Audio    None      f32     1 *
-      1  133 [109 125         ]  2  1 Audio    None      f32     1 *
-      2  134 [132 133         ]  2  1 Audio    None      f32     1 -
-      3  135 [134             ]  1  0 Audio    Sink      f32     1 delay_write
-    TREE 52   [42] Audio  Sink      f32     1
-      0  151 [125             ]  1  0 Audio    Sink      f32     1 delay_write
-    TREE 59   [26] Audio  Sink      f32     1
-      0  243 [70              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 23   [22 20] Audio  FanOut    f32     1
+      0   60 [55 5            ]  2  1 Audio    None      f32     1 *
+      1   61 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      2   62 [60 61           ]  2  5 Audio    FanOut    f32     1 +
+    TREE 24   [17 20 21 23] Audio  Sink      f32     1
+      0   63 [56 5            ]  2  1 Audio    None      f32     1 *
+      1   64 [58 62           ]  2  1 Audio    None      f32     1 *
+      2   65 [63 64           ]  2  1 Audio    None      f32     1 -
+      3   66 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      4   67 [65 66           ]  2  1 Audio    None      f32     1 +
+      5   68 [67              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 27   [25 20 26 23] Audio  Sink      f32     1
+      0   69 [57 5            ]  2  1 Audio    None      f32     1 *
+      1   70 [59 62           ]  2  1 Audio    None      f32     1 *
+      2   71 [69 70           ]  2  1 Audio    None      f32     1 -
+      3   72 [71              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 28   [22 23] Audio  FanOut    f32     1
+      0   73 [55 62           ]  2  1 Audio    None      f32     1 *
+      1   74 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      2   75 [73 74           ]  2  3 Audio    FanOut    f32     1 +
+    TREE 29   [17 23 21 28] Audio  Sink      f32     1
+      0   76 [56 62           ]  2  1 Audio    None      f32     1 *
+      1   77 [58 75           ]  2  1 Audio    None      f32     1 *
+      2   78 [76 77           ]  2  1 Audio    None      f32     1 -
+      3   79 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      4   80 [78 79           ]  2  1 Audio    None      f32     1 +
+      5   81 [80              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 30   [25 23 26 28] Audio  Sink      f32     1
+      0   82 [57 62           ]  2  1 Audio    None      f32     1 *
+      1   83 [59 75           ]  2  1 Audio    None      f32     1 *
+      2   84 [82 83           ]  2  1 Audio    None      f32     1 -
+      3   85 [84              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 39   [38 20] Audio  FanOut    f32     1
+      0  115 [110 5           ]  2  1 Audio    None      f32     1 *
+      1  116 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      2  117 [115 116         ]  2  5 Audio    FanOut    f32     1 +
+    TREE 40   [36 20 37 39] Audio  Sink      f32     1
+      0  118 [111 5           ]  2  1 Audio    None      f32     1 *
+      1  119 [113 117         ]  2  1 Audio    None      f32     1 *
+      2  120 [118 119         ]  2  1 Audio    None      f32     1 -
+      3  121 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      4  122 [120 121         ]  2  1 Audio    None      f32     1 +
+      5  123 [122             ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 43   [41 20 42 39] Audio  Sink      f32     1
+      0  124 [112 5           ]  2  1 Audio    None      f32     1 *
+      1  125 [114 117         ]  2  1 Audio    None      f32     1 *
+      2  126 [124 125         ]  2  1 Audio    None      f32     1 -
+      3  127 [126             ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 44   [38 39] Audio  FanOut    f32     1
+      0  128 [110 117         ]  2  1 Audio    None      f32     1 *
+      1  129 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      2  130 [128 129         ]  2  3 Audio    FanOut    f32     1 +
+    TREE 45   [36 39 37 44] Audio  Sink      f32     1
+      0  131 [111 117         ]  2  1 Audio    None      f32     1 *
+      1  132 [113 130         ]  2  1 Audio    None      f32     1 *
+      2  133 [131 132         ]  2  1 Audio    None      f32     1 -
+      3  134 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      4  135 [133 134         ]  2  1 Audio    None      f32     1 +
+      5  136 [135             ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 46   [41 39 42 44] Audio  Sink      f32     1
+      0  137 [112 117         ]  2  1 Audio    None      f32     1 *
+      1  138 [114 130         ]  2  1 Audio    None      f32     1 *
+      2  139 [137 138         ]  2  1 Audio    None      f32     1 -
+      3  140 [139             ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 54   [44] Audio  Sink      f32     1
+      0  156 [130             ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 61   [28] Audio  Sink      f32     1
+      0  248 [75              ]  1  0 Audio    Sink      f32     1 delay_write
   LOOP  6 [2] Audio  2
-    TREE 68   [65* 67*] Audio  SeparateLoop f32     2
-      0  225 [223 224         ]  2  1 Audio    SeparateLoop f32     2 vec_join
+    TREE 70   [67* 69*] Audio  SeparateLoop f32     2
+      0  230 [228 229         ]  2  1 Audio    SeparateLoop f32     2 vec_join
   LOOP  7 [2] Audio  2
-    TREE 76   [73* 75*] Audio  SeparateLoop f32     2
-      0  317 [315 316         ]  2  1 Audio    SeparateLoop f32     2 vec_join
+    TREE 78   [75* 77*] Audio  SeparateLoop f32     2
+      0  322 [320 321         ]  2  1 Audio    SeparateLoop f32     2 vec_join
   LOOP  8 [3 4 5 6 7] Audio  2
-    TREE 77   [16 60 18 68* 76*] Audio  Sink      f32     2
-      0  318 [225 317         ]  2  1 Audio    None      f32     2 +
-      1  319 [318 5           ]  2  1 Audio    None      f32     2 -
-      2  322 [5 319           ]  2  1 Audio    None      f32     2 +
-      3  323 [322 0           ]  2  1 Audio    None      f32     2 -
-      4  324 [2 323           ]  2  1 Audio    None      f32     2 *
-      5  325 [0 324           ]  2  1 Audio    None      f32     2 +
-      6  326 [325             ]  1  0 Audio    Sink      f32     2 outlet
+    TREE 79   [18 62 20 70* 78*] Audio  Sink      f32     2
+      0  323 [230 322         ]  2  1 Audio    None      f32     2 +
+      1  324 [323 5           ]  2  1 Audio    None      f32     2 -
+      2  327 [5 324           ]  2  1 Audio    None      f32     2 +
+      3  328 [327 0           ]  2  1 Audio    None      f32     2 -
+      4  329 [2 328           ]  2  1 Audio    None      f32     2 *
+      5  330 [0 329           ]  2  1 Audio    None      f32     2 +
+      6  331 [330             ]  1  0 Audio    Sink      f32     2 outlet
 -- PARAMETER GROUPS
 GROUP 0 sources [speed] nodes [1 17]
 GROUP 1 sources [mix] nodes [2]
@@ -5545,18 +5567,20 @@ GROUP 1 sources [mix] nodes [2]
 CYCLE 0 weight 1 recurrence nodes [15 18 19 20] delays [15<-20:1]
   CLASS affine-block order 1 STRATEGY block (affine)
 CYCLE 1 weight 1 recurrence nodes [22 23 24 25] delays [22<-25:1]
-  CLASS affine-block order 1 STRATEGY block (affine)
-CYCLE 2 weight 1 recurrence nodes [56 57 59 60 61 62 65 66] delays [56<-62:1 61<-66:1]
+  CLASS affine-block order 1 STRATEGY block (statespace)
+CYCLE 2 weight 1 recurrence nodes [27 28 29 30] delays [27<-30:1]
+  CLASS affine-block order 1 STRATEGY block (statespace)
+CYCLE 3 weight 1 recurrence nodes [61 62 64 65 66 67 70 71] delays [61<-67:1 66<-71:1]
   CLASS affine-block order 2 STRATEGY block (statespace)
-CYCLE 3 weight 1 recurrence nodes [69 70 72 73 74 75 78 79] delays [69<-75:1 74<-79:1]
+CYCLE 4 weight 1 recurrence nodes [74 75 77 78 79 80 83 84] delays [74<-80:1 79<-84:1]
   CLASS affine-block order 2 STRATEGY serial
-CYCLE 4 weight 1 recurrence nodes [111 112 114 115 116 117 120 121] delays [111<-117:1 116<-121:1]
+CYCLE 5 weight 1 recurrence nodes [116 117 119 120 121 122 125 126] delays [116<-122:1 121<-126:1]
   CLASS affine-block order 2 STRATEGY block (statespace)
-CYCLE 5 weight 1 recurrence nodes [124 125 127 128 129 130 133 134] delays [124<-130:1 129<-134:1]
+CYCLE 6 weight 1 recurrence nodes [129 130 132 133 134 135 138 139] delays [129<-135:1 134<-139:1]
   CLASS affine-block order 2 STRATEGY serial
-CYCLE 6 weight 1 recurrence nodes [136 141 142 143] delays [136<-143:1]
+CYCLE 7 weight 1 recurrence nodes [141 146 147 148] delays [141<-148:1]
   CLASS scan(+wrap) STRATEGY block (scan+wrap)
-CYCLE 7 weight 1 recurrence nodes [228 233 234 235] delays [228<-235:1]
+CYCLE 8 weight 1 recurrence nodes [233 238 239 240] delays [233<-240:1]
   CLASS scan(+wrap) STRATEGY block (scan+wrap)
 DELAY 0 f32 1
     15 f32 1 delay_fix_read(1)
@@ -5565,41 +5589,44 @@ DELAY 1 f32 1
     22 f32 1 delay_fix_read(1)
     26 f32 1 delay_write
 DELAY 2 f32 1
-    56 f32 1 delay_fix_read(1)
-    63 f32 1 delay_write
+    27 f32 1 delay_fix_read(1)
+    31 f32 1 delay_write
 DELAY 3 f32 1
     61 f32 1 delay_fix_read(1)
-    67 f32 1 delay_write
+    68 f32 1 delay_write
 DELAY 4 f32 1
-    69 f32 1 delay_fix_read(1)
-    76 f32 1 delay_write
+    66 f32 1 delay_fix_read(1)
+    72 f32 1 delay_write
 DELAY 5 f32 1
     74 f32 1 delay_fix_read(1)
-    80 f32 1 delay_write
+    81 f32 1 delay_write
 DELAY 6 f32 1
-   111 f32 1 delay_fix_read(1)
-   118 f32 1 delay_write
+    79 f32 1 delay_fix_read(1)
+    85 f32 1 delay_write
 DELAY 7 f32 1
    116 f32 1 delay_fix_read(1)
-   122 f32 1 delay_write
+   123 f32 1 delay_write
 DELAY 8 f32 1
-   124 f32 1 delay_fix_read(1)
-   131 f32 1 delay_write
+   121 f32 1 delay_fix_read(1)
+   127 f32 1 delay_write
 DELAY 9 f32 1
    129 f32 1 delay_fix_read(1)
-   135 f32 1 delay_write
-DELAY 10 f64 1
-   136 f64 1 delay_fix_read(1)
-   144 f64 1 delay_write
-DELAY 11 f32 1
-   167 f32 1 delay_var_read
-   151 f32 1 delay_write
-DELAY 12 f64 1
-   228 f64 1 delay_fix_read(1)
-   236 f64 1 delay_write
-DELAY 13 f32 1
-   259 f32 1 delay_var_read
-   243 f32 1 delay_write
+   136 f32 1 delay_write
+DELAY 10 f32 1
+   134 f32 1 delay_fix_read(1)
+   140 f32 1 delay_write
+DELAY 11 f64 1
+   141 f64 1 delay_fix_read(1)
+   149 f64 1 delay_write
+DELAY 12 f32 1
+   172 f32 1 delay_var_read
+   156 f32 1 delay_write
+DELAY 13 f64 1
+   233 f64 1 delay_fix_read(1)
+   241 f64 1 delay_write
+DELAY 14 f32 1
+   264 f32 1 delay_var_read
+   248 f32 1 delay_write
 
 SYNTH fxEcho
 -- PORTS
@@ -9338,9 +9365,9 @@ GROUP 1 sources [drive] nodes [1 21 23]
 GROUP 2 sources [level] nodes [3]
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [15 17 18] delays [15<-18:1]
-  CLASS affine-block order 1 STRATEGY serial
+  CLASS affine-block order 1 STRATEGY block (statespace)
 CYCLE 1 weight 1 recurrence nodes [60 61 63 64 65 66 69 70] delays [60<-66:1 65<-70:1]
-  CLASS affine-block order 2 STRATEGY serial
+  CLASS affine-block order 2 STRATEGY block (statespace)
 DELAY 0 f32 2
     13 f32 2 delay_fix_read(1)
     12 f32 2 delay_write

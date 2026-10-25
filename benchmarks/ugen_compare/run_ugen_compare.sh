@@ -2,8 +2,9 @@
 # run_ugen_compare.sh -- our common_ugens.x / filters.x ugens against their
 # tensor-ugens references, for accuracy and speed (block engine plan M7).
 #
-#   bash benchmarks/ugen_compare/run_ugen_compare.sh [case-substring]
+#   bash benchmarks/ugen_compare/run_ugen_compare.sh [--check] [case-substring]
 #
+# --check runs the accuracy comparison only and exits 1 on a regression.
 # Generates the plugins with ugen_cases.x (tzpl_app), compiles them with the
 # flags the bridge uses, builds bench_ugen_compare in build-bench/ (Release,
 # TZPL_BUILD_BENCHMARKS=ON) and runs it. Apple only, like tensor_ugens_ref.
@@ -14,6 +15,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 APP="${TZPL_BUILD_DIR:-$ROOT/build}/app/tzpl_app"
 WORK="${UC_WORK:-/tmp/ugen_compare}"
 BENCH_BUILD="$ROOT/build-bench"
+CHECK=""
+if [ "${1:-}" = "--check" ]; then CHECK="--check"; shift; fi
 FILTER="${1:-}"
 
 [ -x "$APP" ] || { echo "tzpl_app not built at $APP"; exit 1; }
@@ -40,4 +43,4 @@ if [ ! -f "$BENCH_BUILD/CMakeCache.txt" ]; then
     cmake -S "$ROOT" -B "$BENCH_BUILD" -DCMAKE_BUILD_TYPE=Release -DTZPL_BUILD_BENCHMARKS=ON > /dev/null
 fi
 cmake --build "$BENCH_BUILD" --target bench_ugen_compare -j "$(sysctl -n hw.ncpu)" > /dev/null
-"$BENCH_BUILD/benchmarks/ugen_compare/bench_ugen_compare" "$WORK/dylib" $FILTER
+"$BENCH_BUILD/benchmarks/ugen_compare/bench_ugen_compare" $CHECK "$WORK/dylib" $FILTER
