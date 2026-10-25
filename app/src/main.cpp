@@ -53,7 +53,7 @@
 #include "nrt_tempo_scheduler.hpp"
 #include "tzpl_client_interface.hpp"
 #include "tzpl_test_plugins.hpp"
-#include "synthdef_compile_link.hpp" // getBuildDir, for plugin browser search paths
+#include "tzpl_synth_build.hpp" // getBuildDir, for plugin browser search paths
 #if TZPL_HAS_OSC
 #include "tzpl_osc_ffi.hpp"
 #include "tzpl_osc_vm_handlers.hpp"
@@ -808,7 +808,7 @@ int main(int argc, const char* argv[]) {
         if (!projectDylibDir.empty()) {
             appCtx.pluginSearchPaths.push_back(projectDylibDir);
         }
-        appCtx.pluginSearchPaths.push_back(synthdef::getBuildDir() + "dylib");
+        appCtx.pluginSearchPaths.push_back(synthbuild::getBuildDir() + "dylib");
 
         appCtx.initEngine = [projectDylibDir](engine::Engine* e) {
             registerBuiltinDefs(e);

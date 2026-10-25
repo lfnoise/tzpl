@@ -6,6 +6,7 @@
 -- Runs live audio (quiet 440 Hz burst); see run_engine_stop_tail_test.sh.
 import audio_engine.*;
 import synthdef.*;
+import synthc.compile.*;
 import common_ugens.*;
 import effects.*;
 import clock.*;
@@ -17,7 +18,7 @@ fn tailVoice() S {
 	(sinosc(440.0) * amp) echo(0.4, 0.9, 1.0, 1.0) outlet
 }
 
-tailVoice defSynth("tailtest") await;
+tailVoice defSynthX("tailtest") await;
 
 begin();
 newNode("tailtest", 100);

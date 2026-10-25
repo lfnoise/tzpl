@@ -7,6 +7,7 @@
 --       integration-tests/scripts/pat_nrt.x
 
 import synthdef.*;
+import synthc.compile.*;
 import common_ugens.*;
 import clock.*;
 import audio_engine.*;
@@ -21,7 +22,7 @@ fn sineVoice() S {
     pch nnhz sinosc cb * env * amp
 }
 fn sineSynth() S = voicer(16, sineVoice) sum outlet;
-sineSynth defSynth("pat_sine") await;
+sineSynth defSynthX("pat_sine") await;
 
 randSeed(42);
 

@@ -23,7 +23,7 @@ fn dcVoice() S {
 		v * gate()
 	}) outlet
 }
-dcVoice defSynth("dcvoicer") await;
+dcVoice defSynthX("dcvoicer") await;
 
 let t = allocTapID();
 begin(); tapMaster(t, TapMode.tapMeter); go(0);

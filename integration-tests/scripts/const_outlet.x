@@ -36,7 +36,7 @@ if (mode == "x") {
 	connect(100, 0, 0, 0);
 	sched(0);
 } else {
-	dc defSynth("const_dc_cpp") await;
+	dc defSynthX("const_dc_cpp") await;
 	safetyLimiter(false);
 	begin();
 	newNode("const_dc_cpp", 100);

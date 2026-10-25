@@ -57,29 +57,37 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
     target_compile_options(tzpl_clock_bridge PRIVATE -O2)
 endif()
 
-# --- Synthdef-compiler FFI bridge ---
+# --- Synth build FFI bridge (synthc compile, link, load) ---
+#
+# The target keeps its old name; it no longer links the frozen C++
+# synthdef-compiler (block-engine plan D9): tzpl_synth_build.cpp holds the
+# compile-and-link step synthc uses.
 
-if(TARGET synthdef_compiler_lib)
-    add_library(tzpl_synthdef_compiler_bridge OBJECT
-        src/tzpl_synthdef_compiler_ffi.cpp
-    )
+add_library(tzpl_synthdef_compiler_bridge OBJECT
+    src/tzpl_synthdef_compiler_ffi.cpp
+    src/tzpl_synth_build.cpp
+)
 
-    target_include_directories(tzpl_synthdef_compiler_bridge
-        PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/include
-    )
+target_include_directories(tzpl_synthdef_compiler_bridge
+    PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
 
-    target_link_libraries(tzpl_synthdef_compiler_bridge
-        PUBLIC  tzpl_lib
-        PUBLIC  synthdef_compiler_lib
-        PUBLIC  audio_engine_lib
-    )
+target_link_libraries(tzpl_synthdef_compiler_bridge
+    PUBLIC  tzpl_lib
+    PUBLIC  audio_engine_lib
+)
 
-    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        target_compile_options(tzpl_synthdef_compiler_bridge PRIVATE -O1)
-    endif()
-    if(CMAKE_BUILD_TYPE STREQUAL "Release")
-        target_compile_options(tzpl_synthdef_compiler_bridge PRIVATE -O2)
-    endif()
+# The runtime plugin compiler shells out to a C++ compiler; bake in the one
+# this build was configured with so the PATH lookup is only a fallback
+# ($TZPL_CC still overrides at runtime).
+target_compile_definitions(tzpl_synthdef_compiler_bridge PRIVATE
+    TZPL_PLUGIN_CXX="${CMAKE_CXX_COMPILER}")
+
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    target_compile_options(tzpl_synthdef_compiler_bridge PRIVATE -O1)
+endif()
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    target_compile_options(tzpl_synthdef_compiler_bridge PRIVATE -O2)
 endif()
 
 # --- OSC FFI bridge ---

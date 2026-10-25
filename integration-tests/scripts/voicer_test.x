@@ -2,6 +2,7 @@
 --              compile & load it, then play notes and chords.
 
 import synthdef.*;
+import synthc.compile.*;
 import common_ugens.*;
 import clock.*;
 import audio_engine.*;
@@ -31,7 +32,7 @@ fn sineVoice() S {
 
 fn sineSynth() S = voicer(32, sineVoice) sum outlet;
 
-sineSynth defSynth("sine_voice") await;
+sineSynth defSynthX("sine_voice") await;
 
 println("compiled sine_voice");
 println(listSynthDefs());

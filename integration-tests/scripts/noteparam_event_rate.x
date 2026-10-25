@@ -5,6 +5,7 @@
 -- per-voice value) took effect. Rendered by `tzpl_app --nrt`; the checker in
 -- run_noteparam_event_test.sh asserts the exact step samples.
 import synthdef.*;
+import synthc.compile.*;
 import common_ugens.*;
 import audio_engine.*;
 
@@ -14,7 +15,7 @@ fn npVoice() S {
 		v * gate()
 	}) sum outlet
 }
-npVoice defSynth("np_event");
+npVoice defSynthX("np_event");
 
 safetyLimiter(false);
 begin();

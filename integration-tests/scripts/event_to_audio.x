@@ -10,6 +10,7 @@
 --    delay-read activation fix (the z1 read re-runs per event; before the
 --    fix it never ran and the trigger never cleared).
 import synthdef.*;
+import synthc.compile.*;
 import common_ugens.*;
 import audio_engine.*;
 
@@ -19,7 +20,7 @@ fn e2aDemo() S {
 	let held = (c tr) * (1.0 + 1.0e-30 * white());
 	[imp, held] join outlet
 }
-e2aDemo defSynth("e2a_demo");
+e2aDemo defSynthX("e2a_demo");
 
 safetyLimiter(false);
 begin();

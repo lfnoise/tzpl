@@ -66,7 +66,7 @@ fn graph() S {
 }
 
 let name = "widen_%^_%^_%^" fmt(mode, form, idx);
-if (mode == "x") { graph defSynthX(name) await; } else { graph defSynth(name) await; }
+if (mode == "x") { graph defSynthX(name) await; } else { graph defSynthX(name) await; }
 safetyLimiter(false);
 begin();
 newNode(name, 100);

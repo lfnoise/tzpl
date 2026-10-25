@@ -44,7 +44,7 @@ let name = "neg_abs_" $ kase $ "_" $ mode;
 if (mode == "x") {
 	f defSynthX(name) await;
 } else {
-	f defSynth(name) await;
+	f defSynthX(name) await;
 }
 safetyLimiter(false);
 begin();

@@ -136,7 +136,7 @@ cmake --build build -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
 |--------|---------|-------------|
 | `TZPL_BUILD_LANG` | `ON` | Build the Tzopilotl interpreter |
 | `TZPL_BUILD_AUDIO_ENGINE` | `ON` | Build the audio engine |
-| `TZPL_BUILD_SYNTHDEF_COMPILER` | `ON` | Build the synthdef compiler |
+| `TZPL_BUILD_SYNTHDEF_COMPILER` | `OFF` | Build the frozen C++ synthdef compiler (superseded by synthc) |
 | `TZPL_BUILD_BRIDGE` | `ON` | Build the FFI bridge libraries |
 | `TZPL_BUILD_APP` | `OFF` | Build the Dear ImGui application (`tzpl_app`) |
 | `TZPL_BUILD_APP_JUCE` | `OFF` | Build the JUCE GUI application (`tzpl_app_juce`, preferred) |

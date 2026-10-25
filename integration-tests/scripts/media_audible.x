@@ -8,6 +8,7 @@
 --       integration-tests/scripts/media_audible.x
 
 import synthdef.*;
+import synthc.compile.*;
 import common_ugens.*;
 import clock.*;
 import audio_engine.*;
@@ -22,7 +23,7 @@ fn sineVoice() S {
     pch nnhz sinosc cb * env * amp
 }
 fn sineSynth() S = voicer(16, sineVoice) sum outlet;
-sineSynth defSynth("media_sine") await;
+sineSynth defSynthX("media_sine") await;
 
 engineStart();
 masterGain(0.2);

@@ -18,8 +18,10 @@
 //  tzpl_synthdef_compiler_ffi.cpp
 //  bridge
 //
-//  FFI bridge: wraps synthdef-compiler functions into the CFun signature
-//  expected by the Tzopilotl VM, and registers them with the compiler.
+//  FFI bridge for synthc, the Tzopilotl-hosted synth compiler: write the
+//  generated C++, compile and link it (tzpl_synth_build), load the plugin
+//  and register it with the engine, sync or async. The frozen C++
+//  synthdef-compiler is no longer reachable from here (block-engine plan D9).
 //
 
 #include "tzpl_synthdef_compiler_ffi.hpp"
@@ -28,11 +30,7 @@
 #include "tzpl.hpp"
 #include "value.hpp"
 #include "tzpl_client_interface.hpp"
-#include "synthdef_compile_link.hpp"
-#include "synthdef_from_sexpr.hpp"
-#include "synthdef_cpp_codegen.hpp"
-#include "synthdef_synth.hpp"
-#include "synthdef_str_util.hpp"
+#include "tzpl_synth_build.hpp"
 #include <dlfcn.h>
 #include <memory>
 #include <mutex>
@@ -92,91 +90,20 @@ static void returnErrString(ts::VM& vm, u16 dst, std::string const& err,
 }
 
 // ---------------------------------------------------------------------------
-// Compilation cache
-// ---------------------------------------------------------------------------
-
-struct CacheEntry {
-    std::string dylibPath;
-};
-
-static std::unordered_map<std::string, CacheEntry>& compilationCache() {
-    static std::unordered_map<std::string, CacheEntry> cache;
-    return cache;
-}
-
-static std::string cacheKey(std::string const& name, std::string const& sexpr) {
-    size_t h = std::hash<std::string>{}(sexpr);
-    return name + ":" + std::to_string(h);
-}
-
-// ---------------------------------------------------------------------------
 // Core compilation pipeline
 // ---------------------------------------------------------------------------
 
-// Serializes users of the C++ compiler's process-wide state (PushSynth's
-// current-synth stack, gApplyRewrites, the build dir's revision scan) between
-// the VM thread's synchronous FFIs and the async compile worker.
+// Serializes the build dir's revision scan and compiles between the VM
+// thread's synchronous FFIs and the async compile worker.
 static std::mutex& compileMtx() {
     static std::mutex m;
     return m;
 }
 
-// Runs the full synthdef compilation pipeline.
-// The sexpr should be in (Synth <name> (Graph ...)) format.
-// Returns "" on success, error message on failure.
-// On success, sets dylibPath and synthName.
-static std::string compileSynthDefPipeline(std::string const& sexpr,
-                                            std::string& synthName,
-                                            std::string& dylibPath) {
-    std::lock_guard<std::mutex> lock(compileMtx());
-
-    // Parse s-expression and build synth graph (name extracted from Synth wrapper)
-    auto result = synthdef::synthFromSExprText(sexpr);
-    if (!result) {
-        return std::string("parse error: ") + result.error();
-    }
-
-    // Take ownership so the Synth (and its Arena, holding every Expr/Graph/
-    // ExprTree/GenLoop allocated during parse + analysis + codegen) is freed
-    // when this function returns. Without this every call leaks an arena.
-    std::unique_ptr<synthdef::Synth> synth(result.value());
-    synthName = synth->name;
-
-    // Graph analysis and code generation (need PushSynth scope)
-    std::string cppCode;
-    try {
-        synthdef::PushSynth ps(synth.get());
-        synth->graphAnalysis();
-        cppCode = synthdef::cppCodeGen(synth.get());
-    } catch (std::exception const& e) {
-        return std::string("codegen error: ") + e.what();
-    }
-
-    // Write generated code to file
-    std::string dir = synthdef::getBuildDir();
-    if (auto ok = synthdef::ensureBuildDirs(dir); !ok) {
-        return "build dir error: " + ok.error();
-    }
-    try {
-        synthdef::writeCodeToFile(dir, synthName, cppCode);
-    } catch (std::exception const& e) {
-        return std::string("write error: ") + e.what();
-    }
-
-    // Compile and link to .dylib
-    int err = synthdef::compileAndLink(dir, synthName);
-    if (err) {
-        return std::string("compile/link failed with exit code ") + std::to_string(err);
-    }
-
-    dylibPath = synthdef::dylibPath(dir, synthName);
-    return "";
-}
-
 // Load a compiled plugin dylib and register its def with the VM's engine.
 // Returns "" on success, error message on failure.
 static std::string loadAndRegister(ts::VM& vm, std::string const& path) {
-    auto optDef = synthdef::loadDef(path);
+    auto optDef = synthbuild::loadDef(path);
     if (!optDef.has_value()) {
         return std::string("failed to load plugin: ") + path;
     }
@@ -195,93 +122,9 @@ static std::string loadAndRegister(ts::VM& vm, std::string const& path) {
 // FFI functions
 // ---------------------------------------------------------------------------
 
-// fn compileSynthDef(sexpr String) String
-// Returns "" on success, error message on failure.
-static void ffi_compileSynthDef(ts::VM& vm, u16 dst, u16, u16 argBase) {
-    std::string sexpr = regString(vm, argBase);
-
-    std::string synthName, dylibPath;
-    std::string error = compileSynthDefPipeline(sexpr, synthName, dylibPath);
-
-    if (error.empty()) {
-        // Cache the result
-        compilationCache()[cacheKey(synthName, sexpr)] = CacheEntry{dylibPath};
-    }
-
-    returnErrString(vm, dst, error, __func__);
-}
-
-// fn compileSynthDefAndLoad(sexpr String) String
-// Compiles, loads the .dylib, and registers the def with the engine.
-// Returns "" on success, error message on failure.
-static void ffi_compileSynthDefAndLoad(ts::VM& vm, u16 dst, u16, u16 argBase) {
-    std::string sexpr = regString(vm, argBase);
-
-    std::string synthName, dylibPath;
-
-    // Check cache (use sexpr as key since name is embedded in it)
-    std::string key = cacheKey("", sexpr);
-    auto it = compilationCache().find(key);
-    bool fromCache = it != compilationCache().end();
-    if (fromCache) {
-        dylibPath = it->second.dylibPath;
-    } else {
-        // Compile
-        std::string error = compileSynthDefPipeline(sexpr, synthName, dylibPath);
-        if (!error.empty()) {
-            returnErrString(vm, dst, error, __func__);
-            return;
-        }
-        compilationCache()[key] = CacheEntry{dylibPath};
-    }
-
-    // Load the .dylib
-    auto optDef = synthdef::loadDef(dylibPath);
-    if (!optDef.has_value() && fromCache) {
-        // The cached revision is gone -- pruned after enough later builds of
-        // the same name. The cache records a path, not the code, so recompile
-        // and re-point it. Only worth retrying on a cache hit: a load failure
-        // on a dylib we just built is a real failure, not a stale path.
-        compilationCache().erase(key);
-        std::string error = compileSynthDefPipeline(sexpr, synthName, dylibPath);
-        if (!error.empty()) {
-            returnErrString(vm, dst, error, __func__);
-            return;
-        }
-        compilationCache()[key] = CacheEntry{dylibPath};
-        optDef = synthdef::loadDef(dylibPath);
-    }
-    if (!optDef.has_value()) {
-        returnErrString(vm, dst, std::string("failed to load plugin: ") + dylibPath,
-                        __func__);
-        return;
-    }
-
-    // Register with the engine
-    engine::Engine* eng = getEngine(vm);
-    if (!eng) {
-        returnErrString(vm, dst, "no engine attached to VM", __func__);
-        return;
-    }
-
-    engine::addSynthDef(eng, optDef->def, optDef->dlHandle, &optDef->bufferDefs,
-                        &optDef->tagList, &optDef->bankDefs, optDef->swapSampleBank);
-
-    returnString(vm, dst, "");
-}
-
 // ---------------------------------------------------------------------------
 // Low-level FFI for the Tzopilotl-hosted synthdef compiler (synthc modules)
 // ---------------------------------------------------------------------------
-
-// Saves/restores the rewrite flag so a test setting can't leak.
-struct RewriteGuard {
-    bool prev;
-    explicit RewriteGuard(bool apply) : prev(synthdef::gApplyRewrites) {
-        synthdef::gApplyRewrites = apply;
-    }
-    ~RewriteGuard() { synthdef::gApplyRewrites = prev; }
-};
 
 // fn writeAndCompileCpp(name String, cppSource String) String
 // Writes generated C++ to the build dir, compiles and links it.
@@ -292,20 +135,20 @@ static void ffi_writeAndCompileCpp(ts::VM& vm, u16 dst, u16, u16 argBase) {
 
     std::lock_guard<std::mutex> lock(compileMtx());
 
-    std::string dir = synthdef::getBuildDir();
-    if (auto ok = synthdef::ensureBuildDirs(dir); !ok) {
+    std::string dir = synthbuild::getBuildDir();
+    if (auto ok = synthbuild::ensureBuildDirs(dir); !ok) {
         returnErrString(vm, dst, "error: build dir: " + ok.error(), __func__);
         return;
     }
     try {
-        synthdef::writeCodeToFile(dir, name, cppCode);
+        synthbuild::writeCodeToFile(dir, name, cppCode);
     } catch (std::exception const& e) {
         returnErrString(vm, dst, std::string("error: write failed: ") + e.what(),
                         __func__);
         return;
     }
 
-    int err = synthdef::compileAndLink(dir, name);
+    int err = synthbuild::compileAndLink(dir, name);
     if (err) {
         returnErrString(vm, dst,
                         "error: compile/link failed with exit code " + std::to_string(err),
@@ -313,7 +156,7 @@ static void ffi_writeAndCompileCpp(ts::VM& vm, u16 dst, u16, u16 argBase) {
         return;
     }
 
-    returnString(vm, dst, synthdef::dylibPath(dir, name));
+    returnString(vm, dst, synthbuild::dylibPath(dir, name));
 }
 
 // fn loadSynthDylib(path String) String
@@ -327,7 +170,7 @@ static void ffi_loadSynthDylib(ts::VM& vm, u16 dst, u16, u16 argBase) {
 // ---------------------------------------------------------------------------
 // Async compile FFIs
 //
-// The clang subprocess behind defSynth/defSynthX takes on the order of a
+// The clang subprocess behind defSynthX takes on the order of a
 // second and used to run on the VM thread, stalling the NRT scheduler -- an
 // audible pause in any playing sequence. These variants run the compile on
 // the host's async I/O worker (async_io.hpp); the completion step loads the
@@ -339,7 +182,6 @@ static void ffi_loadSynthDylib(ts::VM& vm, u16 dst, u16, u16 argBase) {
 // State shared between an async compile job's work and complete steps.
 // System-allocated on purpose: the worker thread must never touch the VM heap.
 struct AsyncCompileState {
-    std::string sexpr;      // pipeline input (compileSynthDefAndLoadAsync)
     std::string name;       // synth name
     std::string cpp;        // generated C++ source (writeCompileAndLoadAsync)
     std::string dylibPath;
@@ -409,56 +251,6 @@ static void finishAsyncCompile(ts::VM& vm,
     vm.resolveExternalFuture(fut, &w, 1);
 }
 
-// fn compileSynthDefAndLoadAsync(sexpr String, name String) Future<String>
-// Async backend of defSynth: the full C++ pipeline (parse, analysis, codegen,
-// clang) runs on the worker thread. Resolves to "" on success. `name` is the
-// def name the sexpr declares, passed up front so the compile can be found
-// by name (synthDefReady) before the worker has parsed it.
-static void ffi_compileSynthDefAndLoadAsync(ts::VM& vm, u16 dst, u16, u16 argBase) {
-    auto st = std::make_shared<AsyncCompileState>();
-    st->sexpr = regString(vm, argBase);
-    st->name = regString(vm, argBase + 1);
-
-    ts::Future* fut = makePendingStringFuture(vm);
-    vm.reg(dst).o = fut;
-
-    // Cache hit: nothing to compile -- load and resolve right away. A stale
-    // path (revision pruned since it was cached) falls through to a fresh
-    // compile, mirroring the synchronous version's retry.
-    std::string key = cacheKey("", st->sexpr);
-    auto it = compilationCache().find(key);
-    if (it != compilationCache().end()) {
-        std::string err = loadAndRegister(vm, it->second.dylibPath);
-        if (err.empty()) {
-            ts::Word w;
-            w.o = new ts::StringObj("");
-            vm.resolveExternalFuture(fut, &w, 1);
-            return;
-        }
-        compilationCache().erase(it);
-    }
-    notePendingCompile(st->name, fut);
-
-    ts::AsyncIOJob job;
-    // Nothing above the executor catches: an exception escaping `work`
-    // terminates the process, so the whole step is fenced here.
-    job.work = [st] {
-        try {
-            st->error = compileSynthDefPipeline(st->sexpr, st->name, st->dylibPath);
-        } catch (std::exception const& e) {
-            st->error = std::string("compile failed: ") + e.what();
-        }
-    };
-    job.complete = [st, fut](ts::VM& v) {
-        if (st->error.empty()) {
-            // Host-mutex-held, so the cache access can't race the VM thread.
-            compilationCache()[cacheKey("", st->sexpr)] = CacheEntry{st->dylibPath};
-        }
-        finishAsyncCompile(v, st, fut, "compileSynthDefAndLoadAsync");
-    };
-    submitOrRunInline(vm, std::move(job));
-}
-
 // fn writeCompileAndLoadAsync(name String, cppSource String) Future<String>
 // Async backend of defSynthX: writes the synthc-generated C++, compiles and
 // links it on the worker thread. Resolves to "" on success.
@@ -474,25 +266,25 @@ static void ffi_writeCompileAndLoadAsync(ts::VM& vm, u16 dst, u16, u16 argBase) 
     ts::AsyncIOJob job;
     job.work = [st] {
         std::lock_guard<std::mutex> lock(compileMtx());
-        std::string dir = synthdef::getBuildDir();
+        std::string dir = synthbuild::getBuildDir();
         // One try around the whole step: an exception escaping `work`
         // terminates the process (nothing above the executor catches).
         try {
-            if (auto ok = synthdef::ensureBuildDirs(dir); !ok) {
+            if (auto ok = synthbuild::ensureBuildDirs(dir); !ok) {
                 st->error = "build dir error: " + ok.error();
                 return;
             }
-            synthdef::writeCodeToFile(dir, st->name, st->cpp);
+            synthbuild::writeCodeToFile(dir, st->name, st->cpp);
         } catch (std::exception const& e) {
             st->error = std::string("write failed: ") + e.what();
             return;
         }
-        int err = synthdef::compileAndLink(dir, st->name);
+        int err = synthbuild::compileAndLink(dir, st->name);
         if (err) {
             st->error = "compile/link failed with exit code " + std::to_string(err);
             return;
         }
-        st->dylibPath = synthdef::dylibPath(dir, st->name);
+        st->dylibPath = synthbuild::dylibPath(dir, st->name);
     };
     job.complete = [st, fut](ts::VM& v) {
         finishAsyncCompile(v, st, fut, "writeCompileAndLoadAsync");
@@ -518,67 +310,6 @@ static void ffi_synthDefReady(ts::VM& vm, u16 dst, u16, u16 argBase) {
     fut->value_[0].o = new ts::StringObj("");
     fut->state_ = ts::Future::Resolved;
     vm.reg(dst).o = fut;
-}
-
-// fn synthdefGenCppFromSexpr(sexpr String, maxSimdWidth Int, applyRewrites Bool) String
-// Runs the C++ compiler pipeline up to code generation and returns the
-// generated C++ source (no compile). For differential testing against the
-// Tzopilotl-hosted compiler. With applyRewrites=false the algebraic rewriter is
-// bypassed so the output is comparable against a compiler that does not yet
-// implement rewriting. Returns "error: ..." on failure.
-static void ffi_synthdefGenCppFromSexpr(ts::VM& vm, u16 dst, u16, u16 argBase) {
-    std::string sexpr = regString(vm, argBase);
-    int simdWidth = static_cast<int>(vm.reg(argBase + 1).i);
-    bool applyRewrites = vm.reg(argBase + 2).i != 0;
-
-    std::lock_guard<std::mutex> lock(compileMtx());
-    RewriteGuard guard(applyRewrites);
-
-    auto result = synthdef::synthFromSExprText(sexpr);
-    if (!result) {
-        returnErrString(vm, dst, std::string("error: parse error: ") + result.error(),
-                        __func__);
-        return;
-    }
-
-    std::unique_ptr<synthdef::Synth> synth(result.value());
-    try {
-        synthdef::PushSynth ps(synth.get());
-        synth->graphAnalysis();
-        returnString(vm, dst, synthdef::cppCodeGen(synth.get(), simdWidth, simdWidth));
-    } catch (std::exception const& e) {
-        returnErrString(vm, dst, std::string("error: codegen error: ") + e.what(),
-                        __func__);
-    }
-}
-
-// fn synthdefAnalysisDump(sexpr String, applyRewrites Bool) String
-// Runs the C++ compiler's graph analysis and returns Synth::dumpToString().
-// With applyRewrites=false the algebraic rewriter is bypassed so the dump is
-// comparable against compilers that don't implement rewriting.
-// Returns "error: ..." on failure.
-static void ffi_synthdefAnalysisDump(ts::VM& vm, u16 dst, u16, u16 argBase) {
-    std::string sexpr = regString(vm, argBase);
-    bool applyRewrites = vm.reg(argBase + 1).i != 0;
-
-    std::lock_guard<std::mutex> lock(compileMtx());
-    RewriteGuard guard(applyRewrites);
-
-    auto result = synthdef::synthFromSExprText(sexpr);
-    if (!result) {
-        returnErrString(vm, dst, std::string("error: parse error: ") + result.error(),
-                        __func__);
-        return;
-    }
-
-    std::unique_ptr<synthdef::Synth> synth(result.value());
-    try {
-        synthdef::PushSynth ps(synth.get());
-        synth->graphAnalysis();
-        returnString(vm, dst, synth->dumpToString());
-    } catch (std::exception const& e) {
-        returnErrString(vm, dst, std::string("error: ") + e.what(), __func__);
-    }
 }
 
 // fn compareAudioFiles(pathA String, pathB String) Float
@@ -621,12 +352,12 @@ static void ffi_compareAudioFiles(ts::VM& vm, u16 dst, u16, u16 argBase) {
 
 // fn ftosF32Cpp(x Float) String
 // Shortest round-trip decimal for x rounded to f32, with a trailing 'f' --
-// exactly the generator's f32 constant formatting (synthdef::ftos(f32)). synthc
+// exactly the generator's f32 constant formatting (synthbuild::ftos(f32)). synthc
 // uses this so its emitted f32 constants byte-match the C++ generator (a value's
 // shortest-f32 form differs from its shortest-f64 form, e.g. 0.70794576f).
 static void ffi_ftosF32Cpp(ts::VM& vm, u16 dst, u16, u16 argBase) {
     double x = vm.reg(argBase).f;
-    returnString(vm, dst, synthdef::ftos((float)x));
+    returnString(vm, dst, synthbuild::ftosF32(x));
 }
 
 // fn audioFileMaxAbs(path String) Float
@@ -658,10 +389,7 @@ static void ffi_audioFileMaxAbs(ts::VM& vm, u16 dst, u16, u16 argBase) {
 
 void registerSynthdefCompilerFFI(ts::Compiler& compiler) {
     auto* String = compiler.stringType();
-    auto* Int    = compiler.intType();
-    auto* Bool   = compiler.boolType();
     auto* Float  = compiler.floatType();
-    ts::Type* StringArray = reinterpret_cast<ts::Type*>(compiler.arrayType(String));
     ts::Type* FutureString = reinterpret_cast<ts::Type*>(compiler.futureType(String));
 
     using R = void (*)(ts::VM&, u16, u16, u16);
@@ -676,27 +404,20 @@ void registerSynthdefCompilerFFI(ts::Compiler& compiler) {
                                                /*pure=*/false, /*rtSafe=*/false);
     };
 
-    reg("compileSynthDef",        String,      {String}, ffi_compileSynthDef);
-    reg("compileSynthDefAndLoad", String,      {String}, ffi_compileSynthDefAndLoad);
-
-    // Async backends of defSynth / defSynthX: the compile runs on the host's
-    // async I/O worker so the NRT scheduler keeps dispatching while clang runs.
-    reg("compileSynthDefAndLoadAsync", FutureString, {String, String},
-        ffi_compileSynthDefAndLoadAsync);
+    // Async backend of defSynthX: the compile runs on the host's async I/O
+    // worker so the NRT scheduler keeps dispatching while clang runs.
     reg("writeCompileAndLoadAsync",    FutureString, {String, String},
         ffi_writeCompileAndLoadAsync);
     // The in-flight compile of a def by name (or a ready future); play awaits it.
     reg("synthDefReady",               FutureString, {String}, ffi_synthDefReady);
 
     // Low-level functions for the Tzopilotl-hosted compiler (synthc modules)
-    // and its differential test harness.
+    // and render tests.
     reg("writeAndCompileCpp",      String, {String, String}, ffi_writeAndCompileCpp);
     reg("loadSynthDylib",          String, {String},         ffi_loadSynthDylib);
     reg("compareAudioFiles",       Float,  {String, String}, ffi_compareAudioFiles);
     reg("audioFileMaxAbs",         Float,  {String},         ffi_audioFileMaxAbs);
     reg("ftosF32Cpp",              String, {Float},          ffi_ftosF32Cpp);
-    reg("synthdefGenCppFromSexpr", String, {String, Int, Bool}, ffi_synthdefGenCppFromSexpr);
-    reg("synthdefAnalysisDump",    String, {String, Bool},   ffi_synthdefAnalysisDump);
 }
 
 } // namespace bridge

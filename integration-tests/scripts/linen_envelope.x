@@ -8,6 +8,7 @@
 -- Rendered by `tzpl_app --nrt`; the checker in run_linen_test.sh asserts
 -- the slopes, the hold level, the early-release peak, and the zero tails.
 import synthdef.*;
+import synthc.compile.*;
 import common_ugens.*;
 import audio_engine.*;
 
@@ -18,7 +19,7 @@ fn linenShapes() S {
 	let early = linen(t(0) < 0.1, 0.2, 0.4);
 	[full, early] join outlet
 }
-linenShapes defSynth("linen_shapes");
+linenShapes defSynthX("linen_shapes");
 
 safetyLimiter(false);
 begin();

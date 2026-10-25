@@ -38,7 +38,7 @@ find_package(Threads REQUIRED)
 # --- Options ----------------------------------------------------------------
 
 option(TZPL_BUILD_AUDIO_ENGINE      "Build the engine library and executable"             ON)
-option(TZPL_BUILD_SYNTHDEF_COMPILER "Build the synthdef-compiler library and executable"  ON)
+option(TZPL_BUILD_SYNTHDEF_COMPILER "Build the frozen C++ synthdef-compiler (block-engine D9)" OFF)
 option(TZPL_BUILD_LANG              "Build the lang library and executable"                ON)
 option(TZPL_BUILD_BRIDGE            "Build the FFI bridge libraries"                      ON)
 option(TZPL_BUILD_APP               "Build the audio coding application"                  OFF)
@@ -90,9 +90,6 @@ endif()
 if(TZPL_BUILD_BRIDGE AND TZPL_BUILD_LANG AND TZPL_BUILD_AUDIO_ENGINE)
     add_subdirectory(bridge)
 endif()
-# Note: The synthdef-compiler bridge inside bridge/CMakeLists.txt is guarded
-# by if(TARGET synthdef_compiler_lib), so it only builds when
-# TZPL_BUILD_SYNTHDEF_COMPILER is ON.
 # The OSC bridge inside bridge/CMakeLists.txt is guarded
 # by if(TARGET osc_lib), so it only builds when TZPL_BUILD_OSC is ON.
 # The NATS bridge inside bridge/CMakeLists.txt is guarded

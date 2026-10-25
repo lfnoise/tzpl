@@ -1,12 +1,10 @@
 -- synthdef.x
--- Script wrapper for the synthdef compiler FFI. Re-exports
--- `synthdef_ffi.*` (currently `compileSynthDef` and `compileSynthDefAndLoad`)
--- so users can write `import synthdef.*;` and get both the FFI functions
--- and the Tzopilotl-side graph construction API defined below.
+-- The graph construction API for synths, plus playback helpers. Re-exports
+-- `synthdef_ffi.*` (the synthc build and load FFIs) so `import synthdef.*;`
+-- brings both. Synths are compiled by synthc: `defSynthX` in synthc/compile.x.
 
 export synthdef_ffi.*;
 
-import std.result.*;    -- Result<T, E> for defSynthChecked
 
 ---------------------------------------------------------------------------
 --- Rate
@@ -368,6 +366,16 @@ enum CastOp {
 	i64,
 	f32,
 	f64,
+}
+
+-- The NumType bit of a cast's target type.
+fn numTypeInt(op CastOp) Int {
+	match (op) {
+		i32 : 1;
+		i64 : 2;
+		f32 : 4;
+		f64 : 8;
+	}
 }
 
 enum VecOp {
@@ -1148,206 +1156,15 @@ fn select2(test AsSignal, ifOne AsSignal, ifZero AsSignal) S {
     test asSignal select([ifZero asSignal, ifOne asSignal])
 }
 
----------------------------------------------------------------------------
--- To S-Expressions
-
-fn parens(s String)   String = "(%^)" fmt(s);
-fn brackets(s String) String = "[%^]" fmt(s);
-fn braces(s String)   String = "{%^}" fmt(s);
-fn quotes(s String)   String = "\"%^\"" fmt(s);
-
-fn indent(s String, n Int = 1) String = n <= 0 ? s : "    "  $ indent(s, n-1);
-
-fn separatedString(strings [String], separator String = " ") String  = strings fold1(fn(z, s) { z $ separator $ s });
-fn separatedString<T>(values [T], separator String = " ") String = values @ toString separatedString(separator);
-
-
-fn inputsToLisp(o S) String = o.ins.id separatedString parens;
-
-fn idsToLisp(o [S]) String = o.id separatedString parens;
-fn numbersToLisp(o [Int]) String = o separatedString parens;
-
--- Warp payload (step size for .step; 0.0 otherwise), carried as the optional
--- fifth ControlSpec number so plugins can expose it in tzpl_ControlSpec.param.
-fn _warpParam(o ControlWarp) Float {
-	match (o) {
-		ControlWarp.step(sz): sz;
-		_: 0.0;
-	}
-}
-
-fn toLisp(o ControlSpec) String {
-    "(ControlSpec %^ %^ %^ %^ %^)" fmt(o.lo, o.hi, o.init, o.warp ordinal, o.warp _warpParam)
-}
-
--- ControlSpec with a control kind: appends the kind ordinal as an
--- optional 6th field. Omitted for continuous so existing defs and
--- golden dumps are byte-identical.
-fn _specToLisp(o ControlSpec, kind ControlKind) String {
-    match (kind) {
-        continuous : o toLisp;
-        _ : "(ControlSpec %^ %^ %^ %^ %^ %^)"
-                fmt(o.lo, o.hi, o.init, o.warp ordinal, o.warp _warpParam,
-                    kind ordinal);
-    }
-}
-
-fn numTypeInt(op CastOp) Int {
-	match (op) {
-		i32 : 1;
-		i64 : 2;
-		f32 : 4;
-		f64 : 8;
-	}
-}
-
-fn toLisp(graph SignalGraph, indentLevel Int) String {
-	-- A branch/body that just returns a captured enclosing value has no local
-	-- exprs; emit an empty list, not `(nil)` (which the C++ parseGraph rejects).
-	if (graph.exprs length == 0) {
-		return "\n" $ "(Graph %^ ())" fmt(graph.root.id) indent(indentLevel);
-	}
-	let sexprLines = graph.exprs toLisp(indentLevel);
-
-	-- Join with newlines and add indentation
-	let text = sexprLines indent(indentLevel + 1) separatedString("\n");
-
-	"\n" $ "(Graph %^ (\n%^))" fmt(graph.root.id, text) indent(indentLevel)
-}
-
-fn toLisp(o S, indentLevel Int) String {
-    match (o.kind) {
-        sampleRate : "(%^ SampleRate)" fmt(o.id);
-        sampleDur : "(%^ SampleDur)" fmt(o.id);
-        sharedIn(slot, rate) : "(%^ SharedIn %^ %^)" fmt(o.id, rate ordinal, slot);
-        int(a, typ) : "(%^ Constant %^ %^ %^)" fmt(o.id, a length, typ.0, a separatedString parens);
-        float(a, typ) : "(%^ Constant %^ %^ %^)" fmt(o.id, a length, typ.0, a separatedString parens);
-        unop(op) : "(%^ UnaryOp %^ %^)" fmt(o.id, op tag toString, o inputsToLisp);
-        binop(op) : "(%^ BinaryOp %^ %^)" fmt(o.id, op tag toString, o inputsToLisp);
-        compareop(op) : "(%^ CompareOp %^ %^)" fmt(o.id, op tag toString, o inputsToLisp);
-        castop(op) : "(%^ CastOp %^ %^)" fmt(o.id, op numTypeInt, o inputsToLisp);
-        eventToAudio : "(%^ EventToAudio %^)" fmt(o.id, o inputsToLisp);
-        random(op, rate, chans) : match (op) {
-            frand(lo, hi) : "(%^ FRand %^ %^ %^ %^)" fmt(o.id, rate ordinal, chans asChans, lo, hi);
-            irand(lo, hi) : "(%^ IRand %^ %^ %^ %^)" fmt(o.id, rate ordinal, chans asChans, lo, hi);
-            unipolar : "(%^ URand %^ %^)" fmt(o.id, rate ordinal, chans asChans);
-            bipolar : "(%^ BiRand %^ %^)" fmt(o.id, rate ordinal, chans asChans);
-            bits : "(%^ Rand64 %^ %^)" fmt(o.id, rate ordinal, chans asChans);
-        }
-        vecop(op) : match (op) {
-            at : "(%^ VecAt %^)" fmt(o.id, o inputsToLisp);
-           	put : "(%^ VecPut %^)" fmt(o.id, o inputsToLisp);
-           	take(n) : "(%^ VecTake %^ %^)" fmt(o.id, n, o inputsToLisp);
-           	drop(n) : "(%^ VecDrop %^ %^)" fmt(o.id, n, o inputsToLisp);
-           	stride(n) : "(%^ VecStride %^ %^)" fmt(o.id, n, o inputsToLisp);
-           	stutter(n) : "(%^ VecStutter %^ %^)" fmt(o.id, n, o inputsToLisp);
-           	ncyc(n) : "(%^ VecNCyc %^ %^)" fmt(o.id, n, o inputsToLisp);
-           	rotate : "(%^ VecRotate %^)" fmt(o.id, o inputsToLisp);
-           	reverse : "(%^ VecReverse %^)" fmt(o.id, o inputsToLisp);
-           	transpose(n) : "(%^ VecTranspose %^ %^)" fmt(o.id, n, o inputsToLisp);
-           	join : "(%^ VecJoin %^)" fmt(o.id, o inputsToLisp);
-           	reduce(op, chans) : "(%^ VecReduce %^ %^ %^)"
-                fmt(o.id, op tag toString, chans asChans, o inputsToLisp);
-           	sum(chans) : "(%^ VecSum %^ %^)" fmt(o.id, chans asChans, o inputsToLisp);
-           	prod(chans) : "(%^ VecProd %^ %^)" fmt(o.id, chans asChans, o inputsToLisp);
-           	minOf(chans) : "(%^ VecMin %^ %^)" fmt(o.id, chans asChans, o inputsToLisp);
-           	maxOf(chans) : "(%^ VecMax %^ %^)" fmt(o.id, chans asChans, o inputsToLisp);
-
-        }
-        inlet(typ, chans, name) : "(%^ Inlet \"%^\" %^ %^)" fmt(o.id, name, chans asChans, typ.0);
-        outlet(name) : "(%^ Outlet \"%^\" %^)" fmt(o.id, name, o.ins.id separatedString);
-
-        control(spec, chans, name, kind) :
-            "(%^ Control \"%^\" %^ %^)" fmt(o.id, name, chans asChans, spec _specToLisp(kind));
-
-        noteParam(spec, chans, name) :
-            "(%^ NoteParam \"%^\" %^ %^)" fmt(o.id, name, chans asChans, spec toLisp);
-
-        delay(delayVar, op) : match (op) {
-            maxDelayTime : "(%^ MaxDelay %^ %^)" fmt(o.id, delayVar.id, o inputsToLisp);
-            init(offset) : "(%^ DelayInit %^ %^ %^)" fmt(o.id, delayVar.id, offset, o inputsToLisp);
-            read(offset) : "(%^ DelayFixRead %^ %^)" fmt(o.id, delayVar.id, offset);
-            vread(interpolation) : "(%^ DelayVarRead %^ %^ %^)" fmt(o.id, delayVar.id, interpolation toLispString, o inputsToLisp);
-            write :  "(%^ DelayWrite %^ %^)" fmt(o.id, delayVar.id, o inputsToLisp);
-        }
-
-        buffer(bufferVar, op) : match (op) {
-            fixRead(index, chans, startChan) :
-                "(%^ BufFixRead %^ %^ %^ %^)" fmt(o.id, bufferVar.id, index, chans, startChan);
-            vread(interpolation, chans, startChan) :
-                "(%^ BufVarRead %^ %^ %^ %^ %^)" fmt(o.id, bufferVar.id, interpolation toLispString, chans, startChan, o inputsToLisp);
-            write(chans, startChan) :
-                "(%^ BufWrite %^ %^ %^ %^)" fmt(o.id, bufferVar.id, chans, startChan, o inputsToLisp);
-            length :
-                "(%^ BufLength %^)" fmt(o.id, bufferVar.id);
-        }
-
-        bankLookup(bankVar) :
-            "(%^ BankLookup %^ %^)" fmt(o.id, bankVar.id, o inputsToLisp);
-
-        bank(op) : match (op) {
-            fixRead(index, chans, startChan) :
-                "(%^ BankFixRead %^ %^ %^ %^)" fmt(o.id, index, chans, startChan, o inputsToLisp);
-            vread(interpolation, chans, startChan) :
-                "(%^ BankVarRead %^ %^ %^ %^)" fmt(o.id, interpolation toLispString, chans, startChan, o inputsToLisp);
-            rootKey :
-                "(%^ BankRootKey %^)" fmt(o.id, o inputsToLisp);
-            sampleRate :
-                "(%^ BankSampleRate %^)" fmt(o.id, o inputsToLisp);
-            length :
-                "(%^ BankLength %^)" fmt(o.id, o inputsToLisp);
-            loopStart :
-                "(%^ BankLoopStart %^)" fmt(o.id, o inputsToLisp);
-            loopEnd :
-                "(%^ BankLoopEnd %^)" fmt(o.id, o inputsToLisp);
-            hasLoop :
-                "(%^ BankHasLoop %^)" fmt(o.id, o inputsToLisp);
-        }
-
-        if_(thenGraph, elseGraph) : {
-            "(%^ IfExpr %^ %^ %^)" fmt(o.id, o inputsToLisp, thenGraph toLisp(indentLevel + 1), elseGraph toLisp(indentLevel + 1))
-		}
-        for_(count, bodyGraph) :
-            "(%^ ForExpr %^ %^)" fmt(o.id, o inputsToLisp, bodyGraph toLisp(indentLevel + 1));
-
-        switch_(cases) :
-            "(%^ SwitchExpr %^ %^)" fmt(o.id, o inputsToLisp, cases toLisp(indentLevel + 1) separatedString(" "));
-
-        select : "(%^ SelectExpr %^)" fmt(o.id, o inputsToLisp);
-        select2 : "(%^ SelectExpr %^)" fmt(o.id, o inputsToLisp);
-		varexpr(name) : "(%^ VarExpr \"%^\")" fmt(o.id, name);
-
-        voicer(maxVoices, bodyGraph) : {
-            "(%^ Voicer %^ %^)" fmt(o.id, maxVoices, bodyGraph toLisp(indentLevel + 1))
-		}
-
-		spectralFrame(fftSize) : "(%^ SpectralFrameInput %^)" fmt(o.id, fftSize);
-
-		spectralChain(fftSize, hopSize, bodyGraph) : {
-			"(%^ SpectralChainExpr %^ %^ %^ %^)" fmt(o.id, o inputsToLisp, fftSize, hopSize, bodyGraph toLisp(indentLevel + 1))
-		}
-
-		debug(label, period, consecutive) :
-			"(%^ DebugExpr \"%^\" %^ %^ %^)" fmt(o.id, label, period, consecutive, o inputsToLisp);
-    }
-}
-
-
 -- Build the in-memory SignalGraph for a synth function without compiling.
 -- Used by the Tzopilotl-hosted compiler (synthc) and its tests.
 fn makeGraph(synthFun GraphFn) SignalGraph = synthFun _makeTopGraph;
-
--- The (Synth <name> <graph>) s-expression for a graph, as sent to the C++
--- compiler by defSynth.
-fn toSynthSexpr(graph SignalGraph, synthName String) String =
-	"(Synth %^ %^)" fmt(synthName, graph toLisp(0));
 
 ---------------------------------------------------------------------------
 -- Category tags
 
 -- Session-default tags from the TZPL_DEFAULT_TAGS environment variable
--- (comma-separated), appended to every synthdef compiled via defSynth /
--- defSynthX. Test harnesses set TZPL_DEFAULT_TAGS=test so everything they
+-- (comma-separated), appended to every synthdef compiled via defSynthX. Test harnesses set TZPL_DEFAULT_TAGS=test so everything they
 -- compile is born tagged and the plugin browser can filter it out.
 fn defaultSynthTags() [String] {
 	match (getEnv("TZPL_DEFAULT_TAGS")) {
@@ -1364,71 +1181,12 @@ fn defaultSynthTags() [String] {
 }
 
 -- Declared tags followed by session defaults, deduped in first-occurrence
--- order (mirrors the C++ sexpr parser's dedup).
+-- order.
 fn mergeSynthTags(declared [String], defaults [String]) [String] {
 	var out [String] = [];
 	for (t : declared) { if (t length > 0 && !(out contains(t))) { out push!(t); } }
 	for (t : defaults) { if (t length > 0 && !(out contains(t))) { out push!(t); } }
 	out
-}
-
--- As toSynthSexpr, with category tags emitted as a (Tags ...) clause. Tags
--- must not contain quote or backslash characters.
-fn toSynthSexpr(graph SignalGraph, synthName String, tags [String]) String {
-	if (tags length == 0) { return graph toSynthSexpr(synthName); }
-	var ts = "";
-	for (t : tags) { ts = ts $ " \"" $ t $ "\""; }
-	"(Synth %^ (Tags%^) %^)" fmt(synthName, ts, graph toLisp(0))
-}
-
--- LEGACY / oracle path. Compiles a synth via the S-expression serializer + the C++
--- compiler (compileSynthDefAndLoadAsync). As of the M5.5 switchover, production synths
--- compile through synthc instead -- `defSynthX` (synthc/compile.x), the Tzopilotl-
--- hosted compiler, which byte-matches this path's output (rewrites-on + SIMD width 4)
--- across the whole corpus and renders bit-identically. `defSynth` (and the `toLisp`/
--- `toSynthSexpr` serializer + the synthdefGenCppFromSexpr/synthdefAnalysisDump FFIs)
--- are retained as the differential-test oracle the synthc diff suites compare against.
---
--- Async: the clang compile runs on a worker thread so playing sequences keep
--- running. Await the returned future before the def's FIRST play; when
--- redefining a def that is already playing, fire-and-forget is fine -- players
--- keep the old def and hot-swap when the new one loads. (Inside an NRT render
--- the compile runs synchronously, so the future is already resolved.)
---
--- A failed compile PANICS (prints the error and halts) -- a script must not
--- sail past a def that never loaded. Harnesses that need to tolerate and
--- report failures use defSynthChecked, which returns ok(sexpr) / err(message)
--- instead of halting.
-fn defSynth(synthFun GraphFn, synthName String) Future<String> =
-	defSynth(synthFun, synthName, [String]());
-
-async fn defSynth(synthFun GraphFn, synthName String, tags [String]) String {
-	match (defSynthChecked(synthFun, synthName, tags) await) {
-		ok(sx): {
-			println(synthName $ " compiled successfully.");
-			sx
-		}
-		err(msg): { panic(msg); "" }
-	}
-}
-
--- Fallible form of defSynth: ok(sexpr source) on success, err(message) on a
--- failed compile. Never halts and prints nothing.
-fn defSynthChecked(synthFun GraphFn, synthName String) Future<Result<String, String>> =
-	defSynthChecked(synthFun, synthName, [String]());
-
-async fn defSynthChecked(synthFun GraphFn, synthName String, tags [String]) Result<String, String> {
-
-	let graph SignalGraph = synthFun _makeTopGraph;
-
-	let sexprString = graph
-		toSynthSexpr(synthName, mergeSynthTags(tags, defaultSynthTags()));
-
-	let err = compileSynthDefAndLoadAsync(sexprString, synthName) await;
-	if (err length > 0) {
-		return Result<String, String>.err("compiling " $ synthName $ " failed: " $ err);
-	}
-	Result<String, String>.ok(sexprString)
 }
 
 ---------------------------------------------------------------------------
@@ -1439,7 +1197,7 @@ import audio_engine as ae;
 var _nextNodeID = 1000;
 
 fn play(defName String, nodeID Int) Int {
-	-- A defSynth/defSynthX of this name still compiling in the background
+	-- A defSynthX of this name still compiling in the background
 	-- (its Future not awaited) is waited for here, so the node is created
 	-- against a def that exists rather than failing with errNodeDefNotFound.
 	-- Already-loaded or never-compiled defs pass straight through.

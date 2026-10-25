@@ -16,7 +16,7 @@ let fails = &0;
 
 async fn cc(f GraphFn, name String, both Bool) Void {
 	if (both) {
-		match (f defSynthChecked(name $ "_cpp") await) {
+		match (f defSynthXChecked(name $ "_cpp") await) {
 			ok(sx): { println("PASS " $ name $ " cpp"); }
 			err(m): { fails <- *fails + 1; println("FAIL " $ name $ " cpp: " $ m); }
 		}
