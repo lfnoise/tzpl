@@ -19,7 +19,7 @@ out=$(TZPL_EVAL_CELLS=1 "$APP" --nogui \
 }
 
 # The first cell must still FAIL (that's the premise of the regression).
-echo "$out" | grep -q "requires numeric operands" || {
+echo "$out" | grep -q "No matching overload for '+'" || {
     echo "FAIL: cell 1 no longer fails -- test premise lost"; echo "$out"; exit 1
 }
 echo "$out" | grep -q "UNREACHABLE cell1" && {
