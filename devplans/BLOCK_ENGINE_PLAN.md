@@ -1358,6 +1358,68 @@ Deviations and notes:
   accuracy and speed.
 - The corpus re-renders within the tolerance contracts.
 
+Progress (2026-10-25; M7 is in progress):
+- **Classification (`synthc/recurrence.x`):**
+  - Each weight 1–3 cycle is walked with linear forms over its state (the in-cycle
+    delay reads), tracking the largest rate of any coefficient that multiplies state.
+  - The classes are scan (`+`, `+` with wrap written `x - floor(x)`, `max`, `min`,
+    `xor`), affine-block (order = total delay weight), affine-scan, and general, which
+    names the node that made it general.
+  - The analysis dump prints each recurrence's CLASS and STRATEGY. Over the dump
+    corpus: 123 scans, 63 affine-block (44 first order), 4 affine-scan; the rest are
+    general (state machines and varying-coefficient filters).
+  - The "minimal cycle" is the SCC itself for now.
+- **Block layout of `process` (codegen):**
+  - Each root-graph loop runs over the block's samples in turn.
+  - Loops that share state run together sample by sample, as one region: a delay (its
+    writer and every reader, wherever they are nested), a graph's random generator
+    (its draw order is sample order), or a written buffer.
+  - A temp consumed in a later region becomes a block buffer (`bt<serial>`, interleaved
+    channel rows). So does a root-graph instance value at block or audio rate
+    (`bk<serial>`), read at row `bi × stride`: stride 1 while its parameter group runs
+    every sample, else 0. This is the `{ptr, stride}` plumbing.
+  - One-channel ports are read and written in place. Multichannel ports go through
+    interleaved block buffers, gathered once per call, and a multichannel input read
+    only by parameter groups (`notes`) is gathered only when it changed.
+  - Buffer bases are hoisted `__restrict` locals.
+- **Block forms:** first-order cycles run over the block in two passes around a
+  `tzpl_dsp` scan:
+  - Pass 1 computes the scan input, or the affine map's `a` and `b` taken from the
+    cycle's linear form.
+  - The scan is `scanSumWrapBlock`, `scanSumBlock` or `scanAffineBlock`.
+  - Pass 2 runs the cycle's trees with the state read replaced by the previous
+    written value. The delay write is left out, and the state is set from the scan's
+    carry.
+  - **Eligible cycles:** scan `+`/`+wrap`, affine-scan, or affine-block of order 1;
+    one channel; root graph; one weight-1 read of a delay with no other reader, kept
+    as a single value; no random draw inlined into the cycle's inputs.
+  - In the dump corpus: 96 scans and 13 first-order affine cycles.
+- **`TZPL_STRICT_RECURRENCES=1`** turns block forms off: every recurrence runs in
+  its own order. This is the plan's `strictRecurrences`, as an environment variable
+  for now.
+- **Plugins** can include `tzpl_dsp/` (the build stages the subdirectory).
+- **Fixes:**
+  - `repeat()` on a payload-free enum crashed (lang, with a test).
+  - A GC crash from an array of tuples in synthc was worked around; it is a separate
+    VM bug, the second found on this branch.
+
+Status:
+- **Corpus, compat mode:**
+  - Strict recurrences match M6 within -100 dBFS on 112 of 118. The rest are FMA
+    contraction across the new buffer boundaries, -40 to -94 dBFS.
+  - Block forms against strict differ only by rounding, as expected. The differences
+    are amplified where a scanned value drives a decision (a sample-accurate gate, a
+    sequencer step), a delay-read position (echo times from a lagged control), or a
+    high-Q filter.
+- **Benchmark against M6, same app binary** (ms of CPU per node-second, M6 → now):
+  knobs 0.305 → 0.333, chorus 0.973 → 1.026, bank 2.612 → 2.330. Block forms gain
+  little yet: most loops still compute one sample at a time between them, and
+  vectorizing those over samples is M8's fusion.
+- **Not done yet:**
+  - block state space for order-2 and order-3 filters, and multichannel cycles;
+  - the per-ugen accuracy and speed runs against the M1 references;
+  - a per-cycle stride check that picks the block or the per-sample form each block.
+
 **M8: Strategy and fusion optimiser (§4.2 steps 6–8).**
 - Serial-loop isolation of short cycles, the cost table, loop formation of all three
   kinds,

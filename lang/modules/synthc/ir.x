@@ -484,6 +484,7 @@ struct Ctx {
 	                          -- delay's writer stores (the delay edge's source)
 	dweight [Int],            -- per node: that edge's delay weight
 	cycles [CycleInfo],
+	blockCycles [Int],        -- cycles run in block form (recurrence.x), by index
 	paramGroups [ParamGroup],
 	groupOf [Int],            -- per node: its parameter group, NONE if none
 	delayAllocs [Int],        -- delay indices needing runtime allocation
@@ -538,6 +539,7 @@ fn newCtx(name String) Ctx {
 		dsrc: [NIdx](),
 		dweight: [Int](),
 		cycles: [CycleInfo](),
+		blockCycles: [Int](),
 		paramGroups: [ParamGroup](),
 		groupOf: [Int](),
 		delayAllocs: [Int](),

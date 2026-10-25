@@ -188,14 +188,84 @@ fn recClassStr(ctx Ctx, c RecClass) String = match (c) {
 	                               : "general (nonlinear) at %^ %^" fmt(ctx.serial[x], nodeStr(ctx, x)));
 };
 
--- Record each cycle's class and strategy for the analysis dump. The serial
--- generator runs every recurrence as a plain per-sample recurrence.
+-- The block form of a first-order cycle (block-engine M7): its kind, or ""
+-- when the cycle runs as a plain recurrence. A first-order cycle is one
+-- state read of weight 1 on a delay kept as a single value (allocSize 1)
+-- with no other reader, in the root graph, one channel throughout.
+fn blockFormOf(ctx Ctx, cy CycleInfo, c RecClass) String {
+	-- TZPL_STRICT_RECURRENCES=1: every recurrence in its own order (plain
+	-- recurrences, exact against the serial code), for reference renders.
+	let strict = match (getEnv("TZPL_STRICT_RECURRENCES")) { some(v): v == "1"; none: false; };
+	if (strict) { return ""; }
+	let kind = match (c) {
+		scan(op):           (op == "+" || op == "+wrap") ? "scan" $ op : "";
+		affineScan:         "affine";
+		affineBlock(order): order == 1 ? "affine" : "";
+		_:                  "";
+	};
+	if (kind length == 0) { return ""; }
+	if (cy.readers length != 1) { return ""; }
+	let r = cy.readers[0];
+	if (ctx.dweight[r] != 1) { return ""; }
+	for (x : cy.nodes) {
+		if (ctx.graphOf[x] != 0 || ctx.chans[x] != 1) { return ""; }
+	}
+	let d = match (ctx.kind[r]) { delayFixReadK(di, _): di; _: NONE; };
+	if (d == NONE) { return ""; }
+	let di = ctx.delays[d];
+	if (di.allocSize != 1 || di.fixReaders length != 1 || di.varReaders length != 0) { return ""; }
+	if (di.writer == NONE || ctx.chans[di.writer] > 1) { return ""; }
+	-- float state only (the scans and affine maps are float)
+	let t = ctx.typ[ctx.dsrc[r]];
+	if (!(t.0 == 4 || t.0 == 8)) { return ""; }
+	-- The two passes each evaluate the cycle's inputs; a random draw inlined
+	-- into them would be drawn twice.
+	for (x : cy.nodes) {
+		for (i : ctx.ins[x]) {
+			if (!(cy.nodes contains(i)) && ctx _inlinedDraw(i)) { return ""; }
+		}
+	}
+	kind
+}
+
+-- Does the value of n, as inlined into its consumer (single consumer,
+-- audio rate: not materialized), draw a random number?
+fn _inlinedDraw(ctx Ctx, n NIdx) Bool {
+	if (ctx.nrate[n] != Rate.audio || ctx.consumers[n] length > 1) { return false; }
+	match (ctx.kind[n]) {
+		urandK(_):  { return true; }
+		birandK(_): { return true; }
+		rand64K(_): { return true; }
+		_: {}
+	}
+	for (i : ctx.ins[n]) { if (ctx _inlinedDraw(i)) { return true; } }
+	false
+}
+
+-- Choose the block-form cycles: ctx.blockCycles.
+fn selectBlockCycles(ctx Ctx) Void {
+	let classes = ctx classifyRecurrences;
+	ctx.blockCycles clear!;
+	var i = 0;
+	while (i < ctx.cycles length) {
+		if (ctx blockFormOf(ctx.cycles[i], classes[i]) length > 0) { ctx.blockCycles push!(i); }
+		i = i + 1;
+	}
+}
+
+-- Record each cycle's class and strategy for the analysis dump: "block"
+-- with its form for a cycle the generator runs over the block, "serial" for
+-- a plain per-sample recurrence.
 fn annotateRecurrences(ctx Ctx) Void {
 	let classes = ctx classifyRecurrences;
 	var i = 0;
 	while (i < ctx.cycles length) {
 		let c = classes[i];
-		let strategy = match (c) { notRecurrence: ""; _: "serial"; };
+		let form = ctx blockFormOf(ctx.cycles[i], c);
+		let strategy = match (c) {
+			notRecurrence: "";
+			_: form length > 0 ? "block (%^)" fmt(form) : "serial";
+		};
 		ctx.cycles[i] = CycleInfo { ...ctx.cycles[i], cls: ctx recClassStr(c), strategy: strategy };
 		i = i + 1;
 	}

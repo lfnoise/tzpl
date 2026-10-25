@@ -181,11 +181,11 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 CYCLE 1 weight 1 recurrence nodes [19 25 26 27] delays [19<-27:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 CYCLE 2 weight 1 recurrence nodes [36 42 43 44] delays [36<-44:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 DELAY 0 f64 1
      1 f32 0 delay_init
      2 f64 1 delay_fix_read(1)
@@ -382,11 +382,11 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 CYCLE 1 weight 1 recurrence nodes [19 25 26 27] delays [19<-27:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 CYCLE 2 weight 1 recurrence nodes [36 42 43 44] delays [36<-44:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 DELAY 0 f64 1
      1 f32 0 delay_init
      2 f64 1 delay_fix_read(1)
@@ -583,11 +583,11 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 CYCLE 1 weight 1 recurrence nodes [19 25 26 27] delays [19<-27:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 CYCLE 2 weight 1 recurrence nodes [36 42 43 44] delays [36<-44:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 DELAY 0 f64 1
      1 f32 0 delay_init
      2 f64 1 delay_fix_read(1)
@@ -801,11 +801,11 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 CYCLE 1 weight 1 recurrence nodes [19 25 26 27] delays [19<-27:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 CYCLE 2 weight 1 recurrence nodes [36 42 43 44] delays [36<-44:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 DELAY 0 f64 1
      1 f32 0 delay_init
      2 f64 1 delay_fix_read(1)
@@ -1019,11 +1019,11 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 CYCLE 1 weight 1 recurrence nodes [19 25 26 27] delays [19<-27:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 CYCLE 2 weight 1 recurrence nodes [36 42 43 44] delays [36<-44:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 DELAY 0 f64 1
      1 f32 0 delay_init
      2 f64 1 delay_fix_read(1)
@@ -1203,11 +1203,11 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 CYCLE 1 weight 1 recurrence nodes [19 25 26 27] delays [19<-27:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 CYCLE 2 weight 1 recurrence nodes [36 42 43 44] delays [36<-44:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 DELAY 0 f64 1
      1 f32 0 delay_init
      2 f64 1 delay_fix_read(1)
@@ -1387,11 +1387,11 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 CYCLE 1 weight 1 recurrence nodes [19 25 26 27] delays [19<-27:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 CYCLE 2 weight 1 recurrence nodes [36 42 43 44] delays [36<-44:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 DELAY 0 f64 1
      1 f32 0 delay_init
      2 f64 1 delay_fix_read(1)
@@ -1611,11 +1611,11 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 CYCLE 1 weight 1 recurrence nodes [19 25 26 27] delays [19<-27:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 CYCLE 2 weight 1 recurrence nodes [36 42 43 44] delays [36<-44:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 DELAY 0 f64 1
      1 f32 0 delay_init
      2 f64 1 delay_fix_read(1)
@@ -1822,11 +1822,11 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 CYCLE 1 weight 1 recurrence nodes [19 25 26 27] delays [19<-27:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 CYCLE 2 weight 1 recurrence nodes [36 42 43 44] delays [36<-44:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 DELAY 0 f64 1
      1 f32 0 delay_init
      2 f64 1 delay_fix_read(1)
@@ -2033,11 +2033,11 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 CYCLE 1 weight 1 recurrence nodes [19 25 26 27] delays [19<-27:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 CYCLE 2 weight 1 recurrence nodes [36 42 43 44] delays [36<-44:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 DELAY 0 f64 1
      1 f32 0 delay_init
      2 f64 1 delay_fix_read(1)
@@ -2241,11 +2241,11 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 CYCLE 1 weight 1 recurrence nodes [19 25 26 27] delays [19<-27:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 CYCLE 2 weight 1 recurrence nodes [36 42 43 44] delays [36<-44:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 DELAY 0 f64 1
      1 f32 0 delay_init
      2 f64 1 delay_fix_read(1)
@@ -2462,11 +2462,11 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 CYCLE 1 weight 1 recurrence nodes [19 25 26 27] delays [19<-27:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 CYCLE 2 weight 1 recurrence nodes [36 42 43 44] delays [36<-44:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 DELAY 0 f64 1
      1 f32 0 delay_init
      2 f64 1 delay_fix_read(1)
@@ -2598,7 +2598,7 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 CYCLE 1 weight 1 recurrence nodes [19 20 21 22 23] delays [19<-23:1]
   CLASS general (nonlinear) at 22 floor STRATEGY serial
 DELAY 0 f64 1

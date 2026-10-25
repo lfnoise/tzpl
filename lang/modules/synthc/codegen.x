@@ -13,6 +13,7 @@
 import synthdef.*;
 import synthc.ir.*;
 import synthc.opnames.*;
+import synthc.recurrence.*;
 
 ---------------------------------------------------------------------------
 -- Small helpers
@@ -161,13 +162,14 @@ fn _numInlets(ctx Ctx) Int = ctx.inlets length;
 -- genVarName: the C++ identifier (or accessor) for a node's value.
 fn _varName(ctx Ctx, n NIdx) String = match (ctx.kind[n]) {
 	constant(_, _):    "p->c%^" fmt(ctx.serial[n]);
-	inletK(_, sn, _):  "p->in%^" fmt(sn);
-	outletK(_, sn):    "p->out%^" fmt(sn);
+	inletK(_, sn, _):  "in%^" fmt(sn);
+	outletK(_, sn):    "out%^" fmt(sn);
 	-- Flat voice mode: a body instance var is per-voice (p->voice_v<serial>); a
 	-- body temp is a local v<serial>[maxVoices] array. In an AoS per-voice
 	-- block (cgInVoiceLoop) an instance var is a VoiceState member (vs.),
 	-- mirroring the C++ genVarName's inVoiceLoop branch.
-	_:                 (`cgVoiceCount > 0 && ctx.graphOf[n] == `cgVoiceGraph)
+	_:                 ctx _isRootBuf(n) ? "bv%^" fmt(ctx.serial[n]) :
+	                   (`cgVoiceCount > 0 && ctx.graphOf[n] == `cgVoiceGraph)
 	                       ? ((ctx _isInstVar(n)) ? "p->voice_v%^" fmt(ctx.serial[n]) : "v%^" fmt(ctx.serial[n]))
 	                       : ((ctx _isInstVar(n))
 	                           ? (`cgInVoiceLoop ? "vs.v%^" fmt(ctx.serial[n]) : "p->v%^" fmt(ctx.serial[n]))
@@ -294,8 +296,8 @@ fn _varRef(ctx Ctx, n NIdx, cel String) String {
 		let t = ctx.typ[n];
 		match (ctx.kind[n]) {
 			inletK(_, sn, _): {
-				if (ctx.chans[n] == 1) { return _simdSplat(t, w, "p->in%^[0]" fmt(sn)); }
-				return _simdLoad(t, w, "&p->in%^[%^]" fmt(sn, cel));
+				if (ctx.chans[n] == 1) { return _simdSplat(t, w, "in%^[0]" fmt(sn)); }
+				return _simdLoad(t, w, "&in%^[%^]" fmt(sn, cel));
 			}
 			_: {}
 		}
@@ -361,7 +363,7 @@ fn _varRef(ctx Ctx, n NIdx, cel String) String {
 -- width; in SIMD a mono port splats and wider ones load or gather.
 fn _inletRef(ctx Ctx, n NIdx, sn Int, cel String) String {
 	let C = ctx.chans[n];
-	let a = "p->in%^" fmt(sn);
+	let a = "in%^" fmt(sn);
 	let flat = `cgVoiceCount > 0 && `cgFlatChanShift >= 0 && `cgFlatTrip > 0;
 	if (`cgSimdW > 0) {
 		let w = `cgSimdW;
@@ -511,9 +513,9 @@ fn _inlineExpr(ctx Ctx, n NIdx, cel String) String {
 		inletK(_, sn, _): {
 			if (`cgSimdW > 0) {
 				let t = ctx.typ[n]; let w = `cgSimdW; let c = ctx.chans[n];
-				if (c == w) { _simdLoad(t, w, "p->in%^" fmt(sn)) }
-				else if (c > w) { _simdLoad(t, w, "&p->in%^[%^]" fmt(sn, cel)) }
-				else { _simdSplat(t, w, "p->in%^[0]" fmt(sn)) }
+				if (c == w) { _simdLoad(t, w, "in%^" fmt(sn)) }
+				else if (c > w) { _simdLoad(t, w, "&in%^[%^]" fmt(sn, cel)) }
+				else { _simdSplat(t, w, "in%^[0]" fmt(sn)) }
 			} else { _varRef(ctx, n, cel) }
 		}
 		unopK(op):      _simdWiden(ctx.typ[n], ctx.typ[ins[0]],
@@ -561,7 +563,7 @@ fn _inlineExpr(ctx Ctx, n NIdx, cel String) String {
 		bankLoopStartK:                 _bankSlot(ctx, ctx.ins[n][0], "loopStart", cel);
 		bankLoopEndK:                   _bankSlot(ctx, ctx.ins[n][0], "loopEnd", cel);
 		bankHasLoopK:                   _bankSlot(ctx, ctx.ins[n][0], "hasLoop", cel);
-		delayFixReadK(d, k): _delayFixReadExpr(ctx, n, d, k, cel);
+		delayFixReadK(d, k): n == `cgReaderSub ? `cgReaderExpr : _delayFixReadExpr(ctx, n, d, k, cel);
 		delayVarReadK(d, ip): _delayVarReadExpr(ctx, n, d, ip, cel);
 		_:              "/* FIXME %^ */" fmt(nodeStr(ctx, n));
 	}
@@ -1614,7 +1616,7 @@ fn _genVoicer(ctx Ctx, root NIdx, mv Int) String {
 		-- VoicerExpr visitor's AoS branch.
 		var s = _tabs(`cgIndent) $ "for (int v = 0; v < %^; ++v) {\n" fmt(mv);
 		var `cgIndent Int = `cgIndent + 1;
-		s = s $ _tabs(`cgIndent) $ "f32* vparams = &p->in%^[v * %^];\n" fmt(`cgNotesSn, `cgNotesCols);
+		s = s $ _tabs(`cgIndent) $ "f32* vparams = &in%^[v * %^];\n" fmt(`cgNotesSn, `cgNotesCols);
 		s = s $ _tabs(`cgIndent) $ "auto& vs = p->voice_state[v];\n";
 		var `cgInVoiceLoop Bool = true;
 		var `cgVoiceIdx String = "v";
@@ -1797,7 +1799,10 @@ fn genTree(ctx Ctx, treeIdx Int, cel String) String {
 	-- Special sink forms handled structurally.
 	match (ctx.kind[root]) {
 		inletK(_, _, _): { return ""; }   -- gathered by process()
-		delayWriteK(d): { return _tabs(`cgIndent) $ _delayWriteStmt(ctx, root, d, cel, tree.serial); }
+		delayWriteK(d): {
+			if (d == `cgSuppressDelay) { return ""; }   -- a block-form cycle sets its state itself
+			return _tabs(`cgIndent) $ _delayWriteStmt(ctx, root, d, cel, tree.serial);
+		}
 		delayInitK(_, _): { return ""; }   -- emitted by genDelayInit
 		maxDelayK(_): { return ""; }
 		bufWriteK(bi, wc, sc): { return _tabs(`cgIndent) $ _bufWriteStmt(ctx, root, bi, wc, sc, cel, tree.serial); }
@@ -1835,8 +1840,8 @@ fn genTree(ctx Ctx, treeIdx Int, cel String) String {
 	-- A root is emitted as a local temp declaration when it is consumed only
 	-- within its loop, OR when it is a temp-var (non-inst) root in a scalar
 	-- loop (mirrors genTree's second condition).
-	let localDecl = _consumedInLoop(ctx, treeIdx)
-		|| (ctx.cut[root] isTempVarCut && `cgLoopChans == 1 && `cgVoiceCount == 0);
+	let localDecl = !(ctx _isBlockTemp(root)) && (_consumedInLoop(ctx, treeIdx)
+		|| (ctx.cut[root] isTempVarCut && `cgLoopChans == 1 && `cgVoiceCount == 0));
 	if (ctx _isSink(root)) {
 		-- e.g. outlet: "<lhs> = <expr>; // <serial> Sink <str>" -- but outlet's
 		-- genExpr is the lhs accessor; the assignment is built here.
@@ -1863,12 +1868,12 @@ fn _sinkStmt(ctx Ctx, n NIdx, cel String) String = match (ctx.kind[n]) {
 			-- Case A (chans==width): the bare outlet pointer; Case B: &accessor[cel]
 			-- (no parens around the &, mirroring the C++ Outlet visitor).
 			if (ctx.chans[n] == w) {
-				"*(%^*)p->out%^ = %^" fmt(_simdType(t, w), sn, val)
+				"*(%^*)out%^ = %^" fmt(_simdType(t, w), sn, val)
 			} else {
-				"*(%^*)&p->out%^[%^] = %^" fmt(_simdType(t, w), sn, cel, val)
+				"*(%^*)&out%^[%^] = %^" fmt(_simdType(t, w), sn, cel, val)
 			}
 		} else {
-			"p->out%^%^ = %^"
+			"out%^%^ = %^"
 				fmt(sn, (ctx.chans[n] > 1 ? "[%^]" fmt(cel) : "[0]"),
 				    genExpr(ctx, ctx.ins[n][0], cel))
 		}
@@ -1933,7 +1938,7 @@ fn _flatSimdVarWrapIdx(cel String, j Int, shift Int, chans Int) String {
 -- A voice's notes column: element (voice, col) of the gathered `notes` input
 -- {maxVoices, cols}.
 fn _np(vi String, col String) String =
-	"p->in%^[(%^) * %^ + %^]" fmt(`cgNotesSn, vi, `cgNotesCols, col);
+	"in%^[(%^) * %^ + %^]" fmt(`cgNotesSn, vi, `cgNotesCols, col);
 
 -- NoteParam in flat-voice SIMD: a per-lane gather of the voice's column(s).
 -- A 1-chan param whose lanes all fall in one voice splats. The column is the
@@ -2141,7 +2146,7 @@ fn genLoop(ctx Ctx, loopIdx Int) String {
 		let mv = ctx _voicerMaxVoices(ctx _voicerNodes[0]);
 		var s2 = _tabs(`cgIndent) $ "for (int v = 0; v < %^; ++v) {\n" fmt(mv);
 		var `cgIndent Int = `cgIndent + 1;
-		s2 = s2 $ _tabs(`cgIndent) $ "f32* vparams = &p->in%^[v * %^];\n" fmt(`cgNotesSn, `cgNotesCols);
+		s2 = s2 $ _tabs(`cgIndent) $ "f32* vparams = &in%^[v * %^];\n" fmt(`cgNotesSn, `cgNotesCols);
 		s2 = s2 $ _tabs(`cgIndent) $ "auto& vs = p->voice_state[v];\n";
 		var `cgInVoiceLoop Bool = true;
 		var `cgVoiceIdx String = "v";
@@ -2176,7 +2181,7 @@ fn genLoop(ctx Ctx, loopIdx Int) String {
 		var decls = "";
 		for (t : loop.trees) {
 			let root = ctx.trees[t].root;
-			if (ctx.cut[root] isTempVarCut && !_consumedInLoop(ctx, t)) {
+			if (ctx.cut[root] isTempVarCut && !_consumedInLoop(ctx, t) && !(ctx _isBlockTemp(root))) {
 				let shp = flat ? "[%^]" fmt(`cgVoiceCount * ctx.chans[root]) : _shape(ctx.chans[root]);
 				decls = decls $ "\t%^ %^%^;\n" fmt(cppType(ctx.typ[root]), _varName(ctx, root), shp);
 			}
@@ -2370,13 +2375,13 @@ fn genDeclInstVars(ctx Ctx) String {
 			let root = ctx.trees[t].root;
 			let isInletOutlet = match (ctx.kind[root]) { inletK(_, _, _): true; outletK(_, _): true; _: false; };
 			let inVoice = ctx _isVoiceGraphDeep(ctx.graphOf[root]);
-			if (ctx _isInstVar(root) && !isInletOutlet && !inVoice) {
+			if (ctx _isInstVar(root) && !isInletOutlet && !inVoice && !(ctx _isRootBuf(root))) {
 				s = s $ "\t%^ %^%^;\n" fmt(cppType(ctx.typ[root]), _varDeclName(ctx, root), _shape(ctx.chans[root]));
 			}
 		}
 	}
 	if (s length > 0) { s = "\t// instance variables\n" $ s $ "\n"; }
-	s = genPortDecls(ctx) $ s;
+	s = genPortDecls(ctx) $ s $ ctx genBlockBufDecls;
 	s = s $ genVoicerDecls(ctx);
 	s = s $ genSpectralDecls(ctx);
 	s = s $ genDelayDecls(ctx);
@@ -2559,13 +2564,58 @@ fn genBankSlotDeclsScalar(ctx Ctx) String {
 ---------------------------------------------------------------------------
 -- Lifecycle functions
 
-fn genAllocFun(ctx Ctx, name String) String =
-	"%^* %^_alloc(int32_t) {\n\t%^* p = (%^*)calloc(1, sizeof(%^));\n\tp->funs = %^_funs;\n\treturn p;\n}\n\n"
+fn genAllocFun(ctx Ctx, name String) String {
+	var s = "%^* %^_alloc(int32_t maxBlock) {\n\t%^* p = (%^*)calloc(1, sizeof(%^));\n\tp->funs = %^_funs;\n"
 		fmt(name, name, name, name, name, name);
+	s = s $ "\tif (maxBlock < 1) maxBlock = 1;\n";
+	let bufs = ctx _blockBuffers;
+	var k = 0;
+	while (k < bufs.names length) {
+		s = s $ "\tp->%^ = (%^*)calloc((size_t)maxBlock * %^, sizeof(%^));\n"
+			fmt(bufs.names[k], bufs.types[k], bufs.elems[k], bufs.types[k]);
+		k = k + 1;
+	}
+	s $ "\treturn p;\n}\n\n"
+}
 
-fn genFreeFun(ctx Ctx, name String) String =
-	"tzpl_SErr %^_free(%^* p) {\n\ttzpl_SErr %^_uninit(%^* p);\n\t%^_uninit(p);\n\tfree(p);\n\treturn tzpl_errNone;\n}\n\n"
+-- Every block buffer: member names, element types, row elements (parallel
+-- arrays; an array of tuples here tripped a VM GC bug).
+struct BlockBufs {
+	names [String],
+	types [String],
+	elems [Int],
+}
+
+fn _addBuf(b BlockBufs, name String, ty String, e Int) Void {
+	b.names push!(name);
+	b.types push!(ty);
+	b.elems push!(e);
+}
+
+fn _blockBuffers(ctx Ctx) BlockBufs {
+	let out = BlockBufs { names: [String](), types: [String](), elems: [Int]() };
+	-- One-channel ports are read and written in place (planar is interleaved).
+	for (x : ctx.inlets) {
+		match (ctx.kind[x]) { inletK(_, sn, _): { if (ctx.chans[x] > 1) { out _addBuf("bin%^" fmt(sn), cppType(ctx.typ[x]), ctx _portElems(x)); } } _: {} }
+	}
+	for (x : ctx.outlets) {
+		match (ctx.kind[x]) { outletK(_, sn): { if (ctx.chans[x] > 1) { out _addBuf("bout%^" fmt(sn), cppType(ctx.typ[x]), ctx _portElems(x)); } } _: {} }
+	}
+	for (x : `cgRootBuf) { out _addBuf("bk%^" fmt(ctx.serial[x]), cppType(ctx.typ[x]), ctx _rowElems(x)); }
+	for (x : `cgBlockTemps) { out _addBuf("bt%^" fmt(ctx.serial[x]), cppType(ctx.typ[x]), ctx _rowElems(x)); }
+	for (k : ctx.blockCycles) {
+		let ty = ctx _blockCycleType(k);
+		for (part : ["x", "a", "b", "w"]) { out _addBuf("rc%^_%^" fmt(k, part), ty, 1); }
+	}
+	out
+}
+
+fn genFreeFun(ctx Ctx, name String) String {
+	var s = "tzpl_SErr %^_free(%^* p) {\n\ttzpl_SErr %^_uninit(%^* p);\n\t%^_uninit(p);\n"
 		fmt(name, name, name, name, name);
+	for (nm : (ctx _blockBuffers).names) { s = s $ "\tfree(p->%^);\n" fmt(nm); }
+	s $ "\tfree(p);\n\treturn tzpl_errNone;\n}\n\n"
+}
 
 fn genInitConstants(ctx Ctx) String {
 	var s = "";
@@ -2633,7 +2683,7 @@ fn _genAoSInitVoiceBlock(ctx Ctx) String {
 	let mv = ctx _voicerMaxVoices(ctx _voicerNodes[0]);
 	var s = "\tfor (int v = 0; v < %^; ++v) {\n" fmt(mv);
 	var `cgIndent Int = 2;
-	s = s $ _tabs(`cgIndent) $ "f32* vparams = &p->in%^[v * %^];\n" fmt(`cgNotesSn, `cgNotesCols);
+	s = s $ _tabs(`cgIndent) $ "f32* vparams = &in%^[v * %^];\n" fmt(`cgNotesSn, `cgNotesCols);
 	s = s $ _tabs(`cgIndent) $ "auto& vs = p->voice_state[v];\n";
 	var `cgInVoiceLoop Bool = true;
 	var `cgVoiceIdx String = "v";
@@ -2652,7 +2702,7 @@ fn _genAoSResetVoiceBlock(ctx Ctx) String {
 	let mv = ctx _voicerMaxVoices(ctx _voicerNodes[0]);
 	var s = "\tfor (int v = 0; v < %^; ++v) {\n" fmt(mv);
 	var `cgIndent Int = 2;
-	s = s $ _tabs(`cgIndent) $ "f32* vparams = &p->in%^[v * %^];\n" fmt(`cgNotesSn, `cgNotesCols);
+	s = s $ _tabs(`cgIndent) $ "f32* vparams = &in%^[v * %^];\n" fmt(`cgNotesSn, `cgNotesCols);
 	s = s $ _tabs(`cgIndent) $ "auto& vs = p->voice_state[v];\n";
 	var `cgInVoiceLoop Bool = true;
 	var `cgVoiceIdx String = "v";
@@ -2887,6 +2937,17 @@ fn genVoiceDelayAlloc(ctx Ctx) String {
 
 fn genInitFun(ctx Ctx, name String) String {
 	var s = "tzpl_SErr %^_init(%^* p) {\n\tf64 fs = p->fs;\n\tp->sd = 1./fs;\n" fmt(name, name);
+	-- Init code that names an input port (an AoS voice row) sees row 0.
+	for (x : ctx.inlets) {
+		match (ctx.kind[x]) {
+			inletK(_, sn, _): {
+				let ty = cppType(ctx.typ[x]);
+				if (ctx.chans[x] > 1) { s = s $ "\t%^* in%^ = p->bin%^; (void)in%^;\n" fmt(ty, sn, sn, sn); }
+				else { s = s $ "\tstatic %^ z%^[1] = {}; %^* in%^ = z%^; (void)in%^;\n" fmt(ty, sn, ty, sn, sn, sn); }
+			}
+			_: {}
+		}
+	}
 	s = s $ genInitConstants(ctx);
 	-- Synth-wide RNG seeds up front; per-voice RNGs are seeded next, BEFORE
 	-- the init loops, so per-voice init-rate draws (e.g. a voicer pink's
@@ -3004,7 +3065,17 @@ fn genVoicerNoteFuns(ctx Ctx, name String) String {
 	var s = "";
 	s = s $ "tzpl_SErr %^_resetVoice(%^* p, i32 vi, i32 off) {\n" fmt(name, name);
 	s = s $ "\tif (vi < 0 || vi >= %^) return tzpl_errNoteNotFound;\n" fmt(ctx _voicerMaxVoices(v));
-	s = s $ "\t%^_gather(p, off);\n" fmt(name);
+	s = s $ "\t%^_gather(p, off, 1);\n" fmt(name);
+	for (x : ctx.inlets) {
+		match (ctx.kind[x]) {
+			inletK(_, sn, _): {
+				let ty = cppType(ctx.typ[x]);
+				if (ctx.chans[x] > 1) { s = s $ "\t%^* in%^ = p->bin%^ + off * %^;\n" fmt(ty, sn, sn, ctx _portElems(x)); }
+				else { s = s $ "\t%^* in%^ = (%^*)p->ins[%^].chans[0] + off;\n" fmt(ty, sn, ty, sn); }
+			}
+			_: {}
+		}
+	}
 	-- The voice's parameter-group values are recomputed for the new note.
 	if (ctx _pgActive) { s = s $ "\tp->pg_vforce[vi] = 1;\n"; }
 	if (!`cgFlatVoice) {
@@ -3221,7 +3292,7 @@ fn genVoicerNoteFuns(ctx Ctx, name String) String {
 	if (hasReset && !`cgFlatVoice) {
 		-- AoS: bind the new voice's row and state, then run the loops as
 		-- plain per-voice code (mirrors the C++ AoS reset-loop emission).
-		s = s $ "\tf32* vparams = &p->in%^[vi * %^];\n" fmt(`cgNotesSn, `cgNotesCols);
+		s = s $ "\tf32* vparams = &in%^[vi * %^];\n" fmt(`cgNotesSn, `cgNotesCols);
 		s = s $ "\tauto& vs = p->voice_state[vi];\n";
 		var `cgInResetMode Bool = true;
 		var `cgInVoiceLoop Bool = true;
@@ -3395,43 +3466,63 @@ fn genDelayAdvance(ctx Ctx, graph Int) String {
 -- padded to whole SIMD vectors.
 fn _portElems(ctx Ctx, n NIdx) Int {
 	let c = ctx.chans[n] max(1);
-	(c + 3) // 4 * 4
+	c == 1 ? 1 : (c + 3) // 4 * 4
 }
 
 fn genPortDecls(ctx Ctx) String {
 	var s = "";
 	for (n : ctx.inlets) {
 		match (ctx.kind[n]) {
-			inletK(_, sn, _): { s = s $ "\talignas(16) %^ in%^[%^];\n" fmt(cppType(ctx.typ[n]), sn, ctx _portElems(n)); }
+			inletK(_, sn, _): { if (ctx.chans[n] > 1) { s = s $ "\t%^* bin%^;\n" fmt(cppType(ctx.typ[n]), sn); } }
 			_: {}
 		}
 	}
 	for (n : ctx.outlets) {
 		match (ctx.kind[n]) {
-			outletK(_, sn): { s = s $ "\talignas(16) %^ out%^[%^];\n" fmt(cppType(ctx.typ[n]), sn, ctx _portElems(n)); }
+			outletK(_, sn): { if (ctx.chans[n] > 1) { s = s $ "\t%^* bout%^;\n" fmt(cppType(ctx.typ[n]), sn); } }
 			_: {}
 		}
 	}
-	if (s length > 0) { s = "\t// port values of the current sample\n" $ s $ "\n"; }
+	if (s length > 0) { s = "\t// ports: block buffers (maxBlock rows, interleaved)\n" $ s $ "\n"; }
 	s
 }
 
--- gather(p, i): input ports' channels at block index i into p->in<k>.
+-- gather(p, from, count): input ports' planar channels into the interleaved
+-- block buffers, rows [from, from + count); scatter: the reverse for outputs.
 fn genGatherFun(ctx Ctx, name String) String {
-	var s = "static inline void %^_gather(%^* p, i32 i) {\n" fmt(name, name);
+	var s = "static inline void %^_gather(%^* p, i32 from, i32 count) {\n" fmt(name, name);
 	for (n : ctx.inlets) {
 		match (ctx.kind[n]) {
 			inletK(_, sn, _): {
-				let t = cppType(ctx.typ[n]);
-				s = s $ "\tfor (int c = 0; c < %^; ++c) p->in%^[c] = ((const %^*)p->ins[%^].chans[c])[i];\n"
-					fmt(ctx.chans[n], sn, t, sn);
+				if (ctx.chans[n] > 1) {
+					let t = cppType(ctx.typ[n]);
+					let e = ctx _portElems(n);
+					s = s $ "\tfor (int c = 0; c < %^; ++c) {\n" fmt(ctx.chans[n]);
+					s = s $ "\t\tconst %^* src = (const %^*)p->ins[%^].chans[c];\n" fmt(t, t, sn);
+					s = s $ "\t\tfor (i32 i = from; i < from + count; ++i) p->bin%^[i * %^ + c] = src[i];\n\t}\n" fmt(sn, e);
+				}
+			}
+			_: {}
+		}
+	}
+	s = s $ "}\n\n";
+	s = s $ "static inline void %^_scatter(%^* p, i32 from, i32 count) {\n" fmt(name, name);
+	for (n : ctx.outlets) {
+		match (ctx.kind[n]) {
+			outletK(_, sn): {
+				if (ctx.chans[n] > 1) {
+					let t = cppType(ctx.typ[n]);
+					let e = ctx _portElems(n);
+					s = s $ "\tfor (int c = 0; c < %^; ++c) {\n" fmt(ctx.chans[n]);
+					s = s $ "\t\t%^* dst = (%^*)p->outs[%^].chans[c];\n" fmt(t, t, sn);
+					s = s $ "\t\tfor (i32 i = from; i < from + count; ++i) dst[i] = p->bout%^[i * %^ + c];\n\t}\n" fmt(sn, e);
+				}
 			}
 			_: {}
 		}
 	}
 	s $ "}\n\n"
 }
-
 
 ---------------------------------------------------------------------------
 -- Parameter groups (block-engine M6, plan 4.5). Block-placed loops hold one
@@ -3513,14 +3604,43 @@ fn genParamGroupInit(ctx Ctx) String {
 -- per-channel array) and refresh the cache.
 fn _pgClassify(ctx Ctx, sn Int, chans Int, perChan Bool) String {
 	var s = "";
-	if (perChan) { s = s $ "\tu8 pgd%^[%^];\n" fmt(sn, chans); } else { s = s $ "\tu8 pgd%^ = 0;\n" fmt(sn); }
+	if (perChan) { s = s $ "\tu8 pgd%^[%^];\n\tu8 pgd%^_any = 0;\n" fmt(sn, chans, sn); } else { s = s $ "\tu8 pgd%^ = 0;\n" fmt(sn); }
 	s = s $ "\tfor (int c = 0; c < %^; ++c) {\n" fmt(chans);
 	s = s $ "\t\tbool k = p->ins[%^].isConst[c];\n" fmt(sn);
 	s = s $ "\t\tu32 v = p->ins[%^].version[c];\n" fmt(sn);
 	s = s $ "\t\tu8 d = !k ? 2 : (v != p->pgv%^[c] ? 1 : 0);\n" fmt(sn);
-	if (perChan) { s = s $ "\t\tpgd%^[c] = d;\n" fmt(sn); } else { s = s $ "\t\tif (d > pgd%^) pgd%^ = d;\n" fmt(sn, sn); }
+	if (perChan) { s = s $ "\t\tpgd%^[c] = d;\n\t\tif (d > pgd%^_any) pgd%^_any = d;\n" fmt(sn, sn, sn); } else { s = s $ "\t\tif (d > pgd%^) pgd%^ = d;\n" fmt(sn, sn); }
 	s = s $ "\t\tp->pgv%^[c] = k ? v : 0xffffffffu;\n" fmt(sn);
 	s $ "\t}\n"
+}
+
+-- Input transposition at the top of process. A multichannel input read only
+-- by parameter groups (the `notes` matrix, a control tensor) is gathered
+-- only when some channel changed.
+fn _genProcessGather(ctx Ctx) String {
+	var s = "";
+	for (x : ctx.inlets) {
+		match (ctx.kind[x]) {
+			inletK(_, sn, _): {
+				if (ctx.chans[x] > 1) {
+					var blockOnly = ctx _pgActive;
+					for (c : ctx.consumers[x]) { if (ctx.nrate[c] != Rate.block) { blockOnly = false; } }
+					let watched = (ctx _pgInputs) contains(sn) || (sn == ctx _pgNotesSn && ctx _pgUsesNotes);
+					let t = cppType(ctx.typ[x]);
+					let e = ctx _portElems(x);
+					var cond = "";
+					if (blockOnly && watched) {
+						cond = sn == ctx _pgNotesSn ? "if (p->pg_first || pgd%^_any) " fmt(sn) : "if (p->pg_first || pgd%^) " fmt(sn);
+					}
+					s = s $ "\t%^for (int c = 0; c < %^; ++c) {\n" fmt(cond, ctx.chans[x]);
+					s = s $ "\t\tconst %^* src = (const %^*)p->ins[%^].chans[c];\n" fmt(t, t, sn);
+					s = s $ "\t\tfor (i32 i = off; i < off + n; ++i) p->bin%^[i * %^ + c] = src[i];\n\t}\n" fmt(sn, e);
+				}
+			}
+			_: {}
+		}
+	}
+	s
 }
 
 -- The top of process: classify the sources, then each group's mode.
@@ -3582,11 +3702,14 @@ fn _pgLoopCode(ctx Ctx, li Int) String {
 
 fn _guardedRootLoop(ctx Ctx, li Int) String {
 	let g = ctx.loops[li].group;
-	let head = _tabs(`cgIndent) $ "if %^ {\n" fmt(_pgDue("pg%^" fmt(g)));
-	var `cgIndent Int = `cgIndent + 1;
+	var `cgIndent Int = 2;
 	let code = ctx _pgLoopCode(li);
 	if (code length == 0) { return ""; }
-	head $ code $ _tabs(`cgIndent - 1) $ "}\n"
+	let rl = ctx _rowLocalsFor("bi", code);
+	"\tif (pg%^ == 2) {\n" fmt(g) $ rl.bases $ "\t\tfor (i32 bi = off; bi < off + n; ++bi) {\n"
+		$ rl.rows $ code
+		$ "\t\t}\n\t} else if (pg%^ == 1) {\n\t\ti32 bi = off;\n" fmt(g)
+		$ rl.bases $ rl.rows $ code $ "\t}\n"
 }
 
 -- A flat voice body's block loops: per voice, for the voices whose group is
@@ -3610,28 +3733,441 @@ fn _guardedVoiceLoop(ctx Ctx, li Int) String {
 		$ code $ _tabs(`cgIndent - 1) $ "}\n"
 }
 
--- process(p, off, n): the per-sample body once per sample of [off, off+n).
-fn genTickFun(ctx Ctx, name String) String {
-	var s = "void %^_process(%^* p, i32 off, i32 n) {\n" fmt(name, name);
-	s = s $ ctx genParamGroupModes;
-	s = s $ "\tfor (i32 bi = off; bi < off + n; ++bi) {\n";
-	s = s $ "\t%^_gather(p, bi);\n" fmt(name);
-	-- Root graph's block loops (parameter groups), then its audio loops;
-	-- subgraph loops are emitted inside their control-flow blocks.
-	s = s $ ctx genRootBlockLoops;
-	s = s $ genLoops(ctx, ctx.graphs[0].audioLoops);
-	s = s $ genDelayAdvance(ctx, 0);
-	for (n : ctx.outlets) {
-		match (ctx.kind[n]) {
-			outletK(_, sn): {
-				let t = cppType(ctx.typ[n]);
-				s = s $ "\tfor (int c = 0; c < %^; ++c) ((%^*)p->outs[%^].chans[c])[bi] = p->out%^[c];\n"
-					fmt(ctx.chans[n], t, sn, sn);
+---------------------------------------------------------------------------
+-- Block layout (block-engine M7). process() runs each root-graph loop over
+-- the block's samples in turn. Loops that share a delay (its writer and
+-- readers, and with them every feedback cycle) form one region that runs
+-- sample by sample, so delay code is unchanged; every other loop is a region
+-- of its own. A temp consumed in a later region becomes a block buffer
+-- (bt<serial>, maxBlock rows of its channels, interleaved), and so does a
+-- root-graph instance value at block or audio rate (bk<serial>): a
+-- parameter group's value is read at row bi * stride, stride 1 while the
+-- group runs every sample, 0 when it is cached or computed once. Ports are
+-- interleaved block buffers too (bin/bout), gathered and scattered once per
+-- call; p->in<k> / p->out<k> point at the current row.
+
+fn _graphOwnerOf(ctx Ctx, g Int) NIdx {
+	for (x : ctx.sorted) {
+		for (sub : ctx.subs[x]) { if (ctx.graphOf[sub] == g) { return x; } }
+	}
+	NONE
+}
+
+-- The root-graph audio loop holding node x (through any enclosing
+-- control-flow or voicer node), or NONE.
+fn _rootLoopOfNode(ctx Ctx, x NIdx) Int {
+	var cur = x;
+	while (cur != NONE && ctx.graphOf[cur] != 0) { cur = ctx _graphOwnerOf(ctx.graphOf[cur]); }
+	if (cur == NONE) { return NONE; }
+	let t = ctx.treeOf[cur];
+	t == NONE ? NONE : ctx.trees[t].loopOf
+}
+
+fn _delayMembers(ctx Ctx, d DelayInfo) [NIdx] {
+	var out [NIdx] = [];
+	for (r : d.fixReaders) { out push!(r); }
+	for (r : d.varReaders) { out push!(r); }
+	if (d.writer != NONE) { out push!(d.writer); }
+	out
+}
+
+-- The root regions: runs of root audio loops, as lists of loop indices.
+fn rootRegions(ctx Ctx) [[Int]] {
+	let loops = ctx.graphs[0].audioLoops;
+	let m = loops length;
+	var hi [Int] = [];
+	var i = 0;
+	while (i < m) { hi push!(i); i = i + 1; }
+	-- Every delay, wherever its writer lives: one written inside a branch
+	-- and read in a root loop still ties those loops together.
+	for (d : ctx.delays) {
+		var lo = m;
+		var top = -1;
+		for (x : ctx _delayMembers(d)) {
+			let li = ctx _rootLoopOfNode(x);
+			let pos = _posOf(loops, li);
+			if (pos >= 0) { lo = min(lo, pos); top = max(top, pos); }
+		}
+		if (top > lo) { hi[lo] = max(hi[lo], top); }
+	}
+	-- Other state shared between loops: a graph's random generator (its
+	-- draw order is sample order), and a buffer that is written.
+	var rngLoops [Int] = [];
+	var bufLoops [[Int]] = [];
+	var bufWritten [Bool] = [];
+	for (x : ctx.sorted) {
+		let li = ctx _rootLoopOfNode(x);
+		let pos = li == NONE ? -1 : _posOf(loops, li);
+		if (pos < 0) { continue; }
+		match (ctx.kind[x]) {
+			urandK(_): { rngLoops push!(pos); }
+			birandK(_): { rngLoops push!(pos); }
+			rand64K(_): { rngLoops push!(pos); }
+			bufWriteK(b, _, _): { _noteBufLoop(bufLoops, bufWritten, b, pos, true); }
+			bufFixReadK(b, _, _, _): { _noteBufLoop(bufLoops, bufWritten, b, pos, false); }
+			bufVarReadK(b, _, _, _): { _noteBufLoop(bufLoops, bufWritten, b, pos, false); }
+			_: {}
+		}
+	}
+	_spanAll(hi, rngLoops);
+	var bix = 0;
+	while (bix < bufLoops length) {
+		if (bufWritten[bix]) { _spanAll(hi, bufLoops[bix]); }
+		bix = bix + 1;
+	}
+	var regions [[Int]] = [];
+	i = 0;
+	while (i < m) {
+		var end = hi[i];
+		var j = i;
+		while (j <= end) { end = max(end, hi[j]); j = j + 1; }
+		var r [Int] = [];
+		j = i;
+		while (j <= end) { r push!(loops[j]); j = j + 1; }
+		regions push!(r);
+		i = end + 1;
+	}
+	regions
+}
+
+-- Join the loops at positions `ps` into one span.
+fn _spanAll(hi [Int], ps [Int]) Void {
+	if (ps length < 2) { return; }
+	var lo = ps[0];
+	var top = ps[0];
+	for (q : ps) { lo = min(lo, q); top = max(top, q); }
+	hi[lo] = max(hi[lo], top);
+}
+
+fn _noteBufLoop(bufLoops [[Int]], written [Bool], b Int, pos Int, isWrite Bool) Void {
+	while (bufLoops length <= b) { bufLoops push!([Int]()); written push!(false); }
+	bufLoops[b] push!(pos);
+	if (isWrite) { written[b] = true; }
+}
+
+fn _posOf(xs [Int], x Int) Int {
+	var k = 0;
+	while (k < xs length) { if (xs[k] == x) { return k; } k = k + 1; }
+	-1
+}
+
+fn _regionOfLoop(regions [[Int]], li Int) Int {
+	var k = 0;
+	while (k < regions length) {
+		if (regions[k] contains(li)) { return k; }
+		k = k + 1;
+	}
+	NONE
+}
+
+fn _isPortKind(k NodeKind) Bool = match (k) { inletK(_, _, _): true; outletK(_, _): true; _: false; };
+
+-- Root-graph instance values at block or audio rate: block-buffered.
+fn rootBufNodes(ctx Ctx) [NIdx] {
+	var out [NIdx] = [];
+	for (lp : ctx.loops) {
+		for (t : lp.trees) {
+			let x = ctx.trees[t].root;
+			if (ctx.graphOf[x] == 0 && ctx _isInstVar(x) && !(ctx.kind[x] _isPortKind)
+				&& (ctx.nrate[x] == Rate.block || ctx.nrate[x] == Rate.audio)
+				&& !(out contains(x))) {
+				out push!(x);
+			}
+		}
+	}
+	out
+}
+
+-- Root temps consumed in a later region: block-buffered.
+fn blockTempNodes(ctx Ctx) [NIdx] {
+	let regions = ctx rootRegions;
+	var out [NIdx] = [];
+	for (li : ctx.graphs[0].audioLoops) {
+		let own = _regionOfLoop(regions, li);
+		for (t : ctx.loops[li].trees) {
+			let x = ctx.trees[t].root;
+			if (!(ctx.cut[x] isTempVarCut) || ctx.graphOf[x] != 0) { continue; }
+			var cross = false;
+			for (c : ctx.consumers[x]) {
+				let cl = ctx _rootLoopOfNode(c);
+				if (cl != NONE && _regionOfLoop(regions, cl) != own) { cross = true; }
+			}
+			if (cross) { out push!(x); }
+		}
+	}
+	out
+}
+
+fn _isBlockTemp(ctx Ctx, x NIdx) Bool = `cgBlockTemps contains(x);
+fn _isRootBuf(ctx Ctx, x NIdx) Bool = `cgRootBuf contains(x);
+
+-- Elements per buffer row: the channels, padded to whole SIMD vectors.
+fn _rowElems(ctx Ctx, x NIdx) Int {
+	let c = ctx.chans[x] max(1);
+	c == 1 ? 1 : (c + 3) // 4 * 4
+}
+
+fn genBlockBufDecls(ctx Ctx) String {
+	var s = "";
+	for (k : ctx.blockCycles) {
+		let ty = ctx _blockCycleType(k);
+		for (part : ["x", "a", "b", "w"]) { s = s $ "\t%^* rc%^_%^;\n" fmt(ty, k, part); }
+	}
+	for (x : `cgRootBuf) { s = s $ "\t%^* bk%^;\n" fmt(cppType(ctx.typ[x]), ctx.serial[x]); }
+	for (x : `cgBlockTemps) { s = s $ "\t%^* bt%^;\n" fmt(cppType(ctx.typ[x]), ctx.serial[x]); }
+	s length > 0 ? "\t// block buffers (maxBlock rows)\n" $ s $ "\n" : ""
+}
+
+-- The per-row locals of one sample that `code` uses, and the hoisted bases
+-- they index: `__restrict` locals set before the sample loop, so the rows
+-- don't reload through `p` (which every state store may alias).
+struct RowLocals {
+	bases String,
+	rows String,
+}
+
+-- One row local: the name it defines, its base (type, initializer), and
+-- its definition from the base `r_<name>` at row `row`.
+struct RowEntry {
+	name String,
+	baseType String,
+	baseInit String,
+	rowDef String,
+}
+
+fn _rowEntries(ctx Ctx, row String) [RowEntry] {
+	var out [RowEntry] = [];
+	for (x : ctx.inlets) {
+		match (ctx.kind[x]) {
+			inletK(_, sn, _): {
+				let ty = cppType(ctx.typ[x]);
+				let nm = "in%^" fmt(sn);
+				let init = ctx.chans[x] == 1 ? "(%^*)p->ins[%^].chans[0]" fmt(ty, sn) : "p->bin%^" fmt(sn);
+				out push!(RowEntry { name: nm, baseType: ty, baseInit: init,
+				                     rowDef: "%^* %^ = r_%^ + (%^) * %^;" fmt(ty, nm, nm, row, ctx _portElems(x)) });
 			}
 			_: {}
 		}
 	}
-	s = s $ "\t}\n";
+	for (x : ctx.outlets) {
+		match (ctx.kind[x]) {
+			outletK(_, sn): {
+				let ty = cppType(ctx.typ[x]);
+				let nm = "out%^" fmt(sn);
+				let init = ctx.chans[x] == 1 ? "(%^*)p->outs[%^].chans[0]" fmt(ty, sn) : "p->bout%^" fmt(sn);
+				out push!(RowEntry { name: nm, baseType: ty, baseInit: init,
+				                     rowDef: "%^* %^ = r_%^ + (%^) * %^;" fmt(ty, nm, nm, row, ctx _portElems(x)) });
+			}
+			_: {}
+		}
+	}
+	for (x : `cgRootBuf) {
+		let ty = cppType(ctx.typ[x]);
+		let nm = "bv%^" fmt(ctx.serial[x]);
+		let stride = ctx.nrate[x] == Rate.block ? "pgS%^" fmt(ctx.groupOf[x]) : "1";
+		let def = ctx.chans[x] == 1
+			? "%^& %^ = r_%^[(%^) * %^];" fmt(ty, nm, nm, row, stride)
+			: "%^* %^ = r_%^ + (%^) * %^ * %^;" fmt(ty, nm, nm, row, stride, ctx _rowElems(x));
+		out push!(RowEntry { name: nm, baseType: ty, baseInit: "p->bk%^" fmt(ctx.serial[x]), rowDef: def });
+	}
+	for (x : `cgBlockTemps) {
+		let ty = cppType(ctx.typ[x]);
+		let nm = "v%^" fmt(ctx.serial[x]);
+		let def = ctx.chans[x] == 1
+			? "%^& %^ = r_%^[%^];" fmt(ty, nm, nm, row)
+			: "%^* %^ = r_%^ + (%^) * %^;" fmt(ty, nm, nm, row, ctx _rowElems(x));
+		out push!(RowEntry { name: nm, baseType: ty, baseInit: "p->bt%^" fmt(ctx.serial[x]), rowDef: def });
+	}
+	out
+}
+
+-- Does `code` use identifier `nm` (not just as a prefix of a longer one)?
+fn _usesName(code String, nm String) Bool {
+	for (tail : code split(nm) drop(1)) {
+		if (tail length == 0) { return true; }
+		let cp = tail codePoints head;
+		let ident = (cp >= 48 && cp <= 57) || (cp >= 65 && cp <= 90) || (cp >= 97 && cp <= 122) || cp == 95;
+		if (!ident) { return true; }
+	}
+	false
+}
+
+fn _rowLocalsFor(ctx Ctx, row String, code String) RowLocals {
+	var bases = "";
+	var rows = "";
+	for (e : ctx _rowEntries(row)) {
+		if (!(_usesName(code, e.name))) { continue; }
+		bases = bases $ "\t%^* __restrict r_%^ = %^;\n" fmt(e.baseType, e.name, e.baseInit);
+		rows = rows $ "\t\t" $ e.rowDef $ "\n";
+	}
+	RowLocals { bases: bases, rows: rows }
+}
+
+fn _advanceDelay(ctx Ctx, d DelayInfo) String =
+	d.allocSize != 1 ? _tabs(`cgIndent) $ "++p->d%^_wrpos;\n" fmt(d.serial) : "";
+
+---------------------------------------------------------------------------
+-- Block-form recurrences (block-engine M7, plan 4.7). A first-order cycle
+-- chosen by recurrence.x (selectBlockCycles) runs over the block in two
+-- passes around a library scan:
+--   pass 1  per sample: the scan input x (scans), or the affine map's a and
+--           b from the cycle's linear form (s' = a s + b), into rc<k>_x/_a/_b
+--   scan    tzpl::dsp::scanSumWrapBlock / scanSumBlock / scanAffineBlock:
+--           the written value of every sample, into rc<k>_w
+--   pass 2  per sample: the cycle's trees with the state read replaced by
+--           the previous written value, so values used outside the cycle
+--           are computed as before; the delay write is left out and the
+--           state is set from the scan's carry.
+
+fn _blockCycleType(ctx Ctx, k Int) String = cppType(ctx.typ[ctx.dsrc[ctx.cycles[k].readers[0]]]);
+
+-- The block cycle a region consists of, or NONE.
+fn _regionBlockCycle(ctx Ctx, region [Int]) Int {
+	var k = NONE;
+	for (li : region) {
+		let g = ctx.loops[li].group;
+		if (g > -10) { return NONE; }
+		let kk = -10 - g;
+		if (k != NONE && kk != k) { return NONE; }
+		k = kk;
+	}
+	k
+}
+
+fn _mulS(a String, x String) String = a == "0" ? "0" : (a == "1" ? x : "(%^ * %^)" fmt(a, x));
+fn _divS(a String, x String) String = a == "0" ? "0" : "(%^ / %^)" fmt(a, x);
+fn _addS(a String, b String) String = a == "0" ? b : (b == "0" ? a : "(%^ + %^)" fmt(a, b));
+fn _subS(a String, b String) String = b == "0" ? a : (a == "0" ? "(-%^)" fmt(b) : "(%^ - %^)" fmt(a, b));
+fn _negS(a String) String = a == "0" ? "0" : "(-%^)" fmt(a);
+
+-- The affine map of cycle node n over the state read r: (a, b) with
+-- n = a * r + b, as C++ expressions.
+fn _linAB(ctx Ctx, cy CycleInfo, r NIdx, n NIdx) (String, String) {
+	if (n == r) { return ("1", "0"); }
+	if (!(cy.nodes contains(n))) {
+		-- a materialized value is read, not recomputed (it may draw random
+		-- numbers, or be shared)
+		let e = ctx _isRootNode(n) ? _varRef(ctx, n, "0") : genExpr(ctx, n, "0");
+		return ("0", "(%^)" fmt(e));
+	}
+	let ins = ctx.ins[n];
+	match (ctx.kind[n]) {
+		binopK(op): {
+			let (a1, b1) = _linAB(ctx, cy, r, ins[0]);
+			let (a2, b2) = _linAB(ctx, cy, r, ins[1]);
+			match (op) {
+				add: { return (_addS(a1, a2), _addS(b1, b2)); }
+				sub: { return (_subS(a1, a2), _subS(b1, b2)); }
+				mul: {
+					if (cy.nodes contains(ins[0])) { return (_mulS(a1, b2), _mulS(b1, b2)); }
+					return (_mulS(a2, b1), _mulS(b2, b1));
+				}
+				div: { return (_divS(a1, b2), _divS(b1, b2)); }
+				_: {}
+			}
+		}
+		unopK(op): {
+			let (a1, b1) = _linAB(ctx, cy, r, ins[0]);
+			match (op) { neg: { return (_negS(a1), _negS(b1)); } _: {} }
+		}
+		castopK(t): {
+			let (a1, b1) = _linAB(ctx, cy, r, ins[0]);
+			let ty = cppType(t);
+			return ("%^(%^)" fmt(ty, a1), "%^(%^)" fmt(ty, b1));
+		}
+		_: {}
+	}
+	("0", "0")   -- not reached: the cycle classified affine
+}
+
+fn _genBlockCycle(ctx Ctx, k Int, region [Int]) String {
+	let cy = ctx.cycles[k];
+	let r = cy.readers[0];
+	let d = match (ctx.kind[r]) { delayFixReadK(di, _): di; _: 0; };
+	let ser = ctx.delays[d].serial;
+	let v = ctx.dsrc[r];
+	let ty = ctx _blockCycleType(k);
+	let form = ctx blockFormOf(cy, (ctx classifyRecurrences)[k]);
+	var `cgIndent Int = 2;
+	var `cgRoot Int = NONE;    -- no tree is being emitted: every root is a reference
+	-- pass 1
+	var p1 = "";
+	var scanCall = "";
+	if (form == "scan+" || form == "scan+wrap") {
+		-- the accumulation r + x (under the wrap, a - floor(a))
+		let acc = form == "scan+" ? v : ctx.ins[v][0];
+		let x = ctx.ins[acc][0] == r ? ctx.ins[acc][1] : ctx.ins[acc][0];
+		p1 = "\t\tr_x[bi] = %^;\n" fmt(ctx _isRootNode(x) ? _varRef(ctx, x, "0") : genExpr(ctx, x, "0"));
+		let fun = form == "scan+" ? "scanSumBlock" : "scanSumWrapBlock";
+		scanCall = "\ttzpl::dsp::%^(r_x + off, r_w + off, n, s);\n" fmt(fun);
+	} else {
+		let (a, b) = _linAB(ctx, cy, r, v);
+		p1 = "\t\tr_a[bi] = %^;\n\t\tr_b[bi] = %^;\n" fmt(a, b);
+		scanCall = "\ttzpl::dsp::scanAffineBlock(r_a + off, 1, r_b + off, 1, r_w + off, n, s);\n";
+	}
+	let rl1 = ctx _rowLocalsFor("bi", p1);
+	-- pass 2
+	var `cgReaderSub Int = r;
+	var `cgReaderExpr String = "rv";
+	var `cgSuppressDelay Int = d;
+	let body = genLoops(ctx, region);
+	let rl2 = ctx _rowLocalsFor("bi", body);
+	var s = "\t{ // recurrence %^: block form (%^)\n" fmt(k, form);
+	s = s $ "\t%^* __restrict r_x = p->rc%^_x;\n\t%^* __restrict r_a = p->rc%^_a;\n" fmt(ty, k, ty, k);
+	s = s $ "\t%^* __restrict r_b = p->rc%^_b;\n\t%^* __restrict r_w = p->rc%^_w;\n" fmt(ty, k, ty, k);
+	s = s $ "\t{\n" $ rl1.bases $ "\tfor (i32 bi = off; bi < off + n; ++bi) {\n" $ rl1.rows $ p1 $ "\t}\n\t}\n";
+	s = s $ "\t%^ s = p->d%^;\n\t%^ s0 = s;\n" fmt(ty, ser, ty);
+	s = s $ scanCall;
+	s = s $ "\t{\n" $ rl2.bases $ "\tfor (i32 bi = off; bi < off + n; ++bi) {\n" $ rl2.rows;
+	s = s $ "\t\t%^ rv = bi == off ? s0 : r_w[bi - 1];\n" fmt(ty);
+	s = s $ body $ "\t}\n\t}\n";
+	s = s $ "\tp->d%^ = s;\n\t}\n" fmt(ser);
+	s
+}
+
+-- One region: its loops sample by sample, and the root delays it owns.
+fn _genRegion(ctx Ctx, region [Int], delays [DelayInfo]) String {
+	var `cgIndent Int = 2;
+	var body = genLoops(ctx, region);
+	for (d : delays) { body = body $ ctx _advanceDelay(d); }
+	if (body trim length == 0) { return ""; }
+	let rl = ctx _rowLocalsFor("bi", body);
+	"\t{\n" $ rl.bases $ "\tfor (i32 bi = off; bi < off + n; ++bi) {\n" $ rl.rows $ body $ "\t}\n\t}\n"
+}
+
+-- process(p, off, n): the root graph's loops, region by region, over the
+-- samples of [off, off+n) (block layout above).
+fn genTickFun(ctx Ctx, name String) String {
+	var s = "void %^_process(%^* p, i32 off, i32 n) {\n" fmt(name, name);
+	s = s $ ctx genParamGroupModes;
+	var g = 0;
+	while (ctx _pgActive && g < ctx.paramGroups length) {
+		if (!(_pgGroupIsVoiced(ctx, g))) { s = s $ "\ti32 pgS%^ = pg%^ == 2;\n" fmt(g, g); }
+		g = g + 1;
+	}
+	s = s $ ctx _genProcessGather;
+	-- Root graph's block loops (parameter groups), then its regions; subgraph
+	-- loops are emitted inside their control-flow blocks.
+	s = s $ ctx genRootBlockLoops;
+	let regions = ctx rootRegions;
+	var owned [[DelayInfo]] = [];
+	for (r : regions) { owned push!([DelayInfo]()); }
+	for (d : ctx.delays) {
+		if (ctx _delayGraph(d) != 0 || d.allocSize == 1) { continue; }
+		var k = regions length - 1;
+		for (x : ctx _delayMembers(d)) {
+			let li = ctx _rootLoopOfNode(x);
+			if (li != NONE) { let rk = _regionOfLoop(regions, li); if (rk != NONE) { k = rk; } }
+		}
+		if (k >= 0) { owned[k] push!(d); }
+	}
+	var ri = 0;
+	while (ri < regions length) {
+		let k = ctx _regionBlockCycle(regions[ri]);
+		s = s $ (k != NONE ? ctx _genBlockCycle(k, regions[ri]) : ctx _genRegion(regions[ri], owned[ri]));
+		ri = ri + 1;
+	}
+	s = s $ "\t%^_scatter(p, off, n);\n" fmt(name);
 	if (ctx _pgActive) {
 		s = s $ "\tp->pg_first = 0;\n";
 		if (ctx _pgVoices > 0) { s = s $ "\tmemset(p->pg_vforce, 0, sizeof(p->pg_vforce));\n"; }
@@ -4016,6 +4552,13 @@ fn genCpp(ctx Ctx, name String, simdWidth Int = 0) String {
 	}
 	var `cgDstShape Shape = scalarShape();
 	var `cgTables [String] = [];
+	var `cgRootBuf [Int] = [];
+	var `cgBlockTemps [Int] = [];
+	var `cgReaderSub Int = NONE;
+	var `cgReaderExpr String = "";
+	var `cgSuppressDelay Int = NONE;
+	`cgRootBuf = ctx rootBufNodes;
+	`cgBlockTemps = ctx blockTempNodes;
 	var `cgInVoiceLoop Bool = false;
 	var `cgVoiceIdx String = "v";
 
@@ -4025,6 +4568,7 @@ fn genCpp(ctx Ctx, name String, simdWidth Int = 0) String {
 	s = s $ "#include \"tzpl_random.hpp\"\n";
 	s = s $ "#include \"tzpl_delay_interp.hpp\"\n";
 	if (ctx _spectralChains length > 0) { s = s $ "#include \"tzpl_fft.hpp\"\n"; }
+	if (ctx.blockCycles length > 0) { s = s $ "#include \"tzpl_dsp/scan.hpp\"\n"; }
 	s = s $ "#include <cmath>\n#include <cstdio>\n#include <cstring>\n#include <cstdlib>\n#include <array>\n\n";
 	s = s $ "using namespace synthdef;\nusing namespace simd;\n";
 	s = s $ "\n";

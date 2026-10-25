@@ -81,7 +81,7 @@ GRAPH 0
 GROUP 0 sources [freq] nodes [0 2 3 11 6 13 14]
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [9 15] delays [9<-15:1]
-  CLASS scan(+) STRATEGY serial
+  CLASS scan(+) STRATEGY block (scan+)
 DELAY 0 f32 1
      8 f32 0 delay_init
      9 f32 1 delay_fix_read(1)
@@ -293,7 +293,7 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [9 12] delays [9<-12:1]
-  CLASS scan(+) STRATEGY serial
+  CLASS scan(+) STRATEGY block (scan+)
 DELAY 0 f32 1
      8 f32 0 delay_init
      9 f32 1 delay_fix_read(1)

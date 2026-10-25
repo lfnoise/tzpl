@@ -562,6 +562,33 @@ std::expected<void, string> ensureBuildDirs(string const& buildDir) {
         return std::unexpected(std::format(
             "cannot read plugin headers in '{}': {}", srcDir.string(), ec.message()));
     }
+    // The block runtime library (tzpl_dsp/: scans, block state space) is a
+    // subdirectory; generated code includes it as "tzpl_dsp/<name>.hpp".
+    fs::path dspSrc = srcDir / "tzpl_dsp";
+    if (fs::is_directory(dspSrc, ec)) {
+        string dspDst = dstDir + "tzpl_dsp/";
+        fs::create_directories(dspDst, ec);
+        if (ec) {
+            return std::unexpected(std::format(
+                "cannot create '{}': {}", dspDst, ec.message()));
+        }
+        fs::directory_iterator dit(dspSrc, ec);
+        for (; !ec && dit != fs::directory_iterator(); dit.increment(ec)) {
+            std::error_code entryEc;
+            if (!dit->is_regular_file(entryEc)) continue;
+            if (dit->path().extension().string() != ".hpp") continue;
+            string dst = dspDst + dit->path().filename().string();
+            fs::copy_file(dit->path(), dst, fs::copy_options::update_existing, ec);
+            if (ec) {
+                return std::unexpected(std::format(
+                    "cannot copy '{}' to '{}': {}", dit->path().string(), dst, ec.message()));
+            }
+        }
+        if (ec) {
+            return std::unexpected(std::format(
+                "cannot read '{}': {}", dspSrc.string(), ec.message()));
+        }
+    }
 
 #if !defined(__APPLE__) && defined(TZPL_SLEEF_INCLUDE_DIR) && defined(TZPL_SLEEF_LIB)
     // Stage Sleef next to the shared headers: generated code includes

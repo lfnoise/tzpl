@@ -1103,8 +1103,22 @@ fn _newLoop(ctx Ctx, rate Rate, chans Int, isCF Bool, graphOf Int, group Int = N
 
 -- The parameter group a tree's loop must belong to: a block tree's root's
 -- group (a block loop runs, or is skipped, as one group), else NONE.
-fn _treeGroup(ctx Ctx, root NIdx) Int =
-	(ctx.nrate[root] == Rate.block && ctx.groupOf length > root) ? ctx.groupOf[root] : NONE;
+fn _treeGroup(ctx Ctx, root NIdx) Int {
+	if (ctx.nrate[root] == Rate.block && ctx.groupOf length > root) { return ctx.groupOf[root]; }
+	-- A block-form cycle's trees (any tree holding one of its nodes, and its
+	-- delay writer) form loops of their own: key -(10 + cycle index).
+	for (k : ctx.blockCycles) {
+		let cy = ctx.cycles[k];
+		let t = ctx.treeOf[root];
+		for (x : cy.nodes) { if (ctx.treeOf[x] == t) { return -(10 + k); } }
+		let r = cy.readers[0];
+		match (ctx.kind[r]) {
+			delayFixReadK(d, _): { if (ctx.delays[d].writer == root) { return -(10 + k); } }
+			_: {}
+		}
+	}
+	NONE
+}
 
 fn _loopAddTree(ctx Ctx, li Int, treeIdx Int) Void {
 	ctx.loops[li].trees push!(treeIdx);
@@ -1293,6 +1307,8 @@ fn analyzeForCodegen(ctx Ctx) Ctx {
 	ctx findGraphCuts;
 	ctx blockValuesToInstVars;
 	ctx findParamGroups;
+	ctx findCycles;
+	ctx selectBlockCycles;
 	ctx cutGraphToTrees;
 	ctx removeDeadCode;
 	ctx inplaceDelayOps;

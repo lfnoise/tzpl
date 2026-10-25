@@ -566,7 +566,7 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [5 11 12 13] delays [5<-13:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 DELAY 0 f64 1
      4 f32 0 delay_init
      5 f64 1 delay_fix_read(1)
@@ -1199,7 +1199,7 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [5 11 12 13] delays [5<-13:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 DELAY 0 f64 1
      4 f32 0 delay_init
      5 f64 1 delay_fix_read(1)

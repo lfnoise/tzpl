@@ -83,7 +83,7 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 DELAY 0 f64 1
      1 f32 0 delay_init
      2 f64 1 delay_fix_read(1)
@@ -177,7 +177,7 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 DELAY 0 f64 1
      1 f32 0 delay_init
      2 f64 1 delay_fix_read(1)
@@ -376,7 +376,7 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 DELAY 0 f64 1
      1 f32 0 delay_init
      2 f64 1 delay_fix_read(1)
@@ -592,11 +592,11 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 CYCLE 1 weight 1 recurrence nodes [28 34 35 36] delays [28<-36:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 CYCLE 2 weight 1 recurrence nodes [71 76 77 78] delays [71<-78:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 DELAY 0 f64 1
      1 f32 0 delay_init
      2 f64 1 delay_fix_read(1)
@@ -867,7 +867,7 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 CYCLE 1 weight 1 recurrence nodes [28 34 35 36] delays [28<-36:1]
   CLASS scan(+wrap) STRATEGY serial
 CYCLE 2 weight 1 recurrence nodes [71 76 77 78] delays [71<-78:1]
@@ -1133,7 +1133,7 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
-  CLASS scan(+wrap) STRATEGY serial
+  CLASS scan(+wrap) STRATEGY block (scan+wrap)
 CYCLE 1 weight 1 recurrence nodes [40 46 47 48] delays [40<-48:1]
   CLASS scan(+wrap) STRATEGY serial
 CYCLE 2 weight 1 recurrence nodes [64 65 66 67] delays [64<-67:1]
