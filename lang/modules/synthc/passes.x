@@ -11,6 +11,7 @@ import synthdef.*;
 import synthc.ir.*;
 import synthc.cycles.*;
 import synthc.paramgroups.*;
+import synthc.recurrence.*;
 import synthc.types.*;
 
 ---------------------------------------------------------------------------
@@ -1307,6 +1308,7 @@ fn analyzeForCodegen(ctx Ctx) Ctx {
 fn analyze(ctx Ctx) Ctx {
 	ctx analyzeTrees;
 	ctx findCycles;
+	ctx annotateRecurrences;
 	ctx findParamGroups;
 	ctx treesToLoops;
 	ctx splitRates;

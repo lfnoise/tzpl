@@ -398,6 +398,8 @@ struct CycleInfo {
 	nodes [NIdx],          -- the component, in sorted order
 	readers [NIdx],        -- delay readers whose edge lies inside it
 	minWeight Int,         -- weight of its lightest cycle
+	cls String,            -- recurrence class (recurrence.x), "" until classified
+	strategy String,       -- how the code generator runs it, "" for vector cycles
 }
 
 -- A parameter group (paramgroups.x): block-placed nodes with one source set.
@@ -943,6 +945,9 @@ fn dumpToString(ctx Ctx) String {
 		let kind = cy.minWeight >= 4 ? "vector" : "recurrence";
 		out push!("CYCLE %^ weight %^ %^ nodes [%^] delays [%^]\n"
 			fmt(ci, cy.minWeight, kind, nodes join(" "), edges join(" ")));
+		if (cy.minWeight < 4 && cy.cls length > 0) {
+			out push!("  CLASS %^ STRATEGY %^\n" fmt(cy.cls, cy.strategy));
+		}
 		ci = ci + 1;
 	}
 	for (d : ctx.delays) {

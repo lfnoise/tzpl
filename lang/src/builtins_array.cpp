@@ -936,11 +936,21 @@ void builtin_repeat_obj(VM& vm, u16 dst, u16, u16 ab) {
             vm.reg(dst).o = arr;
             return;
         }
-        case ArrayBackend::Int:
-        case ArrayBackend::Float:
-            // _int/_float/_bool/_symbol resolve to dedicated implementations
-            // above; we never reach here for those.
-            break;
+        case ArrayBackend::Int: {
+            // Int/Bool/Symbol resolve to dedicated implementations above, but
+            // other 1-word non-pointer elements land here: a payload-free
+            // enum (DiscriminantEnum) or an atom-like type.
+            auto* arr = new PodArray<i64>(at);
+            arr->v.resize((size_t)n, src[0].i);
+            vm.reg(dst).o = arr;
+            return;
+        }
+        case ArrayBackend::Float: {
+            auto* arr = new PodArray<f64>(at);
+            arr->v.resize((size_t)n, src[0].f);
+            vm.reg(dst).o = arr;
+            return;
+        }
     }
 }
 

@@ -181,8 +181,11 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
+  CLASS scan(+wrap) STRATEGY serial
 CYCLE 1 weight 1 recurrence nodes [19 25 26 27] delays [19<-27:1]
+  CLASS scan(+wrap) STRATEGY serial
 CYCLE 2 weight 1 recurrence nodes [36 42 43 44] delays [36<-44:1]
+  CLASS scan(+wrap) STRATEGY serial
 DELAY 0 f64 1
      1 f32 0 delay_init
      2 f64 1 delay_fix_read(1)
@@ -379,8 +382,11 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
+  CLASS scan(+wrap) STRATEGY serial
 CYCLE 1 weight 1 recurrence nodes [19 25 26 27] delays [19<-27:1]
+  CLASS scan(+wrap) STRATEGY serial
 CYCLE 2 weight 1 recurrence nodes [36 42 43 44] delays [36<-44:1]
+  CLASS scan(+wrap) STRATEGY serial
 DELAY 0 f64 1
      1 f32 0 delay_init
      2 f64 1 delay_fix_read(1)
@@ -577,8 +583,11 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
+  CLASS scan(+wrap) STRATEGY serial
 CYCLE 1 weight 1 recurrence nodes [19 25 26 27] delays [19<-27:1]
+  CLASS scan(+wrap) STRATEGY serial
 CYCLE 2 weight 1 recurrence nodes [36 42 43 44] delays [36<-44:1]
+  CLASS scan(+wrap) STRATEGY serial
 DELAY 0 f64 1
      1 f32 0 delay_init
      2 f64 1 delay_fix_read(1)
@@ -792,8 +801,11 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
+  CLASS scan(+wrap) STRATEGY serial
 CYCLE 1 weight 1 recurrence nodes [19 25 26 27] delays [19<-27:1]
+  CLASS scan(+wrap) STRATEGY serial
 CYCLE 2 weight 1 recurrence nodes [36 42 43 44] delays [36<-44:1]
+  CLASS scan(+wrap) STRATEGY serial
 DELAY 0 f64 1
      1 f32 0 delay_init
      2 f64 1 delay_fix_read(1)
@@ -1007,8 +1019,11 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
+  CLASS scan(+wrap) STRATEGY serial
 CYCLE 1 weight 1 recurrence nodes [19 25 26 27] delays [19<-27:1]
+  CLASS scan(+wrap) STRATEGY serial
 CYCLE 2 weight 1 recurrence nodes [36 42 43 44] delays [36<-44:1]
+  CLASS scan(+wrap) STRATEGY serial
 DELAY 0 f64 1
      1 f32 0 delay_init
      2 f64 1 delay_fix_read(1)
@@ -1188,8 +1203,11 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
+  CLASS scan(+wrap) STRATEGY serial
 CYCLE 1 weight 1 recurrence nodes [19 25 26 27] delays [19<-27:1]
+  CLASS scan(+wrap) STRATEGY serial
 CYCLE 2 weight 1 recurrence nodes [36 42 43 44] delays [36<-44:1]
+  CLASS scan(+wrap) STRATEGY serial
 DELAY 0 f64 1
      1 f32 0 delay_init
      2 f64 1 delay_fix_read(1)
@@ -1369,8 +1387,11 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
+  CLASS scan(+wrap) STRATEGY serial
 CYCLE 1 weight 1 recurrence nodes [19 25 26 27] delays [19<-27:1]
+  CLASS scan(+wrap) STRATEGY serial
 CYCLE 2 weight 1 recurrence nodes [36 42 43 44] delays [36<-44:1]
+  CLASS scan(+wrap) STRATEGY serial
 DELAY 0 f64 1
      1 f32 0 delay_init
      2 f64 1 delay_fix_read(1)
@@ -1590,8 +1611,11 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
+  CLASS scan(+wrap) STRATEGY serial
 CYCLE 1 weight 1 recurrence nodes [19 25 26 27] delays [19<-27:1]
+  CLASS scan(+wrap) STRATEGY serial
 CYCLE 2 weight 1 recurrence nodes [36 42 43 44] delays [36<-44:1]
+  CLASS scan(+wrap) STRATEGY serial
 DELAY 0 f64 1
      1 f32 0 delay_init
      2 f64 1 delay_fix_read(1)
@@ -1798,8 +1822,11 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
+  CLASS scan(+wrap) STRATEGY serial
 CYCLE 1 weight 1 recurrence nodes [19 25 26 27] delays [19<-27:1]
+  CLASS scan(+wrap) STRATEGY serial
 CYCLE 2 weight 1 recurrence nodes [36 42 43 44] delays [36<-44:1]
+  CLASS scan(+wrap) STRATEGY serial
 DELAY 0 f64 1
      1 f32 0 delay_init
      2 f64 1 delay_fix_read(1)
@@ -2006,8 +2033,11 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
+  CLASS scan(+wrap) STRATEGY serial
 CYCLE 1 weight 1 recurrence nodes [19 25 26 27] delays [19<-27:1]
+  CLASS scan(+wrap) STRATEGY serial
 CYCLE 2 weight 1 recurrence nodes [36 42 43 44] delays [36<-44:1]
+  CLASS scan(+wrap) STRATEGY serial
 DELAY 0 f64 1
      1 f32 0 delay_init
      2 f64 1 delay_fix_read(1)
@@ -2211,8 +2241,11 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
+  CLASS scan(+wrap) STRATEGY serial
 CYCLE 1 weight 1 recurrence nodes [19 25 26 27] delays [19<-27:1]
+  CLASS scan(+wrap) STRATEGY serial
 CYCLE 2 weight 1 recurrence nodes [36 42 43 44] delays [36<-44:1]
+  CLASS scan(+wrap) STRATEGY serial
 DELAY 0 f64 1
      1 f32 0 delay_init
      2 f64 1 delay_fix_read(1)
@@ -2429,8 +2462,11 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
+  CLASS scan(+wrap) STRATEGY serial
 CYCLE 1 weight 1 recurrence nodes [19 25 26 27] delays [19<-27:1]
+  CLASS scan(+wrap) STRATEGY serial
 CYCLE 2 weight 1 recurrence nodes [36 42 43 44] delays [36<-44:1]
+  CLASS scan(+wrap) STRATEGY serial
 DELAY 0 f64 1
      1 f32 0 delay_init
      2 f64 1 delay_fix_read(1)
@@ -2562,7 +2598,9 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
+  CLASS scan(+wrap) STRATEGY serial
 CYCLE 1 weight 1 recurrence nodes [19 20 21 22 23] delays [19<-23:1]
+  CLASS general (nonlinear) at 22 floor STRATEGY serial
 DELAY 0 f64 1
      1 f32 0 delay_init
      2 f64 1 delay_fix_read(1)
@@ -2811,6 +2849,7 @@ GROUP 5 sources [lpa lpb] nodes [26 57 27 23 58 24 25 35]
 GROUP 6 sources [lpa lpb notes[1]] per-voice nodes [37]
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [21 22 30 31 38 39] delays [21<-39:1]
+  CLASS general (nonlinear) at 30 >= STRATEGY serial
 DELAY 0 f64 1
     21 f64 1 delay_fix_read(1)
     40 f64 1 delay_write

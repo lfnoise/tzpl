@@ -320,6 +320,7 @@ fn findCycles(ctx Ctx) Void {
 			for (x : comp) { serials push!(ctx.serial[x]); }
 			ctx.errors push!("zero-delay feedback cycle through %^" fmt(serials));
 		}
-		ctx.cycles push!(CycleInfo { nodes: comp, readers: readers, minWeight: minW });
+		ctx.cycles push!(CycleInfo { nodes: comp, readers: readers, minWeight: minW,
+		                             cls: "", strategy: "" });
 	}
 }

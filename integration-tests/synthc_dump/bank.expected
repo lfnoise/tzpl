@@ -262,6 +262,7 @@ GROUP 1 sources [notes[2]] per-voice nodes [1]
 GROUP 2 sources [notes[0]] per-voice nodes [2]
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [8 14 15 16] delays [8<-16:1]
+  CLASS scan(+wrap) STRATEGY serial
 DELAY 0 f64 1
      7 f32 0 delay_init
      8 f64 1 delay_fix_read(1)
@@ -452,6 +453,7 @@ GROUP 1 sources [notes[2]] per-voice nodes [1]
 GROUP 2 sources [notes[0]] per-voice nodes [2 24 26]
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [21 22 28 29 38 39] delays [21<-39:1]
+  CLASS general (nonlinear) at 28 >= STRATEGY serial
 DELAY 0 f64 1
     21 f64 1 delay_fix_read(1)
     40 f64 1 delay_write
@@ -564,6 +566,7 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [5 11 12 13] delays [5<-13:1]
+  CLASS scan(+wrap) STRATEGY serial
 DELAY 0 f64 1
      4 f32 0 delay_init
      5 f64 1 delay_fix_read(1)
@@ -892,6 +895,7 @@ GROUP 1 sources [notes[2]] per-voice nodes [1]
 GROUP 2 sources [notes[0]] per-voice nodes [2]
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [8 14 15 16] delays [8<-16:1]
+  CLASS scan(+wrap) STRATEGY serial
 DELAY 0 f64 1
      7 f32 0 delay_init
      8 f64 1 delay_fix_read(1)
@@ -1082,6 +1086,7 @@ GROUP 1 sources [notes[2]] per-voice nodes [1]
 GROUP 2 sources [notes[0]] per-voice nodes [2 24 26]
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [21 22 28 29 38 39] delays [21<-39:1]
+  CLASS general (nonlinear) at 28 >= STRATEGY serial
 DELAY 0 f64 1
     21 f64 1 delay_fix_read(1)
     40 f64 1 delay_write
@@ -1194,6 +1199,7 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [5 11 12 13] delays [5<-13:1]
+  CLASS scan(+wrap) STRATEGY serial
 DELAY 0 f64 1
      4 f32 0 delay_init
      5 f64 1 delay_fix_read(1)
