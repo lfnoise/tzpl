@@ -33,9 +33,13 @@ The build directory is `build/` at the project root. Key targets: `tzpl`, `tzpl_
 
 Flags: `--verbose`, `--filter <pattern>` (substring match on test path), `--update` (update golden files), `--stop-on-fail`.
 
-Synthdef compiler tests:
+synthc (the synth compiler) analysis-dump goldens, and the block engine:
 
-    ./build/synthdef-compiler/synthdef-compiler --test
+    bash integration-tests/run_synthc_dump_test.sh      # --update to regenerate
+    ./build/integration-tests/test_block_engine
+
+(The frozen C++ synthdef-compiler and its `--test` are retired on the
+block-engine branch; see devplans/BLOCK_ENGINE_PLAN.md D9.)
 
 Always use the official test runner for lang tests -- do not use ad-hoc test loops.
 
