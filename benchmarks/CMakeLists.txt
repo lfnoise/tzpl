@@ -17,4 +17,5 @@ endif()
 # Apple only: the copied sources use <simd/simd.h>.
 if(APPLE)
     add_subdirectory(tensor_ugens_ref)
+    add_subdirectory(ugen_compare)
 endif()

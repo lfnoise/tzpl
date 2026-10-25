@@ -214,7 +214,7 @@ fn ring(x S, freq AsSignal, ringTime AsSignal) S {
 }
 
 fn pling(x S, freq AsSignal, atkTime AsSignal, dcyTime AsSignal) S {
-	x ring(freq, dcyTime) - x ring(freq atkTime)
+	x ring(freq, dcyTime) - x ring(freq, atkTime)
 }
 
 

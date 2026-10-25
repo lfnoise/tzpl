@@ -1436,9 +1436,49 @@ Status:
 - **Not done yet:**
   - block forms for multichannel cycles (planar block buffers, which come with M8's
     layouts), and state space for cycles with several inputs or outputs;
-  - the per-ugen accuracy and speed runs against the M1 references;
   - the stride check for the first-order affine forms. They always run as scans;
     state space already chooses per block.
+
+Reference-ugen comparison (2026-10-25), `benchmarks/ugen_compare/`:
+- **How it runs:**
+  - `run_ugen_compare.sh [case]` runs the whole comparison.
+  - `ugen_cases.x` writes a synthc plugin per ugen at 1 and 4 channels. Parameters
+    are converted to our units: Hz, seconds, and 40 dB times for TU's 60 dB times.
+  - The script compiles the plugins with the bridge's flags.
+  - `bench_ugen_compare` (Apple only) runs each plugin and its TU graph on the same
+    seeded input.
+  - It reports the error (rms of the difference over the reference's rms, in dB) and
+    ns per sample per channel for both.
+- **Accuracy (29 cases):** most match to the f32 floor:
+  - oscillators −89 to −152 dB (our phasors output the previous phase, so they are
+    compared one sample later);
+  - lag, decay, decay2, leaky and leakdc −108 to −127 dB;
+  - all RBJ biquads −98 to −120 dB.
+- **Bugs found in our ugens, still to be fixed:**
+  - `lag3(x, t)` runs two poles, not three (−5 dB).
+  - `lag(x, u, d)` uses the up time while the output falls and the down time while it
+    rises (+6 dB). Its times are in samples, while `lag(x, t)` takes seconds.
+  - `lfvsaw` applies `bi` to an already bipolar shape, so it spans −3..1 (+6 dB).
+  - `ring`/`pling` approximate the pole radius as 1 + K/t, not exp(K/t): −66 dB at a
+    0.1 s ring, but −42 dB for `pling`'s 1 ms attack. Audio-rate `ring` is −41 dB.
+- **Fixed while building it:**
+  - `lag(x, u, d)` and its kin never compiled: a lang bug hid every template overload
+    of a private function after the first one, when a template from another module
+    instantiated it. The scope merge deduplicated by global slot, which is 0 for every
+    template. Fixed, with a test.
+  - `pling` had a typo (`freq atkTime`).
+- **Speed:** we are 1.2–2.6× TU at 1 channel and 1.1–6× at 4 channels, against the
+  1.25× target. We are faster only for `sinosc` (4 ch) and audio-rate `rlpf` (4 ch).
+  The worst cases:
+  - **Serial recurrences keep their state in the synth struct** (`p->d0`) inside the
+    loop. The compiler can't rule out that the output stores alias it, so the state goes
+    through memory every sample: 1-channel `leakdc` 7×, `brf` 8.5×, `ring` 7.7×. These
+    loops should load the state into locals and store it once after the loop.
+  - `brf` and `ring` classify as affine order 2 and 3, but run serially, not as state
+    space.
+  - `leakdc`'s dump says block (affine), but its generated code is serial: the dump's
+    STRATEGY and codegen disagree there.
+  - 4-channel ports pay the temporary interleave copy (M8 removes it).
 
 **M8: Strategy and fusion optimiser (§4.2 steps 6–8).**
 - Serial-loop isolation of short cycles, the cost table, loop formation of all three
