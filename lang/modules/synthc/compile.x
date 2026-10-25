@@ -9,7 +9,6 @@ import std.result.*;
 import synthc.ir.*;
 import synthc.importer.*;
 import synthc.passes.*;
-import synthc.codegen.*;
 
 -- Result of a synthc compile.
 enum CompileResult {
@@ -20,20 +19,36 @@ enum CompileResult {
 -- Compile a graph to C++ source (no disk). Returns the generated source, or an
 -- "error: ..." string if import/analysis failed.
 --
--- The production pipeline runs with the algebraic rewriter ON and SIMD width 4 --
--- matching the C++ compiler's production defaults (max=min=4, so 2-channel loops
--- stay scalar; only the diff oracle uses width 2). Both are validated byte-for-byte
--- against the C++ production output (synthc_rewrite_diff.x + the M5 SIMD diff suites;
--- the full instrument corpus byte-matches at rewrites-on + width-4).
+-- Block engine (devplans/BLOCK_ENGINE_PLAN.md): import and analysis run on
+-- the new IR (shapes, delay-weighted cycles, parameter groups); the block
+-- code generator lands in M4. Until then this reports the analysis errors,
+-- or that code generation is pending. (codegen.x is the per-sample generator
+-- M4 starts from; it is not part of the pipeline.)
 fn compileToCpp(g SignalGraph, name String, applyRewrites Bool = true, simdWidth Int = 4,
                 tags [String] = [String]()) String {
-	let ctx = g importGraph(name, applyRewrites, tags) analyzeM1;
+	let ctx = g importGraph(name, applyRewrites, tags) analyze;
 	if (ctx.errors length > 0) {
 		var msg = "error: " $ name $ " analysis:";
 		for (e : ctx.errors) { msg = msg $ "\n  " $ e; }
 		return msg;
 	}
-	genCpp(ctx, name, simdWidth)
+	"error: " $ name $ ": synthc block code generation is not implemented yet (block-engine M4)"
+}
+
+-- Print the analysis dump of each (name, graph function), for the golden
+-- dump tests (integration-tests/run_synthc_dump_test.sh).
+fn dumpCorpus(entries [(String, GraphFn)]) Void {
+	for (e : entries) {
+		println(analysisDump(makeGraph(e.1), e.0));
+	}
+}
+
+-- The analysis dump of a graph (golden tests, debugging).
+fn analysisDump(g SignalGraph, name String, applyRewrites Bool = true) String {
+	let ctx = g importGraph(name, applyRewrites) analyze;
+	var out = ctx dumpToString;
+	for (e : ctx.errors) { out = out $ "ERROR " $ e $ "\n"; }
+	out
 }
 
 -- Full pipeline: graph -> C++ -> dylib (written + compiled via clang). Returns

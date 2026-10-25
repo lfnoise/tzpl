@@ -17,17 +17,39 @@ import synthc.ir.*;
 const PI = 3.141592653589793;
 
 ---------------------------------------------------------------------------
--- Cyclic element access (power-of-two broadcast: values[i & (size-1)]).
+-- Cyclic element access. Operands of a binary fold are first expanded to
+-- their broadcast shape (gatherShape), so this wrap only serves a scalar.
 
 fn _atF(v ConstVal, i Int) Float = match (v) {
-	ints(a):   a[i & (a length - 1)] toFloat;
-	floats(a): a[i & (a length - 1)];
+	ints(a):   a[i % a length] toFloat;
+	floats(a): a[i % a length];
 };
 
 fn _atI(v ConstVal, i Int) Int = match (v) {
-	ints(a):   a[i & (a length - 1)];
-	floats(a): a[i & (a length - 1)] toInt;
+	ints(a):   a[i % a length];
+	floats(a): a[i % a length] toInt;
 };
+
+-- v (of shape src) broadcast to shape out: element w is v's element at
+-- broadcastChannel(src, out, w).
+fn gatherShape(v ConstVal, src Shape, out Shape) ConstVal {
+	if (src == out) { return v; }
+	let n = out chans;
+	match (v) {
+		ints(a): {
+			var r [Int] = [];
+			var w = 0;
+			while (w < n) { r push!(a[broadcastChannel(src, out, w) % a length]); w = w + 1; }
+			ConstVal.ints(r)
+		}
+		floats(a): {
+			var r [Float] = [];
+			var w = 0;
+			while (w < n) { r push!(a[broadcastChannel(src, out, w) % a length]); w = w + 1; }
+			ConstVal.floats(r)
+		}
+	}
+}
 
 fn _isInts(v ConstVal) Bool = match (v) { ints(_): true; floats(_): false; };
 

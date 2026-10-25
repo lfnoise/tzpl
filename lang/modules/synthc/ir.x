@@ -5,8 +5,9 @@
 -- Mutable arrays are reference types, so a Ctx value can be passed to every
 -- pass by value while all writes are shared.
 --
--- The dump format replicates the C++ Synth::dumpToString() exactly so the
--- two compilers can be differentially tested (see synthc/difftest.x).
+-- The analysis dump (dumpToString) is the compiler's golden-test surface:
+-- shapes, rates, types, cuts, trees, delay-weighted cycles and parameter
+-- groups (run_synthc_dump_test.sh).
 
 import synthdef.*;
 
@@ -75,7 +76,7 @@ fn rateStr(r Rate) String = match (r) {
 	constant: "Const";
 	init:     "Init";
 	reset:    "Reset";
-	event:    "Event";
+	block:    "Block";
 	audio:    "Audio";
 };
 
@@ -150,22 +151,6 @@ fn constSize(v ConstVal) Int = match (v) {
 	floats(a): a length;
 };
 
--- Mirrors VectorT's extend_to_next_power_of_two: a constant value vector is
--- zero-extended to a power-of-two length (the C++ does this in every VectorT
--- construction, so every multichannel Constant has a power-of-two channel count).
-fn padPow2(v ConstVal) ConstVal = match (v) {
-	ints(a): {
-		let n = a length bitCeil;
-		if (n == a length) { ConstVal.ints(a) }
-		else { var out = a copy; while (out length < n) { out push!(0); } ConstVal.ints(out) }
-	}
-	floats(a): {
-		let n = a length bitCeil;
-		if (n == a length) { ConstVal.floats(a) }
-		else { var out = a copy; while (out length < n) { out push!(0.0); } ConstVal.floats(out) }
-	}
-};
-
 fn constF64At(v ConstVal, i Int) Float = match (v) {
 	ints(a):   a[i] toFloat;
 	floats(a): a[i];
@@ -188,16 +173,16 @@ enum NodeKind {
 	sampleDur,
 	sharedInK(Int, Rate),                -- slot, rate (both are in the cons key)
 
-	control(ControlSpec, String, Int, ControlKind),   -- spec, name, serial, kind
-	noteParamK(ControlSpec, String, Int),
-	inletK(String, Int),                 -- name, serial
+	-- A note parameter: column `col` (and following, for multichannel) of the
+	-- voicer's `notes` input row of the current voice.
+	noteParamK(ControlSpec, String, Int),  -- spec, name, column
+	inletK(String, Int, Option<InletSpec>), -- name, serial, spec (controls)
 	outletK(String, Int),                -- name, serial
 
 	unopK(UnaryOp),
 	binopK(BinaryOp),
 	compareopK(CompareOp),
 	castopK(NumType),                    -- cast_type
-	eventToAudioK,                       -- event->audio rate promotion passthrough
 	reduceK(BinaryOp, Int),              -- op, cols
 	vecK(VecOp),                         -- take/drop/stride/stutter/ncyc/rotate/reverse/transpose
 	selectK,
@@ -288,7 +273,7 @@ fn _vecStr(vop VecOp) String = match (vop) {
 fn _vecGetsOwnLoop(vop VecOp) Bool = match (vop) { put: true; join: true; _: false; };
 
 fn shouldHashCons(k NodeKind) Bool = match (k) {
-	inletK(_, _):           false;
+	inletK(_, _, _):        false;
 	outletK(_, _):          false;
 	noteParamK(_, _, _):    false;
 	debugK(_, _, _, _):     false;
@@ -366,7 +351,8 @@ fn isRngKind(k NodeKind) Bool = match (k) {
 struct DelayInfo {
 	serial Int,
 	typ NumType,
-	chans Int,
+	shape Shape,
+	chans Int,             -- shape chans
 	fixReaders [NIdx],
 	varReaders [NIdx],
 	initters [NIdx],
@@ -382,6 +368,7 @@ fn newDelayInfo(serial Int) DelayInfo {
 	DelayInfo {
 		serial: serial,
 		typ: ANY_NUM,
+		shape: scalarShape(),
 		chans: 1,
 		fixReaders: [NIdx](),
 		varReaders: [NIdx](),
@@ -404,6 +391,23 @@ fn interpOverread(i Interpolation) Int = match (i) {
 };
 
 ---------------------------------------------------------------------------
+-- Feedback cycles (cycles.x): the strongly connected components of the graph
+-- with delay-weighted edges.
+
+struct CycleInfo {
+	nodes [NIdx],          -- the component, in sorted order
+	readers [NIdx],        -- delay readers whose edge lies inside it
+	minWeight Int,         -- weight of its lightest cycle
+}
+
+-- A parameter group (paramgroups.x): block-placed nodes with one source set.
+struct ParamGroup {
+	sources [String],      -- input names / note columns, sorted
+	nodes [NIdx],          -- in sorted order
+	perVoice Bool,         -- fed by note parameters: runs per voice
+}
+
+---------------------------------------------------------------------------
 -- Trees and loops (filled in by later passes)
 
 struct Tree {
@@ -412,7 +416,6 @@ struct Tree {
 	antecedents [Int],        -- antecedent tree indices
 	antecedentsSep [Bool],    -- parallel: separate-loop constraint flag
 	loopOf Int,               -- loop index, NONE if none
-	isoGroupOf Int,           -- iso-group index, NONE if not event-rate
 	serial Int,
 }
 
@@ -421,7 +424,6 @@ struct Loop {
 	rate Rate,
 	chans Int,
 	isControlFlow Bool,
-	isoGroup Int,             -- iso-group index, NONE for non-event loops
 	antecedents [Int],        -- loop serials
 	graphOf Int,              -- graph index this loop runs in (0 = root)
 	serial Int,
@@ -429,26 +431,11 @@ struct Loop {
 
 -- A graph: the root (index 0) plus one per control-flow branch/body subgraph
 -- (M3). Mirrors synthdef::Graph. Audio-rate loops are bucketed per graph (the
--- C++ keeps them in Graph::loops); init/reset/event loops stay synth-global.
+-- C++ keeps them in Graph::loops); init/reset loops stay synth-global.
 struct GraphInfo {
 	serial Int,               -- graph index (0 = root)
 	parent Int,               -- parent graph index, NONE for root
 	audioLoops [Int],         -- audio-rate loop indices in this graph
-}
-
--- An iso-group: a set of event-rate trees sharing the same transitive control
--- dependency set. Mirrors synthdef::IsoGroup. `controls` is a sorted list of
--- control node indices (set identity); `activates` lists downstream group
--- indices; `serial` is the final topological position.
-struct IsoGroup {
-	trees [Int],
-	loops [Int],
-	-- Activation sources: control and noteParamK node indices, sorted. A
-	-- group runs when any of its sources changes (control message or note
-	-- event). Mirrors IsoGroup::sources in synthdef_synth.hpp.
-	sources [NIdx],
-	activates [Int],
-	serial Int,
 }
 
 ---------------------------------------------------------------------------
@@ -468,7 +455,8 @@ struct Ctx {
 	                          -- hash-consed away or folded)
 	nrate [Rate],
 	typ [NumType],
-	chans [Int],
+	shape [Shape],
+	chans [Int],              -- shape chans, kept in step with `shape`
 	graphOf [Int],            -- graph index each node belongs to (0 = root)
 	cut [GraphCut],
 	treeOf [Int],             -- tree index, NONE if none
@@ -482,24 +470,29 @@ struct Ctx {
 	sinks [NIdx],
 	inlets [NIdx],
 	outlets [NIdx],
-	controls [NIdx],
 	noteParams [NIdx],
+	notesInlets [NIdx],       -- per voicer: its `notes` input {maxVoices, cols}
+	voicerNotes [NIdx],       -- parallel: the voicer node
 
 	delays [DelayInfo],
+	dsrc [NIdx],              -- per node: for a delay reader, the value its
+	                          -- delay's writer stores (the delay edge's source)
+	dweight [Int],            -- per node: that edge's delay weight
+	cycles [CycleInfo],
+	paramGroups [ParamGroup],
+	groupOf [Int],            -- per node: its parameter group, NONE if none
 	delayAllocs [Int],        -- delay indices needing runtime allocation
 	bufSerials [Int],         -- per-buffer SampleBuf serial (buf index -> serial)
 	bankSerials [Int],        -- per-bank SampleBank serial (bank index -> serial)
 
 	trees [Tree],
 	sortedTrees [Int],        -- tree indices in sorted order
-	isoGroups [IsoGroup],     -- event-rate iso-groups (empty if no controls)
-	isoOrder [Int],           -- iso-group indices in topological order
 	graphs [GraphInfo],       -- root (index 0) + control-flow subgraphs (M3);
 	                          -- per-graph audio loops live in GraphInfo.audioLoops
 	loops [Loop],
 	initLoops [Int],
 	resetLoops [Int],
-	eventLoops [Int],
+	blockLoops [Int],         -- block-placed (parameter group) loops
 	usesRng [Bool],           -- single element; mutable through Ctx copies
 	cmpTyp [NumType],         -- per node: a compare's input_type (the C++
 	                          -- CompareOpExpr::input_type); ANY_NUM elsewhere
@@ -522,6 +515,7 @@ fn newCtx(name String) Ctx {
 		serial: [Int](),
 		nrate: [Rate](),
 		typ: [NumType](),
+		shape: [Shape](),
 		chans: [Int](),
 		graphOf: [Int](),
 		cut: [GraphCut](),
@@ -532,21 +526,25 @@ fn newCtx(name String) Ctx {
 		sinks: [NIdx](),
 		inlets: [NIdx](),
 		outlets: [NIdx](),
-		controls: [NIdx](),
 		noteParams: [NIdx](),
+		notesInlets: [NIdx](),
+		voicerNotes: [NIdx](),
 		delays: [DelayInfo](),
+		dsrc: [NIdx](),
+		dweight: [Int](),
+		cycles: [CycleInfo](),
+		paramGroups: [ParamGroup](),
+		groupOf: [Int](),
 		delayAllocs: [Int](),
 		bufSerials: [Int](),
 		bankSerials: [Int](),
 		trees: [Tree](),
 		sortedTrees: [Int](),
-		isoGroups: [IsoGroup](),
-		isoOrder: [Int](),
 		graphs: [GraphInfo { serial: 0, parent: NONE, audioLoops: [Int]() }],
 		loops: [Loop](),
 		initLoops: [Int](),
 		resetLoops: [Int](),
-		eventLoops: [Int](),
+		blockLoops: [Int](),
 		usesRng: [false],
 		cmpTyp: [NumType](),
 		widening: [false],
@@ -730,15 +728,13 @@ fn nodeStr(ctx Ctx, n NIdx) String {
 		sampleRate:          "fs";
 		sampleDur:           "sd";
 		sharedInK(_, _):     "sharedin";
-		control(_, _, _, _): "control";
-		noteParamK(_, _, _): "noteParam";
-		inletK(_, _):        "inlet";
+		noteParamK(_, name, col): "noteParam(%^@%^)" fmt(name, col);
+		inletK(name, _, sp): match (sp) { some(_): "control(%^)" fmt(name); none: "inlet(%^)" fmt(name); };
 		outletK(_, _):       "outlet";
 		unopK(op):           op unopStr;
 		binopK(op):          op binopStr;
 		compareopK(op):      op compareopStr;
 		castopK(t):          "cast_" $ t numTypeStr;
-		eventToAudioK:       "eventToAudio";
 		reduceK(op, cols):   "reduce(%^, %^)" fmt(op binopStr, cols);
 		vecK(vop):           _vecStr(vop);
 		selectK:             "select";
@@ -789,7 +785,7 @@ fn _inputsString(ctx Ctx, n NIdx) String {
 	parts join(" ")
 }
 
--- "   {:>4} {:>4} [{:<16}] {:>2} {:>2} {:<8} {:<9} {:<3} {:>3} {}\n"
+-- index, serial, [inputs], #inputs, #consumers, rate, cut, type, shape, str
 fn printExpr(ctx Ctx, out [String], n NIdx, i Int) Void {
 	let line = "   "
 		$ padLeft(i toString, 4) $ " "
@@ -800,7 +796,7 @@ fn printExpr(ctx Ctx, out [String], n NIdx, i Int) Void {
 		$ padRight(ctx.nrate[n] rateStr, 8) $ " "
 		$ padRight(ctx.cut[n] cutStr, 9) $ " "
 		$ padRight(ctx.typ[n] numTypeStr, 3) $ " "
-		$ padLeft(ctx.chans[n] toString, 3) $ " "
+		$ padLeft(ctx.shape[n] toString, 5) $ " "
 		$ nodeStr(ctx, n) $ "\n";
 	out push!(line);
 }
@@ -823,7 +819,7 @@ fn printTree(ctx Ctx, out [String], ti Int) Void {
 		$ padRight(ctx.nrate[root] rateStr, 6) $ " "
 		$ padRight(ctx.cut[root] cutStr, 9) $ " "
 		$ padRight(ctx.typ[root] numTypeStr, 3) $ " "
-		$ padLeft(ctx.chans[root] toString, 4) $ "\n");
+		$ padLeft(ctx.shape[root] toString, 5) $ "\n");
 	var i = 0;
 	while (i < tree.exprs length) {
 		printExpr(ctx, out, tree.exprs[i], i);
@@ -852,9 +848,54 @@ fn printLoops(ctx Ctx, out [String], loopIdxs [Int]) Void {
 	}
 }
 
+fn _warpStr(w ControlWarp) String = match (w) {
+	linear:       "lin";
+	exponential:  "exp";
+	step(sz):     "step(%^)" fmt(sz);
+	signedSquare: "sqr";
+	cubed:        "cub";
+};
+
+fn _kindStr(k ControlKind) String = match (k) {
+	continuous: "continuous";
+	trigger:    "trigger";
+	boolean:    "toggle";
+	select:     "choice";
+};
+
+-- The synth's ports: inputs (with specs and the voicer's `notes`) and
+-- outputs, as the plugin ABI will present them.
+fn _printPorts(ctx Ctx, out [String]) Void {
+	for (n : ctx.inlets) {
+		match (ctx.kind[n]) {
+			inletK(name, sn, sp): {
+				let specText = match (sp) {
+					some(is): " %^ [%^ %^] init %^ %^" fmt(is.kind _kindStr, is.spec.lo,
+						is.spec.hi, is.spec.init, is.spec.warp _warpStr);
+					none: "";
+				};
+				out push!("IN %^ %^ %^ %^%^\n" fmt(sn, name, ctx.typ[n] numTypeStr,
+					ctx.shape[n] toString, specText));
+			}
+			_: {}
+		}
+	}
+	for (n : ctx.outlets) {
+		match (ctx.kind[n]) {
+			outletK(name, sn): {
+				out push!("OUT %^ %^ %^ %^\n" fmt(sn, name, ctx.typ[n] numTypeStr,
+					ctx.shape[n] toString));
+			}
+			_: {}
+		}
+	}
+}
+
 fn dumpToString(ctx Ctx) String {
 	var out [String] = [];
 	out push!("SYNTH " $ ctx.name $ "\n");
+	out push!("-- PORTS\n");
+	_printPorts(ctx, out);
 	out push!("-- SORTED EXPRS\n");
 	var i = 0;
 	while (i < ctx.sorted length) {
@@ -869,15 +910,40 @@ fn dumpToString(ctx Ctx) String {
 	printLoops(ctx, out, ctx.initLoops);
 	out push!("-- RESET\n");
 	printLoops(ctx, out, ctx.resetLoops);
-	out push!("-- EVENT\n");
-	printLoops(ctx, out, ctx.eventLoops);
+	out push!("-- BLOCK\n");
+	printLoops(ctx, out, ctx.blockLoops);
 	out push!("-- AUDIO\n");
 	for (g : ctx.graphs) {
 		out push!("GRAPH %^\n" fmt(g.serial));
 		printLoops(ctx, out, g.audioLoops);
 	}
+	out push!("-- PARAMETER GROUPS\n");
+	var gi = 0;
+	while (gi < ctx.paramGroups length) {
+		let pg = ctx.paramGroups[gi];
+		var nodes [String] = [];
+		for (x : pg.nodes) { nodes push!(ctx.serial[x] toString); }
+		out push!("GROUP %^ sources [%^]%^ nodes [%^]\n"
+			fmt(gi, pg.sources join(" "), pg.perVoice ? " per-voice" : "", nodes join(" ")));
+		gi = gi + 1;
+	}
+	out push!("-- CYCLES\n");
+	var ci = 0;
+	while (ci < ctx.cycles length) {
+		let cy = ctx.cycles[ci];
+		var nodes [String] = [];
+		for (x : cy.nodes) { nodes push!(ctx.serial[x] toString); }
+		var edges [String] = [];
+		for (r : cy.readers) {
+			edges push!("%^<-%^:%^" fmt(ctx.serial[r], ctx.serial[ctx.dsrc[r]], ctx.dweight[r]));
+		}
+		let kind = cy.minWeight >= 4 ? "vector" : "recurrence";
+		out push!("CYCLE %^ weight %^ %^ nodes [%^] delays [%^]\n"
+			fmt(ci, cy.minWeight, kind, nodes join(" "), edges join(" ")));
+		ci = ci + 1;
+	}
 	for (d : ctx.delays) {
-		out push!("DELAY %^ %^ %^\n" fmt(d.serial, d.typ numTypeStr, d.chans));
+		out push!("DELAY %^ %^ %^\n" fmt(d.serial, d.typ numTypeStr, d.shape toString));
 		for (n : d.initters) { _printDelayMember(ctx, out, n); }
 		for (n : d.fixReaders) { _printDelayMember(ctx, out, n); }
 		for (n : d.varReaders) { _printDelayMember(ctx, out, n); }
@@ -891,6 +957,6 @@ fn _printDelayMember(ctx Ctx, out [String], n NIdx) Void {
 	out push!("  "
 		$ padLeft(ctx.serial[n] toString, 4) $ " "
 		$ padRight(ctx.typ[n] numTypeStr, 3) $ " "
-		$ ctx.chans[n] toString $ " "
+		$ ctx.shape[n] toString $ " "
 		$ nodeStr(ctx, n) $ "\n");
 }

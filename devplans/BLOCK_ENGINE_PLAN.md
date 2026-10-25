@@ -741,7 +741,8 @@ tail: lane k of a group is channel k (TU §6.5). A cycle can therefore switch fo
 between blocks, and segments of any length are exact continuations.
 
 **Accuracy contracts.** Block state space and scans round differently from the plain
-recurrence: about 1e-14 relative for f64 and 1e-5 for f32 (TU §7). The equivalence tests
+recurrence: about 1e-14 relative for f64 and 2e-5 for f32 (TU §7; f32 relaxed from 1e-5,
+decided 2026-10-25, see M1). The equivalence tests
 in M8 use these tolerances. A synth can ask for exact recurrence order with
 `defSynthX(..., strictRecurrences: true)`, for reference renders.
 
@@ -778,7 +779,7 @@ notation (`common_ugens.x`) must:
 - scans against sequential sums;
 - state space against the step function, for N = 1, 2 and 4;
 - each element type;
-- tolerance contracts of 1e-12 for f64 and 1e-5 for f32.
+- tolerance contracts of 1e-12 for f64 and 2e-5 for f32 (f32 decided 2026-10-25, see M1).
 
 ---
 
@@ -891,7 +892,7 @@ Each milestone ends green on its own tests, with a commit series on `block-engin
   - The Sleef backend maps only the functions `tzpl_simd.hpp` already calls. So
     `logb`, `erf`, `erfc`, `tgamma`, `lgamma`, `remainder`, `fdim` and `nextafter`
     run lane by lane on Linux. On Apple, only `logb` does.
-  - **f32 state space contract is 2e-5, not 1e-5.** Errors are measured against
+  - **f32 state space contract is 2e-5, not 1e-5** (accepted 2026-10-25). Errors are measured against
     the recurrence in f64. On an RBJ lowpass at f = .01, q = 2, the f32 state space
     is 1.4e-5 to 1.7e-5 off, while the f32 recurrence is 3e-6 to 8e-6 off. The test
     accepts the larger of 2e-5 and 3 times the f32 recurrence's own error.
@@ -1003,7 +1004,7 @@ Deviations and notes:
   for compile-and-link.
 - **The M0 corpus** cannot render until synthc emits v3 plugins (M4/M5).
 
-**M3: synthc front end and IR.**
+**M3: synthc front end and IR (done 2026-10-25)**
 - `Shape` and the new rates in `synthdef.x` and `ir.x`; shape and type inference; inlets
   with specs; `notes` columns.
 - **Delay-weighted edges in the IR (§4.2):**
@@ -1019,6 +1020,78 @@ Deviations and notes:
   C++-oracle diff tests, and move the compile and link code (D9).
 - New analysis dump tests (golden text) for shapes and rates over the old diff corpus's
   graphs.
+
+What landed:
+- **D9:**
+  - Compile and link moved to `bridge/src/tzpl_synth_build.{hpp,cpp}`.
+  - The f32 constant formatter is rebuilt on `std::to_chars`.
+  - The bridge no longer links `synthdef_compiler_lib`, and
+    `TZPL_BUILD_SYNTHDEF_COMPILER` defaults OFF.
+  - Removed: `defSynth`, the s-expression serializer, the
+    `compileSynthDef*`/`synthdefGenCppFromSexpr`/`synthdefAnalysisDump` FFIs,
+    `synthc/difftest.x`, and every C++-oracle suite (the analysis, rewrite, voicer,
+    spectral, SIMD, buffer, bank, control-flow, merge-delay, widen, non-flat, prod
+    and effects diffs, the render A/B, codegen validity, `eventToAudio`).
+- **Front end (`synthdef.x`):**
+  - `Shape` (4 row-major dims) with `chans`, `rank`, lcm `broadcast`, `strides`,
+    `broadcastChannel` and `prependDim`.
+  - Shaped `fill`/`tensor` constants.
+  - `inlet`, `control` and `urand` take a `Shape` (Int overloads keep meaning
+    a row).
+  - `Rate` is `constant, init, reset, block, audio`.
+  - `control`/`trigger`/`toggle`/`choice` build an `inlet` carrying an `InletSpec`.
+  - `noteParam`/`gate` are columns of `notes`.
+  - No power-of-two rounding anywhere.
+- **IR:**
+  - `ctx.shape` per node, with `ctx.chans` kept in step.
+  - Shape inference uses the lcm rule; constant folding broadcasts its operands
+    first (`gatherShape`).
+  - Inputs with specs; event rate, iso-groups and event loops are gone.
+  - A voicer creates the synth's `notes` input `{maxVoices, 1+N}`, with gate in
+    column 0.
+- **Delay-weighted edges (`synthc/cycles.x`):**
+  - Each reader gets `dsrc`/`dweight`.
+  - SCCs by iterative Tarjan, minimum cycle weight by Dijkstra inside the
+    component, and the zero-weight check.
+  - Interval analysis bounds `vread` indices.
+  - `addDelayAntecedents` is removed.
+- **Parameter groups (`synthc/paramgroups.x`):** block-placed nodes keyed by source
+  set (input names, `notes[c]` columns); groups fed by notes are per voice.
+- **Dump:** PORTS (shapes, specs), sorted exprs with shapes, trees, loops including
+  BLOCK, PARAMETER GROUPS, CYCLES (weight, vector/recurrence, edges) and DELAY.
+- **Tests:**
+  - `integration-tests/run_synthc_dump_test.sh` holds goldens for 158 graphs in
+    13 corpus files under `integration-tests/synthc_dump/`:
+    - the old diff corpus's graphs;
+    - the instruments.x and effects.x library synths;
+    - a new `shapes.x` with lcm, matrix and fold broadcasting, control kinds,
+      groups, recurrences, `vread` bounds and notes columns.
+    `--update` regenerates them.
+  - `live_plan_check` was updated: controls are input ports now.
+  - The lang suite (486) passes.
+
+Deviations and notes:
+- **synthc's code generator is detached until M4.** `codegen.x` (the per-sample
+  generator M4 starts from) is no longer imported, and `defSynthX` reports that
+  block code generation is pending. Nothing generated could load anyway (ABI v3).
+  CI runs the dump goldens and `run_live_plan_test.sh` in place of the render
+  tests until M5.
+- **Shaped views are not done yet.** The vec ops (take, drop, stride, transpose,
+  join, at, put, reduce) still work on the row-major flattening and produce rows.
+  Per-channel provenance and folding (§4.2 step 1a) are left for the code
+  generator stages (M4/M7). Source sets are per node.
+- **Plain inlets are nominally `audio`.** Only inputs with a spec (controls) and
+  note parameters are nominally `block`. An unspecced `inlet` is declared as a
+  signal input; treating it as `block` would make every effect's audio path a
+  parameter group that always falls back.
+- **Control flow on a block-placed condition still runs at audio.** Per-block
+  branching (§4.4) comes with codegen.
+- **Delay reads stay at audio.** The old event-rate promotion of delays is gone.
+- **The `vread` weight is `max(1, floor(lower bound) - lookahead)`.** The
+  lookahead is 1 for cubic and 3 for the 8-point kernels.
+- **`inplaceDelayOps` is kept.** The M4 generator must order its VecAt loads
+  before the in-place store; `addDelayAntecedents` used to do that.
+- **A second voicer in one synth** gets an input `notes1`.
 
 **M4: synthc serial-loop codegen.**
 - Correctness first. Emit `process(p, off, n)` with every loop serial: an outer sample

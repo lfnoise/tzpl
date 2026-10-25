@@ -43,9 +43,10 @@ assertEq(gWithOut countOutlets, 1, "wrap keeps existing outlet");
 let gRefs = makeGraph(wrapGraphFn(fn() S {
     let ext = inlet(FLOAT32, 2, "in");            -- user's own inlet: port 0
     let a = inlet(FLOAT32, 2, pxRefName(0));      -- ref seq 0: port 1
+    -- A control is an input port too (block engine): port 2.
     let ctl = control("mix", ControlSpec { lo: 0.0, hi: 1.0, init: 0.5,
                                            warp: ControlWarp.linear });
-    let b = inlet(FLOAT32, 1, pxRefName(1));      -- ref seq 1: port 2
+    let b = inlet(FLOAT32, 1, pxRefName(1));      -- ref seq 1: port 3
     (ext + a + b) * ctl
 }));
 
@@ -53,7 +54,7 @@ let refs = gRefs scanRefPorts;
 assertEq(refs length, 2, "two pxref inlets found");
 assertEq(refs[0].0, 1, "first ref on port 1");
 assertEq(refs[0].1, 0, "first ref is seq 0");
-assertEq(refs[1].0, 2, "second ref on port 2");
+assertEq(refs[1].0, 3, "second ref on port 3");
 assertEq(refs[1].1, 1, "second ref is seq 1");
 assertEq(gRefs countNestedRefs, 0, "no nested refs in flat graph");
 

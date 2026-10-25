@@ -66,7 +66,7 @@ fn scanRefPorts(g SignalGraph) [(Int, Int)] {
     var seq = 0;
     for (e : g.exprs) {
         match (e.kind) {
-            inlet(typ, ch, nm): {
+            inlet(typ, sh, nm, sp): {
                 if (nm isPxRefName) {
                     out push!((port, seq));
                     seq = seq + 1;
@@ -101,7 +101,7 @@ fn _countRefsAnywhere(g SignalGraph) Int {
     var n = 0;
     for (e : g.exprs) {
         match (e.kind) {
-            inlet(typ, ch, nm): if (nm isPxRefName) { n = n + 1; }
+            inlet(typ, sh, nm, sp): if (nm isPxRefName) { n = n + 1; }
             voicer(v, sub): n = n + sub _countRefsAnywhere;
             if_(a, b): n = n + a _countRefsAnywhere + b _countRefsAnywhere;
             for_(c, sub): n = n + sub _countRefsAnywhere;
@@ -126,7 +126,7 @@ fn scanControls(g SignalGraph) [String] {
 fn _scanControlsInto(g SignalGraph, out [String]) Void {
     for (e : g.exprs) {
         match (e.kind) {
-            control(spec, ch, nm, k): out push!(nm);
+            inlet(typ, sh, nm, sp): match (sp) { some(_): out push!(nm); none: 0; };
             voicer(v, sub): sub _scanControlsInto(out);
             if_(a, b): { a _scanControlsInto(out); b _scanControlsInto(out); }
             for_(c, sub): sub _scanControlsInto(out);

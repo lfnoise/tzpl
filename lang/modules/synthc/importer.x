@@ -1,13 +1,9 @@
--- synthc/import.x
+-- synthc/importer.x
 -- Imports a synthdef.x SignalGraph (the in-memory front-end graph) into a
--- synthc Ctx, mirroring the C++ s-expression builder exactly:
--- same serial allocation (including serials wasted on hash-consed nodes),
--- same constant handling, same initial rates/types/shapes, same delay
--- bookkeeping. This is what makes the analysis dumps of the two compilers
--- byte-comparable.
---
--- Reference: synthdef-compiler/src/synthdef_from_sexpr.cpp (parse* fns)
--- and addExpr/addConstantExpr in synthdef_synth.cpp.
+-- synthc Ctx: folding, rewriting and hash-consing as nodes are built, with
+-- each node's initial rate, type and shape, and the delay bookkeeping.
+-- Serial allocation still follows the retired C++ s-expression builder
+-- (including serials spent on hash-consed nodes), so dumps stay stable.
 
 import synthdef.*;
 import synthc.ir.*;
@@ -39,8 +35,9 @@ fn importGraph(g SignalGraph, name String, applyRewrites Bool = false,
 	-- Graph being imported into (0 = root). M3.2's subgraph import pushes/pops
 	-- this; for non-control-flow synths it stays 0.
 	var `scCurGraph Int = 0;
-	var `scControlSerials Int = 0;
-	var `scNoteParamSerials Int = 1;      -- 0 is reserved for gate
+	-- Note parameter columns of the voicer body being imported: gate is
+	-- column 0, the others follow in declaration order.
+	var `scNoteCol Int = 1;
 	var `scInletSerials Int = 0;
 	var `scOutletSerials Int = 0;
 	var `scRandSerials Int = 0;
@@ -139,15 +136,13 @@ fn _kindKey(kind NodeKind) String = match (kind) {
 	sampleRate:           "SR";
 	sampleDur:            "SD";
 	sharedInK(slot, r):   "SI|" $ slot toString $ "|" $ r ordinal toString;
-	control(spec, _, sn, kind): "CTL|" $ spec _specKey $ "|" $ kind ordinal toString $ "|" $ sn toString;
-	noteParamK(spec, _, sn): "NP|" $ spec _specKey $ "|" $ sn toString;
-	inletK(_, sn):        "IN|" $ sn toString;
+	noteParamK(spec, _, col): "NP|" $ spec _specKey $ "|" $ col toString;
+	inletK(_, sn, _):     "IN|" $ sn toString;
 	outletK(_, sn):       "OUT|" $ sn toString;
 	unopK(op):            "U|" $ op ordinal toString;
 	binopK(op):           "B|" $ op ordinal toString;
 	compareopK(op):       "C|" $ op ordinal toString;
 	castopK(t):           "X|" $ t.0 toString;
-	eventToAudioK:        "E2A";
 	reduceK(op, cols):    "R|" $ op ordinal toString $ "|" $ cols toString;
 	vecK(vop):            "V|" $ vop _vecOpKey;
 	selectK:              "SEL";
@@ -194,7 +189,7 @@ fn _consKey(kind NodeKind, ins [Int]) String =
 -- C++ addExpr does after the hash-cons check (sinks/inlets/outlets/...,
 -- delay record updates, RNG flag).
 
-fn _appendNode(kind NodeKind, ins [Int], serial Int, r Rate, t NumType, ch Int) Int {
+fn _appendNode(kind NodeKind, ins [Int], serial Int, r Rate, t NumType, sh Shape) Int {
 	var ctx Ctx = `scCtx;
 	let idx = ctx numNodes;
 	ctx.kind push!(kind);
@@ -203,7 +198,8 @@ fn _appendNode(kind NodeKind, ins [Int], serial Int, r Rate, t NumType, ch Int) 
 	ctx.serial push!(serial);
 	ctx.nrate push!(r);
 	ctx.typ push!(t);
-	ctx.chans push!(ch);
+	ctx.shape push!(sh);
+	ctx.chans push!(sh chans);
 	ctx.graphOf push!(`scCurGraph);
 	ctx.cut push!(GraphCut.none);
 	ctx.treeOf push!(NONE);
@@ -214,9 +210,8 @@ fn _appendNode(kind NodeKind, ins [Int], serial Int, r Rate, t NumType, ch Int) 
 	if (kind isSinkKind) { ctx.sinks push!(idx); }
 
 	match (kind) {
-		inletK(_, _):        ctx.inlets push!(idx);
+		inletK(_, _, _):     ctx.inlets push!(idx);
 		outletK(_, _):       ctx.outlets push!(idx);
-		control(_, _, _, _): ctx.controls push!(idx);
 		noteParamK(_, _, _): ctx.noteParams push!(idx);
 		delayInitK(d, _):    ctx.delays[d].initters push!(idx);
 		delayFixReadK(d, _): ctx.delays[d].fixReaders push!(idx);
@@ -238,10 +233,10 @@ fn _appendNode(kind NodeKind, ins [Int], serial Int, r Rate, t NumType, ch Int) 
 
 -- Mirrors addExpr(): consume an expr serial, hash-cons, then append with
 -- initial type/shape. Returns the node index (an existing one if consed).
-fn _addExprNode(kind NodeKind, ins [Int], r Rate, t NumType, ch Int) Int {
+fn _addExprNode(kind NodeKind, ins [Int], r Rate, t NumType, sh Shape) Int {
 	let serial Int = `scExprSerials;
 	`scExprSerials = serial + 1;
-	_addExprNodeS(serial, kind, ins, r, t, ch)
+	_addExprNodeS(serial, kind, ins, r, t, sh)
 }
 
 -- Same, but with the serial (userial) already consumed by the caller. _makeOp
@@ -249,7 +244,7 @@ fn _addExprNode(kind NodeKind, ins [Int], r Rate, t NumType, ch Int) Int {
 -- ctor, where `new BinaryOpExpr` burns a userial even if addExpr() then rewrites
 -- or hash-conses it away -- so a rewritten/duplicate node still leaves the same
 -- serial gap.
-fn _addExprNodeS(serial Int, kind NodeKind, ins [Int], r Rate, t NumType, ch Int) Int {
+fn _addExprNodeS(serial Int, kind NodeKind, ins [Int], r Rate, t NumType, sh Shape) Int {
 	let conses = kind shouldHashCons;
 	let key = conses ? _consKey(kind, ins) : "";
 	var m [String: Int] = `scConsMap;
@@ -260,7 +255,7 @@ fn _addExprNodeS(serial Int, kind NodeKind, ins [Int], r Rate, t NumType, ch Int
 		}
 	}
 
-	let idx = _appendNode(kind, ins, serial, r, t, ch);
+	let idx = _appendNode(kind, ins, serial, r, t, sh);
 	if (conses) {
 		m[key] = idx;
 	}
@@ -269,20 +264,22 @@ fn _addExprNodeS(serial Int, kind NodeKind, ins [Int], r Rate, t NumType, ch Int
 
 -- Mirrors addConstantExpr(): no hash-consing, no calcShape, type stays
 -- NumType::any (the init_type lives in the kind payload for inference).
-fn _addConstantNode(kind NodeKind, ch Int) Int {
+fn _addConstantNode(kind NodeKind, sh Shape) Int {
 	let serial Int = `scExprSerials;
 	`scExprSerials = serial + 1;
-	_appendNode(kind, [Int](), serial, Rate.constant, ANY_NUM, ch)
+	_appendNode(kind, [Int](), serial, Rate.constant, ANY_NUM, sh)
 }
 
 -- A constant produced by constant folding. Unlike imported constants, the C++
 -- routes folded constants through addExpr: they are hash-consed and get their
 -- type set to init_type (any_float for f64 results, any for i64, or the cast
 -- target type). Mirror that by reusing _addExprNode with a constant kind.
-fn _addFoldedConstant(v0 ConstVal, initType NumType) Int {
-	let v = v0 padPow2;
-	_addExprNode(NodeKind.constant(v, initType), [Int](), Rate.constant, initType, v constSize)
+fn _addFoldedConstant(v ConstVal, initType NumType, sh Shape) Int {
+	_addExprNode(NodeKind.constant(v, initType), [Int](), Rate.constant, initType, sh)
 }
+
+-- A shape not known yet (0 channels): the identity of broadcast.
+fn noShape() Shape = shape([0]);
 
 ---------------------------------------------------------------------------
 -- Control flow (M3): subgraph import + control-flow node creation.
@@ -307,13 +304,13 @@ fn _importSubgraph(sg SignalGraph) Int {
 	let root = sg.root.id _nodeOf;
 	-- PhiNodeExpr(in): rate = in.rate (raised to the target's rate by setTarget,
 	-- applied by the caller); initial_type any; chans from calcShape (M3.3).
-	_addExprNode(NodeKind.phiK(NONE), [root], ctx.nrate[root], ANY_NUM, ctx.chans[root])
+	_addExprNode(NodeKind.phiK(NONE), [root], ctx.nrate[root], ANY_NUM, ctx.shape[root])
 }
 
 -- Append a control-flow node (if/switch/for): not hash-consed, carries its
 -- branch/body PhiNode roots in ctx.subs.
-fn _addCFNode(kind NodeKind, ins [Int], subs [Int], r Rate, t NumType, ch Int) Int {
-	let idx = _addExprNode(kind, ins, r, t, ch);
+fn _addCFNode(kind NodeKind, ins [Int], subs [Int], r Rate, t NumType, sh Shape) Int {
+	let idx = _addExprNode(kind, ins, r, t, sh);
 	var ctx Ctx = `scCtx;
 	ctx.subs[idx] = subs;
 	-- A branch/body that writes to a delay (or other sink) purely for its
@@ -357,18 +354,18 @@ fn _maxRateOf(ins [Int]) Rate {
 	r
 }
 
--- Control flow at event rate is not supported (mirrors controlFlowRate in
--- synthdef_expr.hpp): the iso-group machinery would split branch subgraphs
--- into wrongly-activated sibling loops. Clamp event up to audio.
-fn _cfRate(r Rate) Rate = match (r) { Rate.event: Rate.audio; _: r; };
+-- A control-flow node's rate. Branching once per block on a block-placed
+-- condition is a later optimisation (plan §4.4); for now control flow runs
+-- per sample unless everything is const/init/reset.
+fn _cfRate(r Rate) Rate = r == Rate.block ? Rate.audio : r;
 
-fn _broadcastChans(ins [Int]) Int {
+fn _broadcastShape(ins [Int]) Shape {
 	var ctx Ctx = `scCtx;
-	var ch = 0;
+	var sh = noShape();
 	for (i : ins) {
-		ch = max(ch, ctx.chans[i]);
+		sh = broadcast(sh, ctx.shape[i]);
 	}
-	ch
+	sh
 }
 
 ---------------------------------------------------------------------------
@@ -437,14 +434,14 @@ fn _bufIdxFor(bvId Int) Int {
 	}
 }
 
--- Mirrors bankLookupInputOK(): true for values readable at note-on time --
--- constants, note params, controls, and init-rate values.
+-- True for values readable at note-on time: constants, note params,
+-- controls (inputs with a spec), and init-rate values.
 fn _bankLookupInputOK(n NIdx) Bool {
 	var ctx Ctx = `scCtx;
 	match (ctx.kind[n]) {
 		constant(_, _):      true;
 		noteParamK(_, _, _): true;
-		control(_, _, _, _): true;
+		inletK(_, _, sp):    match (sp) { some(_): true; none: false; };
 		_:                   ctx.nrate[n] <= Rate.init;
 	}
 }
@@ -507,15 +504,20 @@ fn _foldedType2(a NumType, b NumType, r ConstVal) NumType {
 
 fn _foldUnopNode(ctx Ctx, op UnaryOp, ins [Int]) Int {
 	let r = foldUnary(_constValOf(ctx, ins[0]), op);
-	_addFoldedConstant(r, _foldedType1(_constInitOf(ctx, ins[0]), r))
+	_addFoldedConstant(r, _foldedType1(_constInitOf(ctx, ins[0]), r), ctx.shape[ins[0]])
 }
+-- A binary fold works on both operands expanded to their broadcast shape.
+fn _gathered(ctx Ctx, n NIdx, out Shape) ConstVal =
+	gatherShape(_constValOf(ctx, n), ctx.shape[n], out);
 fn _foldBinopNode(ctx Ctx, op BinaryOp, ins [Int]) Int {
-	let r = foldBinary(_constValOf(ctx, ins[0]), _constValOf(ctx, ins[1]), op);
-	_addFoldedConstant(r, _foldedType2(_constInitOf(ctx, ins[0]), _constInitOf(ctx, ins[1]), r))
+	let sh = broadcast(ctx.shape[ins[0]], ctx.shape[ins[1]]);
+	let r = foldBinary(_gathered(ctx, ins[0], sh), _gathered(ctx, ins[1], sh), op);
+	_addFoldedConstant(r, _foldedType2(_constInitOf(ctx, ins[0]), _constInitOf(ctx, ins[1]), r), sh)
 }
 fn _foldCmpNode(ctx Ctx, op CompareOp, ins [Int]) Int {
-	let r = foldCompare(_constValOf(ctx, ins[0]), _constValOf(ctx, ins[1]), op);
-	_addFoldedConstant(r, r _foldInitType)
+	let sh = broadcast(ctx.shape[ins[0]], ctx.shape[ins[1]]);
+	let r = foldCompare(_gathered(ctx, ins[0], sh), _gathered(ctx, ins[1], sh), op);
+	_addFoldedConstant(r, r _foldInitType, sh)
 }
 fn _foldOp(ctx Ctx, kind NodeKind, ins [Int]) Option<Int> = match (kind) {
 	unopK(op):      canFoldUnary(_constValOf(ctx, ins[0]), op)
@@ -530,10 +532,10 @@ fn _opRate(ctx Ctx, kind NodeKind, ins [Int]) Rate = match (kind) {
 	compareopK(_): _maxRateOf(ins);
 	_:             ctx.nrate[ins[0]];
 };
-fn _opChans(ctx Ctx, kind NodeKind, ins [Int]) Int = match (kind) {
-	binopK(_):     _broadcastChans(ins);
-	compareopK(_): _broadcastChans(ins);
-	_:             ctx.chans[ins[0]];
+fn _opShape(ctx Ctx, kind NodeKind, ins [Int]) Shape = match (kind) {
+	binopK(_):     _broadcastShape(ins);
+	compareopK(_): _broadcastShape(ins);
+	_:             ctx.shape[ins[0]];
 };
 fn _opType(kind NodeKind, ins [Int]) NumType = match (kind) {
 	binopK(op): op isFloatBinop ? ANY_FLOAT : (op isIntBinop ? ANY_INT : ANY_NUM);
@@ -560,14 +562,14 @@ fn _makeOp(kind NodeKind, ins [Int]) Int {
 			none: {}
 		}
 	}
-	_addExprNodeS(serial, kind, ins, ctx _opRate(kind, ins), _opType(kind, ins), ctx _opChans(kind, ins))
+	_addExprNodeS(serial, kind, ins, ctx _opRate(kind, ins), _opType(kind, ins), ctx _opShape(kind, ins))
 }
 
 -- A scalar constant node for a rule RHS literal (hash-consed f64, like the C++
 -- constant(double)).
 fn _scalarConst(c Float) Int {
 	let v = ConstVal.floats([c]);
-	_addFoldedConstant(v, v _foldInitType)
+	_addFoldedConstant(v, v _foldInitType, scalarShape())
 }
 fn _rhsMonoOp(subs [Int], m Int) UnaryOp {
 	let n = subs subsNode((m == 0) ? VMONOUP : VMONODN);
@@ -594,19 +596,20 @@ fn _buildRHS(p Pat, subs [Int]) Int = match (p) {
 -- constant input folds via reduce_int/reduce_float (addConstantExpr, no hash-cons).
 fn _makeReduce(ctx Ctx, ins [Int], op BinaryOp, cols Int) Int {
 	if (ctx.kind[ins[0]] isConstantKind) {
-		let r = foldReduce(_constValOf(ctx, ins[0]), cols, op) padPow2;
-		return _addConstantNode(NodeKind.constant(r, r _foldInitType), r constSize);
+		let r = foldReduce(_constValOf(ctx, ins[0]), cols, op);
+		return _addConstantNode(NodeKind.constant(r, r _foldInitType), row(r constSize));
 	}
-	_addExprNode(NodeKind.reduceK(op, cols), ins, ctx.nrate[ins[0]], ctx.typ[ins[0]], cols)
+	_addExprNode(NodeKind.reduceK(op, cols), ins, ctx.nrate[ins[0]], ctx.typ[ins[0]], row(cols))
 }
 
--- Output channel count (mirrors each VecXxxExpr::calcShape). at = the index
--- vector's chans; put = the source array's chans; join = sum of all inputs,
--- rounded up to a power of two; the single-input reorders use vecOutChans.
+-- Output channel count of a vec op over flattened channels. at = the index
+-- vector's chans; put = the source array's chans; join = sum of all inputs;
+-- the single-input reorders use vecOutChans. The result is a row (vec ops
+-- work on the row-major flattening; shaped views are a later step).
 fn _vecChans(ctx Ctx, vop VecOp, ins [Int]) Int = match (vop) {
 	at:   ctx.chans[ins[1]];
 	put:  ctx.chans[ins[0]];
-	join: { var raw = 0; for (x : ins) { raw = raw + ctx.chans[x]; } raw asChans }
+	join: { var raw = 0; for (x : ins) { raw = raw + ctx.chans[x]; } raw }
 	_:    vecOutChans(ctx.chans[ins[0]], vop);
 };
 fn _vecRate(ctx Ctx, vop VecOp, ins [Int]) Rate = match (vop) {
@@ -630,7 +633,7 @@ fn _importVecOp(e SignalExpr, vop VecOp) Void {
 			-- take/drop/stride/stutter/ncyc/rotate/reverse/transpose/at/put/join:
 			-- no folding, initial type = any (narrowed to the input type by inference).
 			_mapId(e.id, _addExprNode(NodeKind.vecK(vop), ins,
-				ctx _vecRate(vop, ins), ANY_NUM, ctx _vecChans(vop, ins)));
+				ctx _vecRate(vop, ins), ANY_NUM, row(ctx _vecChans(vop, ins))));
 		}
 	}
 }
@@ -641,23 +644,20 @@ fn _importVecOp(e SignalExpr, vop VecOp) Void {
 fn _importExpr(e SignalExpr) Void {
 	var ctx Ctx = `scCtx;
 	match (e.kind) {
-		int(a, typ): {
-			-- parseConstant always builds f64 storage with explicit chans; the
-			-- value vector is zero-extended to a power-of-two length (VectorT).
-			let pv = ConstVal.floats(a toFloat) padPow2;
-			let n = _addConstantNode(NodeKind.constant(pv, typ), pv constSize);
+		int(a, typ, sh): {
+			-- Constants keep f64 storage (folding yields i64 only through casts).
+			let n = _addConstantNode(NodeKind.constant(ConstVal.floats(a toFloat), typ), sh);
 			_mapId(e.id, n);
 		}
-		float(a, typ): {
-			let pv = ConstVal.floats(a) padPow2;
-			let n = _addConstantNode(NodeKind.constant(pv, typ), pv constSize);
+		float(a, typ, sh): {
+			let n = _addConstantNode(NodeKind.constant(ConstVal.floats(a), typ), sh);
 			_mapId(e.id, n);
 		}
 		sampleRate: {
-			_mapId(e.id, _addExprNode(NodeKind.sampleRate, [Int](), Rate.init, ANY_NUM, 1));
+			_mapId(e.id, _addExprNode(NodeKind.sampleRate, [Int](), Rate.init, ANY_NUM, scalarShape()));
 		}
 		sampleDur: {
-			_mapId(e.id, _addExprNode(NodeKind.sampleDur, [Int](), Rate.init, ANY_NUM, 1));
+			_mapId(e.id, _addExprNode(NodeKind.sampleDur, [Int](), Rate.init, ANY_NUM, scalarShape()));
 		}
 		sharedIn(slot, srate): {
 			-- Mirrors the C++ sharedIn() factory validation.
@@ -668,53 +668,41 @@ fn _importExpr(e SignalExpr) Void {
 				_: { _impError("sharedIn: only init and audio rate supported"); }
 			}
 			_mapId(e.id, _addExprNode(NodeKind.sharedInK(slot, srate), [Int](),
-				srate, ANY_FLOAT, 1));
-		}
-		control(spec, chans, name, kind): {
-			let sn Int = `scControlSerials;
-			`scControlSerials = sn + 1;
-			_mapId(e.id, _addExprNode(NodeKind.control(spec, name, sn, kind), [Int](),
-				Rate.event, FLOAT32, chans));
+				srate, ANY_FLOAT, scalarShape()));
 		}
 		noteParam(spec, chans, name): {
-			-- User noteParams are event-rate sources; the GATE stays audio
-			-- rate so per-sample envelope/trigger edge detection keeps its
-			-- semantics (mirrors the C++ NoteParam ctor).
-			var sn = 0;
-			var r = Rate.event;
+			-- A column (or `chans` columns) of the voicer's `notes` input, read
+			-- for the current voice. Gate is column 0; the others are assigned
+			-- in declaration order. Placed at block: constant while a note
+			-- holds still, recomputed when its row changes.
+			var col = 0;
 			if (name != "gate") {
-				sn = `scNoteParamSerials;
-				`scNoteParamSerials = sn + 1;
-			} else {
-				r = Rate.audio;
+				col = `scNoteCol;
+				`scNoteCol = col + chans;
 			}
-			_mapId(e.id, _addExprNode(NodeKind.noteParamK(spec, name, sn), [Int](),
-				r, FLOAT32, chans));
+			_mapId(e.id, _addExprNode(NodeKind.noteParamK(spec, name, col), [Int](),
+				Rate.block, FLOAT32, row(chans)));
 		}
-		inlet(typ, chans, name): {
+		inlet(typ, sh, name, spec): {
+			-- An input port. One with a spec (a control) is nominally block
+			-- placed: its value is usually held, so what depends on it alone is
+			-- a parameter group, computed per sample only while it moves. A
+			-- plain inlet is declared as a signal input and placed at audio.
 			let sn Int = `scInletSerials;
 			`scInletSerials = sn + 1;
-			_mapId(e.id, _addExprNode(NodeKind.inletK(name, sn), [Int](),
-				Rate.audio, typ, chans));
+			let r = match (spec) { some(_): Rate.block; none: Rate.audio; };
+			_mapId(e.id, _addExprNode(NodeKind.inletK(name, sn, spec), [Int](),
+				r, typ, sh));
 		}
-		-- An outlet is a port the engine patches into the audio graph, and
-		-- Silo::connect demands the two ends' rates match exactly -- it does no
-		-- conversion. Const/init/reset sources hold one value for the whole
-		-- block, so declaring the port audio rate is exact, and it is the only
-		-- way a graph like `140 scalar outlet` can be connected at all (it
-		-- otherwise yields a constRate port and every connect fails with
-		-- errRateMismatch). inlet above hardcodes Rate.audio for the same
-		-- reason. Event rate is deliberately NOT promoted: crossing that
-		-- boundary is what the explicit eventToAudio node is for.
-		-- Mirrors Outlet::Outlet in synthdef-compiler/src/synthdef_expr.cpp.
+		-- An outlet is a port the engine patches into the audio graph: every
+		-- port is audio rate at the ABI (a value held for the block is simply
+		-- reported constant).
 		outlet(name): {
 			let sn Int = `scOutletSerials;
 			`scOutletSerials = sn + 1;
 			let ins = e _resolveIns;
-			let inRate = ctx.nrate[ins[0]];
-			let outRate = inRate < Rate.event ? Rate.audio : inRate;
 			_mapId(e.id, _addExprNode(NodeKind.outletK(name, sn), ins,
-				outRate, ANY_NUM, ctx.chans[ins[0]]));
+				Rate.audio, ANY_NUM, ctx.shape[ins[0]]));
 		}
 		unop(op): {
 			if (!(op _unopSupported)) {
@@ -739,54 +727,41 @@ fn _importExpr(e SignalExpr) Void {
 			let castType = NumType(op numTypeInt);
 			if (ctx.kind[ins[0]] isConstantKind) {
 				let r = foldCast(_constValOf(ctx, ins[0]), op);
-				_mapId(e.id, _addFoldedConstant(r, castType));
+				_mapId(e.id, _addFoldedConstant(r, castType, ctx.shape[ins[0]]));
 				return;
 			}
 			_mapId(e.id, _addExprNode(NodeKind.castopK(castType), ins,
-				ctx.nrate[ins[0]], castType, ctx.chans[ins[0]]));
-		}
-		eventToAudio: {
-			-- Rate promotion passthrough: only an event-rate input gets a
-			-- node (forced audio); any other rate passes through unchanged
-			-- (mirrors the C++ eventToAudio builder).
-			let ins = e _resolveIns;
-			if (ctx.nrate[ins[0]] != Rate.event) {
-				_mapId(e.id, ins[0]);
-				return;
-			}
-			_mapId(e.id, _addExprNode(NodeKind.eventToAudioK, ins,
-				Rate.audio, ANY_NUM, ctx.chans[ins[0]]));
+				ctx.nrate[ins[0]], castType, ctx.shape[ins[0]]));
 		}
 		select: {
 			let ins = e _resolveIns;
-			-- SelectExpr::calcShape: chans of test, broadcast with values
 			_mapId(e.id, _addExprNode(NodeKind.selectK, ins,
-				_maxRateOf(ins), ANY_NUM, _broadcastChans(ins)));
+				_maxRateOf(ins), ANY_NUM, _broadcastShape(ins)));
 		}
 		select2: {
 			let ins = e _resolveIns;
 			_mapId(e.id, _addExprNode(NodeKind.selectK, ins,
-				_maxRateOf(ins), ANY_NUM, _broadcastChans(ins)));
+				_maxRateOf(ins), ANY_NUM, _broadcastShape(ins)));
 		}
-		random(op, rrate, chans): {
+		random(op, rrate, sh): {
 			match (op) {
 				unipolar: {
 					let sn Int = `scRandSerials;
 					`scRandSerials = sn + 1;
 					_mapId(e.id, _addExprNode(NodeKind.urandK(sn), [Int](),
-						rrate, ANY_FLOAT, chans));
+						rrate, ANY_FLOAT, sh));
 				}
 				bipolar: {
 					let sn Int = `scRandSerials;
 					`scRandSerials = sn + 1;
 					_mapId(e.id, _addExprNode(NodeKind.birandK(sn), [Int](),
-						rrate, ANY_FLOAT, chans));
+						rrate, ANY_FLOAT, sh));
 				}
 				bits: {
 					let sn Int = `scRandSerials;
 					`scRandSerials = sn + 1;
 					_mapId(e.id, _addExprNode(NodeKind.rand64K(sn), [Int](),
-						rrate, INT64, chans));
+						rrate, INT64, sh));
 				}
 				frand(_, _): { _impError("FRand is not supported by the synthdef compiler"); }
 				irand(_, _): { _impError("IRand is not supported by the synthdef compiler"); }
@@ -798,29 +773,29 @@ fn _importExpr(e SignalExpr) Void {
 				maxDelayTime: {
 					let ins = e _resolveIns;
 					let n = _addExprNode(NodeKind.maxDelayK(d), ins,
-						Rate.init, ANY_NUM, ctx.chans[ins[0]]);
+						Rate.init, ANY_NUM, ctx.shape[ins[0]]);
 					ctx.delays[d] = DelayInfo { ...ctx.delays[d], maxDelay: n };
 					_mapId(e.id, n);
 				}
 				init(offset): {
 					let ins = e _resolveIns;
-					-- DelayInit::calcShape is a no-op: chans stays 0
+					-- A delay init's own shape stays unset (its value widens the delay).
 					_mapId(e.id, _addExprNode(NodeKind.delayInitK(d, offset), ins,
-						Rate.init, ANY_NUM, 0));
+						Rate.init, ANY_NUM, noShape()));
 				}
 				read(offset): {
 					_mapId(e.id, _addExprNode(NodeKind.delayFixReadK(d, offset), [Int](),
-						Rate.audio, ANY_NUM, ctx.delays[d].chans));
+						Rate.audio, ANY_NUM, ctx.delays[d].shape));
 				}
 				vread(interp): {
 					let ins = e _resolveIns;
 					_mapId(e.id, _addExprNode(NodeKind.delayVarReadK(d, interp), ins,
-						Rate.audio, ANY_NUM, ctx.delays[d].chans));
+						Rate.audio, ANY_NUM, ctx.delays[d].shape));
 				}
 				write: {
 					let ins = e _resolveIns;
 					_mapId(e.id, _addExprNode(NodeKind.delayWriteK(d), ins,
-						Rate.audio, ANY_NUM, ctx.chans[ins[0]]));
+						Rate.audio, ANY_NUM, ctx.shape[ins[0]]));
 				}
 			}
 		}
@@ -829,7 +804,7 @@ fn _importExpr(e SignalExpr) Void {
 			`scDebugSerials = sn + 1;
 			let ins = e _resolveIns;
 			_mapId(e.id, _addExprNode(NodeKind.debugK(label, period, consecutive, sn), ins,
-				ctx.nrate[ins[0]], ANY_NUM, 1));
+				ctx.nrate[ins[0]], ANY_NUM, scalarShape()));
 		}
 		vecop(vop): { _importVecOp(e, vop); }
 		buffer(bv, op): {
@@ -839,22 +814,22 @@ fn _importExpr(e SignalExpr) Void {
 			match (op) {
 				fixRead(index, readChans, startChan): {
 					_mapId(e.id, _addExprNode(NodeKind.bufFixReadK(bi, index, readChans, startChan), [Int](),
-						Rate.audio, FLOAT64, readChans));
+						Rate.audio, FLOAT64, row(readChans)));
 				}
 				vread(interp, readChans, startChan): {
 					let ins = e _resolveIns;
 					_mapId(e.id, _addExprNode(NodeKind.bufVarReadK(bi, interp, readChans, startChan), ins,
-						Rate.audio, FLOAT64, readChans));
+						Rate.audio, FLOAT64, row(readChans)));
 				}
 				write(writeChans, startChan): {
 					let ins = e _resolveIns;
 					-- BufWrite::calcShape sets chans = in0().chans.
 					_mapId(e.id, _addExprNode(NodeKind.bufWriteK(bi, writeChans, startChan), ins,
-						Rate.audio, FLOAT64, ctx.chans[ins[0]]));
+						Rate.audio, FLOAT64, ctx.shape[ins[0]]));
 				}
 				length: {
 					_mapId(e.id, _addExprNode(NodeKind.bufLengthK(bi), [Int](),
-						Rate.audio, FLOAT64, 1));
+						Rate.audio, FLOAT64, scalarShape()));
 				}
 			}
 		}
@@ -870,49 +845,49 @@ fn _importExpr(e SignalExpr) Void {
 			}
 			-- BankLookup: rate FORCED to Reset (a latch), i32, chans 1, sink.
 			_mapId(e.id, _addExprNode(NodeKind.bankLookupK(bi), ins,
-				Rate.reset, INT32, 1));
+				Rate.reset, INT32, scalarShape()));
 		}
 		bank(op): {
 			match (op) {
 				fixRead(index, readChans, startChan): {
 					let ins = e _resolveIns;
 					_mapId(e.id, _addExprNode(NodeKind.bankFixReadK(index, readChans, startChan), ins,
-						Rate.audio, FLOAT64, readChans));
+						Rate.audio, FLOAT64, row(readChans)));
 				}
 				vread(interp, readChans, startChan): {
 					let ins = e _resolveIns;
 					_mapId(e.id, _addExprNode(NodeKind.bankVarReadK(interp, readChans, startChan), ins,
-						Rate.audio, FLOAT64, readChans));
+						Rate.audio, FLOAT64, row(readChans)));
 				}
 				rootKey: {
 					let ins = e _resolveIns;
 					_mapId(e.id, _addExprNode(NodeKind.bankRootKeyK, ins,
-						Rate.reset, FLOAT32, 1));
+						Rate.reset, FLOAT32, scalarShape()));
 				}
 				sampleRate: {
 					let ins = e _resolveIns;
 					_mapId(e.id, _addExprNode(NodeKind.bankSampleRateK, ins,
-						Rate.reset, FLOAT64, 1));
+						Rate.reset, FLOAT64, scalarShape()));
 				}
 				length: {
 					let ins = e _resolveIns;
 					_mapId(e.id, _addExprNode(NodeKind.bankLengthK, ins,
-						Rate.reset, FLOAT64, 1));
+						Rate.reset, FLOAT64, scalarShape()));
 				}
 				loopStart: {
 					let ins = e _resolveIns;
 					_mapId(e.id, _addExprNode(NodeKind.bankLoopStartK, ins,
-						Rate.reset, FLOAT64, 1));
+						Rate.reset, FLOAT64, scalarShape()));
 				}
 				loopEnd: {
 					let ins = e _resolveIns;
 					_mapId(e.id, _addExprNode(NodeKind.bankLoopEndK, ins,
-						Rate.reset, FLOAT64, 1));
+						Rate.reset, FLOAT64, scalarShape()));
 				}
 				hasLoop: {
 					let ins = e _resolveIns;
 					_mapId(e.id, _addExprNode(NodeKind.bankHasLoopK, ins,
-						Rate.reset, INT32, 1));
+						Rate.reset, INT32, scalarShape()));
 				}
 			}
 		}
@@ -925,8 +900,8 @@ fn _importExpr(e SignalExpr) Void {
 			-- else_phi})); type any; chans = broadcast(then, else) (refined
 			-- by calcShape in M3.3).
 			let r = _cfRate(max(_maxRateOf(ins), max(ctx.nrate[thenPhi], ctx.nrate[elsePhi])));
-			let ch = max(ctx.chans[thenPhi], ctx.chans[elsePhi]);
-			let ifNode = _addCFNode(NodeKind.ifK, ins, [thenPhi, elsePhi], r, ANY_NUM, ch);
+			let sh = broadcast(ctx.shape[thenPhi], ctx.shape[elsePhi]);
+			let ifNode = _addCFNode(NodeKind.ifK, ins, [thenPhi, elsePhi], r, ANY_NUM, sh);
 			_linkPhi(thenPhi, ifNode, r);
 			_linkPhi(elsePhi, ifNode, r);
 			_mapId(e.id, ifNode);
@@ -937,7 +912,7 @@ fn _importExpr(e SignalExpr) Void {
 			let bodyPhi = _importSubgraph(bodySg);
 			var ctx Ctx = `scCtx;
 			let r = _cfRate(max(_maxRateOf(ins), ctx.nrate[bodyPhi]));
-			let forNode = _addCFNode(NodeKind.forK, ins, [bodyPhi], r, ANY_NUM, ctx.chans[bodyPhi]);
+			let forNode = _addCFNode(NodeKind.forK, ins, [bodyPhi], r, ANY_NUM, ctx.shape[bodyPhi]);
 			_linkPhi(bodyPhi, forNode, r);
 			_mapId(e.id, forNode);
 		}
@@ -947,10 +922,10 @@ fn _importExpr(e SignalExpr) Void {
 			for (sg : cases) { subs push!(_importSubgraph(sg)); }
 			var ctx Ctx = `scCtx;
 			var r = _maxRateOf(ins);
-			var ch = 0;
-			for (s : subs) { r = max(r, ctx.nrate[s]); ch = max(ch, ctx.chans[s]); }
+			var sh = noShape();
+			for (s : subs) { r = max(r, ctx.nrate[s]); sh = broadcast(sh, ctx.shape[s]); }
 			r = _cfRate(r);
-			let swNode = _addCFNode(NodeKind.switchK(cases length), ins, subs, r, ANY_NUM, ch);
+			let swNode = _addCFNode(NodeKind.switchK(cases length), ins, subs, r, ANY_NUM, sh);
 			for (s : subs) { _linkPhi(s, swNode, r); }
 			_mapId(e.id, swNode);
 		}
@@ -958,31 +933,40 @@ fn _importExpr(e SignalExpr) Void {
 			-- VarExpr: no inputs, initial_type any_int, audio rate; chans stays 0
 			-- (Expr default; calcShape is a no-op), so it broadcasts to its use.
 			-- Hash-consed by name via the VAR| cons key.
-			_mapId(e.id, _addExprNode(NodeKind.varK(name), [Int](), Rate.audio, ANY_INT, 0));
+			_mapId(e.id, _addExprNode(NodeKind.varK(name), [Int](), Rate.audio, ANY_INT, noShape()));
 		}
 		voicer(maxVoices, bodySg): {
-			-- VoicerExpr is a ControlFlowExpr with one subgraph (the voice body).
-			-- No direct inputs; the body root is wrapped in a PhiNode (like for_).
-			-- chans = maxVoices * voice_body.in0().chans (the body root's chans),
-			-- computed directly (not broadcast over the phi) to break the
-			-- voicer<->phi shape cycle; see _voicerChans in types.x.
+			-- One subgraph (the voice body), its root wrapped in a PhiNode. The
+			-- voicer's shape is the body root's with a leading voice dimension,
+			-- computed from the root directly (not broadcast over the phi) to
+			-- break the voicer<->phi shape cycle; see _voicerShape in types.x.
+			-- The body's note parameters are columns of the synth's `notes`
+			-- input, {maxVoices, 1 + params}, created here once the body has
+			-- declared them.
+			var `scNoteCol Int = 1;
 			let bodyPhi = _importSubgraph(bodySg);
+			let cols Int = `scNoteCol;
 			var ctx Ctx = `scCtx;
 			let bodyRoot = ctx.ins[bodyPhi][0];
-			-- Rate is FORCED to audio (mirrors VoicerExpr in
-			-- synthdef_expr.hpp): the voicer sums its voices every sample,
-			-- even when the body is pure noteParam (event-rate) math.
+			-- Audio rate: the voicer runs its voices every sample.
 			let r = Rate.audio;
-			let ch = maxVoices * ctx.chans[bodyRoot];
-			let vNode = _addCFNode(NodeKind.voicerK(maxVoices), [Int](), [bodyPhi], r, ANY_NUM, ch);
+			let sh = prependDim(ctx.shape[bodyRoot], maxVoices);
+			let vNode = _addCFNode(NodeKind.voicerK(maxVoices), [Int](), [bodyPhi], r, ANY_NUM, sh);
 			_linkPhi(bodyPhi, vNode, r);
 			_mapId(e.id, vNode);
+			let sn Int = `scInletSerials;
+			`scInletSerials = sn + 1;
+			let notesName = ctx.notesInlets length == 0 ? "notes" : "notes%^" fmt(ctx.notesInlets length);
+			let ni = _addExprNode(NodeKind.inletK(notesName, sn, Option<InletSpec>.none), [Int](),
+				Rate.block, FLOAT32, matrix(maxVoices, cols));
+			ctx.notesInlets push!(ni);
+			ctx.voicerNotes push!(vNode);
 		}
 		spectralFrame(fftSize): {
 			-- The packed split-complex FFT frame: a source node (no inputs), type
 			-- f32. Its chans (inputChans * fftSize) is set by the enclosing
 			-- spectral_chain once its input is known; default to fftSize (mono).
-			let n = _addExprNode(NodeKind.spectralFrameK(fftSize), [Int](), Rate.audio, FLOAT32, fftSize);
+			let n = _addExprNode(NodeKind.spectralFrameK(fftSize), [Int](), Rate.audio, FLOAT32, row(fftSize));
 			`scLastSpectralFrame = n;
 			_mapId(e.id, n);
 		}
@@ -994,10 +978,13 @@ fn _importExpr(e SignalExpr) Void {
 			let bodyPhi = _importSubgraph(bodySg);
 			var ctx Ctx = `scCtx;
 			let r = max(_maxRateOf(ins), ctx.nrate[bodyPhi]);
-			let ch = ctx.chans[ins[0]];
+			let sh = ctx.shape[ins[0]];
 			-- The frame's shape is inputChans * fftSize.
-			if (frame != NONE) { ctx.chans[frame] = ch * fftSize; }
-			let scNode = _addCFNode(NodeKind.spectralChainK(fftSize, hopSize), ins, [bodyPhi], r, FLOAT32, ch);
+			if (frame != NONE) {
+				ctx.shape[frame] = row(sh chans * fftSize);
+				ctx.chans[frame] = sh chans * fftSize;
+			}
+			let scNode = _addCFNode(NodeKind.spectralChainK(fftSize, hopSize), ins, [bodyPhi], r, FLOAT32, sh);
 			_linkPhi(bodyPhi, scNode, r);
 			_mapId(e.id, scNode);
 		}

@@ -9,11 +9,16 @@ export synthdef_ffi.*;
 ---------------------------------------------------------------------------
 --- Rate
 
+-- When a value is computed, the placement lattice of the block engine:
+-- constant (compile time) < init (once) < reset (per voice onset) < block
+-- (once per block, falling back to per sample when an input source is not
+-- constant for the block) < audio (per sample). `block` is the compiler's
+-- placement of parameter groups; nothing declares it.
 enum Rate {
 	constant,
 	init,
 	reset,
-	event,
+	block,
 	audio,
 }
 
@@ -98,13 +103,99 @@ fn numType(o Int)  NumType = ANY_NUM;
 fn numType(o Float) NumType = o isIntegerValued ? ANY_NUM : ANY_FLOAT;
 
 ---------------------------------------------------------------------------
---- Chans
+--- Shape
+--
+-- A signal is a tensor of channels: up to 4 dimensions, row-major (the last
+-- dimension varies fastest), unused leading dimensions 1. Channel c is the
+-- row-major flattening. Mirrors tzpl_Shape in the plugin ABI.
 
-type Chans = Int;
+struct Shape {
+	dims [Int],    -- always 4 entries
+}
 
-fn asChans(a Chans) Chans = a max(1) bitCeil;
+const MAX_RANK = 4;
 
-fn broadcast(a Chans, b Chans) Chans = max(a, b);
+fn shape(dims [Int]) Shape {
+	var d [Int] = [];
+	var k = dims length;
+	while (k < MAX_RANK) { d push!(1); k = k + 1; }
+	for (x : dims) { d push!(x); }
+	Shape { dims: d }
+}
+fn scalarShape() Shape = shape([1]);
+fn row(n Int) Shape = shape([n]);
+fn matrix(rows Int, cols Int) Shape = shape([rows, cols]);
+fn cuboid(planes Int, rows Int, cols Int) Shape = shape([planes, rows, cols]);
+
+fn chans(s Shape) Int = s.dims[0] * s.dims[1] * s.dims[2] * s.dims[3];
+
+-- Number of dimensions after the leading 1s (a scalar has rank 0).
+fn rank(s Shape) Int {
+	var d = 0;
+	while (d < MAX_RANK) {
+		if (s.dims[d] != 1) { return MAX_RANK - d; }
+		d = d + 1;
+	}
+	0
+}
+
+fn ==(a Shape, b Shape) Bool =
+	a.dims[0] == b.dims[0] && a.dims[1] == b.dims[1]
+	&& a.dims[2] == b.dims[2] && a.dims[3] == b.dims[3];
+fn !=(a Shape, b Shape) Bool = !(a == b);
+
+fn _gcd(a Int, b Int) Int = b == 0 ? a : _gcd(b, a % b);
+fn _lcm(a Int, b Int) Int = (a == 0 || b == 0) ? max(a, b) : a // _gcd(a, b) * b;
+
+-- Each dimension is the least common multiple of a's and b's, so a 2-channel
+-- signal times a 3-channel one is 6 channels, cycling each. A shape with 0
+-- channels (not yet known) is the identity.
+fn broadcast(a Shape, b Shape) Shape {
+	if (a chans == 0) { return b; }
+	if (b chans == 0) { return a; }
+	Shape { dims: [_lcm(a.dims[0], b.dims[0]), _lcm(a.dims[1], b.dims[1]),
+	               _lcm(a.dims[2], b.dims[2]), _lcm(a.dims[3], b.dims[3])] }
+}
+
+-- Row-major strides: the last dimension has stride 1.
+fn strides(s Shape) [Int] {
+	[s.dims[1] * s.dims[2] * s.dims[3], s.dims[2] * s.dims[3], s.dims[3], 1]
+}
+
+-- The source channel output channel w reads when src is broadcast to out:
+-- per dimension, the output index mod the source's size.
+fn broadcastChannel(src Shape, out Shape, w Int) Int {
+	let st = src strides;
+	var rem = w;
+	var p = 0;
+	var d = MAX_RANK - 1;
+	while (d >= 0) {
+		p = p + (rem % out.dims[d] % src.dims[d]) * st[d];
+		rem = rem // out.dims[d];
+		d = d - 1;
+	}
+	p
+}
+
+-- "6", "2x3": the dimensions after the leading 1s.
+fn toString(s Shape) String {
+	let r = s rank;
+	if (r == 0) { return "1"; }
+	var parts [String] = [];
+	var d = MAX_RANK - r;
+	while (d < MAX_RANK) { parts push!(s.dims[d] toString); d = d + 1; }
+	parts join("x")
+}
+
+-- A leading voice dimension: n copies of s (for voicers). A rank-4 shape
+-- folds the new dimension into its first.
+fn prependDim(s Shape, n Int) Shape {
+	let r = s rank;
+	var dims = s.dims copy;
+	if (r < MAX_RANK) { dims[MAX_RANK - 1 - r] = n; }
+	else { dims[0] = n * dims[0]; }
+	Shape { dims: dims }
+}
 
 ---------------------------------------------------------------------------
 -- ControlSpec
@@ -255,41 +346,60 @@ fn delayVar(maxDelay AsSignal) DelayVar {
 
 
 fn scalar(x Bool) S {
-	SignalExprKind.int([x toInt], ANY_NUM) _newSignalExpr
+	SignalExprKind.int([x toInt], ANY_NUM, scalarShape()) _newSignalExpr
 }
 fn scalar(x Int) S {
-	SignalExprKind.int([x], ANY_NUM) _newSignalExpr
+	SignalExprKind.int([x], ANY_NUM, scalarShape()) _newSignalExpr
 }
 fn scalar(x Fraction) S {
 	let x = x toFloat;
-	SignalExprKind.float([x], x numType) _newSignalExpr
+	SignalExprKind.float([x], x numType, scalarShape()) _newSignalExpr
 }
 fn scalar(x Float) S {
-	SignalExprKind.float([x], x numType) _newSignalExpr
+	SignalExprKind.float([x], x numType, scalarShape()) _newSignalExpr
 }
 
-fn fill(chans Int, x Int) S {
-	SignalExprKind.int(x repeat(chans asChans), ANY_NUM) _newSignalExpr
+fn fill(chans Int, x Int) S = fill(row(chans max(1)), x);
+fn fill(chans Int, x Fraction) S = fill(row(chans max(1)), x);
+fn fill(chans Int, x Float) S = fill(row(chans max(1)), x);
+
+fn fill(sh Shape, x Int) S {
+	SignalExprKind.int(x repeat(sh chans), ANY_NUM, sh) _newSignalExpr
 }
-fn fill(chans Int, x Fraction) S {
-	SignalExprKind.float(x toFloat repeat(chans asChans), ANY_NUM) _newSignalExpr
+fn fill(sh Shape, x Fraction) S {
+	SignalExprKind.float(x toFloat repeat(sh chans), ANY_NUM, sh) _newSignalExpr
 }
-fn fill(chans Int, x Float) S {
-	SignalExprKind.float(x repeat(chans asChans), x numType) _newSignalExpr
+fn fill(sh Shape, x Float) S {
+	SignalExprKind.float(x repeat(sh chans), x numType, sh) _newSignalExpr
 }
 
 fn vec(v [Bool]) S {
-	SignalExprKind.int(v toInt, ANY_NUM) _newSignalExpr
+	SignalExprKind.int(v toInt, ANY_NUM, row(v length)) _newSignalExpr
 }
 fn vec(v [Int]) S {
-	SignalExprKind.int(v, ANY_NUM) _newSignalExpr
+	SignalExprKind.int(v, ANY_NUM, row(v length)) _newSignalExpr
 }
 fn vec(v [Fraction]) S {
 	let v = v toFloat;
-	SignalExprKind.float(v, ANY_FLOAT) _newSignalExpr
+	SignalExprKind.float(v, ANY_FLOAT, row(v length)) _newSignalExpr
 }
 fn vec(v [Float]) S {
-	SignalExprKind.float(v, ANY_FLOAT) _newSignalExpr
+	SignalExprKind.float(v, ANY_FLOAT, row(v length)) _newSignalExpr
+}
+
+-- A constant tensor of the given shape; values fill it cyclically in
+-- row-major order.
+fn tensor(sh Shape, v [Int]) S {
+	var out [Int] = [];
+	var i = 0;
+	while (i < sh chans) { out push!(v[i % v length]); i = i + 1; }
+	SignalExprKind.int(out, ANY_NUM, sh) _newSignalExpr
+}
+fn tensor(sh Shape, v [Float]) S {
+	var out [Float] = [];
+	var i = 0;
+	while (i < sh chans) { out push!(v[i % v length]); i = i + 1; }
+	SignalExprKind.float(out, ANY_FLOAT, sh) _newSignalExpr
 }
 
 fn asSignal(x S) S = x;
@@ -390,7 +500,7 @@ enum VecOp {
 	reverse,
 	transpose Int,
 	join,
-	reduce(BinaryOp, Chans),
+	reduce(BinaryOp, Int),
 	sum Int,
 	prod Int,
 	minOf Int,
@@ -432,7 +542,14 @@ enum RandOp {
 struct SignalType {
 	rate Rate,
 	elem NumType,
-	chans Chans,
+	shape Shape,
+}
+
+-- An input's UI metadata (the old controls): its spec, whose init is the
+-- value the input holds while unconnected, and the widget kind.
+struct InletSpec {
+	spec ControlSpec,
+	kind ControlKind,
 }
 
 struct DelayVar {
@@ -480,22 +597,21 @@ enum SignalExprKind {
 	sampleDur,
 	sharedIn(Int, Rate),
 
-	int ([Int], NumType),
-	float ([Float], NumType),
+	int ([Int], NumType, Shape),
+	float ([Float], NumType, Shape),
 
 	unop UnaryOp,
 	binop BinaryOp,
 	compareop CompareOp,
 	castop CastOp,
-	eventToAudio,
-	random (RandOp, Rate, Chans),
+	random (RandOp, Rate, Shape),
 	vecop VecOp,
 
-	inlet(NumType, Chans, String),
+	inlet(NumType, Shape, String, Option<InletSpec>),
 	outlet(String),
 
-	control(ControlSpec, Chans, String, ControlKind),
-	noteParam(ControlSpec, Chans, String),
+	-- A column (or `chans` columns) of the enclosing voicer's `notes` input.
+	noteParam(ControlSpec, Int, String),
 
 	delay(DelayVar, DelayOp),
 	buffer(BufferVar, BufferOp),
@@ -539,55 +655,54 @@ fn sharedIn(slot Int, rate Rate = Rate.audio) S {
     SignalExprKind.sharedIn(slot, rate) _newSignalExpr
 }
 
--- Promote an event-rate signal to audio rate: a stepped audio signal that
--- re-reads the latched event value every sample. Restores one-sample trigger
--- semantics over event sources -- e.g. `eventToAudio(c) tr` fires a single-
--- sample impulse on the sample after a control or noteParam change. No
--- effect on signals of any other rate (constant/init/reset/audio pass
--- through unchanged).
-fn eventToAudio(a AsSignal) S {
-    SignalExprKind.eventToAudio _newSignalExpr([a asSignal])
-}
+-- An input port. Shape and element type are fixed; what feeds it is up to
+-- the engine at run time (a connection, or a value set on it).
+fn inlet(typ NumType, chans Int = 1, name String = "in") S = inlet(typ, row(chans max(1)), name);
 
-fn inlet(typ NumType, chans Chans = 1, name String = "in") S {
-    SignalExprKind.inlet(typ, chans asChans, name) _newSignalExpr
+fn inlet(typ NumType, sh Shape, name String) S {
+    SignalExprKind.inlet(typ, sh, name, Option<InletSpec>.none) _newSignalExpr
 }
 
 fn outlet(a S, name String = "out") S {
     SignalExprKind.outlet(name) _newSignalExpr([a])
 }
 
-fn control(name String, spec ControlSpec, chans Chans = 1) S {
-    SignalExprKind.control(spec, chans asChans, name, ControlKind.continuous) _newSignalExpr
+-- A control: an f32 input with a spec. Its spec's init is its value while
+-- nothing sets or connects it; UIs derive a widget from the kind. Like any
+-- input it can be set, ramped, or patched from another signal at run time.
+fn _specInlet(name String, spec ControlSpec, kind ControlKind, sh Shape) S {
+    SignalExprKind.inlet(FLOAT32, sh, name,
+        Option<InletSpec>.some(InletSpec { spec: spec, kind: kind })) _newSignalExpr
 }
 
--- Momentary event control (0..1, init 0): the synth treats a nonzero
--- arrival as a one-shot edge (retrigger an envelope, reset a phase).
--- UIs render a button.
-fn trigger(name String, chans Chans = 1) S {
-    SignalExprKind.control(
-        ControlSpec { lo: 0.0, hi: 1.0, init: 0.0, warp: ControlWarp.linear },
-        chans asChans, name, ControlKind.trigger) _newSignalExpr
-}
+fn control(name String, spec ControlSpec, chans Int = 1) S =
+    _specInlet(name, spec, ControlKind.continuous, row(chans max(1)));
+fn control(name String, spec ControlSpec, sh Shape) S =
+    _specInlet(name, spec, ControlKind.continuous, sh);
+
+-- Momentary control (0..1, init 0): set with an impulse, so a nonzero value
+-- lasts one sample (retrigger an envelope, reset a phase). UIs render a button.
+fn trigger(name String, chans Int = 1) S =
+    _specInlet(name, ControlSpec { lo: 0.0, hi: 1.0, init: 0.0, warp: ControlWarp.linear },
+               ControlKind.trigger, row(chans max(1)));
 
 -- Latched on/off control (0 or 1). UIs render a toggle.
-fn toggle(name String, init Float = 0.0, chans Chans = 1) S {
-    SignalExprKind.control(
-        ControlSpec { lo: 0.0, hi: 1.0, init: init, warp: ControlWarp.linear },
-        chans asChans, name, ControlKind.boolean) _newSignalExpr
-}
+fn toggle(name String, init Float = 0.0, chans Int = 1) S =
+    _specInlet(name, ControlSpec { lo: 0.0, hi: 1.0, init: init, warp: ControlWarp.linear },
+               ControlKind.boolean, row(chans max(1)));
 
 -- Integer choice control: 0 .. numChoices-1 in unit steps. UIs render a
 -- number box.
-fn choice(name String, numChoices Int, init Int = 0, chans Chans = 1) S {
-    SignalExprKind.control(
-        ControlSpec { lo: 0.0, hi: (numChoices - 1) toFloat, init: init toFloat,
-                      warp: ControlWarp.step(1.0) },
-        chans asChans, name, ControlKind.select) _newSignalExpr
-}
+fn choice(name String, numChoices Int, init Int = 0, chans Int = 1) S =
+    _specInlet(name, ControlSpec { lo: 0.0, hi: (numChoices - 1) toFloat, init: init toFloat,
+                                   warp: ControlWarp.step(1.0) },
+               ControlKind.select, row(chans max(1)));
 
-fn noteParam(name String, spec ControlSpec, chans Chans = 1) S {
-    SignalExprKind.noteParam(spec, chans asChans, name) _newSignalExpr
+-- A note parameter of the enclosing voicer: `chans` columns of its voiced
+-- synth's `notes` input (gate is column 0; the others follow in the order
+-- they are declared). Set per note by noteOn / noteSetParams.
+fn noteParam(name String, spec ControlSpec, chans Int = 1) S {
+    SignalExprKind.noteParam(spec, chans max(1), name) _newSignalExpr
 }
 
 fn gate() S {
@@ -622,21 +737,24 @@ fn debug(input S, label String = "debug", period Int = 4096, consecutive Int = 1
 -- directly: the synthc importer has no lowering for RandOp.frand/irand (see
 -- lang/modules/synthc/importer.x, "FRand/IRand is not supported by the
 -- synthdef compiler") and urand's lowering is already exercised end-to-end.
-fn frand(lo Float, hi Float, chans Chans = 1, rate Rate = Rate.audio) S =
+fn frand(lo Float, hi Float, chans Int = 1, rate Rate = Rate.audio) S =
     lo + (hi - lo) * urand(chans, rate);
 -- Uniform integer in [lo, hi] inclusive. Same urand-based construction as
 -- frand above, for the same reason (no synthc lowering for RandOp.irand);
 -- the min() guards the one-in-2^24 f32 case where u*(n) rounds up to n.
-fn irand(lo Int, hi Int, chans Chans = 1, rate Rate = Rate.audio) S =
+fn irand(lo Int, hi Int, chans Int = 1, rate Rate = Rate.audio) S =
     (lo + min(hi - lo, (urand(chans, rate) * (hi - lo + 1)) floor)) i32;
-fn urand(chans Chans = 1, rate Rate = Rate.audio) S {
-    SignalExprKind.random(RandOp.unipolar, rate, chans asChans) _newSignalExpr
+fn urand(chans Int = 1, rate Rate = Rate.audio) S = urand(row(chans max(1)), rate);
+fn birand(chans Int = 1, rate Rate = Rate.audio) S = birand(row(chans max(1)), rate);
+fn rand64(chans Int = 1, rate Rate = Rate.audio) S = rand64(row(chans max(1)), rate);
+fn urand(sh Shape, rate Rate) S {
+    SignalExprKind.random(RandOp.unipolar, rate, sh) _newSignalExpr
 }
-fn birand(chans Chans = 1, rate Rate = Rate.audio) S {
-    SignalExprKind.random(RandOp.bipolar, rate, chans asChans) _newSignalExpr
+fn birand(sh Shape, rate Rate) S {
+    SignalExprKind.random(RandOp.bipolar, rate, sh) _newSignalExpr
 }
-fn rand64(chans Chans = 1, rate Rate = Rate.audio) S {
-    SignalExprKind.random(RandOp.bits, rate, chans asChans) _newSignalExpr
+fn rand64(sh Shape, rate Rate) S {
+    SignalExprKind.random(RandOp.bits, rate, sh) _newSignalExpr
 }
 
 ---------------------------------------------------------------------------
@@ -1012,34 +1130,34 @@ fn put(a AsSignal, i AsSignal, v AsSignal) S {
 -- fn matmul(a S, b AsSignal) S = SignalExprKind.vecop(VecOp.at) _newSignalExpr([a asSignal, i asSignal]);
 -- fn matmul(a AsSignal, b S) S = SignalExprKind.vecop(VecOp.at) _newSignalExpr([a asSignal, i asSignal]);
 
-fn take(a S, n Chans) S = SignalExprKind.vecop(VecOp.take(n asChans)) _newSignalExpr([a]);
+fn take(a S, n Int) S = SignalExprKind.vecop(VecOp.take(n)) _newSignalExpr([a]);
 
-fn drop(a S, n Chans) S = SignalExprKind.vecop(VecOp.drop(n)) _newSignalExpr([a]);
+fn drop(a S, n Int) S = SignalExprKind.vecop(VecOp.drop(n)) _newSignalExpr([a]);
 
-fn stride(a S, n Chans) S = SignalExprKind.vecop(VecOp.stride(n asChans)) _newSignalExpr([a]);
+fn stride(a S, n Int) S = SignalExprKind.vecop(VecOp.stride(n)) _newSignalExpr([a]);
 
-fn stutter(a S, n Chans) S = SignalExprKind.vecop(VecOp.stutter(n asChans)) _newSignalExpr([a]);
+fn stutter(a S, n Int) S = SignalExprKind.vecop(VecOp.stutter(n)) _newSignalExpr([a]);
 
-fn ncyc(a S, n Int) S = SignalExprKind.vecop(VecOp.ncyc(n asChans)) _newSignalExpr([a]);
+fn ncyc(a S, n Int) S = SignalExprKind.vecop(VecOp.ncyc(n)) _newSignalExpr([a]);
 
 fn rotate(a AsSignal, b AsSignal) S = SignalExprKind.vecop(VecOp.rotate) _newSignalExpr([a asSignal, b asSignal]);
 
 fn reverse(a S) S = SignalExprKind.vecop(VecOp.reverse) _newSignalExpr([a]);
 
-fn transpose(a S, n Chans) S = SignalExprKind.vecop(VecOp.transpose(n asChans)) _newSignalExpr([a]);
+fn transpose(a S, n Int) S = SignalExprKind.vecop(VecOp.transpose(n)) _newSignalExpr([a]);
 
 fn join(a [S]) S = SignalExprKind.vecop(VecOp.join) _newSignalExpr(a);
 
-fn reduce(a S, op BinaryOp, chans Chans = 1) S {
-    SignalExprKind.vecop(VecOp.reduce(op, chans asChans)) _newSignalExpr([a])
+fn reduce(a S, op BinaryOp, chans Int = 1) S {
+    SignalExprKind.vecop(VecOp.reduce(op, chans max(1))) _newSignalExpr([a])
 }
-fn sum(a S, chans Chans = 1) S = a reduce(BinaryOp.add, chans asChans);
+fn sum(a S, chans Int = 1) S = a reduce(BinaryOp.add, chans);
 
-fn product(a S, chans Chans = 1) S = a reduce(BinaryOp.mul, chans asChans);
+fn product(a S, chans Int = 1) S = a reduce(BinaryOp.mul, chans);
 
-fn minOf(a S, chans Chans = 1) S = a reduce(BinaryOp.min, chans asChans);
+fn minOf(a S, chans Int = 1) S = a reduce(BinaryOp.min, chans);
 
-fn maxOf(a S, chans Chans = 1) S = a reduce(BinaryOp.max, chans asChans);
+fn maxOf(a S, chans Int = 1) S = a reduce(BinaryOp.max, chans);
 
 
 ---------------------------------------------------------------------------

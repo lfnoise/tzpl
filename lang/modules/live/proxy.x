@@ -158,7 +158,7 @@ fn quantClock(clock Int, silo Int = 0) Void {
 fn ndef(chans Int = 2, silo Int = 0) Proxy {
     var params [String: Float] = [:];
     let st = &ProxyState {
-        chans: chans asChans, anchor: 0, monitor: 0, src: 0,
+        chans: chans max(1), anchor: 0, monitor: 0, src: 0,
         playing: false, building: false, pending: [GraphFn](),
         params: params, ctlNames: [String](), noteNames: [Symbol](),
         noteDefaults: [Float](), fadeTime: -1.0,
@@ -442,7 +442,7 @@ fn set(p Proxy, name String, value Float) Void {
 fn reshape(p Proxy, chans Int) Future<Int> = _reshapeAsync(p, chans);
 
 async fn _reshapeAsync(p Proxy, chans Int) Int {
-    let newChans = chans asChans;
+    let newChans = chans max(1);
     let s = *p.state;
     if (newChans == s.chans) { return 0; }
     if (s.anchor == 0) {

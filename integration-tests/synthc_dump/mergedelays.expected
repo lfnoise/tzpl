@@ -1,0 +1,866 @@
+SYNTH fb2
+-- PORTS
+OUT 0 out f32 1
+-- SORTED EXPRS
+      0    9 [                ]  0  1 Const    None      f32     1 0.0f
+      1   11 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      2   14 [                ]  0  1 Audio    None      f32     1 delay_fix_read(2)
+      3   10 [9               ]  1  0 Init     Sink      f32     0 delay_init
+      4   12 [                ]  0  1 Const    None      f32     1 0.7f
+      5   13 [11 12           ]  2  1 Audio    None      f32     1 *
+      6   15 [                ]  0  1 Const    None      f32     1 0.2f
+      7   16 [14 15           ]  2  1 Audio    None      f32     1 *
+      8   17 [13 16           ]  2  1 Audio    None      f32     1 +
+      9    4 [                ]  0  1 Const    None      f32     1 0.003030303f
+     10    0 [                ]  0  1 Init     None      f32     1 fs
+     11    5 [4 0             ]  2  1 Init     None      f32     1 *
+     12    6 [5               ]  1  1 Init     None      f32     1 sin
+     13    7 [                ]  0  1 Const    None      f32     1 0.001f
+     14    8 [6 7             ]  2  1 Init     Rate      f32     1 *
+     15   18 [17 8            ]  2  2 Audio    FanOut    f32     1 +
+     16   19 [18              ]  1  0 Audio    Sink      f32     1 delay_write
+     17   20 [18              ]  1  0 Audio    Sink      f32     1 outlet
+-- TREES
+    TREE 1    [] Init   Sink      f32     0
+      0    9 [                ]  0  1 Const    None      f32     1 0.0f
+      1   10 [9               ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 2    [] Init   Rate      f32     1
+      0    4 [                ]  0  1 Const    None      f32     1 0.003030303f
+      1    0 [                ]  0  1 Init     None      f32     1 fs
+      2    5 [4 0             ]  2  1 Init     None      f32     1 *
+      3    6 [5               ]  1  1 Init     None      f32     1 sin
+      4    7 [                ]  0  1 Const    None      f32     1 0.001f
+      5    8 [6 7             ]  2  1 Init     Rate      f32     1 *
+    TREE 3    [2] Audio  FanOut    f32     1
+      0   11 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      1   12 [                ]  0  1 Const    None      f32     1 0.7f
+      2   13 [11 12           ]  2  1 Audio    None      f32     1 *
+      3   14 [                ]  0  1 Audio    None      f32     1 delay_fix_read(2)
+      4   15 [                ]  0  1 Const    None      f32     1 0.2f
+      5   16 [14 15           ]  2  1 Audio    None      f32     1 *
+      6   17 [13 16           ]  2  1 Audio    None      f32     1 +
+      7   18 [17 8            ]  2  2 Audio    FanOut    f32     1 +
+    TREE 4    [3] Audio  Sink      f32     1
+      0   19 [18              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 5    [3] Audio  Sink      f32     1
+      0   20 [18              ]  1  0 Audio    Sink      f32     1 outlet
+-- INIT
+  LOOP  0 [] Init   0
+    TREE 1    [] Init   Sink      f32     0
+      0    9 [                ]  0  1 Const    None      f32     1 0.0f
+      1   10 [9               ]  1  0 Init     Sink      f32     0 delay_init
+  LOOP  1 [] Init   1
+    TREE 2    [] Init   Rate      f32     1
+      0    4 [                ]  0  1 Const    None      f32     1 0.003030303f
+      1    0 [                ]  0  1 Init     None      f32     1 fs
+      2    5 [4 0             ]  2  1 Init     None      f32     1 *
+      3    6 [5               ]  1  1 Init     None      f32     1 sin
+      4    7 [                ]  0  1 Const    None      f32     1 0.001f
+      5    8 [6 7             ]  2  1 Init     Rate      f32     1 *
+-- RESET
+-- BLOCK
+-- AUDIO
+GRAPH 0
+  LOOP  2 [1] Audio  1
+    TREE 3    [2] Audio  FanOut    f32     1
+      0   11 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      1   12 [                ]  0  1 Const    None      f32     1 0.7f
+      2   13 [11 12           ]  2  1 Audio    None      f32     1 *
+      3   14 [                ]  0  1 Audio    None      f32     1 delay_fix_read(2)
+      4   15 [                ]  0  1 Const    None      f32     1 0.2f
+      5   16 [14 15           ]  2  1 Audio    None      f32     1 *
+      6   17 [13 16           ]  2  1 Audio    None      f32     1 +
+      7   18 [17 8            ]  2  2 Audio    FanOut    f32     1 +
+    TREE 4    [3] Audio  Sink      f32     1
+      0   19 [18              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 5    [3] Audio  Sink      f32     1
+      0   20 [18              ]  1  0 Audio    Sink      f32     1 outlet
+-- PARAMETER GROUPS
+-- CYCLES
+CYCLE 0 weight 1 recurrence nodes [11 14 13 16 17 18] delays [11<-18:1 14<-18:2]
+DELAY 0 f32 1
+    10 f32 0 delay_init
+    11 f32 1 delay_fix_read(1)
+    14 f32 1 delay_fix_read(2)
+    19 f32 1 delay_write
+
+SYNTH diffsig
+-- PORTS
+OUT 0 out f32 1
+-- SORTED EXPRS
+      0    0 [                ]  0  1 Const    None      f32     1 0.0f
+      1   58 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      2    1 [0               ]  1  0 Init     Sink      f32     0 delay_init
+      3    2 [                ]  0  1 Const    None      f32     1 0.0f
+      4   59 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      5    3 [2               ]  1  0 Init     Sink      f32     0 delay_init
+      6    4 [                ]  0  1 Const    None      f32     1 0.0f
+      7    6 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
+      8    5 [4               ]  1  0 Init     Sink      f32     0 delay_init
+      9    8 [                ]  0  1 Const    None      f64     1 0.5
+     10    9 [                ]  0  1 Init     None      f32     1 sd
+     11   10 [9               ]  1  1 Init     None      f64     1 cast_f64
+     12   11 [8 10            ]  2  2 Init     Rate      f64     1 *
+     13   12 [6 11            ]  2  2 Audio    FanOut    f64     1 +
+     14   13 [12              ]  1  1 Audio    None      f64     1 floor
+     15   14 [12 13           ]  2  1 Audio    None      f64     1 -
+     16   15 [14              ]  1  0 Audio    Sink      f64     1 delay_write
+     17   26 [                ]  0  1 Const    None      f32     1 0.6f
+     18   17 [6               ]  1  1 Audio    None      f32     1 cast_f32
+     19   27 [26 17           ]  2  1 Audio    None      f32     1 *
+     20   28 [                ]  0  1 Const    None      f32     1 -0.3f
+     21   29 [27 28           ]  2  1 Audio    None      f32     1 +
+     22   30 [29              ]  1  0 Audio    Sink      f32     1 delay_write
+     23   31 [                ]  0  1 Const    None      f32     1 0.0f
+     24   33 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
+     25   32 [31              ]  1  0 Init     Sink      f32     0 delay_init
+     26   39 [33 11           ]  2  2 Audio    FanOut    f64     1 +
+     27   40 [39              ]  1  1 Audio    None      f64     1 floor
+     28   41 [39 40           ]  2  1 Audio    None      f64     1 -
+     29   42 [41              ]  1  0 Audio    Sink      f64     1 delay_write
+     30   53 [                ]  0  1 Const    None      f32     1 0.8f
+     31   44 [33              ]  1  1 Audio    None      f32     1 cast_f32
+     32   54 [53 44           ]  2  1 Audio    None      f32     1 *
+     33   55 [                ]  0  1 Const    None      f32     1 -0.4f
+     34   56 [54 55           ]  2  1 Audio    None      f32     1 +
+     35   57 [56              ]  1  0 Audio    Sink      f32     1 delay_write
+     36   60 [58 59           ]  2  1 Audio    None      f32     1 +
+     37   61 [60              ]  1  0 Audio    Sink      f32     1 outlet
+-- TREES
+    TREE 1    [] Init   Sink      f32     0
+      0    0 [                ]  0  1 Const    None      f32     1 0.0f
+      1    1 [0               ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 2    [] Init   Sink      f32     0
+      0    2 [                ]  0  1 Const    None      f32     1 0.0f
+      1    3 [2               ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 3    [] Audio  FanOut    f64     1
+      0    6 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
+    TREE 4    [] Init   Sink      f32     0
+      0    4 [                ]  0  1 Const    None      f32     1 0.0f
+      1    5 [4               ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 5    [] Init   Rate      f64     1
+      0    8 [                ]  0  1 Const    None      f64     1 0.5
+      1    9 [                ]  0  1 Init     None      f32     1 sd
+      2   10 [9               ]  1  1 Init     None      f64     1 cast_f64
+      3   11 [8 10            ]  2  2 Init     Rate      f64     1 *
+    TREE 6    [3 5] Audio  FanOut    f64     1
+      0   12 [6 11            ]  2  2 Audio    FanOut    f64     1 +
+    TREE 7    [6] Audio  Sink      f64     1
+      0   13 [12              ]  1  1 Audio    None      f64     1 floor
+      1   14 [12 13           ]  2  1 Audio    None      f64     1 -
+      2   15 [14              ]  1  0 Audio    Sink      f64     1 delay_write
+    TREE 8    [3] Audio  Sink      f32     1
+      0   26 [                ]  0  1 Const    None      f32     1 0.6f
+      1   17 [6               ]  1  1 Audio    None      f32     1 cast_f32
+      2   27 [26 17           ]  2  1 Audio    None      f32     1 *
+      3   28 [                ]  0  1 Const    None      f32     1 -0.3f
+      4   29 [27 28           ]  2  1 Audio    None      f32     1 +
+      5   30 [29              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 9    [] Audio  FanOut    f64     1
+      0   33 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
+    TREE 10   [] Init   Sink      f32     0
+      0   31 [                ]  0  1 Const    None      f32     1 0.0f
+      1   32 [31              ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 11   [9 5] Audio  FanOut    f64     1
+      0   39 [33 11           ]  2  2 Audio    FanOut    f64     1 +
+    TREE 12   [11] Audio  Sink      f64     1
+      0   40 [39              ]  1  1 Audio    None      f64     1 floor
+      1   41 [39 40           ]  2  1 Audio    None      f64     1 -
+      2   42 [41              ]  1  0 Audio    Sink      f64     1 delay_write
+    TREE 13   [9] Audio  Sink      f32     1
+      0   53 [                ]  0  1 Const    None      f32     1 0.8f
+      1   44 [33              ]  1  1 Audio    None      f32     1 cast_f32
+      2   54 [53 44           ]  2  1 Audio    None      f32     1 *
+      3   55 [                ]  0  1 Const    None      f32     1 -0.4f
+      4   56 [54 55           ]  2  1 Audio    None      f32     1 +
+      5   57 [56              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 14   [] Audio  Sink      f32     1
+      0   58 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      1   59 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      2   60 [58 59           ]  2  1 Audio    None      f32     1 +
+      3   61 [60              ]  1  0 Audio    Sink      f32     1 outlet
+-- INIT
+  LOOP  0 [] Init   0
+    TREE 1    [] Init   Sink      f32     0
+      0    0 [                ]  0  1 Const    None      f32     1 0.0f
+      1    1 [0               ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 2    [] Init   Sink      f32     0
+      0    2 [                ]  0  1 Const    None      f32     1 0.0f
+      1    3 [2               ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 4    [] Init   Sink      f32     0
+      0    4 [                ]  0  1 Const    None      f32     1 0.0f
+      1    5 [4               ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 10   [] Init   Sink      f32     0
+      0   31 [                ]  0  1 Const    None      f32     1 0.0f
+      1   32 [31              ]  1  0 Init     Sink      f32     0 delay_init
+  LOOP  2 [] Init   1
+    TREE 5    [] Init   Rate      f64     1
+      0    8 [                ]  0  1 Const    None      f64     1 0.5
+      1    9 [                ]  0  1 Init     None      f32     1 sd
+      2   10 [9               ]  1  1 Init     None      f64     1 cast_f64
+      3   11 [8 10            ]  2  2 Init     Rate      f64     1 *
+-- RESET
+-- BLOCK
+-- AUDIO
+GRAPH 0
+  LOOP  1 [2] Audio  1
+    TREE 3    [] Audio  FanOut    f64     1
+      0    6 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
+    TREE 6    [3 5] Audio  FanOut    f64     1
+      0   12 [6 11            ]  2  2 Audio    FanOut    f64     1 +
+    TREE 7    [6] Audio  Sink      f64     1
+      0   13 [12              ]  1  1 Audio    None      f64     1 floor
+      1   14 [12 13           ]  2  1 Audio    None      f64     1 -
+      2   15 [14              ]  1  0 Audio    Sink      f64     1 delay_write
+    TREE 8    [3] Audio  Sink      f32     1
+      0   26 [                ]  0  1 Const    None      f32     1 0.6f
+      1   17 [6               ]  1  1 Audio    None      f32     1 cast_f32
+      2   27 [26 17           ]  2  1 Audio    None      f32     1 *
+      3   28 [                ]  0  1 Const    None      f32     1 -0.3f
+      4   29 [27 28           ]  2  1 Audio    None      f32     1 +
+      5   30 [29              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 9    [] Audio  FanOut    f64     1
+      0   33 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
+    TREE 11   [9 5] Audio  FanOut    f64     1
+      0   39 [33 11           ]  2  2 Audio    FanOut    f64     1 +
+    TREE 12   [11] Audio  Sink      f64     1
+      0   40 [39              ]  1  1 Audio    None      f64     1 floor
+      1   41 [39 40           ]  2  1 Audio    None      f64     1 -
+      2   42 [41              ]  1  0 Audio    Sink      f64     1 delay_write
+    TREE 13   [9] Audio  Sink      f32     1
+      0   53 [                ]  0  1 Const    None      f32     1 0.8f
+      1   44 [33              ]  1  1 Audio    None      f32     1 cast_f32
+      2   54 [53 44           ]  2  1 Audio    None      f32     1 *
+      3   55 [                ]  0  1 Const    None      f32     1 -0.4f
+      4   56 [54 55           ]  2  1 Audio    None      f32     1 +
+      5   57 [56              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 14   [] Audio  Sink      f32     1
+      0   58 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      1   59 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      2   60 [58 59           ]  2  1 Audio    None      f32     1 +
+      3   61 [60              ]  1  0 Audio    Sink      f32     1 outlet
+-- PARAMETER GROUPS
+-- CYCLES
+CYCLE 0 weight 1 recurrence nodes [6 12 13 14] delays [6<-14:1]
+CYCLE 1 weight 1 recurrence nodes [33 39 40 41] delays [33<-41:1]
+DELAY 0 f32 1
+     1 f32 0 delay_init
+    58 f32 1 delay_fix_read(1)
+    30 f32 1 delay_write
+DELAY 1 f32 1
+     3 f32 0 delay_init
+    59 f32 1 delay_fix_read(1)
+    57 f32 1 delay_write
+DELAY 2 f64 1
+     5 f32 0 delay_init
+     6 f64 1 delay_fix_read(1)
+    15 f64 1 delay_write
+DELAY 3 f64 1
+    32 f32 0 delay_init
+    33 f64 1 delay_fix_read(1)
+    42 f64 1 delay_write
+
+SYNTH diffinit
+-- PORTS
+OUT 0 out f32 1
+-- SORTED EXPRS
+      0    0 [                ]  0  1 Const    None      f32     1 0.0f
+      1    2 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
+      2    1 [0               ]  1  0 Init     Sink      f32     0 delay_init
+      3    4 [                ]  0  1 Const    None      f64     1 0.5
+      4    5 [                ]  0  1 Init     None      f32     1 sd
+      5    6 [5               ]  1  1 Init     None      f64     1 cast_f64
+      6    7 [4 6             ]  2  1 Init     Rate      f64     1 *
+      7    8 [2 7             ]  2  2 Audio    FanOut    f64     1 +
+      8    9 [8               ]  1  1 Audio    None      f64     1 floor
+      9   10 [8 9             ]  2  1 Audio    None      f64     1 -
+     10   11 [10              ]  1  0 Audio    Sink      f64     1 delay_write
+     11   26 [                ]  0  1 Const    None      f32     1 0.0f
+     12   32 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+     13   27 [26              ]  1  0 Init     Sink      f32     0 delay_init
+     14   28 [                ]  0  1 Const    None      f32     1 0.5f
+     15   33 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+     16   29 [28              ]  1  0 Init     Sink      f32     0 delay_init
+     17   22 [                ]  0  1 Const    None      f32     1 0.6f
+     18   13 [2               ]  1  1 Audio    None      f32     1 cast_f32
+     19   23 [22 13           ]  2  1 Audio    None      f32     1 *
+     20   24 [                ]  0  1 Const    None      f32     1 -0.3f
+     21   25 [23 24           ]  2  2 Audio    FanOut    f32     1 +
+     22   30 [25              ]  1  0 Audio    Sink      f32     1 delay_write
+     23   31 [25              ]  1  0 Audio    Sink      f32     1 delay_write
+     24   34 [32 33           ]  2  1 Audio    None      f32     1 +
+     25   35 [34              ]  1  0 Audio    Sink      f32     1 outlet
+-- TREES
+    TREE 1    [] Audio  FanOut    f64     1
+      0    2 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
+    TREE 2    [] Init   Sink      f32     0
+      0    0 [                ]  0  1 Const    None      f32     1 0.0f
+      1    1 [0               ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 3    [] Init   Rate      f64     1
+      0    4 [                ]  0  1 Const    None      f64     1 0.5
+      1    5 [                ]  0  1 Init     None      f32     1 sd
+      2    6 [5               ]  1  1 Init     None      f64     1 cast_f64
+      3    7 [4 6             ]  2  1 Init     Rate      f64     1 *
+    TREE 4    [1 3] Audio  FanOut    f64     1
+      0    8 [2 7             ]  2  2 Audio    FanOut    f64     1 +
+    TREE 5    [4] Audio  Sink      f64     1
+      0    9 [8               ]  1  1 Audio    None      f64     1 floor
+      1   10 [8 9             ]  2  1 Audio    None      f64     1 -
+      2   11 [10              ]  1  0 Audio    Sink      f64     1 delay_write
+    TREE 6    [] Init   Sink      f32     0
+      0   26 [                ]  0  1 Const    None      f32     1 0.0f
+      1   27 [26              ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 7    [] Init   Sink      f32     0
+      0   28 [                ]  0  1 Const    None      f32     1 0.5f
+      1   29 [28              ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 8    [1] Audio  FanOut    f32     1
+      0   22 [                ]  0  1 Const    None      f32     1 0.6f
+      1   13 [2               ]  1  1 Audio    None      f32     1 cast_f32
+      2   23 [22 13           ]  2  1 Audio    None      f32     1 *
+      3   24 [                ]  0  1 Const    None      f32     1 -0.3f
+      4   25 [23 24           ]  2  2 Audio    FanOut    f32     1 +
+    TREE 9    [8] Audio  Sink      f32     1
+      0   30 [25              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 10   [8] Audio  Sink      f32     1
+      0   31 [25              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 11   [] Audio  Sink      f32     1
+      0   32 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      1   33 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      2   34 [32 33           ]  2  1 Audio    None      f32     1 +
+      3   35 [34              ]  1  0 Audio    Sink      f32     1 outlet
+-- INIT
+  LOOP  1 [] Init   0
+    TREE 2    [] Init   Sink      f32     0
+      0    0 [                ]  0  1 Const    None      f32     1 0.0f
+      1    1 [0               ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 6    [] Init   Sink      f32     0
+      0   26 [                ]  0  1 Const    None      f32     1 0.0f
+      1   27 [26              ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 7    [] Init   Sink      f32     0
+      0   28 [                ]  0  1 Const    None      f32     1 0.5f
+      1   29 [28              ]  1  0 Init     Sink      f32     0 delay_init
+  LOOP  2 [] Init   1
+    TREE 3    [] Init   Rate      f64     1
+      0    4 [                ]  0  1 Const    None      f64     1 0.5
+      1    5 [                ]  0  1 Init     None      f32     1 sd
+      2    6 [5               ]  1  1 Init     None      f64     1 cast_f64
+      3    7 [4 6             ]  2  1 Init     Rate      f64     1 *
+-- RESET
+-- BLOCK
+-- AUDIO
+GRAPH 0
+  LOOP  0 [2] Audio  1
+    TREE 1    [] Audio  FanOut    f64     1
+      0    2 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
+    TREE 4    [1 3] Audio  FanOut    f64     1
+      0    8 [2 7             ]  2  2 Audio    FanOut    f64     1 +
+    TREE 5    [4] Audio  Sink      f64     1
+      0    9 [8               ]  1  1 Audio    None      f64     1 floor
+      1   10 [8 9             ]  2  1 Audio    None      f64     1 -
+      2   11 [10              ]  1  0 Audio    Sink      f64     1 delay_write
+    TREE 8    [1] Audio  FanOut    f32     1
+      0   22 [                ]  0  1 Const    None      f32     1 0.6f
+      1   13 [2               ]  1  1 Audio    None      f32     1 cast_f32
+      2   23 [22 13           ]  2  1 Audio    None      f32     1 *
+      3   24 [                ]  0  1 Const    None      f32     1 -0.3f
+      4   25 [23 24           ]  2  2 Audio    FanOut    f32     1 +
+    TREE 9    [8] Audio  Sink      f32     1
+      0   30 [25              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 10   [8] Audio  Sink      f32     1
+      0   31 [25              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 11   [] Audio  Sink      f32     1
+      0   32 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      1   33 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      2   34 [32 33           ]  2  1 Audio    None      f32     1 +
+      3   35 [34              ]  1  0 Audio    Sink      f32     1 outlet
+-- PARAMETER GROUPS
+-- CYCLES
+CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
+DELAY 0 f64 1
+     1 f32 0 delay_init
+     2 f64 1 delay_fix_read(1)
+    11 f64 1 delay_write
+DELAY 1 f32 1
+    27 f32 0 delay_init
+    32 f32 1 delay_fix_read(1)
+    30 f32 1 delay_write
+DELAY 2 f32 1
+    29 f32 0 delay_init
+    33 f32 1 delay_fix_read(1)
+    31 f32 1 delay_write
+
+SYNTH fbtwo
+-- PORTS
+OUT 0 out f32 1
+-- SORTED EXPRS
+      0    9 [                ]  0  1 Const    None      f32     1 0.0f
+      1   13 [                ]  0  2 Audio    FanOut    f32     1 delay_fix_read(1)
+      2   10 [9               ]  1  0 Init     Sink      f32     0 delay_init
+      3   11 [                ]  0  1 Const    None      f32     1 0.0f
+      4   18 [                ]  0  2 Audio    FanOut    f32     1 delay_fix_read(1)
+      5   12 [11              ]  1  0 Init     Sink      f32     0 delay_init
+      6   14 [                ]  0  1 Const    None      f32     1 0.5f
+      7   15 [13 14           ]  2  1 Audio    None      f32     1 *
+      8    4 [                ]  0  1 Const    None      f32     1 0.005f
+      9    0 [                ]  0  1 Init     None      f32     1 fs
+     10    5 [4 0             ]  2  1 Init     None      f32     1 *
+     11    6 [5               ]  1  1 Init     None      f32     1 sin
+     12    7 [                ]  0  1 Const    None      f32     1 0.001f
+     13    8 [6 7             ]  2  2 Init     Rate      f32     1 *
+     14   16 [15 8            ]  2  1 Audio    None      f32     1 +
+     15   17 [16              ]  1  0 Audio    Sink      f32     1 delay_write
+     16   19 [                ]  0  1 Const    None      f32     1 0.9f
+     17   20 [18 19           ]  2  1 Audio    None      f32     1 *
+     18   21 [20 8            ]  2  1 Audio    None      f32     1 +
+     19   22 [21              ]  1  0 Audio    Sink      f32     1 delay_write
+     20   25 [13 18           ]  2  1 Audio    None      f32     1 +
+     21   26 [25              ]  1  0 Audio    Sink      f32     1 outlet
+-- TREES
+    TREE 1    [] Audio  FanOut    f32     1
+      0   13 [                ]  0  2 Audio    FanOut    f32     1 delay_fix_read(1)
+    TREE 2    [] Init   Sink      f32     0
+      0    9 [                ]  0  1 Const    None      f32     1 0.0f
+      1   10 [9               ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 3    [] Audio  FanOut    f32     1
+      0   18 [                ]  0  2 Audio    FanOut    f32     1 delay_fix_read(1)
+    TREE 4    [] Init   Sink      f32     0
+      0   11 [                ]  0  1 Const    None      f32     1 0.0f
+      1   12 [11              ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 5    [] Init   Rate      f32     1
+      0    4 [                ]  0  1 Const    None      f32     1 0.005f
+      1    0 [                ]  0  1 Init     None      f32     1 fs
+      2    5 [4 0             ]  2  1 Init     None      f32     1 *
+      3    6 [5               ]  1  1 Init     None      f32     1 sin
+      4    7 [                ]  0  1 Const    None      f32     1 0.001f
+      5    8 [6 7             ]  2  2 Init     Rate      f32     1 *
+    TREE 6    [1 5] Audio  Sink      f32     1
+      0   14 [                ]  0  1 Const    None      f32     1 0.5f
+      1   15 [13 14           ]  2  1 Audio    None      f32     1 *
+      2   16 [15 8            ]  2  1 Audio    None      f32     1 +
+      3   17 [16              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 7    [3 5] Audio  Sink      f32     1
+      0   19 [                ]  0  1 Const    None      f32     1 0.9f
+      1   20 [18 19           ]  2  1 Audio    None      f32     1 *
+      2   21 [20 8            ]  2  1 Audio    None      f32     1 +
+      3   22 [21              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 8    [1 3] Audio  Sink      f32     1
+      0   25 [13 18           ]  2  1 Audio    None      f32     1 +
+      1   26 [25              ]  1  0 Audio    Sink      f32     1 outlet
+-- INIT
+  LOOP  1 [] Init   0
+    TREE 2    [] Init   Sink      f32     0
+      0    9 [                ]  0  1 Const    None      f32     1 0.0f
+      1   10 [9               ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 4    [] Init   Sink      f32     0
+      0   11 [                ]  0  1 Const    None      f32     1 0.0f
+      1   12 [11              ]  1  0 Init     Sink      f32     0 delay_init
+  LOOP  2 [] Init   1
+    TREE 5    [] Init   Rate      f32     1
+      0    4 [                ]  0  1 Const    None      f32     1 0.005f
+      1    0 [                ]  0  1 Init     None      f32     1 fs
+      2    5 [4 0             ]  2  1 Init     None      f32     1 *
+      3    6 [5               ]  1  1 Init     None      f32     1 sin
+      4    7 [                ]  0  1 Const    None      f32     1 0.001f
+      5    8 [6 7             ]  2  2 Init     Rate      f32     1 *
+-- RESET
+-- BLOCK
+-- AUDIO
+GRAPH 0
+  LOOP  0 [2] Audio  1
+    TREE 1    [] Audio  FanOut    f32     1
+      0   13 [                ]  0  2 Audio    FanOut    f32     1 delay_fix_read(1)
+    TREE 3    [] Audio  FanOut    f32     1
+      0   18 [                ]  0  2 Audio    FanOut    f32     1 delay_fix_read(1)
+    TREE 6    [1 5] Audio  Sink      f32     1
+      0   14 [                ]  0  1 Const    None      f32     1 0.5f
+      1   15 [13 14           ]  2  1 Audio    None      f32     1 *
+      2   16 [15 8            ]  2  1 Audio    None      f32     1 +
+      3   17 [16              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 7    [3 5] Audio  Sink      f32     1
+      0   19 [                ]  0  1 Const    None      f32     1 0.9f
+      1   20 [18 19           ]  2  1 Audio    None      f32     1 *
+      2   21 [20 8            ]  2  1 Audio    None      f32     1 +
+      3   22 [21              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 8    [1 3] Audio  Sink      f32     1
+      0   25 [13 18           ]  2  1 Audio    None      f32     1 +
+      1   26 [25              ]  1  0 Audio    Sink      f32     1 outlet
+-- PARAMETER GROUPS
+-- CYCLES
+CYCLE 0 weight 1 recurrence nodes [13 15 16] delays [13<-16:1]
+CYCLE 1 weight 1 recurrence nodes [18 20 21] delays [18<-21:1]
+DELAY 0 f32 1
+    10 f32 0 delay_init
+    13 f32 1 delay_fix_read(1)
+    17 f32 1 delay_write
+DELAY 1 f32 1
+    12 f32 0 delay_init
+    18 f32 1 delay_fix_read(1)
+    22 f32 1 delay_write
+
+SYNTH twodel
+-- PORTS
+OUT 0 out f32 1
+-- SORTED EXPRS
+      0    0 [                ]  0  1 Const    None      f32     1 0.0f
+      1    2 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
+      2    1 [0               ]  1  0 Init     Sink      f32     0 delay_init
+      3    4 [                ]  0  1 Const    None      f64     1 0.5
+      4    5 [                ]  0  1 Init     None      f32     1 sd
+      5    6 [5               ]  1  1 Init     None      f64     1 cast_f64
+      6    7 [4 6             ]  2  1 Init     Rate      f64     1 *
+      7    8 [2 7             ]  2  2 Audio    FanOut    f64     1 +
+      8    9 [8               ]  1  1 Audio    None      f64     1 floor
+      9   10 [8 9             ]  2  1 Audio    None      f64     1 -
+     10   11 [10              ]  1  0 Audio    Sink      f64     1 delay_write
+     11   26 [                ]  0  1 Const    None      f32     1 0.0f
+     12   32 [                ]  0  2 Audio    FanOut    f32     1 delay_fix_read(1)
+     13   27 [26              ]  1  0 Init     Sink      f32     0 delay_init
+     14   28 [                ]  0  1 Const    None      f32     1 0.0f
+     15   29 [28              ]  1  0 Init     Sink      f32     0 delay_init
+     16   22 [                ]  0  1 Const    None      f32     1 0.6f
+     17   13 [2               ]  1  1 Audio    None      f32     1 cast_f32
+     18   23 [22 13           ]  2  1 Audio    None      f32     1 *
+     19   24 [                ]  0  1 Const    None      f32     1 -0.3f
+     20   25 [23 24           ]  2  1 Audio    None      f32     1 +
+     21   30 [25              ]  1  0 Audio    Sink      f32     1 delay_write
+     22   34 [32 32           ]  2  1 Audio    None      f32     1 +
+     23   35 [34              ]  1  0 Audio    Sink      f32     1 outlet
+-- TREES
+    TREE 1    [] Audio  FanOut    f64     1
+      0    2 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
+    TREE 2    [] Init   Sink      f32     0
+      0    0 [                ]  0  1 Const    None      f32     1 0.0f
+      1    1 [0               ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 3    [] Init   Rate      f64     1
+      0    4 [                ]  0  1 Const    None      f64     1 0.5
+      1    5 [                ]  0  1 Init     None      f32     1 sd
+      2    6 [5               ]  1  1 Init     None      f64     1 cast_f64
+      3    7 [4 6             ]  2  1 Init     Rate      f64     1 *
+    TREE 4    [1 3] Audio  FanOut    f64     1
+      0    8 [2 7             ]  2  2 Audio    FanOut    f64     1 +
+    TREE 5    [4] Audio  Sink      f64     1
+      0    9 [8               ]  1  1 Audio    None      f64     1 floor
+      1   10 [8 9             ]  2  1 Audio    None      f64     1 -
+      2   11 [10              ]  1  0 Audio    Sink      f64     1 delay_write
+    TREE 6    [] Audio  FanOut    f32     1
+      0   32 [                ]  0  2 Audio    FanOut    f32     1 delay_fix_read(1)
+    TREE 7    [] Init   Sink      f32     0
+      0   26 [                ]  0  1 Const    None      f32     1 0.0f
+      1   27 [26              ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 8    [] Init   Sink      f32     0
+      0   28 [                ]  0  1 Const    None      f32     1 0.0f
+      1   29 [28              ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 9    [1] Audio  Sink      f32     1
+      0   22 [                ]  0  1 Const    None      f32     1 0.6f
+      1   13 [2               ]  1  1 Audio    None      f32     1 cast_f32
+      2   23 [22 13           ]  2  1 Audio    None      f32     1 *
+      3   24 [                ]  0  1 Const    None      f32     1 -0.3f
+      4   25 [23 24           ]  2  1 Audio    None      f32     1 +
+      5   30 [25              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 10   [6] Audio  Sink      f32     1
+      0   34 [32 32           ]  2  1 Audio    None      f32     1 +
+      1   35 [34              ]  1  0 Audio    Sink      f32     1 outlet
+-- INIT
+  LOOP  1 [] Init   0
+    TREE 2    [] Init   Sink      f32     0
+      0    0 [                ]  0  1 Const    None      f32     1 0.0f
+      1    1 [0               ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 7    [] Init   Sink      f32     0
+      0   26 [                ]  0  1 Const    None      f32     1 0.0f
+      1   27 [26              ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 8    [] Init   Sink      f32     0
+      0   28 [                ]  0  1 Const    None      f32     1 0.0f
+      1   29 [28              ]  1  0 Init     Sink      f32     0 delay_init
+  LOOP  2 [] Init   1
+    TREE 3    [] Init   Rate      f64     1
+      0    4 [                ]  0  1 Const    None      f64     1 0.5
+      1    5 [                ]  0  1 Init     None      f32     1 sd
+      2    6 [5               ]  1  1 Init     None      f64     1 cast_f64
+      3    7 [4 6             ]  2  1 Init     Rate      f64     1 *
+-- RESET
+-- BLOCK
+-- AUDIO
+GRAPH 0
+  LOOP  0 [2] Audio  1
+    TREE 1    [] Audio  FanOut    f64     1
+      0    2 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
+    TREE 4    [1 3] Audio  FanOut    f64     1
+      0    8 [2 7             ]  2  2 Audio    FanOut    f64     1 +
+    TREE 5    [4] Audio  Sink      f64     1
+      0    9 [8               ]  1  1 Audio    None      f64     1 floor
+      1   10 [8 9             ]  2  1 Audio    None      f64     1 -
+      2   11 [10              ]  1  0 Audio    Sink      f64     1 delay_write
+    TREE 6    [] Audio  FanOut    f32     1
+      0   32 [                ]  0  2 Audio    FanOut    f32     1 delay_fix_read(1)
+    TREE 9    [1] Audio  Sink      f32     1
+      0   22 [                ]  0  1 Const    None      f32     1 0.6f
+      1   13 [2               ]  1  1 Audio    None      f32     1 cast_f32
+      2   23 [22 13           ]  2  1 Audio    None      f32     1 *
+      3   24 [                ]  0  1 Const    None      f32     1 -0.3f
+      4   25 [23 24           ]  2  1 Audio    None      f32     1 +
+      5   30 [25              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 10   [6] Audio  Sink      f32     1
+      0   34 [32 32           ]  2  1 Audio    None      f32     1 +
+      1   35 [34              ]  1  0 Audio    Sink      f32     1 outlet
+-- PARAMETER GROUPS
+-- CYCLES
+CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
+DELAY 0 f64 1
+     1 f32 0 delay_init
+     2 f64 1 delay_fix_read(1)
+    11 f64 1 delay_write
+DELAY 1 f32 1
+    27 f32 0 delay_init
+    32 f32 1 delay_fix_read(1)
+    30 f32 1 delay_write
+
+SYNTH mtap
+-- PORTS
+OUT 0 out f32 1
+-- SORTED EXPRS
+      0    0 [                ]  0  1 Const    None      f32     1 0.0f
+      1    2 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
+      2    1 [0               ]  1  0 Init     Sink      f32     0 delay_init
+      3    4 [                ]  0  1 Const    None      f64     1 0.5
+      4    5 [                ]  0  1 Init     None      f32     1 sd
+      5    6 [5               ]  1  1 Init     None      f64     1 cast_f64
+      6    7 [4 6             ]  2  1 Init     Rate      f64     1 *
+      7    8 [2 7             ]  2  2 Audio    FanOut    f64     1 +
+      8    9 [8               ]  1  1 Audio    None      f64     1 floor
+      9   10 [8 9             ]  2  1 Audio    None      f64     1 -
+     10   11 [10              ]  1  0 Audio    Sink      f64     1 delay_write
+     11   26 [                ]  0  1 Const    None      f32     1 0.0f
+     12   32 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+     13   33 [                ]  0  1 Audio    None      f32     1 delay_fix_read(4)
+     14   27 [26              ]  1  0 Init     Sink      f32     0 delay_init
+     15   28 [                ]  0  1 Const    None      f32     1 0.0f
+     16   29 [28              ]  1  0 Init     Sink      f32     0 delay_init
+     17   22 [                ]  0  1 Const    None      f32     1 0.6f
+     18   13 [2               ]  1  1 Audio    None      f32     1 cast_f32
+     19   23 [22 13           ]  2  1 Audio    None      f32     1 *
+     20   24 [                ]  0  1 Const    None      f32     1 -0.3f
+     21   25 [23 24           ]  2  1 Audio    None      f32     1 +
+     22   30 [25              ]  1  0 Audio    Sink      f32     1 delay_write
+     23   34 [32 33           ]  2  1 Audio    None      f32     1 +
+     24   35 [34              ]  1  0 Audio    Sink      f32     1 outlet
+-- TREES
+    TREE 1    [] Audio  FanOut    f64     1
+      0    2 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
+    TREE 2    [] Init   Sink      f32     0
+      0    0 [                ]  0  1 Const    None      f32     1 0.0f
+      1    1 [0               ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 3    [] Init   Rate      f64     1
+      0    4 [                ]  0  1 Const    None      f64     1 0.5
+      1    5 [                ]  0  1 Init     None      f32     1 sd
+      2    6 [5               ]  1  1 Init     None      f64     1 cast_f64
+      3    7 [4 6             ]  2  1 Init     Rate      f64     1 *
+    TREE 4    [1 3] Audio  FanOut    f64     1
+      0    8 [2 7             ]  2  2 Audio    FanOut    f64     1 +
+    TREE 5    [4] Audio  Sink      f64     1
+      0    9 [8               ]  1  1 Audio    None      f64     1 floor
+      1   10 [8 9             ]  2  1 Audio    None      f64     1 -
+      2   11 [10              ]  1  0 Audio    Sink      f64     1 delay_write
+    TREE 6    [] Init   Sink      f32     0
+      0   26 [                ]  0  1 Const    None      f32     1 0.0f
+      1   27 [26              ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 7    [] Init   Sink      f32     0
+      0   28 [                ]  0  1 Const    None      f32     1 0.0f
+      1   29 [28              ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 8    [1] Audio  Sink      f32     1
+      0   22 [                ]  0  1 Const    None      f32     1 0.6f
+      1   13 [2               ]  1  1 Audio    None      f32     1 cast_f32
+      2   23 [22 13           ]  2  1 Audio    None      f32     1 *
+      3   24 [                ]  0  1 Const    None      f32     1 -0.3f
+      4   25 [23 24           ]  2  1 Audio    None      f32     1 +
+      5   30 [25              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 9    [] Audio  Sink      f32     1
+      0   32 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      1   33 [                ]  0  1 Audio    None      f32     1 delay_fix_read(4)
+      2   34 [32 33           ]  2  1 Audio    None      f32     1 +
+      3   35 [34              ]  1  0 Audio    Sink      f32     1 outlet
+-- INIT
+  LOOP  1 [] Init   0
+    TREE 2    [] Init   Sink      f32     0
+      0    0 [                ]  0  1 Const    None      f32     1 0.0f
+      1    1 [0               ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 6    [] Init   Sink      f32     0
+      0   26 [                ]  0  1 Const    None      f32     1 0.0f
+      1   27 [26              ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 7    [] Init   Sink      f32     0
+      0   28 [                ]  0  1 Const    None      f32     1 0.0f
+      1   29 [28              ]  1  0 Init     Sink      f32     0 delay_init
+  LOOP  2 [] Init   1
+    TREE 3    [] Init   Rate      f64     1
+      0    4 [                ]  0  1 Const    None      f64     1 0.5
+      1    5 [                ]  0  1 Init     None      f32     1 sd
+      2    6 [5               ]  1  1 Init     None      f64     1 cast_f64
+      3    7 [4 6             ]  2  1 Init     Rate      f64     1 *
+-- RESET
+-- BLOCK
+-- AUDIO
+GRAPH 0
+  LOOP  0 [2] Audio  1
+    TREE 1    [] Audio  FanOut    f64     1
+      0    2 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
+    TREE 4    [1 3] Audio  FanOut    f64     1
+      0    8 [2 7             ]  2  2 Audio    FanOut    f64     1 +
+    TREE 5    [4] Audio  Sink      f64     1
+      0    9 [8               ]  1  1 Audio    None      f64     1 floor
+      1   10 [8 9             ]  2  1 Audio    None      f64     1 -
+      2   11 [10              ]  1  0 Audio    Sink      f64     1 delay_write
+    TREE 8    [1] Audio  Sink      f32     1
+      0   22 [                ]  0  1 Const    None      f32     1 0.6f
+      1   13 [2               ]  1  1 Audio    None      f32     1 cast_f32
+      2   23 [22 13           ]  2  1 Audio    None      f32     1 *
+      3   24 [                ]  0  1 Const    None      f32     1 -0.3f
+      4   25 [23 24           ]  2  1 Audio    None      f32     1 +
+      5   30 [25              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 9    [] Audio  Sink      f32     1
+      0   32 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
+      1   33 [                ]  0  1 Audio    None      f32     1 delay_fix_read(4)
+      2   34 [32 33           ]  2  1 Audio    None      f32     1 +
+      3   35 [34              ]  1  0 Audio    Sink      f32     1 outlet
+-- PARAMETER GROUPS
+-- CYCLES
+CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
+DELAY 0 f64 1
+     1 f32 0 delay_init
+     2 f64 1 delay_fix_read(1)
+    11 f64 1 delay_write
+DELAY 1 f32 1
+    27 f32 0 delay_init
+    32 f32 1 delay_fix_read(1)
+    33 f32 1 delay_fix_read(4)
+    30 f32 1 delay_write
+
+SYNTH three
+-- PORTS
+OUT 0 out f32 1
+-- SORTED EXPRS
+      0    0 [                ]  0  1 Const    None      f32     1 0.0f
+      1    2 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
+      2    1 [0               ]  1  0 Init     Sink      f32     0 delay_init
+      3    4 [                ]  0  1 Const    None      f64     1 0.5
+      4    5 [                ]  0  1 Init     None      f32     1 sd
+      5    6 [5               ]  1  1 Init     None      f64     1 cast_f64
+      6    7 [4 6             ]  2  1 Init     Rate      f64     1 *
+      7    8 [2 7             ]  2  2 Audio    FanOut    f64     1 +
+      8    9 [8               ]  1  1 Audio    None      f64     1 floor
+      9   10 [8 9             ]  2  1 Audio    None      f64     1 -
+     10   11 [10              ]  1  0 Audio    Sink      f64     1 delay_write
+     11   26 [                ]  0  1 Const    None      f32     1 0.0f
+     12   35 [                ]  0  2 Audio    FanOut    f32     1 delay_fix_read(1)
+     13   36 [                ]  0  1 Audio    None      f32     1 delay_fix_read(2)
+     14   27 [26              ]  1  0 Init     Sink      f32     0 delay_init
+     15   28 [                ]  0  1 Const    None      f32     1 0.0f
+     16   29 [28              ]  1  0 Init     Sink      f32     0 delay_init
+     17   30 [                ]  0  1 Const    None      f32     1 0.0f
+     18   31 [30              ]  1  0 Init     Sink      f32     0 delay_init
+     19   22 [                ]  0  1 Const    None      f32     1 0.6f
+     20   13 [2               ]  1  1 Audio    None      f32     1 cast_f32
+     21   23 [22 13           ]  2  1 Audio    None      f32     1 *
+     22   24 [                ]  0  1 Const    None      f32     1 -0.3f
+     23   25 [23 24           ]  2  1 Audio    None      f32     1 +
+     24   32 [25              ]  1  0 Audio    Sink      f32     1 delay_write
+     25   37 [35 36           ]  2  1 Audio    None      f32     1 +
+     26   39 [37 35           ]  2  1 Audio    None      f32     1 +
+     27   40 [39              ]  1  0 Audio    Sink      f32     1 outlet
+-- TREES
+    TREE 1    [] Audio  FanOut    f64     1
+      0    2 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
+    TREE 2    [] Init   Sink      f32     0
+      0    0 [                ]  0  1 Const    None      f32     1 0.0f
+      1    1 [0               ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 3    [] Init   Rate      f64     1
+      0    4 [                ]  0  1 Const    None      f64     1 0.5
+      1    5 [                ]  0  1 Init     None      f32     1 sd
+      2    6 [5               ]  1  1 Init     None      f64     1 cast_f64
+      3    7 [4 6             ]  2  1 Init     Rate      f64     1 *
+    TREE 4    [1 3] Audio  FanOut    f64     1
+      0    8 [2 7             ]  2  2 Audio    FanOut    f64     1 +
+    TREE 5    [4] Audio  Sink      f64     1
+      0    9 [8               ]  1  1 Audio    None      f64     1 floor
+      1   10 [8 9             ]  2  1 Audio    None      f64     1 -
+      2   11 [10              ]  1  0 Audio    Sink      f64     1 delay_write
+    TREE 6    [] Audio  FanOut    f32     1
+      0   35 [                ]  0  2 Audio    FanOut    f32     1 delay_fix_read(1)
+    TREE 7    [] Init   Sink      f32     0
+      0   26 [                ]  0  1 Const    None      f32     1 0.0f
+      1   27 [26              ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 8    [] Init   Sink      f32     0
+      0   28 [                ]  0  1 Const    None      f32     1 0.0f
+      1   29 [28              ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 9    [] Init   Sink      f32     0
+      0   30 [                ]  0  1 Const    None      f32     1 0.0f
+      1   31 [30              ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 10   [1] Audio  Sink      f32     1
+      0   22 [                ]  0  1 Const    None      f32     1 0.6f
+      1   13 [2               ]  1  1 Audio    None      f32     1 cast_f32
+      2   23 [22 13           ]  2  1 Audio    None      f32     1 *
+      3   24 [                ]  0  1 Const    None      f32     1 -0.3f
+      4   25 [23 24           ]  2  1 Audio    None      f32     1 +
+      5   32 [25              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 11   [6] Audio  Sink      f32     1
+      0   36 [                ]  0  1 Audio    None      f32     1 delay_fix_read(2)
+      1   37 [35 36           ]  2  1 Audio    None      f32     1 +
+      2   39 [37 35           ]  2  1 Audio    None      f32     1 +
+      3   40 [39              ]  1  0 Audio    Sink      f32     1 outlet
+-- INIT
+  LOOP  1 [] Init   0
+    TREE 2    [] Init   Sink      f32     0
+      0    0 [                ]  0  1 Const    None      f32     1 0.0f
+      1    1 [0               ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 7    [] Init   Sink      f32     0
+      0   26 [                ]  0  1 Const    None      f32     1 0.0f
+      1   27 [26              ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 8    [] Init   Sink      f32     0
+      0   28 [                ]  0  1 Const    None      f32     1 0.0f
+      1   29 [28              ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 9    [] Init   Sink      f32     0
+      0   30 [                ]  0  1 Const    None      f32     1 0.0f
+      1   31 [30              ]  1  0 Init     Sink      f32     0 delay_init
+  LOOP  2 [] Init   1
+    TREE 3    [] Init   Rate      f64     1
+      0    4 [                ]  0  1 Const    None      f64     1 0.5
+      1    5 [                ]  0  1 Init     None      f32     1 sd
+      2    6 [5               ]  1  1 Init     None      f64     1 cast_f64
+      3    7 [4 6             ]  2  1 Init     Rate      f64     1 *
+-- RESET
+-- BLOCK
+-- AUDIO
+GRAPH 0
+  LOOP  0 [2] Audio  1
+    TREE 1    [] Audio  FanOut    f64     1
+      0    2 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
+    TREE 4    [1 3] Audio  FanOut    f64     1
+      0    8 [2 7             ]  2  2 Audio    FanOut    f64     1 +
+    TREE 5    [4] Audio  Sink      f64     1
+      0    9 [8               ]  1  1 Audio    None      f64     1 floor
+      1   10 [8 9             ]  2  1 Audio    None      f64     1 -
+      2   11 [10              ]  1  0 Audio    Sink      f64     1 delay_write
+    TREE 6    [] Audio  FanOut    f32     1
+      0   35 [                ]  0  2 Audio    FanOut    f32     1 delay_fix_read(1)
+    TREE 10   [1] Audio  Sink      f32     1
+      0   22 [                ]  0  1 Const    None      f32     1 0.6f
+      1   13 [2               ]  1  1 Audio    None      f32     1 cast_f32
+      2   23 [22 13           ]  2  1 Audio    None      f32     1 *
+      3   24 [                ]  0  1 Const    None      f32     1 -0.3f
+      4   25 [23 24           ]  2  1 Audio    None      f32     1 +
+      5   32 [25              ]  1  0 Audio    Sink      f32     1 delay_write
+    TREE 11   [6] Audio  Sink      f32     1
+      0   36 [                ]  0  1 Audio    None      f32     1 delay_fix_read(2)
+      1   37 [35 36           ]  2  1 Audio    None      f32     1 +
+      2   39 [37 35           ]  2  1 Audio    None      f32     1 +
+      3   40 [39              ]  1  0 Audio    Sink      f32     1 outlet
+-- PARAMETER GROUPS
+-- CYCLES
+CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
+DELAY 0 f64 1
+     1 f32 0 delay_init
+     2 f64 1 delay_fix_read(1)
+    11 f64 1 delay_write
+DELAY 1 f32 1
+    27 f32 0 delay_init
+    35 f32 1 delay_fix_read(1)
+    36 f32 1 delay_fix_read(2)
+    32 f32 1 delay_write

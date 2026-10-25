@@ -1,0 +1,330 @@
+SYNTH identity
+-- PORTS
+OUT 0 out f32 1
+-- SORTED EXPRS
+      0    0 [                ]  0  1 Const    None      f32     1 0.0f
+      1    2 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
+      2    1 [0               ]  1  0 Init     Sink      f32     0 delay_init
+      3    4 [                ]  0  1 Const    None      f64     1 0.3
+      4    5 [                ]  0  1 Init     None      f32     1 sd
+      5    6 [5               ]  1  1 Init     None      f64     1 cast_f64
+      6    7 [4 6             ]  2  1 Init     Rate      f64     1 *
+      7    8 [2 7             ]  2  2 Audio    FanOut    f64     1 +
+      8    9 [8               ]  1  1 Audio    None      f64     1 floor
+      9   10 [8 9             ]  2  1 Audio    None      f64     1 -
+     10   11 [10              ]  1  0 Audio    Sink      f64     1 delay_write
+     11   18 [                ]  0  1 Const    None      f32     1 -1.0f
+     12   14 [                ]  0  1 Const    None      f32     1 2.0f
+     13   13 [2               ]  1  1 Audio    None      f32     1 cast_f32
+     14   15 [14 13           ]  2  1 Audio    None      f32     1 *
+     15   19 [18 15           ]  2  1 Audio    None      f32     1 +
+     16   20 [                ]  0  1 Audio    Graph     f32   256 spectral_frame(256)
+     17   21 [20              ]  1  0 Audio    Phi       f32   256 PhiNode
+     18   22 [19              ]  1  1 Audio    ControlFlow f32     1 spectral_chain(256, 128)
+     19   23 [22              ]  1  0 Audio    Sink      f32     1 outlet
+-- TREES
+    TREE 1    [] Audio  FanOut    f64     1
+      0    2 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
+    TREE 2    [] Init   Sink      f32     0
+      0    0 [                ]  0  1 Const    None      f32     1 0.0f
+      1    1 [0               ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 3    [] Init   Rate      f64     1
+      0    4 [                ]  0  1 Const    None      f64     1 0.3
+      1    5 [                ]  0  1 Init     None      f32     1 sd
+      2    6 [5               ]  1  1 Init     None      f64     1 cast_f64
+      3    7 [4 6             ]  2  1 Init     Rate      f64     1 *
+    TREE 4    [1 3] Audio  FanOut    f64     1
+      0    8 [2 7             ]  2  2 Audio    FanOut    f64     1 +
+    TREE 5    [4] Audio  Sink      f64     1
+      0    9 [8               ]  1  1 Audio    None      f64     1 floor
+      1   10 [8 9             ]  2  1 Audio    None      f64     1 -
+      2   11 [10              ]  1  0 Audio    Sink      f64     1 delay_write
+    TREE 6    [] Audio  Graph     f32   256
+      0   20 [                ]  0  1 Audio    Graph     f32   256 spectral_frame(256)
+    TREE 7    [6] Audio  Phi       f32   256
+      0   21 [20              ]  1  0 Audio    Phi       f32   256 PhiNode
+    TREE 8    [1 7*] Audio  ControlFlow f32     1
+      0   18 [                ]  0  1 Const    None      f32     1 -1.0f
+      1   14 [                ]  0  1 Const    None      f32     1 2.0f
+      2   13 [2               ]  1  1 Audio    None      f32     1 cast_f32
+      3   15 [14 13           ]  2  1 Audio    None      f32     1 *
+      4   19 [18 15           ]  2  1 Audio    None      f32     1 +
+      5   22 [19              ]  1  1 Audio    ControlFlow f32     1 spectral_chain(256, 128)
+    TREE 9    [8] Audio  Sink      f32     1
+      0   23 [22              ]  1  0 Audio    Sink      f32     1 outlet
+-- INIT
+  LOOP  1 [] Init   0
+    TREE 2    [] Init   Sink      f32     0
+      0    0 [                ]  0  1 Const    None      f32     1 0.0f
+      1    1 [0               ]  1  0 Init     Sink      f32     0 delay_init
+  LOOP  2 [] Init   1
+    TREE 3    [] Init   Rate      f64     1
+      0    4 [                ]  0  1 Const    None      f64     1 0.3
+      1    5 [                ]  0  1 Init     None      f32     1 sd
+      2    6 [5               ]  1  1 Init     None      f64     1 cast_f64
+      3    7 [4 6             ]  2  1 Init     Rate      f64     1 *
+-- RESET
+-- BLOCK
+-- AUDIO
+GRAPH 0
+  LOOP  0 [2] Audio  1
+    TREE 1    [] Audio  FanOut    f64     1
+      0    2 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
+    TREE 4    [1 3] Audio  FanOut    f64     1
+      0    8 [2 7             ]  2  2 Audio    FanOut    f64     1 +
+    TREE 5    [4] Audio  Sink      f64     1
+      0    9 [8               ]  1  1 Audio    None      f64     1 floor
+      1   10 [8 9             ]  2  1 Audio    None      f64     1 -
+      2   11 [10              ]  1  0 Audio    Sink      f64     1 delay_write
+  LOOP  3 [] Audio  256
+    TREE 6    [] Audio  Graph     f32   256
+      0   20 [                ]  0  1 Audio    Graph     f32   256 spectral_frame(256)
+  LOOP  5 [0 4] Audio  1
+    TREE 8    [1 7*] Audio  ControlFlow f32     1
+      0   18 [                ]  0  1 Const    None      f32     1 -1.0f
+      1   14 [                ]  0  1 Const    None      f32     1 2.0f
+      2   13 [2               ]  1  1 Audio    None      f32     1 cast_f32
+      3   15 [14 13           ]  2  1 Audio    None      f32     1 *
+      4   19 [18 15           ]  2  1 Audio    None      f32     1 +
+      5   22 [19              ]  1  1 Audio    ControlFlow f32     1 spectral_chain(256, 128)
+  LOOP  6 [5] Audio  1
+    TREE 9    [8] Audio  Sink      f32     1
+      0   23 [22              ]  1  0 Audio    Sink      f32     1 outlet
+GRAPH 1
+  LOOP  4 [3] Audio  256
+    TREE 7    [6] Audio  Phi       f32   256
+      0   21 [20              ]  1  0 Audio    Phi       f32   256 PhiNode
+-- PARAMETER GROUPS
+-- CYCLES
+CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
+DELAY 0 f64 1
+     1 f32 0 delay_init
+     2 f64 1 delay_fix_read(1)
+    11 f64 1 delay_write
+
+SYNTH scale
+-- PORTS
+OUT 0 out f32 1
+-- SORTED EXPRS
+      0    0 [                ]  0  1 Const    None      f32     1 0.0f
+      1    2 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
+      2    1 [0               ]  1  0 Init     Sink      f32     0 delay_init
+      3    4 [                ]  0  1 Const    None      f64     1 0.3
+      4    5 [                ]  0  1 Init     None      f32     1 sd
+      5    6 [5               ]  1  1 Init     None      f64     1 cast_f64
+      6    7 [4 6             ]  2  1 Init     Rate      f64     1 *
+      7    8 [2 7             ]  2  2 Audio    FanOut    f64     1 +
+      8    9 [8               ]  1  1 Audio    None      f64     1 floor
+      9   10 [8 9             ]  2  1 Audio    None      f64     1 -
+     10   11 [10              ]  1  0 Audio    Sink      f64     1 delay_write
+     11   18 [                ]  0  1 Const    None      f32     1 -1.0f
+     12   14 [                ]  0  1 Const    None      f32     1 2.0f
+     13   13 [2               ]  1  1 Audio    None      f32     1 cast_f32
+     14   15 [14 13           ]  2  1 Audio    None      f32     1 *
+     15   19 [18 15           ]  2  1 Audio    None      f32     1 +
+     16   20 [                ]  0  1 Audio    Graph     f32   256 spectral_frame(256)
+     17   21 [                ]  0  1 Const    None      f32     1 0.5f
+     18   22 [20 21           ]  2  1 Audio    Temp      f32   256 *
+     19   23 [22              ]  1  0 Audio    Phi       f32   256 PhiNode
+     20   24 [19              ]  1  1 Audio    ControlFlow f32     1 spectral_chain(256, 128)
+     21   25 [24              ]  1  0 Audio    Sink      f32     1 outlet
+-- TREES
+    TREE 1    [] Audio  FanOut    f64     1
+      0    2 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
+    TREE 2    [] Init   Sink      f32     0
+      0    0 [                ]  0  1 Const    None      f32     1 0.0f
+      1    1 [0               ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 3    [] Init   Rate      f64     1
+      0    4 [                ]  0  1 Const    None      f64     1 0.3
+      1    5 [                ]  0  1 Init     None      f32     1 sd
+      2    6 [5               ]  1  1 Init     None      f64     1 cast_f64
+      3    7 [4 6             ]  2  1 Init     Rate      f64     1 *
+    TREE 4    [1 3] Audio  FanOut    f64     1
+      0    8 [2 7             ]  2  2 Audio    FanOut    f64     1 +
+    TREE 5    [4] Audio  Sink      f64     1
+      0    9 [8               ]  1  1 Audio    None      f64     1 floor
+      1   10 [8 9             ]  2  1 Audio    None      f64     1 -
+      2   11 [10              ]  1  0 Audio    Sink      f64     1 delay_write
+    TREE 6    [] Audio  Graph     f32   256
+      0   20 [                ]  0  1 Audio    Graph     f32   256 spectral_frame(256)
+    TREE 7    [6] Audio  Temp      f32   256
+      0   21 [                ]  0  1 Const    None      f32     1 0.5f
+      1   22 [20 21           ]  2  1 Audio    Temp      f32   256 *
+    TREE 8    [7] Audio  Phi       f32   256
+      0   23 [22              ]  1  0 Audio    Phi       f32   256 PhiNode
+    TREE 9    [1 8*] Audio  ControlFlow f32     1
+      0   18 [                ]  0  1 Const    None      f32     1 -1.0f
+      1   14 [                ]  0  1 Const    None      f32     1 2.0f
+      2   13 [2               ]  1  1 Audio    None      f32     1 cast_f32
+      3   15 [14 13           ]  2  1 Audio    None      f32     1 *
+      4   19 [18 15           ]  2  1 Audio    None      f32     1 +
+      5   24 [19              ]  1  1 Audio    ControlFlow f32     1 spectral_chain(256, 128)
+    TREE 10   [9] Audio  Sink      f32     1
+      0   25 [24              ]  1  0 Audio    Sink      f32     1 outlet
+-- INIT
+  LOOP  1 [] Init   0
+    TREE 2    [] Init   Sink      f32     0
+      0    0 [                ]  0  1 Const    None      f32     1 0.0f
+      1    1 [0               ]  1  0 Init     Sink      f32     0 delay_init
+  LOOP  2 [] Init   1
+    TREE 3    [] Init   Rate      f64     1
+      0    4 [                ]  0  1 Const    None      f64     1 0.3
+      1    5 [                ]  0  1 Init     None      f32     1 sd
+      2    6 [5               ]  1  1 Init     None      f64     1 cast_f64
+      3    7 [4 6             ]  2  1 Init     Rate      f64     1 *
+-- RESET
+-- BLOCK
+-- AUDIO
+GRAPH 0
+  LOOP  0 [2] Audio  1
+    TREE 1    [] Audio  FanOut    f64     1
+      0    2 [                ]  0  2 Audio    FanOut    f64     1 delay_fix_read(1)
+    TREE 4    [1 3] Audio  FanOut    f64     1
+      0    8 [2 7             ]  2  2 Audio    FanOut    f64     1 +
+    TREE 5    [4] Audio  Sink      f64     1
+      0    9 [8               ]  1  1 Audio    None      f64     1 floor
+      1   10 [8 9             ]  2  1 Audio    None      f64     1 -
+      2   11 [10              ]  1  0 Audio    Sink      f64     1 delay_write
+  LOOP  3 [] Audio  256
+    TREE 6    [] Audio  Graph     f32   256
+      0   20 [                ]  0  1 Audio    Graph     f32   256 spectral_frame(256)
+  LOOP  5 [0 4] Audio  1
+    TREE 9    [1 8*] Audio  ControlFlow f32     1
+      0   18 [                ]  0  1 Const    None      f32     1 -1.0f
+      1   14 [                ]  0  1 Const    None      f32     1 2.0f
+      2   13 [2               ]  1  1 Audio    None      f32     1 cast_f32
+      3   15 [14 13           ]  2  1 Audio    None      f32     1 *
+      4   19 [18 15           ]  2  1 Audio    None      f32     1 +
+      5   24 [19              ]  1  1 Audio    ControlFlow f32     1 spectral_chain(256, 128)
+  LOOP  6 [5] Audio  1
+    TREE 10   [9] Audio  Sink      f32     1
+      0   25 [24              ]  1  0 Audio    Sink      f32     1 outlet
+GRAPH 1
+  LOOP  4 [3] Audio  256
+    TREE 7    [6] Audio  Temp      f32   256
+      0   21 [                ]  0  1 Const    None      f32     1 0.5f
+      1   22 [20 21           ]  2  1 Audio    Temp      f32   256 *
+    TREE 8    [7] Audio  Phi       f32   256
+      0   23 [22              ]  1  0 Audio    Phi       f32   256 PhiNode
+-- PARAMETER GROUPS
+-- CYCLES
+CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
+DELAY 0 f64 1
+     1 f32 0 delay_init
+     2 f64 1 delay_fix_read(1)
+    11 f64 1 delay_write
+
+SYNTH stereo_scale
+-- PORTS
+OUT 0 out f32 2
+-- SORTED EXPRS
+      0    0 [                ]  0  1 Const    None      f32     1 0.0f
+      1    2 [                ]  0  2 Audio    FanOut    f64     2 delay_fix_read(1)
+      2    1 [0               ]  1  0 Init     Sink      f32     0 delay_init
+      3    4 [                ]  0  1 Const    None      f64     2 {0.3, 0.4}
+      4    5 [                ]  0  1 Init     None      f32     1 sd
+      5    6 [5               ]  1  1 Init     Broadcast f64     1 cast_f64
+      6    7 [4 6             ]  2  1 Init     Rate      f64     2 *
+      7    8 [2 7             ]  2  2 Audio    FanOut    f64     2 +
+      8    9 [8               ]  1  1 Audio    None      f64     2 floor
+      9   10 [8 9             ]  2  1 Audio    None      f64     2 -
+     10   11 [10              ]  1  0 Audio    Sink      f64     2 delay_write
+     11   18 [                ]  0  1 Const    None      f32     1 -1.0f
+     12   14 [                ]  0  1 Const    None      f32     1 2.0f
+     13   13 [2               ]  1  1 Audio    None      f32     2 cast_f32
+     14   15 [14 13           ]  2  1 Audio    None      f32     2 *
+     15   19 [18 15           ]  2  1 Audio    None      f32     2 +
+     16   20 [                ]  0  1 Audio    Graph     f32   512 spectral_frame(512)
+     17   21 [                ]  0  1 Const    None      f32     1 0.5f
+     18   22 [20 21           ]  2  1 Audio    Temp      f32   512 *
+     19   23 [22              ]  1  0 Audio    Phi       f32   512 PhiNode
+     20   24 [19              ]  1  1 Audio    ControlFlow f32     2 spectral_chain(512, 256)
+     21   25 [24              ]  1  0 Audio    Sink      f32     2 outlet
+-- TREES
+    TREE 1    [] Audio  FanOut    f64     2
+      0    2 [                ]  0  2 Audio    FanOut    f64     2 delay_fix_read(1)
+    TREE 2    [] Init   Sink      f32     0
+      0    0 [                ]  0  1 Const    None      f32     1 0.0f
+      1    1 [0               ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 3    [] Init   Broadcast f64     1
+      0    5 [                ]  0  1 Init     None      f32     1 sd
+      1    6 [5               ]  1  1 Init     Broadcast f64     1 cast_f64
+    TREE 4    [3] Init   Rate      f64     2
+      0    4 [                ]  0  1 Const    None      f64     2 {0.3, 0.4}
+      1    7 [4 6             ]  2  1 Init     Rate      f64     2 *
+    TREE 5    [1 4] Audio  FanOut    f64     2
+      0    8 [2 7             ]  2  2 Audio    FanOut    f64     2 +
+    TREE 6    [5] Audio  Sink      f64     2
+      0    9 [8               ]  1  1 Audio    None      f64     2 floor
+      1   10 [8 9             ]  2  1 Audio    None      f64     2 -
+      2   11 [10              ]  1  0 Audio    Sink      f64     2 delay_write
+    TREE 7    [] Audio  Graph     f32   512
+      0   20 [                ]  0  1 Audio    Graph     f32   512 spectral_frame(512)
+    TREE 8    [7] Audio  Temp      f32   512
+      0   21 [                ]  0  1 Const    None      f32     1 0.5f
+      1   22 [20 21           ]  2  1 Audio    Temp      f32   512 *
+    TREE 9    [8] Audio  Phi       f32   512
+      0   23 [22              ]  1  0 Audio    Phi       f32   512 PhiNode
+    TREE 10   [1 9*] Audio  ControlFlow f32     2
+      0   18 [                ]  0  1 Const    None      f32     1 -1.0f
+      1   14 [                ]  0  1 Const    None      f32     1 2.0f
+      2   13 [2               ]  1  1 Audio    None      f32     2 cast_f32
+      3   15 [14 13           ]  2  1 Audio    None      f32     2 *
+      4   19 [18 15           ]  2  1 Audio    None      f32     2 +
+      5   24 [19              ]  1  1 Audio    ControlFlow f32     2 spectral_chain(512, 256)
+    TREE 11   [10] Audio  Sink      f32     2
+      0   25 [24              ]  1  0 Audio    Sink      f32     2 outlet
+-- INIT
+  LOOP  1 [] Init   0
+    TREE 2    [] Init   Sink      f32     0
+      0    0 [                ]  0  1 Const    None      f32     1 0.0f
+      1    1 [0               ]  1  0 Init     Sink      f32     0 delay_init
+  LOOP  2 [] Init   1
+    TREE 3    [] Init   Broadcast f64     1
+      0    5 [                ]  0  1 Init     None      f32     1 sd
+      1    6 [5               ]  1  1 Init     Broadcast f64     1 cast_f64
+  LOOP  3 [2] Init   2
+    TREE 4    [3] Init   Rate      f64     2
+      0    4 [                ]  0  1 Const    None      f64     2 {0.3, 0.4}
+      1    7 [4 6             ]  2  1 Init     Rate      f64     2 *
+-- RESET
+-- BLOCK
+-- AUDIO
+GRAPH 0
+  LOOP  0 [3] Audio  2
+    TREE 1    [] Audio  FanOut    f64     2
+      0    2 [                ]  0  2 Audio    FanOut    f64     2 delay_fix_read(1)
+    TREE 5    [1 4] Audio  FanOut    f64     2
+      0    8 [2 7             ]  2  2 Audio    FanOut    f64     2 +
+    TREE 6    [5] Audio  Sink      f64     2
+      0    9 [8               ]  1  1 Audio    None      f64     2 floor
+      1   10 [8 9             ]  2  1 Audio    None      f64     2 -
+      2   11 [10              ]  1  0 Audio    Sink      f64     2 delay_write
+  LOOP  4 [] Audio  512
+    TREE 7    [] Audio  Graph     f32   512
+      0   20 [                ]  0  1 Audio    Graph     f32   512 spectral_frame(512)
+  LOOP  6 [0 5] Audio  2
+    TREE 10   [1 9*] Audio  ControlFlow f32     2
+      0   18 [                ]  0  1 Const    None      f32     1 -1.0f
+      1   14 [                ]  0  1 Const    None      f32     1 2.0f
+      2   13 [2               ]  1  1 Audio    None      f32     2 cast_f32
+      3   15 [14 13           ]  2  1 Audio    None      f32     2 *
+      4   19 [18 15           ]  2  1 Audio    None      f32     2 +
+      5   24 [19              ]  1  1 Audio    ControlFlow f32     2 spectral_chain(512, 256)
+  LOOP  7 [6] Audio  2
+    TREE 11   [10] Audio  Sink      f32     2
+      0   25 [24              ]  1  0 Audio    Sink      f32     2 outlet
+GRAPH 1
+  LOOP  5 [4] Audio  512
+    TREE 8    [7] Audio  Temp      f32   512
+      0   21 [                ]  0  1 Const    None      f32     1 0.5f
+      1   22 [20 21           ]  2  1 Audio    Temp      f32   512 *
+    TREE 9    [8] Audio  Phi       f32   512
+      0   23 [22              ]  1  0 Audio    Phi       f32   512 PhiNode
+-- PARAMETER GROUPS
+-- CYCLES
+CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
+DELAY 0 f64 2
+     1 f32 0 delay_init
+     2 f64 2 delay_fix_read(1)
+    11 f64 2 delay_write

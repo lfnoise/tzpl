@@ -1,6 +1,6 @@
 -- synthc/types.x
--- Per-kind shape and type rules for the analysis passes, ported from the
--- virtual methods of the C++ Expr hierarchy (synthdef_expr.cpp/.hpp):
+-- Per-kind shape and type rules for the analysis passes (originally ported
+-- from the virtual methods of the C++ Expr hierarchy):
 --   calcShape()          -> calcShapeOf
 --   update_type()        -> updateTypeOf
 --   inputTypeConstraint  -> inputConstraintOf
@@ -40,19 +40,12 @@ fn wlPop(wl WorkList) Int {
 }
 
 ---------------------------------------------------------------------------
--- Shape (channel count) rules -- mirrors Expr::calcShape()
+-- Shape rules
 
-fn _broadcastC(a Int, b Int) Int = max(a, b);
+fn _noShape() Shape = shape([0]);
 
--- vec op shape/type helpers (factored out: the join arms accumulate over all
--- inputs). at = index chans; put = source chans; join = padded sum; the reorders
--- use vecOutChans.
-fn _vecShapeOf(ctx Ctx, vop VecOp, ins [Int]) Int = match (vop) {
-	at:   ctx.chans[ins[1]];
-	put:  ctx.chans[ins[0]];
-	join: { var raw = 0; for (x : ins) { raw = raw + ctx.chans[x]; } raw asChans }
-	_:    vecOutChans(ctx.chans[ins[0]], vop);
-};
+-- vec op type helpers (factored out: the join arms accumulate over all
+-- inputs).
 fn _vecInputConstraint(vop VecOp, nodeTyp NumType, i Int) NumType = match (vop) {
 	put:  i == 1 ? ANY_INT : nodeTyp;
 	join: nodeTyp;
@@ -64,100 +57,102 @@ fn _vecNarrowType(ctx Ctx, n NIdx, vop VecOp, ins [Int]) NumType = match (vop) {
 	_:    ctx.typ[n] & ctx.typ[ins[0]];
 };
 
--- Returns the recomputed channel count for node n from its inputs.
-fn calcShapeOf(ctx Ctx, n NIdx) Int {
+-- Vec ops work on the row-major flattening of their input and yield a row.
+-- at = the index vector's chans; put = the source array's chans; join = the
+-- sum of all inputs; the single-input reorders use vecOutChans.
+fn _vecShapeOf(ctx Ctx, vop VecOp, ins [Int]) Shape = match (vop) {
+	at:   row(ctx.chans[ins[1]]);
+	put:  row(ctx.chans[ins[0]]);
+	join: { var raw = 0; for (x : ins) { raw = raw + ctx.chans[x]; } row(raw) }
+	_:    row(vecOutChans(ctx.chans[ins[0]], vop));
+};
+
+-- The recomputed shape of node n from its inputs. Elementwise ops broadcast
+-- (lcm per dimension); sources keep the shape they were declared with.
+fn calcShapeOf(ctx Ctx, n NIdx) Shape {
 	let ins = ctx.ins[n];
 	match (ctx.kind[n]) {
-		constant(v, _):      v constSize;
-		sampleRate:          1;
-		sampleDur:           1;
-		sharedInK(_, _):     1;
-		control(_, _, _, _): ctx.chans[n];     -- fixed at import
-		noteParamK(_, _, _): ctx.chans[n];
-		inletK(_, _):        ctx.chans[n];
-		outletK(_, _):       ctx.chans[ins[0]];
-		unopK(_):            ctx.chans[ins[0]];
-		binopK(_):           _broadcastC(ctx.chans[ins[0]], ctx.chans[ins[1]]);
-		compareopK(_):       _broadcastC(ctx.chans[ins[0]], ctx.chans[ins[1]]);
-		castopK(_):          ctx.chans[ins[0]];
-		eventToAudioK:       ctx.chans[ins[0]];
-		reduceK(_, cols):    cols;
+		constant(_, _):      ctx.shape[n];      -- declared (or folded) shape
+		sampleRate:          scalarShape();
+		sampleDur:           scalarShape();
+		sharedInK(_, _):     scalarShape();
+		noteParamK(_, _, _): ctx.shape[n];      -- fixed at import
+		inletK(_, _, _):     ctx.shape[n];
+		outletK(_, _):       ctx.shape[ins[0]];
+		unopK(_):            ctx.shape[ins[0]];
+		binopK(_):           broadcast(ctx.shape[ins[0]], ctx.shape[ins[1]]);
+		compareopK(_):       broadcast(ctx.shape[ins[0]], ctx.shape[ins[1]]);
+		castopK(_):          ctx.shape[ins[0]];
+		reduceK(_, cols):    row(cols);
 		vecK(vop):           _vecShapeOf(ctx, vop, ins);
-		selectK:             _selectChans(ctx, n);
-		urandK(_):           ctx.chans[n];      -- fixed at import
-		birandK(_):          ctx.chans[n];
-		rand64K(_):          ctx.chans[n];
-		maxDelayK(_):        ctx.chans[ins[0]];
-		delayInitK(_, _):    ctx.chans[n];      -- no-op: stays 0
-		delayFixReadK(d, _): ctx.delays[d].chans;
-		delayVarReadK(d, _): ctx.delays[d].chans;
-		delayWriteK(_):      ctx.chans[ins[0]];
-		bufFixReadK(_, _, readChans, _): readChans;
-		bufVarReadK(_, _, readChans, _): readChans;
-		bufWriteK(_, _, _):  ctx.chans[ins[0]];   -- BufWrite::calcShape: in0().chans
-		bufLengthK(_):       1;
-		bankLookupK(_):      1;
-		bankFixReadK(_, readChans, _): readChans;
-		bankVarReadK(_, readChans, _): readChans;
-		bankRootKeyK:        1;
-		bankSampleRateK:     1;
-		bankLengthK:         1;
-		bankLoopStartK:      1;
-		bankLoopEndK:        1;
-		bankHasLoopK:        1;
+		selectK:             _selectShape(ctx, n);
+		urandK(_):           ctx.shape[n];      -- fixed at import
+		birandK(_):          ctx.shape[n];
+		rand64K(_):          ctx.shape[n];
+		maxDelayK(_):        ctx.shape[ins[0]];
+		delayInitK(_, _):    ctx.shape[n];      -- stays unset
+		delayFixReadK(d, _): ctx.delays[d].shape;
+		delayVarReadK(d, _): ctx.delays[d].shape;
+		delayWriteK(_):      ctx.shape[ins[0]];
+		bufFixReadK(_, _, readChans, _): row(readChans);
+		bufVarReadK(_, _, readChans, _): row(readChans);
+		bufWriteK(_, _, _):  ctx.shape[ins[0]];
+		bufLengthK(_):       scalarShape();
+		bankLookupK(_):      scalarShape();
+		bankFixReadK(_, readChans, _): row(readChans);
+		bankVarReadK(_, readChans, _): row(readChans);
+		bankRootKeyK:        scalarShape();
+		bankSampleRateK:     scalarShape();
+		bankLengthK:         scalarShape();
+		bankLoopStartK:      scalarShape();
+		bankLoopEndK:        scalarShape();
+		bankHasLoopK:        scalarShape();
 		-- Control flow: a control-flow node broadcasts over its branch/body phis
 		-- (the test/selector/count input is scalar and doesn't contribute); a
-		-- phi broadcasts its (current, target, input) channel counts.
-		ifK:                 _cfChans(ctx, n);
-		switchK(_):          _cfChans(ctx, n);
-		forK:                _cfChans(ctx, n);
-		voicerK(mv):         _voicerChans(ctx, n, mv);
-		spectralChainK(_, _): ctx.chans[ctx.ins[n][0]];   -- output = input chans
-		spectralFrameK(_):    ctx.chans[n];               -- inputChans * fftSize, set at import
-		phiK(t):             _phiChans(ctx, n, t);
-		varK(_):             ctx.chans[n];   -- fixed at import (scalar loop var)
-		debugK(_, _, _, _):  1;
+		-- phi broadcasts its (current, target, input) shapes.
+		ifK:                 _cfShape(ctx, n);
+		switchK(_):          _cfShape(ctx, n);
+		forK:                _cfShape(ctx, n);
+		voicerK(mv):         _voicerShape(ctx, n, mv);
+		spectralChainK(_, _): ctx.shape[ctx.ins[n][0]];   -- output = input shape
+		spectralFrameK(_):    ctx.shape[n];               -- inputChans * fftSize, set at import
+		phiK(t):             _phiShape(ctx, n, t);
+		varK(_):             ctx.shape[n];   -- unset: broadcasts to its use
+		debugK(_, _, _, _):  scalarShape();
 	}
 }
 
 -- Control-flow node shape: broadcast over the branch/body phis (ctx.subs).
-fn _cfChans(ctx Ctx, n NIdx) Int {
-	var ch = 0;
-	for (s : ctx.subs[n]) { ch = _broadcastC(ch, ctx.chans[s]); }
-	ch
+fn _cfShape(ctx Ctx, n NIdx) Shape {
+	var sh = _noShape();
+	for (s : ctx.subs[n]) { sh = broadcast(sh, ctx.shape[s]); }
+	sh
 }
 
--- Voicer shape: maxVoices * voice_body.in0().chans (the body root's channels),
--- computed directly from the body root rather than broadcasting over the phi --
--- the phi's chans broadcasts UP to the voicer's (target), so reading it back
--- would be circular. Mirrors VoicerExpr::calcShape.
-fn _voicerChans(ctx Ctx, n NIdx, maxVoices Int) Int {
+-- Voicer shape: the body root's with a leading voice dimension, computed
+-- from the body root rather than broadcasting over the phi -- the phi
+-- broadcasts UP to the voicer's (target), so reading it back would be
+-- circular.
+fn _voicerShape(ctx Ctx, n NIdx, maxVoices Int) Shape {
 	let bodyPhi = ctx.subs[n][0];
 	let bodyRoot = ctx.ins[bodyPhi][0];
-	maxVoices * ctx.chans[bodyRoot]
+	prependDim(ctx.shape[bodyRoot], maxVoices)
 }
 
--- PhiNode shape: broadcast(current, target, input). Mirrors PhiNodeExpr::calcShape.
--- A voicer target's chans is maxVoices * voiceChans, but the phi represents a
--- single voice's output (voiceChans wide); broadcasting to the target would
--- voice-expand the phi's shape. The per-voice fan-out happens at codegen time.
-fn _phiChans(ctx Ctx, n NIdx, target Int) Int {
-	var ch = ctx.chans[n];
+-- PhiNode shape: broadcast(current, target, input). A voicer target has a
+-- voice dimension the phi (one voice's output) does not, so it is skipped.
+fn _phiShape(ctx Ctx, n NIdx, target Int) Shape {
+	var sh = ctx.shape[n];
 	if (target != NONE && !(ctx.kind[target] isVoicerKind)) {
-		ch = _broadcastC(ch, ctx.chans[target]);
+		sh = broadcast(sh, ctx.shape[target]);
 	}
-	_broadcastC(ch, ctx.chans[ctx.ins[n][0]])
+	broadcast(sh, ctx.shape[ctx.ins[n][0]])
 }
 
-fn _selectChans(ctx Ctx, n NIdx) Int {
-	let ins = ctx.ins[n];
-	var ch = ctx.chans[ins[0]];
-	var i = 1;
-	while (i < ins length) {
-		ch = _broadcastC(ch, ctx.chans[ins[i]]);
-		i = i + 1;
-	}
-	ch
+fn _selectShape(ctx Ctx, n NIdx) Shape {
+	var sh = _noShape();
+	for (i : ctx.ins[n]) { sh = broadcast(sh, ctx.shape[i]); }
+	sh
 }
 
 ---------------------------------------------------------------------------
@@ -244,7 +239,6 @@ fn updateTypeOf(ctx Ctx, n NIdx, wl WorkList) Void {
 		}
 		compareopK(_):       { _updateCompare(ctx, n, wl); }
 		castopK(_):          {}                  -- output is cast_type; input unconstrained
-		eventToAudioK:       { _narrow(ctx, n, ctx.typ[n] & ctx.typ[ins[0]], wl); }
 		reduceK(_, _):       { _narrow(ctx, n, ctx.typ[n] & ctx.typ[ins[0]], wl); }
 		-- put narrows by its array + value (skip the integer index); join by all
 		-- inputs; at + the reorders narrow by the data input.

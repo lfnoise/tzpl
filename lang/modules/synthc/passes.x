@@ -9,6 +9,8 @@
 
 import synthdef.*;
 import synthc.ir.*;
+import synthc.cycles.*;
+import synthc.paramgroups.*;
 import synthc.types.*;
 
 ---------------------------------------------------------------------------
@@ -368,10 +370,11 @@ fn shapeInference(ctx Ctx) Void {
 	for (n : ctx.sorted) { wl wlPush(n); }
 	while (!(wl wlEmpty)) {
 		let n = wl wlPop;
-		let chans0 = ctx.chans[n];
-		let ch = calcShapeOf(ctx, n);
-		ctx.chans[n] = ch;
-		if (ch != chans0) {
+		let sh0 = ctx.shape[n];
+		let sh = calcShapeOf(ctx, n);
+		ctx.shape[n] = sh;
+		ctx.chans[n] = sh chans;
+		if (sh != sh0) {
 			for (c : ctx.consumers[n]) { wl wlPush(c); }
 			-- Control-flow shape edges aren't `consumers` edges: a phi feeds its
 			-- target, and a control-flow node feeds its branch/body phis (subs).
@@ -385,33 +388,27 @@ fn shapeInference(ctx Ctx) Void {
 				_: {}
 			}
 		}
-		-- A delay's width covers its writer AND its init values. Widen-only
-		-- keeps the fixpoint monotone: a pure at/put feedback cycle has no
-		-- width source other than the init, and the writer pass must not
-		-- shrink it back. (Mirrors the C++ shapeInference.)
+		-- A delay's shape covers its writer AND its init values (broadcast).
+		-- Widen-only keeps the fixpoint monotone: a pure at/put feedback cycle
+		-- has no shape source other than the init, and the writer pass must not
+		-- shrink it back.
 		match (ctx.kind[n]) {
-			delayWriteK(d): {
-				if (ch > ctx.delays[d].chans) {
-					ctx.delays[d] = DelayInfo { ...ctx.delays[d], chans: ch };
-					for (u : ctx.delays[d].initters) { wl wlPush(u); }
-					for (u : ctx.delays[d].fixReaders) { wl wlPush(u); }
-					for (u : ctx.delays[d].varReaders) { wl wlPush(u); }
-					if (ctx.delays[d].writer != NONE) { wl wlPush(ctx.delays[d].writer); }
-				}
-			}
-			delayInitK(d, _): {
-				let w = ctx.chans[ctx.ins[n][0]];
-				if (w > ctx.delays[d].chans) {
-					ctx.delays[d] = DelayInfo { ...ctx.delays[d], chans: w };
-					for (u : ctx.delays[d].initters) { wl wlPush(u); }
-					for (u : ctx.delays[d].fixReaders) { wl wlPush(u); }
-					for (u : ctx.delays[d].varReaders) { wl wlPush(u); }
-					if (ctx.delays[d].writer != NONE) { wl wlPush(ctx.delays[d].writer); }
-				}
-			}
+			delayWriteK(d): { _widenDelay(ctx, d, sh, wl); }
+			delayInitK(d, _): { _widenDelay(ctx, d, ctx.shape[ctx.ins[n][0]], wl); }
 			_: {}
 		}
 	}
+}
+
+fn _widenDelay(ctx Ctx, d Int, sh Shape, wl WorkList) Void {
+	let old = ctx.delays[d].shape;
+	let w = broadcast(old, sh);
+	if (w == old) { return; }
+	ctx.delays[d] = DelayInfo { ...ctx.delays[d], shape: w, chans: w chans };
+	for (u : ctx.delays[d].initters) { wl wlPush(u); }
+	for (u : ctx.delays[d].fixReaders) { wl wlPush(u); }
+	for (u : ctx.delays[d].varReaders) { wl wlPush(u); }
+	if (ctx.delays[d].writer != NONE) { wl wlPush(ctx.delays[d].writer); }
 }
 
 ---------------------------------------------------------------------------
@@ -677,29 +674,6 @@ fn setNonConcreteTypesToDefault(ctx Ctx) Void {
 }
 
 ---------------------------------------------------------------------------
--- setDelayReaderRates (synthdef_synth.cpp:226)
--- Promote delay writer + readers to event rate when the written value is
--- event-rate.
-
-fn setDelayReaderRates(ctx Ctx) Void {
-	var di = 0;
-	while (di < ctx.delays length) {
-		let d = ctx.delays[di];
-		if (d.writer != NONE) {
-			if (ctx.nrate[ctx.ins[d.writer][0]] == Rate.event) {
-				ctx.nrate[d.writer] = Rate.event;
-			}
-		}
-		let isEvent = d.writer != NONE && ctx.nrate[d.writer] == Rate.event;
-		if (isEvent) {
-			for (u : d.fixReaders) { ctx.nrate[u] = Rate.event; }
-			for (u : d.varReaders) { ctx.nrate[u] = max(ctx.nrate[u], Rate.event); }
-		}
-		di = di + 1;
-	}
-}
-
----------------------------------------------------------------------------
 -- findGraphCuts (synthdef_synth.cpp:251)
 --
 -- Annotates each node with a GraphCut that marks where a value must be
@@ -719,8 +693,7 @@ fn _setCut(ctx Ctx, n NIdx, c GraphCut) Void {
 }
 
 fn _isInputKind(k NodeKind) Bool = match (k) {
-	inletK(_, _):        true;
-	control(_, _, _, _): true;
+	inletK(_, _, _):     true;
 	noteParamK(_, _, _): true;
 	_:                   false;
 };
@@ -847,7 +820,7 @@ fn _buildTree(ctx Ctx, treeIdx Int, root NIdx) Void {
 	ctx.trees[treeIdx] = Tree {
 		root: root, exprs: `curExprs,
 		antecedents: `curAnte, antecedentsSep: `curAnteSep,
-		loopOf: NONE, isoGroupOf: NONE, serial: ctx.trees[treeIdx].serial,
+		loopOf: NONE, serial: ctx.trees[treeIdx].serial,
 	};
 }
 
@@ -862,7 +835,7 @@ fn cutGraphToTrees(ctx Ctx) Void {
 				ctx.trees push!(Tree {
 					root: root, exprs: [Int](),
 					antecedents: [Int](), antecedentsSep: [Bool](),
-					loopOf: NONE, isoGroupOf: NONE, serial: serialNo,
+					loopOf: NONE, serial: serialNo,
 				});
 				serialNo = serialNo + 1;
 				ctx _buildTree(treeIdx, root);
@@ -872,11 +845,9 @@ fn cutGraphToTrees(ctx Ctx) Void {
 }
 
 ---------------------------------------------------------------------------
--- addDelayAntecedents (synthdef_synth.cpp:523)
---
--- A delay writer's tree must run after every reader's tree in the same cycle
--- (so the read sees the previous sample). Add reader trees as antecedents of
--- the writer's tree (non-separate-loop).
+-- Tree antecedents. (Delay writers no longer take their readers' trees as
+-- antecedents: a read is a weighted edge from the written value (cycles.x),
+-- and block-sized rings let a writer run before its readers.)
 
 fn _treeAddAntecedent(ctx Ctx, treeIdx Int, anteTreeIdx Int, sep Bool) Void {
 	let t = ctx.trees[treeIdx];
@@ -899,8 +870,8 @@ fn _treeAddAntecedent(ctx Ctx, treeIdx Int, anteTreeIdx Int, sep Bool) Void {
 -- indexed store instead of materializing the read, copying the whole vector
 -- through the put, and storing every lane back. When every other consumer
 -- of the read is a scalar VecAt, the read's materialization is suppressed
--- too and the VecAts load the state directly; appending them to fixReaders
--- makes addDelayAntecedents order those loads before the in-place store.
+-- too and the VecAts load the state directly (appended to fixReaders). The
+-- block code generator (M4) must order those loads before the store.
 
 fn _inplaceForWrite(ctx Ctx, n NIdx, d Int) Void {
 	let info = ctx.delays[d];
@@ -961,22 +932,6 @@ fn inplaceDelayOps(ctx Ctx) Void {
 	}
 }
 
-fn addDelayAntecedents(ctx Ctx) Void {
-	for (n : ctx.sorted) {
-		match (ctx.kind[n]) {
-			delayWriteK(d): {
-				let wtree = ctx.treeOf[n];
-				for (rd : ctx.delays[d].fixReaders) {
-					if (ctx.treeOf[rd] != wtree) { _treeAddAntecedent(ctx, wtree, ctx.treeOf[rd], false); }
-				}
-				for (rd : ctx.delays[d].varReaders) {
-					if (ctx.treeOf[rd] != wtree) { _treeAddAntecedent(ctx, wtree, ctx.treeOf[rd], false); }
-				}
-			}
-			_: {}
-		}
-	}
-}
 
 ---------------------------------------------------------------------------
 -- addSubgraphAntecedents (synthdef_synth.cpp:545)
@@ -1108,7 +1063,7 @@ fn _replaceIntArray(dst [Int], src [Int]) Void {
 }
 
 ---------------------------------------------------------------------------
--- treesToLoops (synthdef_synth.cpp:757)  -- M1: no iso-groups (isoGroup=null)
+-- treesToLoops
 --
 -- Fuse trees into loops. Trees join an existing loop with the same rate and
 -- channel count when the loop can access all the tree's antecedents and there
@@ -1120,207 +1075,11 @@ fn _intListHas(lst [Int], x Int) Bool {
 	false
 }
 
----------------------------------------------------------------------------
--- computeIsoGroups (synthdef_synth.cpp:674)
---
--- Group event-rate trees by their transitive source-dependency set (controls
--- and noteParams), build the activation graph between groups, and
--- topologically sort it. Each group then becomes its own set of event loops;
--- processEvents runs only the groups whose sources changed. Runs after
--- sortTrees, before treesToLoops.
-
-fn _isSourceNode(ctx Ctx, n NIdx) Bool = match (ctx.kind[n]) {
-	control(_, _, _, _): true;
-	noteParamK(_, _, _): true;
-	_: false;
-};
-
--- Insert control node index x into a sorted-unique list (set semantics).
-fn _ctrlInsert(lst [Int], x Int) Void {
-	var i = 0;
-	while (i < lst length) {
-		if (lst[i] == x) { return; }
-		if (lst[i] > x) {
-			lst push!(0);
-			var j = lst length - 1;
-			while (j > i) { lst[j] = lst[j - 1]; j = j - 1; }
-			lst[i] = x;
-			return;
-		}
-		i = i + 1;
-	}
-	lst push!(x);
-}
-
-fn _ctrlListEq(a [Int], b [Int]) Bool {
-	if (a length != b length) { return false; }
-	var i = 0;
-	while (i < a length) { if (a[i] != b[i]) { return false; } i = i + 1; }
-	true
-}
-
--- Transitive source set of a tree, memoized in `transCtrl / `transDone.
-fn _computeTransitiveSources(ctx Ctx, treeIdx Int) Void {
-	var done [Bool] = `transDone;
-	if (done[treeIdx]) { return; }
-	done[treeIdx] = true;
-	var result [Int] = [];
-	let tree = ctx.trees[treeIdx];
-	-- A tree whose own root is a source (control or noteParam) reads it
-	-- directly, so it must re-run (re-loading the value into its instance
-	-- var) when that source changes. Without this the source-reading
-	-- iso-group has an empty activation set and never fires, leaving the
-	-- synth silent.
-	if (ctx _isSourceNode(tree.root)) {
-		_ctrlInsert(result, tree.root);
-	}
-	for (ante : tree.antecedents) {
-		let anteRoot = ctx.trees[ante].root;
-		if (ctx _isSourceNode(anteRoot)) {
-			_ctrlInsert(result, anteRoot);
-		} else if (ctx.nrate[anteRoot] == Rate.event) {
-			_computeTransitiveSources(ctx, ante);
-			let ac [[Int]] = `transCtrl;
-			for (c : ac[ante]) { _ctrlInsert(result, c); }
-		}
-	}
-	-- A materialized read of an event-rate delay has no tree antecedent on
-	-- its writer (delay ordering edges point write-after-read so the reader
-	-- sees the previous event's value), which left its iso-group with an
-	-- empty activation set: the read never re-ran and z1-over-event state
-	-- stayed stale forever. Inherit the writer tree's sources so the read
-	-- re-runs (before the write, by tree order) whenever the writer does.
-	-- Mirrors the C++ computeTransitiveSources.
-	let rdDelay = match (ctx.kind[tree.root]) {
-		delayFixReadK(d, _): d;
-		delayVarReadK(d, _): d;
-		_: NONE;
-	};
-	if (rdDelay != NONE) {
-		let w = ctx.delays[rdDelay].writer;
-		if (w != NONE && ctx.nrate[w] == Rate.event) {
-			let wtree = ctx.treeOf[w];
-			if (wtree != NONE && wtree != treeIdx) {
-				_computeTransitiveSources(ctx, wtree);
-				let ws [[Int]] = `transCtrl;
-				for (c : ws[wtree]) { _ctrlInsert(result, c); }
-			}
-		}
-	}
-	let tc [[Int]] = `transCtrl;
-	tc[treeIdx] = result;
-}
-
-fn computeIsoGroups(ctx Ctx) Void {
-	-- Collect event-rate trees (in sortedTrees order) and their source sets.
-	var `transCtrl [[Int]] = [];
-	var `transDone [Bool] = false repeat(ctx.trees length);
-	var ti = 0;
-	while (ti < ctx.trees length) { `transCtrl push!([Int]()); ti = ti + 1; }
-
-	var eventTrees [Int] = [];
-	for (treeIdx : ctx.sortedTrees) {
-		if (ctx.nrate[ctx.trees[treeIdx].root] == Rate.event) {
-			eventTrees push!(treeIdx);
-			_computeTransitiveSources(ctx, treeIdx);
-		}
-	}
-	if (eventTrees length == 0) { return; }
-
-	-- Group by identical source set (first-appearance order).
-	var tcAll [[Int]] = `transCtrl;
-	for (treeIdx : eventTrees) {
-		let cs [Int] = tcAll[treeIdx];
-		var found = NONE;
-		var gi = 0;
-		while (gi < ctx.isoGroups length && found == NONE) {
-			if (_ctrlListEq(ctx.isoGroups[gi].sources, cs)) { found = gi; }
-			gi = gi + 1;
-		}
-		if (found == NONE) {
-			found = ctx.isoGroups length;
-			ctx.isoGroups push!(IsoGroup {
-				trees: [Int](), loops: [Int](), sources: cs,
-				activates: [Int](), serial: found,
-			});
-		}
-		ctx.isoGroups[found].trees push!(treeIdx);
-		ctx.trees[treeIdx] = Tree { ...ctx.trees[treeIdx], isoGroupOf: found };
-	}
-
-	-- Activation graph: if a tree in group B has an antecedent tree in group A,
-	-- then A activates B.
-	var gi2 = 0;
-	while (gi2 < ctx.isoGroups length) {
-		var upstream [Int] = [];
-		for (t : ctx.isoGroups[gi2].trees) {
-			for (ante : ctx.trees[t].antecedents) {
-				let ag = ctx.trees[ante].isoGroupOf;
-				if (ag != NONE && ag != gi2 && !_intListHas(upstream, ag)) { upstream push!(ag); }
-			}
-		}
-		for (u : upstream) {
-			if (!_intListHas(ctx.isoGroups[u].activates, gi2)) {
-				ctx.isoGroups[u].activates push!(gi2);
-			}
-		}
-		gi2 = gi2 + 1;
-	}
-
-	-- Kahn topological sort by activation edges.
-	var inDeg [Int] = 0 repeat(ctx.isoGroups length);
-	var g3 = 0;
-	while (g3 < ctx.isoGroups length) {
-		for (d : ctx.isoGroups[g3].activates) { inDeg[d] = inDeg[d] + 1; }
-		g3 = g3 + 1;
-	}
-	var queue [Int] = [];
-	var g4 = 0;
-	while (g4 < ctx.isoGroups length) { if (inDeg[g4] == 0) { queue push!(g4); } g4 = g4 + 1; }
-	var qHead = 0;
-	while (qHead < queue length) {
-		let g = queue[qHead];
-		qHead = qHead + 1;
-		ctx.isoOrder push!(g);
-		for (d : ctx.isoGroups[g].activates) {
-			inDeg[d] = inDeg[d] - 1;
-			if (inDeg[d] == 0) { queue push!(d); }
-		}
-	}
-	-- Final serials reflect topological order.
-	var pos = 0;
-	while (pos < ctx.isoOrder length) {
-		let g = ctx.isoOrder[pos];
-		ctx.isoGroups[g] = IsoGroup { ...ctx.isoGroups[g], serial: pos };
-		pos = pos + 1;
-	}
-
-	-- A temp-var tree root computed in one iso-group but consumed by a tree
-	-- in another is emitted as a local inside the producer group's guarded
-	-- block -- out of scope where the consumer group reads it, and stale when
-	-- the consumer group fires without the producer. Promote such roots to
-	-- instance variables: the iso-group boundary is the event-rate analogue
-	-- of a rate boundary.
-	for (treeIdx : ctx.sortedTrees) {
-		let root = ctx.trees[treeIdx].root;
-		if (ctx.nrate[root] == Rate.event && ctx.cut[root] isTempVarCut) {
-			var promote = false;
-			for (c : ctx.consumers[root]) {
-				let ct = ctx.treeOf[c];
-				if (ct != NONE && ctx.trees[ct].isoGroupOf != ctx.trees[treeIdx].isoGroupOf) {
-					promote = true;
-				}
-			}
-			if (promote) { _setCut(ctx, root, GraphCut.rate); }
-		}
-	}
-}
-
-fn _newLoop(ctx Ctx, rate Rate, chans Int, isCF Bool, isoGroup Int, graphOf Int) Int {
+fn _newLoop(ctx Ctx, rate Rate, chans Int, isCF Bool, graphOf Int) Int {
 	let li = ctx.loops length;
 	ctx.loops push!(Loop {
 		trees: [Int](), rate: rate, chans: chans,
-		isControlFlow: isCF, isoGroup: isoGroup, antecedents: [Int](),
+		isControlFlow: isCF, antecedents: [Int](),
 		graphOf: graphOf, serial: li,
 	});
 	li
@@ -1383,13 +1142,12 @@ fn treesToLoops(ctx Ctx) Void {
 		let root = ctx.trees[treeIdx].root;
 		let rate = ctx.nrate[root];
 		let chans = ctx.chans[root];
-		let ig = ctx.trees[treeIdx].isoGroupOf;
 		let go = ctx.graphOf[root];
 		if (ctx.kind[root] isControlFlowKind) {
-			let li = _newLoop(ctx, rate, chans, true, ig, go);
+			let li = _newLoop(ctx, rate, chans, true, go);
 			_loopAddTree(ctx, li, treeIdx);
 		} else if (outputMustBeSeparateLoop(ctx.kind[root])) {
-			let li = _newLoop(ctx, rate, chans, false, ig, go);
+			let li = _newLoop(ctx, rate, chans, false, go);
 			_loopAddTree(ctx, li, treeIdx);
 		} else {
 			var placed = false;
@@ -1397,7 +1155,7 @@ fn treesToLoops(ctx Ctx) Void {
 			while (li < ctx.loops length && !placed) {
 				let lp = ctx.loops[li];
 				if (!lp.isControlFlow && lp.rate == rate && lp.chans == chans
-					&& lp.isoGroup == ig && lp.graphOf == go) {
+					&& lp.graphOf == go) {
 					if (_canAccessAllAntecedents(ctx, li, treeIdx)
 						&& _hasNoSeparateLoopConstraints(ctx, li, treeIdx)) {
 						_loopAddTree(ctx, li, treeIdx);
@@ -1407,29 +1165,16 @@ fn treesToLoops(ctx Ctx) Void {
 				li = li + 1;
 			}
 			if (!placed) {
-				let nl = _newLoop(ctx, rate, chans, false, ig, go);
+				let nl = _newLoop(ctx, rate, chans, false, go);
 				_loopAddTree(ctx, nl, treeIdx);
 			}
 		}
-	}
-	-- Populate IsoGroup.loops (the distinct loops of each group's trees).
-	var gi = 0;
-	while (gi < ctx.isoGroups length) {
-		var seen [Int] = [];
-		for (t : ctx.isoGroups[gi].trees) {
-			let lp = ctx.trees[t].loopOf;
-			if (lp != NONE && !_intListHas(seen, lp)) {
-				seen push!(lp);
-				ctx.isoGroups[gi].loops push!(lp);
-			}
-		}
-		gi = gi + 1;
 	}
 }
 
 ---------------------------------------------------------------------------
 -- splitRates (synthdef_synth.cpp:843)
--- Partition loops into init / reset / event / audio buckets by rate.
+-- Partition loops into init / reset / block / audio buckets by rate.
 
 fn splitRates(ctx Ctx) Void {
 	var li = 0;
@@ -1438,7 +1183,7 @@ fn splitRates(ctx Ctx) Void {
 			constant: { ctx.initLoops push!(li); }
 			init:     { ctx.initLoops push!(li); }
 			reset:    { ctx.resetLoops push!(li); }
-			event:    { ctx.eventLoops push!(li); }
+			block:    { ctx.blockLoops push!(li); }
 			audio:    { ctx.graphs[ctx.loops[li].graphOf].audioLoops push!(li); }
 		}
 		li = li + 1;
@@ -1457,8 +1202,7 @@ fn analyzeM0(ctx Ctx) Ctx {
 	ctx
 }
 
--- M1 analysis up to (and including) type inference + rates. Trees/loops are
--- added in later stages.
+-- Analysis up to (and including) type inference and rates.
 fn analyzeTypes(ctx Ctx) Ctx {
 	ctx mergeDelays;
 	ctx topologicalSortExprs;
@@ -1467,29 +1211,26 @@ fn analyzeTypes(ctx Ctx) Ctx {
 	ctx shapeInference;
 	ctx typeInferenceWithWidening;
 	ctx setNonConcreteTypesToDefault;
-	ctx setDelayReaderRates;
 	ctx findGraphCuts;
 	ctx
 }
 
--- M1 analysis through tree construction (no loops yet).
+-- Analysis through tree construction (no loops yet).
 fn analyzeTrees(ctx Ctx) Ctx {
 	ctx analyzeTypes;
 	ctx cutGraphToTrees;
 	ctx removeDeadCode;
 	ctx inplaceDelayOps;
-	ctx addDelayAntecedents;
 	ctx addSubgraphAntecedents;
 	ctx sortTrees;
 	ctx
 }
 
--- Full analysis pipeline. Mirrors synthdef::Synth::graphAnalysis() for the
--- supported node set, including iso-groups (so control synths' event-loop
--- grouping matches the C++), including mergeDelays. Subgraphs remain deferred.
-fn analyzeM1(ctx Ctx) Ctx {
+-- The full analysis pipeline.
+fn analyze(ctx Ctx) Ctx {
 	ctx analyzeTrees;
-	ctx computeIsoGroups;
+	ctx findCycles;
+	ctx findParamGroups;
 	ctx treesToLoops;
 	ctx splitRates;
 	ctx

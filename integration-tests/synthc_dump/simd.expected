@@ -1,0 +1,1012 @@
+SYNTH s4
+-- PORTS
+IN 0 in f32 4
+OUT 0 out f32 4
+-- SORTED EXPRS
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+      1    1 [0               ]  1  1 Audio    None      f32     4 sin
+      2    2 [                ]  0  1 Const    None      f32     4 {0.1f, 0.2f, 0.3f, 0.4f}
+      3    3 [1 2             ]  2  1 Audio    None      f32     4 *
+      4    4 [3               ]  1  0 Audio    Sink      f32     4 outlet
+-- TREES
+    TREE 1    [] Audio  Input     f32     4
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 2    [1] Audio  Sink      f32     4
+      0    1 [0               ]  1  1 Audio    None      f32     4 sin
+      1    2 [                ]  0  1 Const    None      f32     4 {0.1f, 0.2f, 0.3f, 0.4f}
+      2    3 [1 2             ]  2  1 Audio    None      f32     4 *
+      3    4 [3               ]  1  0 Audio    Sink      f32     4 outlet
+-- INIT
+-- RESET
+-- BLOCK
+-- AUDIO
+GRAPH 0
+  LOOP  0 [] Audio  4
+    TREE 1    [] Audio  Input     f32     4
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 2    [1] Audio  Sink      f32     4
+      0    1 [0               ]  1  1 Audio    None      f32     4 sin
+      1    2 [                ]  0  1 Const    None      f32     4 {0.1f, 0.2f, 0.3f, 0.4f}
+      2    3 [1 2             ]  2  1 Audio    None      f32     4 *
+      3    4 [3               ]  1  0 Audio    Sink      f32     4 outlet
+-- PARAMETER GROUPS
+-- CYCLES
+
+SYNTH s8
+-- PORTS
+IN 0 in f32 8
+OUT 0 out f32 8
+-- SORTED EXPRS
+      0    0 [                ]  0  1 Audio    Input     f32     8 inlet(in)
+      1    1 [0               ]  1  1 Audio    None      f32     8 sin
+      2    2 [                ]  0  1 Const    None      f32     1 0.1f
+      3    3 [1 2             ]  2  1 Audio    None      f32     8 *
+      4    4 [3               ]  1  0 Audio    Sink      f32     8 outlet
+-- TREES
+    TREE 1    [] Audio  Input     f32     8
+      0    0 [                ]  0  1 Audio    Input     f32     8 inlet(in)
+    TREE 2    [1] Audio  Sink      f32     8
+      0    1 [0               ]  1  1 Audio    None      f32     8 sin
+      1    2 [                ]  0  1 Const    None      f32     1 0.1f
+      2    3 [1 2             ]  2  1 Audio    None      f32     8 *
+      3    4 [3               ]  1  0 Audio    Sink      f32     8 outlet
+-- INIT
+-- RESET
+-- BLOCK
+-- AUDIO
+GRAPH 0
+  LOOP  0 [] Audio  8
+    TREE 1    [] Audio  Input     f32     8
+      0    0 [                ]  0  1 Audio    Input     f32     8 inlet(in)
+    TREE 2    [1] Audio  Sink      f32     8
+      0    1 [0               ]  1  1 Audio    None      f32     8 sin
+      1    2 [                ]  0  1 Const    None      f32     1 0.1f
+      2    3 [1 2             ]  2  1 Audio    None      f32     8 *
+      3    4 [3               ]  1  0 Audio    Sink      f32     8 outlet
+-- PARAMETER GROUPS
+-- CYCLES
+
+SYNTH srate
+-- PORTS
+IN 0 in f32 4
+OUT 0 out f32 4
+-- SORTED EXPRS
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+      1    1 [                ]  0  1 Init     Rate      f32     1 fs
+      2    2 [0 1             ]  2  1 Audio    None      f32     4 *
+      3    3 [2               ]  1  1 Audio    None      f32     4 sin
+      4    4 [3               ]  1  0 Audio    Sink      f32     4 outlet
+-- TREES
+    TREE 1    [] Audio  Input     f32     4
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 2    [] Init   Rate      f32     1
+      0    1 [                ]  0  1 Init     Rate      f32     1 fs
+    TREE 3    [1 2] Audio  Sink      f32     4
+      0    2 [0 1             ]  2  1 Audio    None      f32     4 *
+      1    3 [2               ]  1  1 Audio    None      f32     4 sin
+      2    4 [3               ]  1  0 Audio    Sink      f32     4 outlet
+-- INIT
+  LOOP  1 [] Init   1
+    TREE 2    [] Init   Rate      f32     1
+      0    1 [                ]  0  1 Init     Rate      f32     1 fs
+-- RESET
+-- BLOCK
+-- AUDIO
+GRAPH 0
+  LOOP  0 [1] Audio  4
+    TREE 1    [] Audio  Input     f32     4
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 3    [1 2] Audio  Sink      f32     4
+      0    2 [0 1             ]  2  1 Audio    None      f32     4 *
+      1    3 [2               ]  1  1 Audio    None      f32     4 sin
+      2    4 [3               ]  1  0 Audio    Sink      f32     4 outlet
+-- PARAMETER GROUPS
+-- CYCLES
+
+SYNTH mx
+-- PORTS
+IN 0 in f32 4
+OUT 0 out f32 4
+-- SORTED EXPRS
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+      1    1 [                ]  0  1 Const    None      f32     1 0.0f
+      2    2 [0 1             ]  2  1 Audio    None      f32     4 max
+      3    3 [                ]  0  1 Const    None      f32     4 {0.5f, 0.6f, 0.7f, 0.8f}
+      4    4 [2 3             ]  2  1 Audio    None      f32     4 *
+      5    5 [4               ]  1  0 Audio    Sink      f32     4 outlet
+-- TREES
+    TREE 1    [] Audio  Input     f32     4
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 2    [1] Audio  Sink      f32     4
+      0    1 [                ]  0  1 Const    None      f32     1 0.0f
+      1    2 [0 1             ]  2  1 Audio    None      f32     4 max
+      2    3 [                ]  0  1 Const    None      f32     4 {0.5f, 0.6f, 0.7f, 0.8f}
+      3    4 [2 3             ]  2  1 Audio    None      f32     4 *
+      4    5 [4               ]  1  0 Audio    Sink      f32     4 outlet
+-- INIT
+-- RESET
+-- BLOCK
+-- AUDIO
+GRAPH 0
+  LOOP  0 [] Audio  4
+    TREE 1    [] Audio  Input     f32     4
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 2    [1] Audio  Sink      f32     4
+      0    1 [                ]  0  1 Const    None      f32     1 0.0f
+      1    2 [0 1             ]  2  1 Audio    None      f32     4 max
+      2    3 [                ]  0  1 Const    None      f32     4 {0.5f, 0.6f, 0.7f, 0.8f}
+      3    4 [2 3             ]  2  1 Audio    None      f32     4 *
+      4    5 [4               ]  1  0 Audio    Sink      f32     4 outlet
+-- PARAMETER GROUPS
+-- CYCLES
+
+SYNTH add2
+-- PORTS
+IN 0 in f32 8
+IN 1 in f32 8
+OUT 0 out f32 8
+-- SORTED EXPRS
+      0    0 [                ]  0  1 Audio    Input     f32     8 inlet(in)
+      1    1 [                ]  0  1 Audio    Input     f32     8 inlet(in)
+      2    2 [1               ]  1  1 Audio    None      f32     8 tanh
+      3    3 [0 2             ]  2  1 Audio    None      f32     8 +
+      4    4 [3               ]  1  0 Audio    Sink      f32     8 outlet
+-- TREES
+    TREE 1    [] Audio  Input     f32     8
+      0    0 [                ]  0  1 Audio    Input     f32     8 inlet(in)
+    TREE 2    [] Audio  Input     f32     8
+      0    1 [                ]  0  1 Audio    Input     f32     8 inlet(in)
+    TREE 3    [1 2] Audio  Sink      f32     8
+      0    2 [1               ]  1  1 Audio    None      f32     8 tanh
+      1    3 [0 2             ]  2  1 Audio    None      f32     8 +
+      2    4 [3               ]  1  0 Audio    Sink      f32     8 outlet
+-- INIT
+-- RESET
+-- BLOCK
+-- AUDIO
+GRAPH 0
+  LOOP  0 [] Audio  8
+    TREE 1    [] Audio  Input     f32     8
+      0    0 [                ]  0  1 Audio    Input     f32     8 inlet(in)
+    TREE 2    [] Audio  Input     f32     8
+      0    1 [                ]  0  1 Audio    Input     f32     8 inlet(in)
+    TREE 3    [1 2] Audio  Sink      f32     8
+      0    2 [1               ]  1  1 Audio    None      f32     8 tanh
+      1    3 [0 2             ]  2  1 Audio    None      f32     8 +
+      2    4 [3               ]  1  0 Audio    Sink      f32     8 outlet
+-- PARAMETER GROUPS
+-- CYCLES
+
+SYNTH cst
+-- PORTS
+IN 0 in f32 4
+OUT 0 out f32 4
+-- SORTED EXPRS
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+      1    1 [                ]  0  1 Const    None      f32     4 {1.0f, 2.0f, 3.0f, 4.0f}
+      2    2 [0 1             ]  2  1 Audio    None      f32     4 *
+      3    3 [                ]  0  1 Const    None      f32     4 {10.0f, 20.0f, 30.0f, 40.0f}
+      4    4 [2 3             ]  2  1 Audio    None      f32     4 +
+      5    5 [4               ]  1  0 Audio    Sink      f32     4 outlet
+-- TREES
+    TREE 1    [] Audio  Input     f32     4
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 2    [1] Audio  Sink      f32     4
+      0    1 [                ]  0  1 Const    None      f32     4 {1.0f, 2.0f, 3.0f, 4.0f}
+      1    2 [0 1             ]  2  1 Audio    None      f32     4 *
+      2    3 [                ]  0  1 Const    None      f32     4 {10.0f, 20.0f, 30.0f, 40.0f}
+      3    4 [2 3             ]  2  1 Audio    None      f32     4 +
+      4    5 [4               ]  1  0 Audio    Sink      f32     4 outlet
+-- INIT
+-- RESET
+-- BLOCK
+-- AUDIO
+GRAPH 0
+  LOOP  0 [] Audio  4
+    TREE 1    [] Audio  Input     f32     4
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 2    [1] Audio  Sink      f32     4
+      0    1 [                ]  0  1 Const    None      f32     4 {1.0f, 2.0f, 3.0f, 4.0f}
+      1    2 [0 1             ]  2  1 Audio    None      f32     4 *
+      2    3 [                ]  0  1 Const    None      f32     4 {10.0f, 20.0f, 30.0f, 40.0f}
+      3    4 [2 3             ]  2  1 Audio    None      f32     4 +
+      4    5 [4               ]  1  0 Audio    Sink      f32     4 outlet
+-- PARAMETER GROUPS
+-- CYCLES
+
+SYNTH cast4
+-- PORTS
+IN 0 in f32 4
+OUT 0 out f32 4
+-- SORTED EXPRS
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+      1    1 [0               ]  1  1 Audio    None      f64     4 cast_f64
+      2    2 [1               ]  1  1 Audio    None      f64     4 sin
+      3    3 [2               ]  1  1 Audio    None      f32     4 cast_f32
+      4    4 [3               ]  1  0 Audio    Sink      f32     4 outlet
+-- TREES
+    TREE 1    [] Audio  Input     f32     4
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 2    [1] Audio  Sink      f32     4
+      0    1 [0               ]  1  1 Audio    None      f64     4 cast_f64
+      1    2 [1               ]  1  1 Audio    None      f64     4 sin
+      2    3 [2               ]  1  1 Audio    None      f32     4 cast_f32
+      3    4 [3               ]  1  0 Audio    Sink      f32     4 outlet
+-- INIT
+-- RESET
+-- BLOCK
+-- AUDIO
+GRAPH 0
+  LOOP  0 [] Audio  4
+    TREE 1    [] Audio  Input     f32     4
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 2    [1] Audio  Sink      f32     4
+      0    1 [0               ]  1  1 Audio    None      f64     4 cast_f64
+      1    2 [1               ]  1  1 Audio    None      f64     4 sin
+      2    3 [2               ]  1  1 Audio    None      f32     4 cast_f32
+      3    4 [3               ]  1  0 Audio    Sink      f32     4 outlet
+-- PARAMETER GROUPS
+-- CYCLES
+
+SYNTH ctl
+-- PORTS
+IN 0 amp f32 1 continuous [0.0 1.0] init 0.5 lin
+IN 1 in f32 4
+OUT 0 out f32 4
+-- SORTED EXPRS
+      0    1 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+      1    0 [                ]  0  1 Block    Input     f32     1 control(amp)
+      2    2 [1 0             ]  2  1 Audio    None      f32     4 *
+      3    3 [2               ]  1  0 Audio    Sink      f32     4 outlet
+-- TREES
+    TREE 1    [] Audio  Input     f32     4
+      0    1 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 2    [] Block  Input     f32     1
+      0    0 [                ]  0  1 Block    Input     f32     1 control(amp)
+    TREE 3    [1 2] Audio  Sink      f32     4
+      0    2 [1 0             ]  2  1 Audio    None      f32     4 *
+      1    3 [2               ]  1  0 Audio    Sink      f32     4 outlet
+-- INIT
+-- RESET
+-- BLOCK
+  LOOP  1 [] Block  1
+    TREE 2    [] Block  Input     f32     1
+      0    0 [                ]  0  1 Block    Input     f32     1 control(amp)
+-- AUDIO
+GRAPH 0
+  LOOP  0 [1] Audio  4
+    TREE 1    [] Audio  Input     f32     4
+      0    1 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 3    [1 2] Audio  Sink      f32     4
+      0    2 [1 0             ]  2  1 Audio    None      f32     4 *
+      1    3 [2               ]  1  0 Audio    Sink      f32     4 outlet
+-- PARAMETER GROUPS
+GROUP 0 sources [amp] nodes [0]
+-- CYCLES
+
+SYNTH mono4
+-- PORTS
+IN 0 in f32 1
+OUT 0 out f32 4
+-- SORTED EXPRS
+      0    0 [                ]  0  1 Audio    Input     f32     1 inlet(in)
+      1    1 [                ]  0  1 Const    None      f32     4 {0.1f, 0.2f, 0.3f, 0.4f}
+      2    2 [0 1             ]  2  1 Audio    None      f32     4 +
+      3    3 [2               ]  1  0 Audio    Sink      f32     4 outlet
+-- TREES
+    TREE 1    [] Audio  Input     f32     1
+      0    0 [                ]  0  1 Audio    Input     f32     1 inlet(in)
+    TREE 2    [1] Audio  Sink      f32     4
+      0    1 [                ]  0  1 Const    None      f32     4 {0.1f, 0.2f, 0.3f, 0.4f}
+      1    2 [0 1             ]  2  1 Audio    None      f32     4 +
+      2    3 [2               ]  1  0 Audio    Sink      f32     4 outlet
+-- INIT
+-- RESET
+-- BLOCK
+-- AUDIO
+GRAPH 0
+  LOOP  0 [] Audio  1
+    TREE 1    [] Audio  Input     f32     1
+      0    0 [                ]  0  1 Audio    Input     f32     1 inlet(in)
+  LOOP  1 [0] Audio  4
+    TREE 2    [1] Audio  Sink      f32     4
+      0    1 [                ]  0  1 Const    None      f32     4 {0.1f, 0.2f, 0.3f, 0.4f}
+      1    2 [0 1             ]  2  1 Audio    None      f32     4 +
+      2    3 [2               ]  1  0 Audio    Sink      f32     4 outlet
+-- PARAMETER GROUPS
+-- CYCLES
+
+SYNTH d4
+-- PORTS
+IN 0 in f32 4
+OUT 0 out f32 4
+-- SORTED EXPRS
+      0    1 [                ]  0  1 Const    None      f32     1 0.0f
+      1    3 [                ]  0  2 Audio    FanOut    f32     4 delay_fix_read(1)
+      2    2 [1               ]  1  0 Init     Sink      f32     0 delay_init
+      3    0 [                ]  0  2 Audio    Input     f32     4 inlet(in)
+      4    4 [                ]  0  1 Const    None      f32     1 0.5f
+      5    5 [0 4             ]  2  1 Audio    None      f32     4 *
+      6    6 [5 3             ]  2  1 Audio    None      f32     4 +
+      7    7 [6               ]  1  0 Audio    Sink      f32     4 delay_write
+      8    8 [                ]  0  1 Const    None      f32     1 0.5f
+      9    9 [0 8             ]  2  1 Audio    None      f32     4 *
+     10   10 [9 3             ]  2  1 Audio    None      f32     4 +
+     11   11 [10              ]  1  0 Audio    Sink      f32     4 outlet
+-- TREES
+    TREE 1    [] Audio  FanOut    f32     4
+      0    3 [                ]  0  2 Audio    FanOut    f32     4 delay_fix_read(1)
+    TREE 2    [] Init   Sink      f32     0
+      0    1 [                ]  0  1 Const    None      f32     1 0.0f
+      1    2 [1               ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 3    [] Audio  Input     f32     4
+      0    0 [                ]  0  2 Audio    Input     f32     4 inlet(in)
+    TREE 4    [3 1] Audio  Sink      f32     4
+      0    4 [                ]  0  1 Const    None      f32     1 0.5f
+      1    5 [0 4             ]  2  1 Audio    None      f32     4 *
+      2    6 [5 3             ]  2  1 Audio    None      f32     4 +
+      3    7 [6               ]  1  0 Audio    Sink      f32     4 delay_write
+    TREE 5    [3 1] Audio  Sink      f32     4
+      0    8 [                ]  0  1 Const    None      f32     1 0.5f
+      1    9 [0 8             ]  2  1 Audio    None      f32     4 *
+      2   10 [9 3             ]  2  1 Audio    None      f32     4 +
+      3   11 [10              ]  1  0 Audio    Sink      f32     4 outlet
+-- INIT
+  LOOP  1 [] Init   0
+    TREE 2    [] Init   Sink      f32     0
+      0    1 [                ]  0  1 Const    None      f32     1 0.0f
+      1    2 [1               ]  1  0 Init     Sink      f32     0 delay_init
+-- RESET
+-- BLOCK
+-- AUDIO
+GRAPH 0
+  LOOP  0 [] Audio  4
+    TREE 1    [] Audio  FanOut    f32     4
+      0    3 [                ]  0  2 Audio    FanOut    f32     4 delay_fix_read(1)
+    TREE 3    [] Audio  Input     f32     4
+      0    0 [                ]  0  2 Audio    Input     f32     4 inlet(in)
+    TREE 4    [3 1] Audio  Sink      f32     4
+      0    4 [                ]  0  1 Const    None      f32     1 0.5f
+      1    5 [0 4             ]  2  1 Audio    None      f32     4 *
+      2    6 [5 3             ]  2  1 Audio    None      f32     4 +
+      3    7 [6               ]  1  0 Audio    Sink      f32     4 delay_write
+    TREE 5    [3 1] Audio  Sink      f32     4
+      0    8 [                ]  0  1 Const    None      f32     1 0.5f
+      1    9 [0 8             ]  2  1 Audio    None      f32     4 *
+      2   10 [9 3             ]  2  1 Audio    None      f32     4 +
+      3   11 [10              ]  1  0 Audio    Sink      f32     4 outlet
+-- PARAMETER GROUPS
+-- CYCLES
+CYCLE 0 weight 1 recurrence nodes [3 6] delays [3<-6:1]
+DELAY 0 f32 4
+     2 f32 0 delay_init
+     3 f32 4 delay_fix_read(1)
+     7 f32 4 delay_write
+
+SYNTH d8
+-- PORTS
+IN 0 in f32 8
+OUT 0 out f32 8
+-- SORTED EXPRS
+      0    1 [                ]  0  1 Const    None      f32     1 0.0f
+      1    3 [                ]  0  2 Audio    FanOut    f32     8 delay_fix_read(1)
+      2    2 [1               ]  1  0 Init     Sink      f32     0 delay_init
+      3    0 [                ]  0  1 Audio    Input     f32     8 inlet(in)
+      4    4 [                ]  0  1 Const    None      f32     1 0.9f
+      5    5 [3 4             ]  2  1 Audio    None      f32     8 *
+      6    6 [0 5             ]  2  1 Audio    None      f32     8 +
+      7    7 [6               ]  1  0 Audio    Sink      f32     8 delay_write
+      8    8 [3               ]  1  0 Audio    Sink      f32     8 outlet
+-- TREES
+    TREE 1    [] Audio  FanOut    f32     8
+      0    3 [                ]  0  2 Audio    FanOut    f32     8 delay_fix_read(1)
+    TREE 2    [] Init   Sink      f32     0
+      0    1 [                ]  0  1 Const    None      f32     1 0.0f
+      1    2 [1               ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 3    [] Audio  Input     f32     8
+      0    0 [                ]  0  1 Audio    Input     f32     8 inlet(in)
+    TREE 4    [3 1] Audio  Sink      f32     8
+      0    4 [                ]  0  1 Const    None      f32     1 0.9f
+      1    5 [3 4             ]  2  1 Audio    None      f32     8 *
+      2    6 [0 5             ]  2  1 Audio    None      f32     8 +
+      3    7 [6               ]  1  0 Audio    Sink      f32     8 delay_write
+    TREE 5    [1] Audio  Sink      f32     8
+      0    8 [3               ]  1  0 Audio    Sink      f32     8 outlet
+-- INIT
+  LOOP  1 [] Init   0
+    TREE 2    [] Init   Sink      f32     0
+      0    1 [                ]  0  1 Const    None      f32     1 0.0f
+      1    2 [1               ]  1  0 Init     Sink      f32     0 delay_init
+-- RESET
+-- BLOCK
+-- AUDIO
+GRAPH 0
+  LOOP  0 [] Audio  8
+    TREE 1    [] Audio  FanOut    f32     8
+      0    3 [                ]  0  2 Audio    FanOut    f32     8 delay_fix_read(1)
+    TREE 3    [] Audio  Input     f32     8
+      0    0 [                ]  0  1 Audio    Input     f32     8 inlet(in)
+    TREE 4    [3 1] Audio  Sink      f32     8
+      0    4 [                ]  0  1 Const    None      f32     1 0.9f
+      1    5 [3 4             ]  2  1 Audio    None      f32     8 *
+      2    6 [0 5             ]  2  1 Audio    None      f32     8 +
+      3    7 [6               ]  1  0 Audio    Sink      f32     8 delay_write
+    TREE 5    [1] Audio  Sink      f32     8
+      0    8 [3               ]  1  0 Audio    Sink      f32     8 outlet
+-- PARAMETER GROUPS
+-- CYCLES
+CYCLE 0 weight 1 recurrence nodes [3 5 6] delays [3<-6:1]
+DELAY 0 f32 8
+     2 f32 0 delay_init
+     3 f32 8 delay_fix_read(1)
+     7 f32 8 delay_write
+
+SYNTH r4
+-- PORTS
+IN 0 in f32 4
+OUT 0 out f32 4
+-- SORTED EXPRS
+      0    1 [                ]  0  1 Const    None      f32     1 0.0f
+      1    3 [                ]  0  1 Audio    None      f32     4 delay_fix_read(2)
+      2    2 [1               ]  1  0 Init     Sink      f32     0 delay_init
+      3    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+      4    4 [0               ]  1  0 Audio    Sink      f32     4 delay_write
+      5    5 [3               ]  1  0 Audio    Sink      f32     4 outlet
+-- TREES
+    TREE 1    [] Init   Sink      f32     0
+      0    1 [                ]  0  1 Const    None      f32     1 0.0f
+      1    2 [1               ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 2    [] Audio  Input     f32     4
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 3    [2] Audio  Sink      f32     4
+      0    4 [0               ]  1  0 Audio    Sink      f32     4 delay_write
+    TREE 4    [] Audio  Sink      f32     4
+      0    3 [                ]  0  1 Audio    None      f32     4 delay_fix_read(2)
+      1    5 [3               ]  1  0 Audio    Sink      f32     4 outlet
+-- INIT
+  LOOP  0 [] Init   0
+    TREE 1    [] Init   Sink      f32     0
+      0    1 [                ]  0  1 Const    None      f32     1 0.0f
+      1    2 [1               ]  1  0 Init     Sink      f32     0 delay_init
+-- RESET
+-- BLOCK
+-- AUDIO
+GRAPH 0
+  LOOP  1 [] Audio  4
+    TREE 2    [] Audio  Input     f32     4
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 3    [2] Audio  Sink      f32     4
+      0    4 [0               ]  1  0 Audio    Sink      f32     4 delay_write
+    TREE 4    [] Audio  Sink      f32     4
+      0    3 [                ]  0  1 Audio    None      f32     4 delay_fix_read(2)
+      1    5 [3               ]  1  0 Audio    Sink      f32     4 outlet
+-- PARAMETER GROUPS
+-- CYCLES
+DELAY 0 f32 4
+     2 f32 0 delay_init
+     3 f32 4 delay_fix_read(2)
+     4 f32 4 delay_write
+
+SYNTH r8
+-- PORTS
+IN 0 in f32 8
+OUT 0 out f32 8
+-- SORTED EXPRS
+      0    1 [                ]  0  1 Const    None      f32     1 0.0f
+      1    3 [                ]  0  1 Audio    None      f32     8 delay_fix_read(2)
+      2    2 [1               ]  1  0 Init     Sink      f32     0 delay_init
+      3    0 [                ]  0  1 Audio    Input     f32     8 inlet(in)
+      4    4 [0               ]  1  0 Audio    Sink      f32     8 delay_write
+      5    5 [3               ]  1  0 Audio    Sink      f32     8 outlet
+-- TREES
+    TREE 1    [] Init   Sink      f32     0
+      0    1 [                ]  0  1 Const    None      f32     1 0.0f
+      1    2 [1               ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 2    [] Audio  Input     f32     8
+      0    0 [                ]  0  1 Audio    Input     f32     8 inlet(in)
+    TREE 3    [2] Audio  Sink      f32     8
+      0    4 [0               ]  1  0 Audio    Sink      f32     8 delay_write
+    TREE 4    [] Audio  Sink      f32     8
+      0    3 [                ]  0  1 Audio    None      f32     8 delay_fix_read(2)
+      1    5 [3               ]  1  0 Audio    Sink      f32     8 outlet
+-- INIT
+  LOOP  0 [] Init   0
+    TREE 1    [] Init   Sink      f32     0
+      0    1 [                ]  0  1 Const    None      f32     1 0.0f
+      1    2 [1               ]  1  0 Init     Sink      f32     0 delay_init
+-- RESET
+-- BLOCK
+-- AUDIO
+GRAPH 0
+  LOOP  1 [] Audio  8
+    TREE 2    [] Audio  Input     f32     8
+      0    0 [                ]  0  1 Audio    Input     f32     8 inlet(in)
+    TREE 3    [2] Audio  Sink      f32     8
+      0    4 [0               ]  1  0 Audio    Sink      f32     8 delay_write
+    TREE 4    [] Audio  Sink      f32     8
+      0    3 [                ]  0  1 Audio    None      f32     8 delay_fix_read(2)
+      1    5 [3               ]  1  0 Audio    Sink      f32     8 outlet
+-- PARAMETER GROUPS
+-- CYCLES
+DELAY 0 f32 8
+     2 f32 0 delay_init
+     3 f32 8 delay_fix_read(2)
+     4 f32 8 delay_write
+
+SYNTH rfb
+-- PORTS
+IN 0 in f32 4
+OUT 0 out f32 4
+-- SORTED EXPRS
+      0    1 [                ]  0  1 Const    None      f32     1 0.0f
+      1    3 [                ]  0  2 Audio    FanOut    f32     4 delay_fix_read(3)
+      2    2 [1               ]  1  0 Init     Sink      f32     0 delay_init
+      3    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+      4    4 [                ]  0  1 Const    None      f32     1 0.5f
+      5    5 [0 4             ]  2  1 Audio    None      f32     4 *
+      6    6 [                ]  0  1 Const    None      f32     1 0.5f
+      7    7 [3 6             ]  2  1 Audio    None      f32     4 *
+      8    8 [5 7             ]  2  1 Audio    None      f32     4 +
+      9    9 [8               ]  1  0 Audio    Sink      f32     4 delay_write
+     10   10 [3               ]  1  0 Audio    Sink      f32     4 outlet
+-- TREES
+    TREE 1    [] Audio  FanOut    f32     4
+      0    3 [                ]  0  2 Audio    FanOut    f32     4 delay_fix_read(3)
+    TREE 2    [] Init   Sink      f32     0
+      0    1 [                ]  0  1 Const    None      f32     1 0.0f
+      1    2 [1               ]  1  0 Init     Sink      f32     0 delay_init
+    TREE 3    [] Audio  Input     f32     4
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 4    [3 1] Audio  Sink      f32     4
+      0    4 [                ]  0  1 Const    None      f32     1 0.5f
+      1    5 [0 4             ]  2  1 Audio    None      f32     4 *
+      2    6 [                ]  0  1 Const    None      f32     1 0.5f
+      3    7 [3 6             ]  2  1 Audio    None      f32     4 *
+      4    8 [5 7             ]  2  1 Audio    None      f32     4 +
+      5    9 [8               ]  1  0 Audio    Sink      f32     4 delay_write
+    TREE 5    [1] Audio  Sink      f32     4
+      0   10 [3               ]  1  0 Audio    Sink      f32     4 outlet
+-- INIT
+  LOOP  1 [] Init   0
+    TREE 2    [] Init   Sink      f32     0
+      0    1 [                ]  0  1 Const    None      f32     1 0.0f
+      1    2 [1               ]  1  0 Init     Sink      f32     0 delay_init
+-- RESET
+-- BLOCK
+-- AUDIO
+GRAPH 0
+  LOOP  0 [] Audio  4
+    TREE 1    [] Audio  FanOut    f32     4
+      0    3 [                ]  0  2 Audio    FanOut    f32     4 delay_fix_read(3)
+    TREE 3    [] Audio  Input     f32     4
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 4    [3 1] Audio  Sink      f32     4
+      0    4 [                ]  0  1 Const    None      f32     1 0.5f
+      1    5 [0 4             ]  2  1 Audio    None      f32     4 *
+      2    6 [                ]  0  1 Const    None      f32     1 0.5f
+      3    7 [3 6             ]  2  1 Audio    None      f32     4 *
+      4    8 [5 7             ]  2  1 Audio    None      f32     4 +
+      5    9 [8               ]  1  0 Audio    Sink      f32     4 delay_write
+    TREE 5    [1] Audio  Sink      f32     4
+      0   10 [3               ]  1  0 Audio    Sink      f32     4 outlet
+-- PARAMETER GROUPS
+-- CYCLES
+CYCLE 0 weight 3 recurrence nodes [3 7 8] delays [3<-8:3]
+DELAY 0 f32 4
+     2 f32 0 delay_init
+     3 f32 4 delay_fix_read(3)
+     9 f32 4 delay_write
+
+SYNTH vc
+-- PORTS
+IN 0 in f32 4
+IN 1 in f32 4
+OUT 0 out f32 4
+-- SORTED EXPRS
+      0    2 [                ]  0  1 Const    None      f32     1 1.0f
+      1    5 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+      2    6 [5               ]  1  1 Audio    None      f32     4 delay_var_read
+      3    3 [2               ]  1  0 Init     Sink      f32     1 max_delay
+      4    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+      5    4 [0               ]  1  0 Audio    Sink      f32     4 delay_write
+      6    7 [6               ]  1  0 Audio    Sink      f32     4 outlet
+-- TREES
+    TREE 1    [] Audio  Input     f32     4
+      0    5 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 2    [] Init   Sink      f32     1
+      0    2 [                ]  0  1 Const    None      f32     1 1.0f
+      1    3 [2               ]  1  0 Init     Sink      f32     1 max_delay
+    TREE 3    [] Audio  Input     f32     4
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 4    [3] Audio  Sink      f32     4
+      0    4 [0               ]  1  0 Audio    Sink      f32     4 delay_write
+    TREE 5    [1] Audio  Sink      f32     4
+      0    6 [5               ]  1  1 Audio    None      f32     4 delay_var_read
+      1    7 [6               ]  1  0 Audio    Sink      f32     4 outlet
+-- INIT
+  LOOP  1 [] Init   1
+    TREE 2    [] Init   Sink      f32     1
+      0    2 [                ]  0  1 Const    None      f32     1 1.0f
+      1    3 [2               ]  1  0 Init     Sink      f32     1 max_delay
+-- RESET
+-- BLOCK
+-- AUDIO
+GRAPH 0
+  LOOP  0 [] Audio  4
+    TREE 1    [] Audio  Input     f32     4
+      0    5 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 3    [] Audio  Input     f32     4
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 4    [3] Audio  Sink      f32     4
+      0    4 [0               ]  1  0 Audio    Sink      f32     4 delay_write
+    TREE 5    [1] Audio  Sink      f32     4
+      0    6 [5               ]  1  1 Audio    None      f32     4 delay_var_read
+      1    7 [6               ]  1  0 Audio    Sink      f32     4 outlet
+-- PARAMETER GROUPS
+-- CYCLES
+DELAY 0 f32 4
+     6 f32 4 delay_var_read
+     4 f32 4 delay_write
+
+SYNTH vl
+-- PORTS
+IN 0 in f32 4
+IN 1 in f32 4
+OUT 0 out f32 4
+-- SORTED EXPRS
+      0    2 [                ]  0  1 Const    None      f32     1 1.0f
+      1    5 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+      2    6 [5               ]  1  1 Audio    None      f32     4 delay_var_read
+      3    3 [2               ]  1  0 Init     Sink      f32     1 max_delay
+      4    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+      5    4 [0               ]  1  0 Audio    Sink      f32     4 delay_write
+      6    7 [6               ]  1  0 Audio    Sink      f32     4 outlet
+-- TREES
+    TREE 1    [] Audio  Input     f32     4
+      0    5 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 2    [] Init   Sink      f32     1
+      0    2 [                ]  0  1 Const    None      f32     1 1.0f
+      1    3 [2               ]  1  0 Init     Sink      f32     1 max_delay
+    TREE 3    [] Audio  Input     f32     4
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 4    [3] Audio  Sink      f32     4
+      0    4 [0               ]  1  0 Audio    Sink      f32     4 delay_write
+    TREE 5    [1] Audio  Sink      f32     4
+      0    6 [5               ]  1  1 Audio    None      f32     4 delay_var_read
+      1    7 [6               ]  1  0 Audio    Sink      f32     4 outlet
+-- INIT
+  LOOP  1 [] Init   1
+    TREE 2    [] Init   Sink      f32     1
+      0    2 [                ]  0  1 Const    None      f32     1 1.0f
+      1    3 [2               ]  1  0 Init     Sink      f32     1 max_delay
+-- RESET
+-- BLOCK
+-- AUDIO
+GRAPH 0
+  LOOP  0 [] Audio  4
+    TREE 1    [] Audio  Input     f32     4
+      0    5 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 3    [] Audio  Input     f32     4
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 4    [3] Audio  Sink      f32     4
+      0    4 [0               ]  1  0 Audio    Sink      f32     4 delay_write
+    TREE 5    [1] Audio  Sink      f32     4
+      0    6 [5               ]  1  1 Audio    None      f32     4 delay_var_read
+      1    7 [6               ]  1  0 Audio    Sink      f32     4 outlet
+-- PARAMETER GROUPS
+-- CYCLES
+DELAY 0 f32 4
+     6 f32 4 delay_var_read
+     4 f32 4 delay_write
+
+SYNTH vg
+-- PORTS
+IN 0 in f32 4
+IN 1 in f32 4
+OUT 0 out f32 4
+-- SORTED EXPRS
+      0    2 [                ]  0  1 Const    None      f32     1 1.0f
+      1    5 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+      2    6 [5               ]  1  1 Audio    None      f32     4 delay_var_read
+      3    3 [2               ]  1  0 Init     Sink      f32     1 max_delay
+      4    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+      5    4 [0               ]  1  0 Audio    Sink      f32     4 delay_write
+      6    7 [6               ]  1  0 Audio    Sink      f32     4 outlet
+-- TREES
+    TREE 1    [] Audio  Input     f32     4
+      0    5 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 2    [] Init   Sink      f32     1
+      0    2 [                ]  0  1 Const    None      f32     1 1.0f
+      1    3 [2               ]  1  0 Init     Sink      f32     1 max_delay
+    TREE 3    [] Audio  Input     f32     4
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 4    [3] Audio  Sink      f32     4
+      0    4 [0               ]  1  0 Audio    Sink      f32     4 delay_write
+    TREE 5    [1] Audio  Sink      f32     4
+      0    6 [5               ]  1  1 Audio    None      f32     4 delay_var_read
+      1    7 [6               ]  1  0 Audio    Sink      f32     4 outlet
+-- INIT
+  LOOP  1 [] Init   1
+    TREE 2    [] Init   Sink      f32     1
+      0    2 [                ]  0  1 Const    None      f32     1 1.0f
+      1    3 [2               ]  1  0 Init     Sink      f32     1 max_delay
+-- RESET
+-- BLOCK
+-- AUDIO
+GRAPH 0
+  LOOP  0 [] Audio  4
+    TREE 1    [] Audio  Input     f32     4
+      0    5 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 3    [] Audio  Input     f32     4
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 4    [3] Audio  Sink      f32     4
+      0    4 [0               ]  1  0 Audio    Sink      f32     4 delay_write
+    TREE 5    [1] Audio  Sink      f32     4
+      0    6 [5               ]  1  1 Audio    None      f32     4 delay_var_read
+      1    7 [6               ]  1  0 Audio    Sink      f32     4 outlet
+-- PARAMETER GROUPS
+-- CYCLES
+DELAY 0 f32 4
+     6 f32 4 delay_var_read
+     4 f32 4 delay_write
+
+SYNTH vs
+-- PORTS
+IN 0 in f32 4
+IN 1 in f32 4
+OUT 0 out f32 4
+-- SORTED EXPRS
+      0    2 [                ]  0  1 Const    None      f32     1 1.0f
+      1    5 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+      2    6 [5               ]  1  1 Audio    None      f32     4 delay_var_read
+      3    3 [2               ]  1  0 Init     Sink      f32     1 max_delay
+      4    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+      5    4 [0               ]  1  0 Audio    Sink      f32     4 delay_write
+      6    7 [6               ]  1  0 Audio    Sink      f32     4 outlet
+-- TREES
+    TREE 1    [] Audio  Input     f32     4
+      0    5 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 2    [] Init   Sink      f32     1
+      0    2 [                ]  0  1 Const    None      f32     1 1.0f
+      1    3 [2               ]  1  0 Init     Sink      f32     1 max_delay
+    TREE 3    [] Audio  Input     f32     4
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 4    [3] Audio  Sink      f32     4
+      0    4 [0               ]  1  0 Audio    Sink      f32     4 delay_write
+    TREE 5    [1] Audio  Sink      f32     4
+      0    6 [5               ]  1  1 Audio    None      f32     4 delay_var_read
+      1    7 [6               ]  1  0 Audio    Sink      f32     4 outlet
+-- INIT
+  LOOP  1 [] Init   1
+    TREE 2    [] Init   Sink      f32     1
+      0    2 [                ]  0  1 Const    None      f32     1 1.0f
+      1    3 [2               ]  1  0 Init     Sink      f32     1 max_delay
+-- RESET
+-- BLOCK
+-- AUDIO
+GRAPH 0
+  LOOP  0 [] Audio  4
+    TREE 1    [] Audio  Input     f32     4
+      0    5 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 3    [] Audio  Input     f32     4
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 4    [3] Audio  Sink      f32     4
+      0    4 [0               ]  1  0 Audio    Sink      f32     4 delay_write
+    TREE 5    [1] Audio  Sink      f32     4
+      0    6 [5               ]  1  1 Audio    None      f32     4 delay_var_read
+      1    7 [6               ]  1  0 Audio    Sink      f32     4 outlet
+-- PARAMETER GROUPS
+-- CYCLES
+DELAY 0 f32 4
+     6 f32 4 delay_var_read
+     4 f32 4 delay_write
+
+SYNTH vn
+-- PORTS
+IN 0 in f32 4
+IN 1 in f32 4
+OUT 0 out f32 4
+-- SORTED EXPRS
+      0    2 [                ]  0  1 Const    None      f32     1 1.0f
+      1    5 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+      2    6 [5               ]  1  1 Audio    None      f32     4 delay_var_read
+      3    3 [2               ]  1  0 Init     Sink      f32     1 max_delay
+      4    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+      5    4 [0               ]  1  0 Audio    Sink      f32     4 delay_write
+      6    7 [6               ]  1  0 Audio    Sink      f32     4 outlet
+-- TREES
+    TREE 1    [] Audio  Input     f32     4
+      0    5 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 2    [] Init   Sink      f32     1
+      0    2 [                ]  0  1 Const    None      f32     1 1.0f
+      1    3 [2               ]  1  0 Init     Sink      f32     1 max_delay
+    TREE 3    [] Audio  Input     f32     4
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 4    [3] Audio  Sink      f32     4
+      0    4 [0               ]  1  0 Audio    Sink      f32     4 delay_write
+    TREE 5    [1] Audio  Sink      f32     4
+      0    6 [5               ]  1  1 Audio    None      f32     4 delay_var_read
+      1    7 [6               ]  1  0 Audio    Sink      f32     4 outlet
+-- INIT
+  LOOP  1 [] Init   1
+    TREE 2    [] Init   Sink      f32     1
+      0    2 [                ]  0  1 Const    None      f32     1 1.0f
+      1    3 [2               ]  1  0 Init     Sink      f32     1 max_delay
+-- RESET
+-- BLOCK
+-- AUDIO
+GRAPH 0
+  LOOP  0 [] Audio  4
+    TREE 1    [] Audio  Input     f32     4
+      0    5 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 3    [] Audio  Input     f32     4
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 4    [3] Audio  Sink      f32     4
+      0    4 [0               ]  1  0 Audio    Sink      f32     4 delay_write
+    TREE 5    [1] Audio  Sink      f32     4
+      0    6 [5               ]  1  1 Audio    None      f32     4 delay_var_read
+      1    7 [6               ]  1  0 Audio    Sink      f32     4 outlet
+-- PARAMETER GROUPS
+-- CYCLES
+DELAY 0 f32 4
+     6 f32 4 delay_var_read
+     4 f32 4 delay_write
+
+SYNTH sc
+-- PORTS
+IN 0 in f32 4
+IN 1 dt f32 1 continuous [0.0 1.0] init 0.3 lin
+OUT 0 out f32 4
+-- SORTED EXPRS
+      0    2 [                ]  0  1 Const    None      f32     1 1.0f
+      1    5 [                ]  0  1 Block    Input     f32     1 control(dt)
+      2    6 [5               ]  1  1 Audio    None      f32     4 delay_var_read
+      3    3 [2               ]  1  0 Init     Sink      f32     1 max_delay
+      4    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+      5    4 [0               ]  1  0 Audio    Sink      f32     4 delay_write
+      6    7 [6               ]  1  0 Audio    Sink      f32     4 outlet
+-- TREES
+    TREE 1    [] Block  Input     f32     1
+      0    5 [                ]  0  1 Block    Input     f32     1 control(dt)
+    TREE 2    [] Init   Sink      f32     1
+      0    2 [                ]  0  1 Const    None      f32     1 1.0f
+      1    3 [2               ]  1  0 Init     Sink      f32     1 max_delay
+    TREE 3    [] Audio  Input     f32     4
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 4    [3] Audio  Sink      f32     4
+      0    4 [0               ]  1  0 Audio    Sink      f32     4 delay_write
+    TREE 5    [1] Audio  Sink      f32     4
+      0    6 [5               ]  1  1 Audio    None      f32     4 delay_var_read
+      1    7 [6               ]  1  0 Audio    Sink      f32     4 outlet
+-- INIT
+  LOOP  1 [] Init   1
+    TREE 2    [] Init   Sink      f32     1
+      0    2 [                ]  0  1 Const    None      f32     1 1.0f
+      1    3 [2               ]  1  0 Init     Sink      f32     1 max_delay
+-- RESET
+-- BLOCK
+  LOOP  0 [] Block  1
+    TREE 1    [] Block  Input     f32     1
+      0    5 [                ]  0  1 Block    Input     f32     1 control(dt)
+-- AUDIO
+GRAPH 0
+  LOOP  2 [0] Audio  4
+    TREE 3    [] Audio  Input     f32     4
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 4    [3] Audio  Sink      f32     4
+      0    4 [0               ]  1  0 Audio    Sink      f32     4 delay_write
+    TREE 5    [1] Audio  Sink      f32     4
+      0    6 [5               ]  1  1 Audio    None      f32     4 delay_var_read
+      1    7 [6               ]  1  0 Audio    Sink      f32     4 outlet
+-- PARAMETER GROUPS
+GROUP 0 sources [dt] nodes [5]
+-- CYCLES
+DELAY 0 f32 4
+     6 f32 4 delay_var_read
+     4 f32 4 delay_write
+
+SYNTH ss
+-- PORTS
+IN 0 in f32 4
+IN 1 dt f32 1 continuous [0.0 1.0] init 0.3 lin
+OUT 0 out f32 4
+-- SORTED EXPRS
+      0    2 [                ]  0  1 Const    None      f32     1 1.0f
+      1    5 [                ]  0  1 Block    Input     f32     1 control(dt)
+      2    6 [5               ]  1  1 Audio    None      f32     4 delay_var_read
+      3    3 [2               ]  1  0 Init     Sink      f32     1 max_delay
+      4    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+      5    4 [0               ]  1  0 Audio    Sink      f32     4 delay_write
+      6    7 [6               ]  1  0 Audio    Sink      f32     4 outlet
+-- TREES
+    TREE 1    [] Block  Input     f32     1
+      0    5 [                ]  0  1 Block    Input     f32     1 control(dt)
+    TREE 2    [] Init   Sink      f32     1
+      0    2 [                ]  0  1 Const    None      f32     1 1.0f
+      1    3 [2               ]  1  0 Init     Sink      f32     1 max_delay
+    TREE 3    [] Audio  Input     f32     4
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 4    [3] Audio  Sink      f32     4
+      0    4 [0               ]  1  0 Audio    Sink      f32     4 delay_write
+    TREE 5    [1] Audio  Sink      f32     4
+      0    6 [5               ]  1  1 Audio    None      f32     4 delay_var_read
+      1    7 [6               ]  1  0 Audio    Sink      f32     4 outlet
+-- INIT
+  LOOP  1 [] Init   1
+    TREE 2    [] Init   Sink      f32     1
+      0    2 [                ]  0  1 Const    None      f32     1 1.0f
+      1    3 [2               ]  1  0 Init     Sink      f32     1 max_delay
+-- RESET
+-- BLOCK
+  LOOP  0 [] Block  1
+    TREE 1    [] Block  Input     f32     1
+      0    5 [                ]  0  1 Block    Input     f32     1 control(dt)
+-- AUDIO
+GRAPH 0
+  LOOP  2 [0] Audio  4
+    TREE 3    [] Audio  Input     f32     4
+      0    0 [                ]  0  1 Audio    Input     f32     4 inlet(in)
+    TREE 4    [3] Audio  Sink      f32     4
+      0    4 [0               ]  1  0 Audio    Sink      f32     4 delay_write
+    TREE 5    [1] Audio  Sink      f32     4
+      0    6 [5               ]  1  1 Audio    None      f32     4 delay_var_read
+      1    7 [6               ]  1  0 Audio    Sink      f32     4 outlet
+-- PARAMETER GROUPS
+GROUP 0 sources [dt] nodes [5]
+-- CYCLES
+DELAY 0 f32 4
+     6 f32 4 delay_var_read
+     4 f32 4 delay_write
+
+SYNTH sn
+-- PORTS
+IN 0 in f32 8
+IN 1 dt f32 1 continuous [0.0 1.0] init 0.3 lin
+OUT 0 out f32 8
+-- SORTED EXPRS
+      0    2 [                ]  0  1 Const    None      f32     1 1.0f
+      1    5 [                ]  0  1 Block    Input     f32     1 control(dt)
+      2    6 [5               ]  1  1 Audio    None      f32     8 delay_var_read
+      3    3 [2               ]  1  0 Init     Sink      f32     1 max_delay
+      4    0 [                ]  0  1 Audio    Input     f32     8 inlet(in)
+      5    4 [0               ]  1  0 Audio    Sink      f32     8 delay_write
+      6    7 [6               ]  1  0 Audio    Sink      f32     8 outlet
+-- TREES
+    TREE 1    [] Block  Input     f32     1
+      0    5 [                ]  0  1 Block    Input     f32     1 control(dt)
+    TREE 2    [] Init   Sink      f32     1
+      0    2 [                ]  0  1 Const    None      f32     1 1.0f
+      1    3 [2               ]  1  0 Init     Sink      f32     1 max_delay
+    TREE 3    [] Audio  Input     f32     8
+      0    0 [                ]  0  1 Audio    Input     f32     8 inlet(in)
+    TREE 4    [3] Audio  Sink      f32     8
+      0    4 [0               ]  1  0 Audio    Sink      f32     8 delay_write
+    TREE 5    [1] Audio  Sink      f32     8
+      0    6 [5               ]  1  1 Audio    None      f32     8 delay_var_read
+      1    7 [6               ]  1  0 Audio    Sink      f32     8 outlet
+-- INIT
+  LOOP  1 [] Init   1
+    TREE 2    [] Init   Sink      f32     1
+      0    2 [                ]  0  1 Const    None      f32     1 1.0f
+      1    3 [2               ]  1  0 Init     Sink      f32     1 max_delay
+-- RESET
+-- BLOCK
+  LOOP  0 [] Block  1
+    TREE 1    [] Block  Input     f32     1
+      0    5 [                ]  0  1 Block    Input     f32     1 control(dt)
+-- AUDIO
+GRAPH 0
+  LOOP  2 [0] Audio  8
+    TREE 3    [] Audio  Input     f32     8
+      0    0 [                ]  0  1 Audio    Input     f32     8 inlet(in)
+    TREE 4    [3] Audio  Sink      f32     8
+      0    4 [0               ]  1  0 Audio    Sink      f32     8 delay_write
+    TREE 5    [1] Audio  Sink      f32     8
+      0    6 [5               ]  1  1 Audio    None      f32     8 delay_var_read
+      1    7 [6               ]  1  0 Audio    Sink      f32     8 outlet
+-- PARAMETER GROUPS
+GROUP 0 sources [dt] nodes [5]
+-- CYCLES
+DELAY 0 f32 8
+     6 f32 8 delay_var_read
+     4 f32 8 delay_write
