@@ -131,11 +131,14 @@ let dep2 = ndef(2);
 okOr(define(dep2, fn() S { w() * 0.5 }) await, "dependent of mono defines");
 let oldAnchor = (*w.state).anchor;
 assertEq(reshape(w, 4) await, 0, "reshape succeeds");
-assertEq((*w.state).chans, 4, "chans updated");
+assertEq(((*w.state).shape chans), 4, "chans updated");
 assertTrue((*w.state).anchor != oldAnchor, "reshape made a new anchor");
 okOr(define(w, fn() S { sinosc([301.0, 302.0, 303.0, 304.0]) * 0.05 }) await,
      "redefine at the new width");
 assertEq(reshape(w, 4) await, 0, "reshape to same width is a no-op");
+assertEq(reshape(w, shape([2, 2])) await, 0, "reshape to a 2x2 shape");
+assertTrue((*w.state).shape == shape([2, 2]), "shape updated to 2x2");
+assertEq(anchorDefName((*w.state).shape), "_wire2x2", "matrix anchor def named by shape");
 w free;
 dep2 free;
 

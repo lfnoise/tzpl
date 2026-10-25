@@ -15,7 +15,7 @@
 //  document (claimed panels render inline as notebook panel cells) -- and
 //  dispatches widget value changes each frame:
 //    * engine fast path: dirty engine-bound widgets batch into one
-//      begin()/setControl()/go() bundle per silo, on the GUI thread,
+//      begin()/setInput()/go() bundle per silo, on the GUI thread,
 //      without entering the VM;
 //    * lang callbacks: onChange closures fire with the latest value at
 //      most once per widget per frame, only when nrtvm.mtx is free

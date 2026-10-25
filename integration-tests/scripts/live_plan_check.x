@@ -126,7 +126,7 @@ let swap = swapOps("_px0_3", 1000012, 1000007, 1000001,
                    [(1000042, 1)], [("freq", 165.0)], 2.0);
 assertEq(swap opsToString,
     "newNode(_px0_3, 1000012)\n" $
-    "setControl(1000012, freq, 165.0)\n" $
+    "setInput(1000012, freq, 165.0)\n" $
     "connect(1000042, 0, 1000012, 1)\n" $
     "connectX(1000012, 0, 1000001, 0, 2.0)\n" $
     "disconnectSourceX(1000007, 0, 1000001, 0, 2.0)\n",

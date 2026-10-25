@@ -75,6 +75,8 @@ struct TapSlot {
     // RT install; capped at kMaxScopeChans for scope capture).
     int chans = 1;
     static constexpr int kMaxScopeChans = 16;
+    // Full shape of the tapped outlet (uncapped; for introspection).
+    tzpl_Shape shape{{1, 1, 1, 1}};
 
     // The registry key, mirrored here so the RT tables can identify a slot
     // without a reverse lookup. Set at bundle submit.

@@ -2,8 +2,8 @@
 -- Script wrapper for the ui FFI: live control widgets rendered by the app.
 --
 -- Widgets are created by code and bound to running audio, two ways:
---   * fast path: bindControl(w, node, "cutoff") -- the GUI thread sends
---     setControl directly to the engine on drag, without entering the VM.
+--   * fast path: bindInput(w, node, "cutoff") -- the GUI thread sets the
+--     node's input directly on drag, without entering the VM.
 --   * flexible path: onChange(w, fn(v Float) Void { ... }) -- a lang
 --     callback, coalesced to the latest value once per GUI frame.
 --
@@ -12,8 +12,8 @@
 -- refreshes its spec, and clears old bindings for fresh rebinding.
 --
 -- Value mapping reuses synthdef.ControlSpec, so a widget can be derived
--- entirely from a synthdef's control declaration:
---   control(node, "cutoff")  -- one widget from the def's ControlSpec
+-- entirely from a synthdef's control declaration (an input with a spec):
+--   control(node, "cutoff")  -- one widget from the input's ControlSpec
 --   controls(node)           -- materialize the node's whole interface
 
 import ui_ffi.*;
@@ -48,8 +48,8 @@ fn slider(name String, lo Float, hi Float, init Float) Widget =
 -- Range slider: one scale, two ends (lo, hi). Drag sweeps out a new
 -- range, option-drag moves the whole range, shift-drag adjusts the
 -- nearer end, cmd-click types an end's value. Read the ends with
--- value()/valueY() or values(); bindControl drives the lo end,
--- bindControlY the hi end.
+-- value()/valueY() or values(); bindInput drives the lo end,
+-- bindInputY the hi end.
 fn range(name String, spec ControlSpec) Widget =
 	Widget(uiRange(name, spec.lo, spec.hi, spec.init, spec.init,
 	               spec.warp ordinal, spec.warp _stepParam));
@@ -137,14 +137,17 @@ fn onChangeVec(w Widget, f ([Float]) Void) Void = uiOnChangeVec(w.0, f);
 -- syncs (setValues, preset recall, undo) fire only onChangeVec.
 fn onCell(w Widget, f (Int, Int, Float) Void) Void = uiOnCell(w.0, f);
 
--- Engine fast path: control resolved by name on the node's def.
--- Returns an audio_engine error code (0 = ok).
-fn bindControl(w Widget, node Int, control String, silo Int = 0) Int =
-	uiBindControl(w.0, node, control, silo);
+-- Engine fast path: the widget drives an input, resolved by name on the
+-- node's def. `element` picks one element (flat channel index) of a
+-- multichannel input; -1, the default, drives the whole input, with the
+-- widget's values broadcast over it. Returns an audio_engine error code
+-- (0 = ok).
+fn bindInput(w Widget, node Int, input String, element Int = -1, silo Int = 0) Int =
+	uiBindInput(w.0, node, input, element, silo);
 
 -- Bind the Y axis of an xy widget.
-fn bindControlY(w Widget, node Int, control String, silo Int = 0) Int =
-	uiBindControlY(w.0, node, control, silo);
+fn bindInputY(w Widget, node Int, input String, element Int = -1, silo Int = 0) Int =
+	uiBindInputY(w.0, node, input, element, silo);
 
 -- Keyboard binding: a single character ("a".."z", "0".."9") or "space".
 -- Buttons fire momentary (down/up), toggles flip on press -- whenever no

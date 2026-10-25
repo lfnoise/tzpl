@@ -1190,7 +1190,7 @@ Deviations and notes:
   proxy self-reference needs inter-node feedback (MF). The C++-oracle scripts
   (codegen validity, render A/B) were removed in M3.
 
-**M5: Consumers (§6).**
+**M5: Consumers (§6) (done 2026-10-25, corpus precision deferred to M6)**
 - Port the bridge FFI, `bundles.x`, the music libs, live, ui, the app (JUCE and ImGui),
   OSC and NATS, `instruments.x`, `effects.x` and the examples.
 - Port the integration scripts. The noteparam and eventToAudio tests are rewritten as
@@ -1198,6 +1198,89 @@ Deviations and notes:
 - **Gate:** the M0 corpus re-renders within tolerance (−100 dBFS max difference for f32
   synths, except for the files on the expected-to-change manifest), and every
   `run_*.sh` passes.
+
+What landed (2026-10-25):
+- **Engine.** The deprecated `setControl` overloads, `ControlDesc`,
+  `listDefControls` and `DefDesc::controls` are gone; a def's controls are its
+  inputs with a spec (`DefDesc::ins[i].hasSpec`).
+  - New: `setInputX` by input name, `rtNoteSetParams` (silo tasks), `tapShape`, and
+    shape forms of `ensureWireDef`/`ensureGainDef` (`_wire2x3`).
+- **Bridge FFI and `audio_engine.x`:**
+  - Two primitives, `inputOp` (whole input or flat channel range) and `inputOpBox`,
+    each with op set, crossfade or impulse.
+  - `.x` wrappers: `setInput`, `setInputAt`, `setInputBox`, `setInputX`, `impulseInput`
+    and `impulseInputAt`. The port is an index or a name; the value is a `Float` or
+    `[Float]`; ramp time and curve are optional.
+  - Also: `noteSetParams` with a ramp, silo-only `setNoteParams`, `tapShape`,
+    `wireDef([dims])`/`gainDef([dims])`, and `errRegionOutOfRange` in `Err`.
+- **`bundles.x`.** `EngineCmd.input` replaces `setInput`/`setInputX`/`setControl`/
+  `setControlNamed`, with builders for every input form. `noteSetParams` carries a ramp.
+  `toString` prints each command as the builder call that makes it.
+- **ui:**
+  - `bindInput(w, node, input, element = -1)` and `bindInputY` replace
+    `bindControl`/`bindControlY`; `element` drives one element of a multichannel input.
+  - `UIEngineTarget` is `{node, port, first, count, silo}`, and both apps' dispatchers
+    send `setInput` with a region.
+- **Apps (JUCE and ImGui):**
+  - The plugin browsers show Inputs (with spec columns) and Outputs.
+  - Graph ports show their shape (`2×3`).
+  - The graph model counts specced inputs.
+- **OSC/NATS.** `setControl` is removed. New messages: `setInput` (port by index or name,
+  values broadcast), `setInputAt`, `setInputRamp`, `setInputX` (by name too),
+  `impulseInput`, `impulseInputAt` and `noteSetParamsRamp`. NATS gains `noteSetParams`.
+- **live:**
+  - `opSetControl` becomes `opSetInputNamed`.
+  - Proxies carry a `Shape`: `ndef(shape(...))` and `reshape(p, shape(...))`, with
+    anchor and monitor defs named by shape.
+- **music.** `NoteCmd.noteSetParams` has a ramp, and the silo `scorePlayer` honours it
+  through `setNoteParams`.
+- **Libraries, examples, scripts:**
+  - Every `setControl` is now `setInput` by name.
+  - `event_to_audio` is rewritten as input steps plus `impulseInput`, and is on the
+    change manifest.
+  - The noteparam test adds a second voice and a ramp, and is also on the change
+    manifest.
+  - The `voicer` built-in test def keeps its old name: M2's rename to `voicerTest` had
+    silenced the silo and panic scripts.
+- **Docs.** Writing_SynthDefs, Live_Controls_and_Notebooks, FFI_Guide, the Cookbook and
+  engine/Architecture.md are updated for inputs, the rates, shapes, the new calls and the
+  messages.
+- **Fixes:**
+  - synthc: a 1-channel inlet used as a scalar join/put operand is element 0 of its
+    gathered array.
+  - The integration test `test_nats` has the stdlib on its module path.
+
+Gate status:
+- **Scripts.** Every `run_*.sh` passes except `run_live_test.sh`, whose self-referencing
+  proxy needs inter-node feedback (MF). CI gates that script off on this branch; run
+  them serially, because the live-audio ones contend for the device.
+- **C++ suites.** All pass:
+  - `test_block_engine`, `test_audio_engine_ffi` (66), `test_foreign_modules`,
+    `test_graph_shadow`, `test_metering`, `test_stopped_engine`,
+    `test_synthdef_compiler_ffi`, `test_voicer`;
+  - `test_osc` (25) and `test_nats` (27, with a local nats-server);
+  - the app's six test binaries;
+  - the lang suite (486).
+- **Corpus: not met; precision is deferred to M6.**
+  - Against the patched old-app oracle in `TZPL_POW2_CHANS=1` mode, 107 of 118 pass,
+    plus the two expected changes.
+  - The rest are as in M4: precision from per-sample recomputation (-53 to -98 dBFS),
+    resonator phase drift (instrument_test, sc2_9), and the oracle's own silence
+    defect (sc2_6).
+  - In normal mode the extra differences are the exact tensor shapes.
+
+Deviations and notes:
+- **A VM bug, worked around.**
+  - `EngineCmd.input` first carried nested enums (port, region, mode). With them,
+    `music_fx_demos` segfaulted in cold-cache renders (`ListNode::force` reading a
+    Float as a pointer).
+  - The payload is flat now. The crashing form and its repro steps are in
+    `devplans/repros/nested_enum_payload_crash/`. The VM bug itself is not found:
+    standalone repros don't crash.
+- **Not done:** patching one proxy into another proxy's control inputs (§6 live), which
+  is a new feature rather than a port.
+- The formant bank in `effects.x` keeps four formants (now only so it sounds as it
+  did).
 
 **M6: Parameter groups and change detection (§4.5).**
 - Group detection, caching keyed on version, and `{ptr, stride}` plumbing.

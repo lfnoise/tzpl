@@ -261,35 +261,101 @@ static void handleReplaceNode(const char*, const char* data, int len, const char
     engine::go(0);
 }
 
+// Input values. Every form takes the node, then the input as a port index
+// or a name (resolved against the node's def at bundle submit), then its own
+// arguments; trailing numbers are the values, broadcast cyclically over the
+// addressed channels.
+//   engine.setInput       "node port value..."
+//   engine.setInputAt     "node port first value..."
+//   engine.setInputRamp   "node port rampTime curve value..."
+//   engine.setInputX      "node port value xfadeTime curve"
+//   engine.impulseInput   "node port value..."
+//   engine.impulseInputAt "node port first value..."
+
+namespace {
+enum class InputOp { set, fade, impulse };
+
+std::vector<engine::f64> argValues(std::vector<std::string> const& args, size_t from) {
+    std::vector<engine::f64> vals;
+    for (size_t i = from; i < args.size(); ++i) vals.push_back(argFloat(args, i));
+    return vals;
+}
+
+void sendInput(NatsDispatcher& d, std::vector<std::string> const& args,
+               engine::Region const& region, std::vector<engine::f64> const& vals,
+               engine::f64 time, engine::FadeCurve curve, InputOp op) {
+    auto nodeID = static_cast<engine::i64>(argInt(args, 0));
+    bool byName = !isIntToken(args[1]);
+    engine::PortAddr port{nodeID, byName ? 0 : argInt(args, 1)};
+    char const* name = argStr(args, 1);
+
+    engine::begin(d.engine());
+    switch (op) {
+        case InputOp::set:
+            if (byName) engine::setInput(nodeID, name, region, vals, time, curve);
+            else engine::setInput(port, region, vals, time, curve);
+            break;
+        case InputOp::fade:
+            if (byName) engine::setInputX(nodeID, name, region, vals, time, curve);
+            else engine::setInputX(port, region, vals, time, curve);
+            break;
+        case InputOp::impulse:
+            if (byName) engine::impulseInput(nodeID, name, region, vals);
+            else engine::impulseInput(port, region, vals);
+            break;
+    }
+    engine::go(0);
+}
+} // namespace
+
 static void handleSetInput(const char*, const char* data, int len, const char*,
                              NatsDispatcher& d) {
     auto args = splitArgs(data, len);
     if (args.size() < 3) return;
-    engine::PortAddr port{static_cast<engine::i64>(argInt(args, 0)), argInt(args, 1)};
-    engine::f32 val = argFloat(args, 2);
-
-    engine::begin(d.engine());
-    engine::setInput(port, 1, &val);
-    engine::go(0);
+    sendInput(d, args, engine::Region::all(), argValues(args, 2), 0., engine::fadeLinear,
+              InputOp::set);
 }
 
-// The control argument is either a numeric controlID or a control name
-// (resolved against the node's def at bundle submit).
-static void handleSetControl(const char*, const char* data, int len, const char*,
+static void handleSetInputAt(const char*, const char* data, int len, const char*,
                                NatsDispatcher& d) {
     auto args = splitArgs(data, len);
-    if (args.size() < 3) return;
-    auto nodeID = static_cast<engine::i64>(argInt(args, 0));
-    engine::f32 val = argFloat(args, 2);
+    if (args.size() < 4) return;
+    auto vals = argValues(args, 3);
+    sendInput(d, args, engine::Region::channels(argInt(args, 2), (int)vals.size()), vals,
+              0., engine::fadeLinear, InputOp::set);
+}
 
-    engine::begin(d.engine());
-    if (isIntToken(args[1])) {
-        auto controlID = static_cast<engine::i64>(argInt(args, 1));
-        engine::setControl(nodeID, controlID, 1, &val);
-    } else {
-        engine::setControl(nodeID, argStr(args, 1), 1, &val);
-    }
-    engine::go(0);
+static void handleSetInputRamp(const char*, const char* data, int len, const char*,
+                                 NatsDispatcher& d) {
+    auto args = splitArgs(data, len);
+    if (args.size() < 5) return;
+    sendInput(d, args, engine::Region::all(), argValues(args, 4), argFloat(args, 2),
+              static_cast<engine::FadeCurve>(argInt(args, 3)), InputOp::set);
+}
+
+static void handleSetInputX(const char*, const char* data, int len, const char*,
+                              NatsDispatcher& d) {
+    auto args = splitArgs(data, len);
+    if (args.size() < 4) return;
+    sendInput(d, args, engine::Region::all(), {argFloat(args, 2)}, argFloat(args, 3),
+              static_cast<engine::FadeCurve>(argInt(args, 4)), InputOp::fade);
+}
+
+static void handleImpulseInput(const char*, const char* data, int len, const char*,
+                                 NatsDispatcher& d) {
+    auto args = splitArgs(data, len);
+    if (args.size() < 3) return;
+    sendInput(d, args, engine::Region::all(), argValues(args, 2), 0., engine::fadeLinear,
+              InputOp::impulse);
+}
+
+static void handleImpulseInputAt(const char*, const char* data, int len, const char*,
+                                   NatsDispatcher& d) {
+    auto args = splitArgs(data, len);
+    if (args.size() < 4) return;
+    auto vals = argValues(args, 3);
+    sendInput(d, args, engine::Region::channels(argInt(args, 2), (int)vals.size()), vals,
+              0., engine::fadeLinear, InputOp::impulse);
 }
 
 static void handleNoteOn(const char*, const char* data, int len, const char*,
@@ -331,6 +397,34 @@ static void handleAllNotesOff(const char*, const char* data, int len, const char
     engine::begin(d.engine());
     engine::allNotesOff(nodeID);
     engine::go(0);
+}
+
+// engine.noteSetParams     "node noteID first value..."
+// engine.noteSetParamsRamp "node noteID first rampTime value..."
+static void noteSetParamsImpl(const char* data, int len, NatsDispatcher& d, bool ramped) {
+    auto args = splitArgs(data, len);
+    size_t from = ramped ? 4 : 3;
+    if (args.size() < from + 1) return;
+    auto nodeID = static_cast<engine::i64>(argInt(args, 0));
+    int noteID = argInt(args, 1);
+    int first = argInt(args, 2);
+    engine::f64 ramp = ramped ? argFloat(args, 3) : 0.;
+    std::vector<engine::f32> values;
+    for (size_t i = from; i < args.size(); ++i) values.push_back(argFloat(args, i));
+
+    engine::begin(d.engine());
+    engine::noteSetParamRange(nodeID, noteID, first, (int)values.size(), values.data(), ramp);
+    engine::go(0);
+}
+
+static void handleNoteSetParams(const char*, const char* data, int len, const char*,
+                                  NatsDispatcher& d) {
+    noteSetParamsImpl(data, len, d, false);
+}
+
+static void handleNoteSetParamsRamp(const char*, const char* data, int len, const char*,
+                                      NatsDispatcher& d) {
+    noteSetParamsImpl(data, len, d, true);
 }
 
 // ---------------------------------------------------------------------------
@@ -380,10 +474,16 @@ void registerEngineHandlers(NatsDispatcher& dispatcher,
     reg("engine.disconnectNode",   wrap(handleDisconnectNode));
     reg("engine.replaceNode",      wrap(handleReplaceNode));
     reg("engine.setInput",         wrap(handleSetInput));
-    reg("engine.setControl",       wrap(handleSetControl));
+    reg("engine.setInputAt",       wrap(handleSetInputAt));
+    reg("engine.setInputRamp",     wrap(handleSetInputRamp));
+    reg("engine.setInputX",        wrap(handleSetInputX));
+    reg("engine.impulseInput",     wrap(handleImpulseInput));
+    reg("engine.impulseInputAt",   wrap(handleImpulseInputAt));
     reg("engine.noteOn",           wrap(handleNoteOn));
     reg("engine.noteOff",          wrap(handleNoteOff));
     reg("engine.allNotesOff",      wrap(handleAllNotesOff));
+    reg("engine.noteSetParams",    wrap(handleNoteSetParams));
+    reg("engine.noteSetParamsRamp", wrap(handleNoteSetParamsRamp));
 }
 
 } // namespace nats

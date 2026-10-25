@@ -47,7 +47,7 @@ import clock.*;
 -- Types
 
 struct ProxyState {
-    chans Int,
+    shape Shape,                -- the proxy's signal shape (its anchor's)
     anchor Int,                 -- anchor node id, 0 until created
     monitor Int,                -- monitor node id, 0 until first play
     src Int,                    -- current source node id, 0 = silent
@@ -155,10 +155,13 @@ fn quantClock(clock Int, silo Int = 0) Void {
 -- Creating proxies
 
 -- A silent placeholder proxy: no def, no nodes yet. Define it with `<-`.
-fn ndef(chans Int = 2, silo Int = 0) Proxy {
+-- A proxy carries one signal shape: `chans` channels (a row), or any Shape.
+fn ndef(chans Int = 2, silo Int = 0) Proxy = ndef(row(chans max(1)), silo);
+
+fn ndef(sh Shape, silo Int = 0) Proxy {
     var params [String: Float] = [:];
     let st = &ProxyState {
-        chans: chans max(1), anchor: 0, monitor: 0, src: 0,
+        shape: sh, anchor: 0, monitor: 0, src: 0,
         playing: false, building: false, pending: [GraphFn](),
         params: params, ctlNames: [String](), noteNames: [Symbol](),
         noteDefaults: [Float](), fadeTime: -1.0,
@@ -176,6 +179,12 @@ fn ndef(f GraphFn, chans Int = 2, silo Int = 0) Proxy {
     p
 }
 
+fn ndef(f GraphFn, sh Shape, silo Int = 0) Proxy {
+    let p = ndef(sh, silo);
+    define(p, f);
+    p
+}
+
 ---------------------------------------------------------------------------
 -- Symbol-keyed proxies: opt-in idempotent upsert.
 --
@@ -186,18 +195,27 @@ fn ndef(f GraphFn, chans Int = 2, silo Int = 0) Proxy {
 
 var _named [Symbol: Proxy] = [:];
 
-fn ndef(name Symbol, chans Int = 2, silo Int = 0) Proxy {
+fn ndef(name Symbol, chans Int = 2, silo Int = 0) Proxy =
+    ndef(name, row(chans max(1)), silo);
+
+fn ndef(name Symbol, sh Shape, silo Int = 0) Proxy {
     match (_named[name]) {
         some(p): return p;
         none: 0;
     }
-    let p = ndef(chans, silo);
+    let p = ndef(sh, silo);
     _named[name] = p;
     p
 }
 
 fn ndef(name Symbol, f GraphFn, chans Int = 2, silo Int = 0) Proxy {
     let p = ndef(name, chans, silo);
+    define(p, f);
+    p
+}
+
+fn ndef(name Symbol, f GraphFn, sh Shape, silo Int = 0) Proxy {
+    let p = ndef(name, sh, silo);
     define(p, f);
     p
 }
@@ -225,7 +243,7 @@ fn _forgetName(p Proxy) Void {
 fn sig(p Proxy) S {
     let idx = `pxRefs length;
     `pxRefs = `pxRefs push(p);
-    inlet(FLOAT32, (*p.state).chans, pxRefName(idx))
+    inlet(FLOAT32, (*p.state).shape, pxRefName(idx))
 }
 
 fn call(p Proxy) S = p sig;
@@ -379,9 +397,9 @@ async fn _playAsync(p Proxy, vol Float) Int {
     var mon = s.monitor;
     var e = 0;
     if (mon == 0) {
-        if (!(_ensureMonDef(s.chans))) { return -1; }
+        if (!(_ensureMonDef(s.shape))) { return -1; }
         mon = _takeNodeID();
-        e = _runOps(playOps(monitorDefName(s.chans), mon, (*p.state).anchor,
+        e = _runOps(playOps(monitorDefName(s.shape), mon, (*p.state).anchor,
                             vol, _fade(p)), p.silo, d);
     } else {
         -- monitor survives stop(); refresh volume and fade back in
@@ -418,7 +436,7 @@ fn amp(p Proxy, v Float, fade Float = 0.05) Void {
 ---------------------------------------------------------------------------
 -- Params
 
--- Set a control by name on the current source. The value is stored on the
+-- Set a control (a specced input) by name on the current source. The value is stored on the
 -- proxy and re-applied after every redefine (as long as the new definition
 -- declares a control of that name).
 fn set(p Proxy, name String, value Float) Void {
@@ -426,36 +444,36 @@ fn set(p Proxy, name String, value Float) Void {
     let stored = s.params;
     stored[name] = value;
     if (s.src != 0 && s.ctlNames contains(name)) {
-        bundle() setControl(s.src, name, value) go(p.silo);
+        bundle() setInput(s.src, name, value) go(p.silo);
     }
 }
 
 ---------------------------------------------------------------------------
 -- Reshaping
 
--- Change the proxy's channel count in place. A new anchor at the new width
--- takes over: the source feeds it, and every dependent wire and the monitor
--- crossfade from the old anchor to the new one (both carry the same signal
--- during the fade). Dependents' own definitions keep their old reference
--- width until their next redefine; the engine adapts the mismatch
--- (power-of-two wrap/fold) in the meantime.
-fn reshape(p Proxy, chans Int) Future<Int> = _reshapeAsync(p, chans);
+-- Change the proxy's shape (or channel count) in place. A new anchor of the
+-- new shape takes over: the source feeds it, and every dependent wire and
+-- the monitor crossfade from the old anchor to the new one (both carry the
+-- same signal during the fade). Dependents' own definitions keep their old
+-- reference shape until their next redefine; the engine broadcasts or folds
+-- the mismatch in the meantime.
+fn reshape(p Proxy, chans Int) Future<Int> = _reshapeAsync(p, row(chans max(1)));
+fn reshape(p Proxy, sh Shape) Future<Int> = _reshapeAsync(p, sh);
 
-async fn _reshapeAsync(p Proxy, chans Int) Int {
-    let newChans = chans max(1);
+async fn _reshapeAsync(p Proxy, newShape Shape) Int {
     let s = *p.state;
-    if (newChans == s.chans) { return 0; }
+    if (newShape == s.shape) { return 0; }
     if (s.anchor == 0) {
-        -- nothing built yet: just adopt the new width
-        p.state <- ProxyState { ...(*p.state), chans: newChans };
+        -- nothing built yet: just adopt the new shape
+        p.state <- ProxyState { ...(*p.state), shape: newShape };
         return 0;
     }
-    if (!(_ensureAnchorDef(newChans))) { return -1; }
+    if (!(_ensureAnchorDef(newShape))) { return -1; }
     var monDef = "";
     var newMon = 0;
     if (s.playing && s.monitor != 0) {
-        if (!(_ensureMonDef(newChans))) { return -1; }
-        monDef = monitorDefName(newChans);
+        if (!(_ensureMonDef(newShape))) { return -1; }
+        monDef = monitorDefName(newShape);
         newMon = _takeNodeID();
     }
 
@@ -474,7 +492,7 @@ async fn _reshapeAsync(p Proxy, chans Int) Int {
     let newAnchor = _takeNodeID();
     let fade = _fade(p);
     let d = *_siloDefaults(p.silo);
-    let e = _runOps(reshapeOps(anchorDefName(newChans), newAnchor, cur.anchor,
+    let e = _runOps(reshapeOps(anchorDefName(newShape), newAnchor, cur.anchor,
                                cur.src, depWires, monDef, newMon, cur.monitor,
                                cur.vol, fade), p.silo, d);
     if (e != 0) {
@@ -489,7 +507,7 @@ async fn _reshapeAsync(p Proxy, chans Int) Int {
     let margin = fade + 0.25 + _quantDelaySecs(d);
     _freeLater(p.silo, cur.anchor, margin);
     if (newMon != 0 && cur.monitor != 0) { _freeLater(p.silo, cur.monitor, margin); }
-    p.state <- ProxyState { ...(*p.state), chans: newChans, anchor: newAnchor,
+    p.state <- ProxyState { ...(*p.state), shape: newShape, anchor: newAnchor,
                             monitor: newMon != 0 ? newMon : cur.monitor };
     -- move the meter to the new anchor
     if (cur.tap != 0) {
@@ -623,7 +641,7 @@ fn dump(silo Int = 0) String {
         if (q.silo == silo) {
             let s = *q.state;
             out = out $ "px" $ q.serial toString
-                $ ": chans=" $ s.chans toString
+                $ ": shape=" $ shapeTag(s.shape)
                 $ " anchor=" $ s.anchor toString
                 $ " src=" $ s.src toString
                 $ " monitor=" $ s.monitor toString
@@ -638,21 +656,22 @@ fn dump(silo Int = 0) String {
 -- Internals: def caching, op lowering, timed cleanup
 
 -- The anchor and monitor defs are the engine's native _wire<N> / _gain<N>
--- (engine/src/tzpl_builtin_defs.cpp): registered on first use of a width,
+-- (_wire2x3 for a matrix; engine/src/tzpl_builtin_defs.cpp): registered on
+-- first use of a shape,
 -- no plugin compile, so a proxy's plumbing is ready the instant it is
 -- asked for. Only the user's own definition ever goes through clang.
 -- These fail only when there is no engine at all.
-fn _ensureAnchorDef(chans Int) Bool {
-    if (wireDef(chans) == "") {
-        println("live: no engine for anchor def (" $ chans toString $ " ch)");
+fn _ensureAnchorDef(sh Shape) Bool {
+    if (wireDef(sh.dims) == "") {
+        println("live: no engine for anchor def (" $ shapeTag(sh) $ ")");
         return false;
     }
     true
 }
 
-fn _ensureMonDef(chans Int) Bool {
-    if (gainDef(chans) == "") {
-        println("live: no engine for monitor def (" $ chans toString $ " ch)");
+fn _ensureMonDef(sh Shape) Bool {
+    if (gainDef(sh.dims) == "") {
+        println("live: no engine for monitor def (" $ shapeTag(sh) $ ")");
         return false;
     }
     true
@@ -661,10 +680,10 @@ fn _ensureMonDef(chans Int) Bool {
 -- Create the proxy's anchor node if it does not exist yet.
 async fn _ensureAnchor(p Proxy) Bool {
     if ((*p.state).anchor != 0) { return true; }
-    let chans = (*p.state).chans;
-    if (!(_ensureAnchorDef(chans))) { return false; }
+    let sh = (*p.state).shape;
+    if (!(_ensureAnchorDef(sh))) { return false; }
     let a = _takeNodeID();
-    let e = bundle() newNode(anchorDefName(chans), a) go(p.silo);
+    let e = bundle() newNode(anchorDefName(sh), a) go(p.silo);
     if (e != 0) {
         println("live: anchor node failed, engine error " $ e toString);
         return false;
@@ -681,7 +700,7 @@ fn _runOps(ops [PxOp], silo Int, d SiloDefaults) Int {
         match (op) {
             opNewNode(def, id): b = b newNode(def, id);
             opFreeNode(id): b = b freeNode(id);
-            opSetControl(n, nm, v): b = b setControl(n, nm, v);
+            opSetInputNamed(n, nm, v): b = b setInput(n, nm, v);
             opSetInput(n, prt, v): b = b setInput(n, prt, v);
             opSetInputX(n, prt, v, x): b = b setInputX(n, prt, v, x, d.curve);
             opConnect(sn, sp, dn, dp): b = b connect(sn, sp, dn, dp);

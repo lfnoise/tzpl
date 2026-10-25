@@ -119,12 +119,15 @@ enum class UIWidgetKind : int {
     // older build opening a newer document degrades instead of crashing.
 };
 
-// Engine fast-path binding: on value change the GUI thread sends
-// setControl(nodeID, controlID, value) in a per-frame bundle, without
-// entering the VM.
+// Engine fast-path binding: on value change the GUI thread sets the
+// node's input (setInput on port, over flat channels [first, first+count),
+// count 0 = the whole port) in a per-frame bundle, without entering the VM.
+// The widget's values broadcast cyclically over the region.
 struct UIEngineTarget {
     long nodeID = -1;
-    long controlID = -1;
+    int port = -1;
+    int first = 0;
+    int count = 0;
     int silo = 0;
 };
 

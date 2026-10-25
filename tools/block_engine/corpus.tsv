@@ -43,8 +43,8 @@ negabs_negconst	0.1	TZPL_ABS_MODE=x TZPL_ABS_CASE=negconst	-	integration-tests/s
 negabs_negctl	0.1	TZPL_ABS_MODE=x TZPL_ABS_CASE=negctl	-	integration-tests/scripts/neg_abs_rewrite.x	same	
 negabs_posconst	0.1	TZPL_ABS_MODE=x TZPL_ABS_CASE=posconst	-	integration-tests/scripts/neg_abs_rewrite.x	same	
 const_outlet	0.05	TZPL_CONST_MODE=x	-	integration-tests/scripts/const_outlet.x	same	
-event_to_audio	0.15	-	-	tools/block_engine/scripts/event_to_audio.x	same	control-set timing; becomes input steps and impulses in M5
-noteparam_event	0.15	-	-	integration-tests/scripts/noteparam_event_rate.x	same	noteSetParams becomes a notes-row element set (D2)
+event_to_audio	0.15	-	-	tools/block_engine/scripts/event_to_audio.x	change	control-set timing; rewritten in M5 as input steps (tr) and impulseInput -- no event rate
+noteparam_event	0.15	-	-	integration-tests/scripts/noteparam_event_rate.x	change	noteSetParams becomes a notes-row element set (D2); the script gained a second voice and a ramp in M5 (identical up to 0.09 s)
 linen_envelope	1.6	-	-	integration-tests/scripts/linen_envelope.x	same	
 fill_buffer_sine_ref	0.1	-	-	integration-tests/scripts/fill_buffer_sine_ref.x	same	
 fill_buffer_sine_tab	0.1	-	-	integration-tests/scripts/fill_buffer_sine_tab.x	same	

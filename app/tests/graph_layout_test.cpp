@@ -420,14 +420,14 @@ static void test_node_controls_materialize() {
         check(freq && freq->spec.warp == bridge::UIWarp::Exponential,
               "ABI warp ordinal mapped to UIWarp");
         check(freq && freq->target
-                   && freq->target->nodeID == 5 && freq->target->controlID == 0
-                   && freq->target->silo == 0,
-              "widget bound to (node, controlID, silo)");
+                   && freq->target->nodeID == 5 && freq->target->port == 0
+                   && freq->target->count == 0 && freq->target->silo == 0,
+              "widget bound to (node, port, whole input, silo)");
         check(freq && freq->dirtyEngine,
               "fresh binding marked for engine push");
 
         // Multichannel: one widget carrying all channels (the dispatcher
-        // sends the full value vector as one setControl).
+        // sends the full value vector as one setInput).
         auto* levels = ui.findByName("ctl_test #5", "levels");
         check(levels && levels->kind == bridge::UIWidgetKind::MultiSlider
                      && levels->values.size() == 4,
@@ -444,7 +444,7 @@ static void test_node_controls_materialize() {
                     && trigs->rows == 1 && trigs->cols == 3
                     && trigs->momentary,
               "multichannel trigger becomes a 1x3 momentary row");
-        check(levels && levels->target && levels->target->controlID == 3
+        check(levels && levels->target && levels->target->port == 3
                      && levels->dirtyEngine,
               "multichannel widget bound and marked for push");
     }

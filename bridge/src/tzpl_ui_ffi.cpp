@@ -95,10 +95,10 @@ static i64 upsertWidget(ts::VM& vm, const char* name, UIWidgetKind kind,
     return static_cast<i64>(w->id);
 }
 
-// Look up the ControlDesc list for the def of a live-engine node.
-// Returns false if the node or def is unknown.
-static bool controlsForNode(AppContext* ctx, i64 nodeID,
-                            std::vector<engine::ControlDesc>& out) {
+// Look up the input ports of the def of a live-engine node (the controls
+// are those with a spec). Returns false if the node or def is unknown.
+static bool inputsForNode(AppContext* ctx, i64 nodeID,
+                          std::vector<engine::PortDesc>& out) {
     if (!ctx || !ctx->engine) return false;
     std::string defName;
     {
@@ -107,7 +107,10 @@ static bool controlsForNode(AppContext* ctx, i64 nodeID,
         if (it == ctx->nodeDefNames.end()) return false;
         defName = it->second;
     }
-    return engine::listDefControls(ctx->engine, defName.c_str(), out);
+    engine::DefDesc def;
+    if (!engine::getDefDesc(ctx->engine, defName.c_str(), def)) return false;
+    out = std::move(def.ins);
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -402,25 +405,28 @@ static void ffi_uiOnCell(ts::VM& vm, u16, u16, u16 argBase) {
     }
 }
 
-// Resolve a control name on a node to an engine target. Returns tzpl_SErr.
-static tzpl_SErr resolveTarget(ts::VM& vm, i64 nodeID, const char* controlName,
-                               int silo, UIEngineTarget& out) {
+// Resolve an input name (and element: flat channel index, < 0 = the whole
+// input) on a node to an engine target. Returns tzpl_SErr.
+static tzpl_SErr resolveTarget(ts::VM& vm, i64 nodeID, const char* inputName,
+                               int element, int silo, UIEngineTarget& out) {
     auto* ctx = getAppContext(vm);
-    std::vector<engine::ControlDesc> controls;
-    if (!controlsForNode(ctx, nodeID, controls)) return tzpl_errNodeNotFound;
-    for (auto const& c : controls) {
-        if (c.name == controlName) {
-            out.nodeID = static_cast<long>(nodeID);
-            out.controlID = static_cast<long>(c.controlID);
-            out.silo = silo;
-            return tzpl_errNone;
-        }
+    std::vector<engine::PortDesc> ins;
+    if (!inputsForNode(ctx, nodeID, ins)) return tzpl_errNodeNotFound;
+    for (int i = 0; i < (int)ins.size(); ++i) {
+        if (ins[i].name != inputName) continue;
+        if (element >= tzpl_shapeChans(ins[i].type.shape)) return tzpl_errRegionOutOfRange;
+        out.nodeID = static_cast<long>(nodeID);
+        out.port = i;
+        out.first = element < 0 ? 0 : element;
+        out.count = element < 0 ? 0 : 1;
+        out.silo = silo;
+        return tzpl_errNone;
     }
-    return tzpl_errControlNotFound;
+    return tzpl_errInputOutOfRange;
 }
 
-// fn uiBindControl(id Int, node Int, control String, silo Int) Int
-static void ffi_uiBindControl(ts::VM& vm, u16 dst, u16, u16 argBase) {
+// fn uiBindInput(id Int, node Int, input String, element Int, silo Int) Int
+static void ffi_uiBindInput(ts::VM& vm, u16 dst, u16, u16 argBase) {
     // Widgets bind the LIVE engine; inside a render (app-level --nrt or
     // renderNRT) the named nodes live on the render engine, so a binding
     // can never resolve. Quiet no-op rather than an error per widget.
@@ -428,11 +434,12 @@ static void ffi_uiBindControl(ts::VM& vm, u16 dst, u16, u16 argBase) {
     UIState* ui = getUIState(vm);
     auto id = static_cast<std::uint64_t>(vm.reg(argBase).i);
     i64 nodeID = vm.reg(argBase + 1).i;
-    const char* control = regString(vm, argBase + 2);
-    int silo = static_cast<int>(vm.reg(argBase + 3).i);
+    const char* input = regString(vm, argBase + 2);
+    int element = static_cast<int>(vm.reg(argBase + 3).i);
+    int silo = static_cast<int>(vm.reg(argBase + 4).i);
 
     UIEngineTarget target;
-    tzpl_SErr err = ui ? resolveTarget(vm, nodeID, control, silo, target)
+    tzpl_SErr err = ui ? resolveTarget(vm, nodeID, input, element, silo, target)
                        : tzpl_errInternal;
     if (err == tzpl_errNone) {
         std::lock_guard<std::mutex> lock(ui->mtx);
@@ -446,8 +453,8 @@ static void ffi_uiBindControl(ts::VM& vm, u16 dst, u16, u16 argBase) {
         }
     }
     if (err != tzpl_errNone) {
-        std::fprintf(stderr, "ui.bindControl: node %lld control \"%s\": error %d\n",
-                     static_cast<long long>(nodeID), control, (int)err);
+        std::fprintf(stderr, "ui.bindInput: node %lld input \"%s\": error %d\n",
+                     static_cast<long long>(nodeID), input, (int)err);
     }
     vm.reg(dst).i = static_cast<i64>(err);
 }
@@ -465,17 +472,19 @@ static void ffi_uiBindKey(ts::VM& vm, u16, u16, u16 argBase) {
     if (UIWidget* w = ui->findById(id)) w->keyChord = std::move(chord);
 }
 
-// fn uiBindControlY(id Int, node Int, control String, silo Int) Int
+// fn uiBindInputY(id Int, node Int, input String, element Int, silo Int) Int
 // Binds the Y axis of an XY widget.
-static void ffi_uiBindControlY(ts::VM& vm, u16 dst, u16, u16 argBase) {
+static void ffi_uiBindInputY(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    if (bridge::currentRenderContext()) { vm.reg(dst).i = 0; return; }
     UIState* ui = getUIState(vm);
     auto id = static_cast<std::uint64_t>(vm.reg(argBase).i);
     i64 nodeID = vm.reg(argBase + 1).i;
-    const char* control = regString(vm, argBase + 2);
-    int silo = static_cast<int>(vm.reg(argBase + 3).i);
+    const char* input = regString(vm, argBase + 2);
+    int element = static_cast<int>(vm.reg(argBase + 3).i);
+    int silo = static_cast<int>(vm.reg(argBase + 4).i);
 
     UIEngineTarget target;
-    tzpl_SErr err = ui ? resolveTarget(vm, nodeID, control, silo, target)
+    tzpl_SErr err = ui ? resolveTarget(vm, nodeID, input, element, silo, target)
                        : tzpl_errInternal;
     if (err == tzpl_errNone) {
         std::lock_guard<std::mutex> lock(ui->mtx);
@@ -488,8 +497,8 @@ static void ffi_uiBindControlY(ts::VM& vm, u16 dst, u16, u16 argBase) {
         }
     }
     if (err != tzpl_errNone) {
-        std::fprintf(stderr, "ui.bindControlY: node %lld control \"%s\": error %d\n",
-                     static_cast<long long>(nodeID), control, (int)err);
+        std::fprintf(stderr, "ui.bindInputY: node %lld input \"%s\": error %d\n",
+                     static_cast<long long>(nodeID), input, (int)err);
     }
     vm.reg(dst).i = static_cast<i64>(err);
 }
@@ -1058,11 +1067,11 @@ static void ffi_uiMasterTap(ts::VM& vm, u16 dst, u16, u16 argBase) {
 // Synthdef-derived widgets (materialize a node's interface)
 // ---------------------------------------------------------------------------
 
-// Create a widget for one ControlDesc of `nodeID` in the current panel and
+// Create a widget for input `port` of `nodeID` in the current panel and
 // bind it fast-path (shared logic in tzpl_ui_node_controls). Requires
 // ui->mtx NOT held. Returns the widget id (0 on failure).
 static i64 widgetForControl(ts::VM& vm, i64 nodeID, int silo,
-                            engine::ControlDesc const& c) {
+                            engine::PortDesc const& c, int port) {
     UIState* ui = getUIState(vm);
     if (!ui) return 0;
     std::string panel;
@@ -1070,24 +1079,24 @@ static i64 widgetForControl(ts::VM& vm, i64 nodeID, int silo,
         std::lock_guard<std::mutex> lock(ui->mtx);
         panel = ui->currentPanel;
     }
-    return static_cast<i64>(bindControlWidget(ui, panel, c, nodeID, silo));
+    return static_cast<i64>(bindControlWidget(ui, panel, c, port, nodeID, silo));
 }
 
 // fn uiControl(node Int, control String, silo Int) Int
-// Widget named, specced, and bound entirely from the def's ControlDef.
-// Returns the widget id, or 0 if the node/control is unknown.
+// Widget named, specced, and bound entirely from the def's input (its
+// spec). Returns the widget id, or 0 if the node/input is unknown.
 static void ffi_uiControl(ts::VM& vm, u16 dst, u16, u16 argBase) {
     if (bridge::currentRenderContext()) { vm.reg(dst).i = 0; return; }
     i64 nodeID = vm.reg(argBase).i;
     const char* control = regString(vm, argBase + 1);
     int silo = static_cast<int>(vm.reg(argBase + 2).i);
 
-    std::vector<engine::ControlDesc> controls;
+    std::vector<engine::PortDesc> ins;
     i64 id = 0;
-    if (controlsForNode(getAppContext(vm), nodeID, controls)) {
-        for (auto const& c : controls) {
-            if (c.name == control) {
-                id = widgetForControl(vm, nodeID, silo, c);
+    if (inputsForNode(getAppContext(vm), nodeID, ins)) {
+        for (int i = 0; i < (int)ins.size(); ++i) {
+            if (ins[i].name == control) {
+                id = widgetForControl(vm, nodeID, silo, ins[i], i);
                 break;
             }
         }
@@ -1105,13 +1114,15 @@ static void ffi_uiControls(ts::VM& vm, u16 dst, u16, u16 argBase) {
     i64 nodeID = vm.reg(argBase).i;
     int silo = static_cast<int>(vm.reg(argBase + 1).i);
 
-    std::vector<engine::ControlDesc> controls;
+    std::vector<engine::PortDesc> ins;
     std::vector<i64> ids;
     if (bridge::currentRenderContext()) {
         // Widgets bind the LIVE engine; quiet no-op inside a render.
-    } else if (controlsForNode(getAppContext(vm), nodeID, controls)) {
-        for (auto const& c : controls) {
-            if (i64 id = widgetForControl(vm, nodeID, silo, c))
+    } else if (inputsForNode(getAppContext(vm), nodeID, ins)) {
+        // The controls: the inputs with a spec.
+        for (int i = 0; i < (int)ins.size(); ++i) {
+            if (!ins[i].hasSpec) continue;
+            if (i64 id = widgetForControl(vm, nodeID, silo, ins[i], i))
                 ids.push_back(id);
         }
     } else {
@@ -1182,8 +1193,8 @@ void registerUIFFI(ts::Compiler& compiler) {
     reg("uiCellLabels",   StringArray, {Int},                   ffi_uiCellLabels);
     reg("uiSetCellLabels", Void, {Int, StringArray},            ffi_uiSetCellLabels);
     reg("uiSetCellLabel", Void, {Int, Int, Int, String},        ffi_uiSetCellLabel);
-    reg("uiBindControl",  Int,  {Int, Int, String, Int},        ffi_uiBindControl);
-    reg("uiBindControlY", Int,  {Int, Int, String, Int},        ffi_uiBindControlY);
+    reg("uiBindInput",    Int,  {Int, Int, String, Int, Int},   ffi_uiBindInput);
+    reg("uiBindInputY",   Int,  {Int, Int, String, Int, Int},   ffi_uiBindInputY);
     reg("uiBindKey",      Void, {Int, String},                  ffi_uiBindKey);
     reg("uiValue",        Float, {Int},                         ffi_uiValue);
     reg("uiValues",       FloatArray, {Int},                    ffi_uiValues);

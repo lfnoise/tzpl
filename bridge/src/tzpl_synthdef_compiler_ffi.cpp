@@ -49,7 +49,7 @@ namespace bridge {
 static engine::Engine* getEngine(ts::VM& vm) {
     // During an NRT render the script's defSynth/loadSynthDylib calls must
     // register the def into the per-render engine -- the same engine the audio
-    // bundling FFI (newNode/connect/setControl) targets via its own
+    // bundling FFI (newNode/connect/setInput) targets via its own
     // currentRenderContext() check. Without this, a def compiled inside a
     // render lands in the live placeholder engine while newNode looks in the
     // render engine, so the node is never created and the render is silent.

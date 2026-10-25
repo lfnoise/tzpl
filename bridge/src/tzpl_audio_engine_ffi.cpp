@@ -30,6 +30,7 @@
 #include "tzpl.hpp"
 #include "value.hpp"
 #include "tzpl_client_interface.hpp"
+#include "tzpl_shape.hpp"
 #include "tzpl_engine.hpp"
 #include "tzpl_builtin_defs.hpp"
 #include "tzpl_sample_bank.hpp"
@@ -136,7 +137,7 @@ static const char* regString(ts::VM& vm, u16 reg) {
 
 // Unbind ui widgets whose engine fast path targets `nodeID` (all nodes if
 // nodeID < 0). Freeing a node otherwise leaves its widgets sending
-// setControl at a dead ID, spamming errNodeNotFound on every drag; unbound
+// setInput at a dead ID, spamming errNodeNotFound on every drag; unbound
 // widgets are silent until code rebinds them.
 static void unbindWidgetsForNode(AppContext* ctx, std::int64_t nodeID) {
     if (!ctx || !ctx->uiState) return;
@@ -220,6 +221,37 @@ static void ffi_wireDef(ts::VM& vm, u16 dst, u16, u16 argBase) {
     auto chans = vm.reg(argBase).i;
     char const* name = (eng && chans >= 1 && chans <= 1024)
         ? engine::ensureWireDef(eng, (int)chans) : "";
+    vm.reg(dst).o = new ts::StringObj(name);
+}
+
+// fn wireDef(shape [Int]) -> String     (dims, row-major: [2, 3] = 2x3)
+// fn gainDef(shape [Int]) -> String
+static bool regShape(ts::VM& vm, u16 r, tzpl_Shape& out) {
+    auto* arr = vm.reg(r).o;
+    usize n = ts::arraySize(arr);
+    if (n < 1 || n > TZPL_MAX_RANK) return false;
+    out = tzpl_Shape{{1, 1, 1, 1}};
+    i64 total = 1;
+    for (usize i = 0; i < n; ++i) {
+        i64 d = ts::arrayGetInt(arr, i);
+        if (d < 1) return false;
+        total *= d;
+        out.dims[TZPL_MAX_RANK - n + i] = (u32)d;
+    }
+    return total <= 1024;
+}
+
+static void ffi_wireDefShape(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    engine::Engine* eng = getEngine(vm);
+    tzpl_Shape shape;
+    char const* name = (eng && regShape(vm, argBase, shape)) ? engine::ensureWireDef(eng, shape) : "";
+    vm.reg(dst).o = new ts::StringObj(name);
+}
+
+static void ffi_gainDefShape(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    engine::Engine* eng = getEngine(vm);
+    tzpl_Shape shape;
+    char const* name = (eng && regShape(vm, argBase, shape)) ? engine::ensureGainDef(eng, shape) : "";
     vm.reg(dst).o = new ts::StringObj(name);
 }
 
@@ -324,8 +356,8 @@ static void ffi_newNode(ts::VM& vm, u16 dst, u16, u16 argBase) {
     // "sched_immediate: errNodeDefNotFound" with no def name. Name it here,
     // with the usual cause -- the def's compile was started but not awaited.
     if (engine::Engine* eng = getEngine(vm)) {
-        std::vector<engine::ControlDesc> unused;
-        if (!engine::listDefControls(eng, defName, unused)) {
+        engine::DefDesc unused;
+        if (!engine::getDefDesc(eng, defName, unused)) {
             std::fprintf(stderr,
                 "audio_engine.newNode: no synthdef named \"%s\" is loaded "
                 "(still compiling? `defSynthX(...) await`, or use `play`, "
@@ -479,44 +511,94 @@ static void ffi_replaceNode(ts::VM& vm, u16 dst, u16, u16 argBase) {
 // Parameter control
 // ---------------------------------------------------------------------------
 
-// fn setInput(nodeID: Int, portIndex: Int, value: Float) -> Int
-// Convenience: sets a single float value on an input port.
-// Passes as f32 to match the engine's native sample type.
-static void ffi_setInput(ts::VM& vm, u16 dst, u16, u16 argBase) {
-    engine::PortAddr port{static_cast<engine::i64>(vm.reg(argBase).i),
-                          static_cast<int>(vm.reg(argBase + 1).i)};
-    engine::f32 val = static_cast<engine::f32>(vm.reg(argBase + 2).f);
-    returnErr(vm, dst, engine::setInput(port, 1, &val), __func__);
+// Value operations on an input's stages (engine::setInput / setInputX /
+// impulseInput). The wrappers in audio_engine.x give the convenient forms;
+// these two primitives carry every one of them:
+//
+// fn inputOp(nodeID Int, port Int, name String, first Int, count Int,
+//            values [Float], time Float, curve Int, op Int) -> Int
+//   port >= 0 addresses the input by index, else by `name`. count == 0 and
+//   first == 0 is the whole port; otherwise flat channels [first,
+//   first + count), count 0 meaning values length. `values` broadcast
+//   cyclically over the region.
+// fn inputOpBox(nodeID Int, port Int, name String, offset [Int], extent [Int],
+//               values [Float], time Float, curve Int, op Int) -> Int
+//   A box region in shape coordinates (up to 4 dims; extent 0 = to the end).
+// op: 0 set (time = ramp), 1 crossfade (time = xfade), 2 impulse.
+
+enum InputOpKind { inputOpSet = 0, inputOpFade = 1, inputOpImpulse = 2 };
+
+static std::vector<f64> regFloats(ts::VM& vm, u16 r) {
+    auto* arr = vm.reg(r).o;
+    usize n = ts::arraySize(arr);
+    std::vector<f64> v(n);
+    for (usize i = 0; i < n; ++i) v[i] = ts::arrayGetFloat(arr, i);
+    return v;
 }
 
-// fn setInputX(nodeID: Int, portIndex: Int, value: Float,
-//              xfade: Float, curve: Int) -> Int
-static void ffi_setInputX(ts::VM& vm, u16 dst, u16, u16 argBase) {
-    engine::PortAddr port{static_cast<engine::i64>(vm.reg(argBase).i),
-                          static_cast<int>(vm.reg(argBase + 1).i)};
-    engine::f32 val = static_cast<engine::f32>(vm.reg(argBase + 2).f);
-    f64 xfade = vm.reg(argBase + 3).f;
-    auto curve = static_cast<engine::FadeCurve>(vm.reg(argBase + 4).i);
-    returnErr(vm, dst, engine::setInput(port, 1, &val, xfade, curve), __func__);
+static tzpl_SErr doInputOp(engine::i64 nodeID, int port, char const* name,
+                           engine::Region const& region, std::vector<f64> const& vals,
+                           f64 time, engine::FadeCurve curve, int op) {
+    std::span<f64 const> v(vals);
+    char const* nm = port >= 0 ? nullptr : name;
+    engine::PortAddr addr{nodeID, port >= 0 ? port : 0};
+    switch (op) {
+        case inputOpSet:
+            return nm ? engine::setInput(nodeID, nm, region, v, time, curve)
+                      : engine::setInput(addr, region, v, time, curve);
+        case inputOpFade:
+            return nm ? engine::setInputX(nodeID, nm, region, v, time, curve)
+                      : engine::setInputX(addr, region, v, time, curve);
+        case inputOpImpulse:
+            return nm ? engine::impulseInput(nodeID, nm, region, v)
+                      : engine::impulseInput(addr, region, v);
+    }
+    return tzpl_errNotImplemented;
 }
 
-// fn setControl(nodeID: Int, controlID: Int, value: Float) -> Int
-// Convenience: sets a single float control value.
-static void ffi_setControl(ts::VM& vm, u16 dst, u16, u16 argBase) {
+static void ffi_inputOp(ts::VM& vm, u16 dst, u16, u16 argBase) {
     auto nodeID = static_cast<engine::i64>(vm.reg(argBase).i);
-    auto controlID = static_cast<engine::i64>(vm.reg(argBase + 1).i);
-    engine::f32 val = static_cast<engine::f32>(vm.reg(argBase + 2).f);
-    returnErr(vm, dst, engine::setControl(nodeID, controlID, 1, &val), __func__);
+    int port = static_cast<int>(vm.reg(argBase + 1).i);
+    char const* name = regString(vm, argBase + 2);
+    int first = static_cast<int>(vm.reg(argBase + 3).i);
+    int count = static_cast<int>(vm.reg(argBase + 4).i);
+    std::vector<f64> vals = regFloats(vm, argBase + 5);
+    f64 time = vm.reg(argBase + 6).f;
+    auto curve = static_cast<engine::FadeCurve>(vm.reg(argBase + 7).i);
+    int op = static_cast<int>(vm.reg(argBase + 8).i);
+    engine::Region region = (first == 0 && count == 0)
+        ? engine::Region::all()
+        : engine::Region::channels(first, count > 0 ? count : (int)vals.size());
+    returnErr(vm, dst, doInputOp(nodeID, port, name, region, vals, time, curve, op),
+              __func__);
 }
 
-// fn setControl(nodeID: Int, name: String, value: Float) -> Int
-// By-name overload: the engine resolves the name against the node's def at
-// bundle submit (errControlNotFound aborts the bundle if it doesn't exist).
-static void ffi_setControlByName(ts::VM& vm, u16 dst, u16, u16 argBase) {
+static void ffi_inputOpBox(ts::VM& vm, u16 dst, u16, u16 argBase) {
     auto nodeID = static_cast<engine::i64>(vm.reg(argBase).i);
-    const char* name = regString(vm, argBase + 1);
-    engine::f32 val = static_cast<engine::f32>(vm.reg(argBase + 2).f);
-    returnErr(vm, dst, engine::setControl(nodeID, name, 1, &val), __func__);
+    int port = static_cast<int>(vm.reg(argBase + 1).i);
+    char const* name = regString(vm, argBase + 2);
+    auto* offArr = vm.reg(argBase + 3).o;
+    auto* extArr = vm.reg(argBase + 4).o;
+    std::vector<f64> vals = regFloats(vm, argBase + 5);
+    f64 time = vm.reg(argBase + 6).f;
+    auto curve = static_cast<engine::FadeCurve>(vm.reg(argBase + 7).i);
+    int op = static_cast<int>(vm.reg(argBase + 8).i);
+    // Dims are row-major and right-aligned in tzpl_Shape (a rank-r shape
+    // fills the last r dims), so align the given coordinates to the right.
+    u32 off[TZPL_MAX_RANK] = {}, ext[TZPL_MAX_RANK] = {};
+    usize no = ts::arraySize(offArr), ne = ts::arraySize(extArr);
+    if (no > TZPL_MAX_RANK || ne > TZPL_MAX_RANK) {
+        returnErr(vm, dst, tzpl_errRegionOutOfRange, __func__);
+        return;
+    }
+    for (usize i = 0; i < no; ++i)
+        off[TZPL_MAX_RANK - no + i] = (u32)ts::arrayGetInt(offArr, i);
+    for (usize i = 0; i < ne; ++i)
+        ext[TZPL_MAX_RANK - ne + i] = (u32)ts::arrayGetInt(extArr, i);
+    // Leading dims not given keep offset 0 and extent 0, which the engine
+    // reads as "to the end": the whole of those dims.
+    returnErr(vm, dst, doInputOp(nodeID, port, name, engine::Region::boxed(off, ext),
+                                 vals, time, curve, op), __func__);
 }
 
 // fn setSharedInput(slot: Int, value: Float) -> Int
@@ -705,7 +787,17 @@ static void ffi_allNotesOff(ts::VM& vm, u16 dst, u16, u16 argBase) {
 
 // fn noteSetParams(nodeID: Int, noteID: Int, firstParam: Int,
 //                  values: Array[Float]) -> Int
+// fn noteSetParams(nodeID, noteID, firstParam, values, rampTime: Float) -> Int
+// Parameter columns from firstParam (0 = the first note parameter), stepped
+// or ramped over rampTime seconds.
+static void noteSetParamsImpl(ts::VM& vm, u16 dst, u16 argBase, f64 rampTime);
 static void ffi_noteSetParams(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    noteSetParamsImpl(vm, dst, argBase, 0.);
+}
+static void ffi_noteSetParamsRamp(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    noteSetParamsImpl(vm, dst, argBase, vm.reg(argBase + 4).f);
+}
+static void noteSetParamsImpl(ts::VM& vm, u16 dst, u16 argBase, f64 rampTime) {
     auto nodeID = static_cast<engine::i64>(vm.reg(argBase).i);
     int noteID = static_cast<int>(vm.reg(argBase + 1).i);
     int first  = static_cast<int>(vm.reg(argBase + 2).i);
@@ -725,7 +817,8 @@ static void ffi_noteSetParams(ts::VM& vm, u16 dst, u16, u16 argBase) {
         params[i] = static_cast<engine::f32>(ts::arrayGetFloat(arr, i));
     }
 
-    returnErr(vm, dst, engine::noteSetParamRange(nodeID, noteID, first, length, params), __func__);
+    returnErr(vm, dst, engine::noteSetParamRange(nodeID, noteID, first, length, params, rampTime),
+              "noteSetParams");
 }
 
 
@@ -1514,6 +1607,22 @@ static void ffi_tapRms(ts::VM& vm, u16 dst, u16, u16 argBase) {
 }
 
 // fn tapChans(tapID Int) Int
+// fn tapShape(tapID Int) [Int] -- the tapped outlet's dims (row-major,
+// leading 1s dropped; [] for an unknown tap). NRT only.
+static void ffi_tapShape(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    auto tapID = static_cast<engine::i64>(vm.reg(argBase).i);
+    engine::Engine* e = getEngine(vm);
+    tzpl_Shape sh = e ? engine::tapShape(e, tapID) : tzpl_Shape{{0, 0, 0, 0}};
+    std::vector<i64> dims;
+    if (sh.dims[0] != 0) {
+        int r = std::max(1, tzpl::rank(sh));
+        for (int d = TZPL_MAX_RANK - r; d < TZPL_MAX_RANK; ++d) dims.push_back(sh.dims[d]);
+    }
+    auto* arr = new ts::PodArray<i64>(vm.arrayType(vm.intType()));
+    arr->v.assign(dims.begin(), dims.end());
+    vm.reg(dst).o = arr;
+}
+
 static void ffi_tapChans(ts::VM& vm, u16 dst, u16, u16 argBase) {
     auto tapID = static_cast<engine::i64>(vm.reg(argBase).i);
     if (engine::Silo* s = gCurrentSilo) {
@@ -1599,6 +1708,24 @@ static void ffi_releaseNote(ts::VM& vm, u16 dst, u16, u16 argBase) {
     i64 nodeID = vm.reg(argBase).i;
     int noteID = static_cast<int>(vm.reg(argBase + 1).i);
     vm.reg(dst).i = (i64)engine::rtNoteOff(s, nodeID, noteID);
+}
+
+// fn setNoteParams(node Int, noteID Int, first Int, values [Float], rampTime Float) Int
+// silo-side, immediate noteSetParams (parameter columns from `first`,
+// stepped or ramped over rampTime seconds).
+static void ffi_setNoteParams(ts::VM& vm, u16 dst, u16, u16 argBase) {
+    engine::Silo* s = gCurrentSilo;
+    if (!s) { vm.reg(dst).i = (i64)tzpl_errNodeNotFound; return; }
+    i64 nodeID = vm.reg(argBase).i;
+    int noteID = static_cast<int>(vm.reg(argBase + 1).i);
+    int first = static_cast<int>(vm.reg(argBase + 2).i);
+    ts::Obj* arr = vm.reg(argBase + 3).o;
+    f64 ramp = vm.reg(argBase + 4).f;
+    int len = static_cast<int>(ts::arraySize(arr));
+    if (len > 64) len = 64;
+    engine::f32 vals[64];
+    for (int i = 0; i < len; ++i) vals[i] = (engine::f32)ts::arrayGetFloat(arr, i);
+    vm.reg(dst).i = (i64)engine::rtNoteSetParams(s, nodeID, noteID, first, len, vals, ramp);
 }
 
 // fn readFile(path String) String  -- read a text file into a String.
@@ -1821,6 +1948,8 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     reg("panicSchedulers",  Int, {},               ffi_panicSchedulers);
     reg("wireDef",          String, {Int},         ffi_wireDef);
     reg("gainDef",          String, {Int},         ffi_gainDef);
+    reg("wireDef",          String, {IntArray},    ffi_wireDefShape);
+    reg("gainDef",          String, {IntArray},    ffi_gainDefShape);
     // NRT-render FFI is registered separately by the bridge::registerNRTRenderFFI
     // entry point (see bridge/include/tzpl_nrt_render.hpp). It defines:
     //   renderNRT(path, setup), renderNRT(path, duration, setup),
@@ -1863,6 +1992,7 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     reg("tapPeak",          Float, {Int},                 ffi_tapPeak,     true);
     reg("tapRms",           Float, {Int},                 ffi_tapRms,      true);
     reg("tapChans",         Int,   {Int},                 ffi_tapChans,    true);
+    reg("tapShape",         IntArray, {Int},              ffi_tapShape);
     reg("tapSamples",       FloatArray, {Int, Int},       ffi_tapSamples,  true);
 
     reg("resizeBuffer",     Int, {Int, Int, Int, Int},    ffi_resizeBuffer, true);
@@ -1889,10 +2019,10 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     reg("replaceNode",      Int, {Int, Int, Float, Int},           ffi_replaceNode,      true);
 
     // Parameter control (rtSafe)
-    reg("setInput",         Int, {Int, Int, Float},             ffi_setInput,    true);
-    reg("setInputX",        Int, {Int, Int, Float, Float, Int}, ffi_setInputX,   true);
-    reg("setControl",       Int, {Int, Int, Float},             ffi_setControl,  true);
-    reg("setControl",       Int, {Int, String, Float},          ffi_setControlByName, true);
+    reg("inputOp",          Int, {Int, Int, String, Int, Int, FloatArray, Float, Int, Int},
+        ffi_inputOp, true);
+    reg("inputOpBox",       Int, {Int, Int, String, IntArray, IntArray, FloatArray, Float, Int, Int},
+        ffi_inputOpBox, true);
     reg("setSharedInput",   Int, {Int, Float},                  ffi_setSharedInput, true);
     reg("getSharedInput",   Float, {Int},                       ffi_getSharedInput, true);
 
@@ -1902,6 +2032,7 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     reg("allNotesOff",      Int, {Int},                   ffi_allNotesOff,  true);
 
     reg("noteSetParams",    Int, {Int, Int, Int, FloatArray}, ffi_noteSetParams, true);
+    reg("noteSetParams",    Int, {Int, Int, Int, FloatArray, Float}, ffi_noteSetParamsRamp, true);
 
     // Introspection
     ts::Type* StringArray = reinterpret_cast<ts::Type*>(compiler.arrayType(String));
@@ -1925,6 +2056,8 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     reg("scheduleTask",     Int,  {Int, FnFloat},         ffi_scheduleTask, true, /*rtOnly=*/true);
     reg("playNote",         Int,  {Int, Int, FloatArray}, ffi_playNote,     true, /*rtOnly=*/true);
     reg("releaseNote",      Int,  {Int, Int},             ffi_releaseNote,  true, /*rtOnly=*/true);
+    reg("setNoteParams",    Int,  {Int, Int, Int, FloatArray, Float}, ffi_setNoteParams,
+        true, /*rtOnly=*/true);
 
     // Enum constants (SchedPolicy, FadeCurve, Err, Enable) are defined
     // in the Tzopilotl module: bridge/modules/audio_engine.x

@@ -76,7 +76,6 @@ bool sameDefs(std::vector<engine::DefDesc> const& a,
         if (a[i].name != b[i].name
             || a[i].ins.size() != b[i].ins.size()
             || a[i].outs.size() != b[i].outs.size()
-            || a[i].controls.size() != b[i].controls.size()
             || a[i].buffers.size() != b[i].buffers.size()
             || a[i].banks.size() != b[i].banks.size()
             || a[i].tags != b[i].tags) return false;
@@ -332,7 +331,6 @@ private:
             row.primary = String(d.name);
             row.secondary = String((int)d.ins.size()) + " in" + dot
                           + String((int)d.outs.size()) + " out" + dot
-                          + String((int)d.controls.size()) + " ctl" + dot
                           + String((int)d.buffers.size()) + " buf";
             rows_.push_back(std::move(row));
         }
@@ -472,16 +470,8 @@ private:
             }
         }
         if (d) {
-            addSection("Inlets", d->ins);
-            addSection("Outlets", d->outs);
-            if (!d->controls.empty()) {
-                details_.rows.push_back({ "Controls", {}, {}, Details::kHeading });
-                for (auto const& c : d->controls)
-                    details_.rows.push_back({ String(c.name), typeText(c.type),
-                        "lo " + numText(c.spec.lo) + "  hi " + numText(c.spec.hi)
-                            + "  init " + numText(c.spec.init),
-                        Details::kEntry });
-            }
+            addSection("Inputs", d->ins);
+            addSection("Outputs", d->outs);
             if (!d->buffers.empty()) {
                 details_.rows.push_back({ "Buffers", {}, {}, Details::kHeading });
                 for (auto const& b : d->buffers)
@@ -550,9 +540,13 @@ private:
                     std::vector<engine::PortDesc> const& ports) {
         if (ports.empty()) return;
         details_.rows.push_back({ heading, {}, {}, Details::kHeading });
+        // An input with a spec (a control) shows its range and default.
         for (auto const& p : ports)
-            details_.rows.push_back({ String(p.name), typeText(p.type), {},
-                                      Details::kEntry });
+            details_.rows.push_back({ String(p.name), typeText(p.type),
+                p.hasSpec ? "lo " + numText(p.spec.lo) + "  hi " + numText(p.spec.hi)
+                              + "  init " + numText(p.spec.init)
+                          : String(),
+                Details::kEntry });
     }
 
     engine::DefDesc const* selectedDef() const {

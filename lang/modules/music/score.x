@@ -17,7 +17,7 @@ export music.core.*;
 enum NoteCmd {
     noteOn (Int, Int, [Float]),             -- node, noteID, params
     noteOff (Int, Int),                     -- node, noteID
-    noteSetParams (Int, Int, Int, [Float]), -- node, noteID, firstParam, params
+    noteSetParams (Int, Int, Int, [Float], Float), -- node, noteID, firstParam, params, ramp
 }
 
 -- How events map onto one synth node's voice pool.
@@ -149,8 +149,9 @@ fn toString(c NoteCmd) String {
     match (c) {
         noteOn(n, id, ps): "noteOn(%^, %^, %^)" fmt(n, id, ps _fmtFloats);
         noteOff(n, id): "noteOff(%^, %^)" fmt(n, id);
-        noteSetParams(n, id, first, ps):
-            "noteSetParams(%^, %^, %^, %^)" fmt(n, id, first, ps _fmtFloats);
+        noteSetParams(n, id, first, ps, ramp): ramp > 0.0
+            ? "noteSetParams(%^, %^, %^, %^, %^)" fmt(n, id, first, ps _fmtFloats, ramp)
+            : "noteSetParams(%^, %^, %^, %^)" fmt(n, id, first, ps _fmtFloats);
     }
 }
 

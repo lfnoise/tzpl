@@ -124,10 +124,8 @@ void ControlsPanel::draw(bridge::UIState& ui,
 namespace {
 
 struct EngineSend {
-    long nodeID;
-    long controlID;
-    int silo;
-    std::vector<float> values;  // 1 for scalar widgets; N for multi/matrix
+    bridge::UIEngineTarget target;
+    std::vector<double> values;  // 1 for scalar widgets; N for multi/matrix
 };
 
 struct CallbackCall {
@@ -165,21 +163,18 @@ void ControlsPanel::dispatch(bridge::UIState& ui, bridge::AppContext& ctx) {
             UIWidget& w = *wp;
             if (!w.dirtyEngine) continue;
             if (w.target) {
-                std::vector<float> vals;
+                std::vector<double> vals;
                 if (w.kind == UIWidgetKind::MultiSlider
                     || w.kind == UIWidgetKind::Matrix
                     || w.kind == UIWidgetKind::ButtonMatrix) {
                     vals.assign(w.values.begin(), w.values.end());
                 } else {
-                    vals.push_back(static_cast<float>(w.values[0]));
+                    vals.push_back(w.values[0]);
                 }
-                sends.push_back({w.target->nodeID, w.target->controlID,
-                                 w.target->silo, std::move(vals)});
+                sends.push_back({*w.target, std::move(vals)});
             }
             if (w.target2 && w.values.size() > 1) {
-                sends.push_back({w.target2->nodeID, w.target2->controlID,
-                                 w.target2->silo,
-                                 {static_cast<float>(w.values[1])}});
+                sends.push_back({*w.target2, {w.values[1]}});
             }
             w.dirtyEngine = false;
         }
@@ -189,16 +184,19 @@ void ControlsPanel::dispatch(bridge::UIState& ui, bridge::AppContext& ctx) {
         // collides with bundles built on the eval or scheduler threads.
         std::sort(sends.begin(), sends.end(),
                   [](EngineSend const& a, EngineSend const& b) {
-                      return a.silo < b.silo;
+                      return a.target.silo < b.target.silo;
                   });
         for (size_t i = 0; i < sends.size();) {
-            int silo = sends[i].silo;
+            int silo = sends[i].target.silo;
             tzpl_SErr err = engine::begin(ctx.engine);
-            for (; i < sends.size() && sends[i].silo == silo; ++i) {
+            for (; i < sends.size() && sends[i].target.silo == silo; ++i) {
                 if (err == tzpl_errNone) {
-                    engine::setControl(sends[i].nodeID, sends[i].controlID,
-                                       (int)sends[i].values.size(),
-                                       sends[i].values.data());
+                    bridge::UIEngineTarget const& t = sends[i].target;
+                    engine::Region region = t.count > 0
+                        ? engine::Region::channels(t.first, t.count)
+                        : engine::Region::all();
+                    engine::setInput(engine::PortAddr{t.nodeID, t.port}, region,
+                                     std::span<double const>(sends[i].values));
                 }
             }
             if (err == tzpl_errNone) err = engine::go(silo);

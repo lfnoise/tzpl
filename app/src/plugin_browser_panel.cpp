@@ -59,7 +59,6 @@ bool sameDefs(std::vector<engine::DefDesc> const& a,
         if (a[i].name != b[i].name
             || a[i].ins.size() != b[i].ins.size()
             || a[i].outs.size() != b[i].outs.size()
-            || a[i].controls.size() != b[i].controls.size()
             || a[i].buffers.size() != b[i].buffers.size()
             || a[i].tags != b[i].tags)
             return false;
@@ -87,7 +86,7 @@ bool containsCaseless(std::string const& hay, char const* needle) {
     return it != hay.end();
 }
 
-// Three shared columns: name | chans | type | rate.
+// Four shared columns: name | shape | type | rate.
 void signalTypeCells(std::string const& name, tzpl_SignalType const& t) {
     ImGui::TableNextRow();
     ImGui::TableNextColumn(); ImGui::TextUnformatted(name.c_str());
@@ -100,39 +99,34 @@ constexpr ImGuiTableFlags kTableFlags =
     ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg
     | ImGuiTableFlags_SizingStretchProp;
 
+// Inputs show their spec (lo/hi/init) when they have one -- a control.
 void drawPortSection(char const* title, char const* tableID,
                      std::vector<engine::PortDesc> const& ports) {
     if (ports.empty()) return;
+    bool anySpec = false;
+    for (auto const& p : ports) anySpec = anySpec || p.hasSpec;
     ImGui::SeparatorText(title);
-    if (ImGui::BeginTable(tableID, 4, kTableFlags)) {
+    if (ImGui::BeginTable(tableID, anySpec ? 7 : 4, kTableFlags)) {
         ImGui::TableSetupColumn("name");
-        ImGui::TableSetupColumn("chans");
+        ImGui::TableSetupColumn("shape");
         ImGui::TableSetupColumn("type");
         ImGui::TableSetupColumn("rate");
+        if (anySpec) {
+            ImGui::TableSetupColumn("lo");
+            ImGui::TableSetupColumn("hi");
+            ImGui::TableSetupColumn("init");
+        }
         ImGui::TableHeadersRow();
-        for (auto const& p : ports)
+        for (auto const& p : ports) {
             signalTypeCells(p.name, p.type);
-        ImGui::EndTable();
-    }
-}
-
-void drawControlSection(std::vector<engine::ControlDesc> const& controls) {
-    if (controls.empty()) return;
-    ImGui::SeparatorText("Controls");
-    if (ImGui::BeginTable("##controls", 7, kTableFlags)) {
-        ImGui::TableSetupColumn("name");
-        ImGui::TableSetupColumn("chans");
-        ImGui::TableSetupColumn("type");
-        ImGui::TableSetupColumn("rate");
-        ImGui::TableSetupColumn("lo");
-        ImGui::TableSetupColumn("hi");
-        ImGui::TableSetupColumn("init");
-        ImGui::TableHeadersRow();
-        for (auto const& c : controls) {
-            signalTypeCells(c.name, c.type);
-            ImGui::TableNextColumn(); ImGui::Text("%g", c.spec.lo);
-            ImGui::TableNextColumn(); ImGui::Text("%g", c.spec.hi);
-            ImGui::TableNextColumn(); ImGui::Text("%g", c.spec.init);
+            if (!anySpec) continue;
+            if (p.hasSpec) {
+                ImGui::TableNextColumn(); ImGui::Text("%g", p.spec.lo);
+                ImGui::TableNextColumn(); ImGui::Text("%g", p.spec.hi);
+                ImGui::TableNextColumn(); ImGui::Text("%g", p.spec.init);
+            } else {
+                ImGui::TableNextColumn(); ImGui::TableNextColumn(); ImGui::TableNextColumn();
+            }
         }
         ImGui::EndTable();
     }
@@ -256,9 +250,9 @@ void PluginBrowserPanel::rebuildRows() {
         }
         char label[512];
         std::snprintf(label, sizeof(label),
-                      "%s  (%zu in, %zu out, %zu ctl, %zu buf)",
+                      "%s  (%zu in, %zu out, %zu buf)",
                       d.name.c_str(), d.ins.size(), d.outs.size(),
-                      d.controls.size(), d.buffers.size());
+                      d.buffers.size());
         loadedRows_.push_back({d.name, label, {}, false, hidden});
     }
     for (auto const& f : available_) {
@@ -513,14 +507,12 @@ void PluginBrowserPanel::draw(bridge::AppContext& ctx) {
         // After a successful Load, refresh() rebuilt defs_/available_, but
         // sel points at the fileDesc_ member here, so it stays valid for
         // the rest of this frame.
-        drawPortSection("Inlets", "##inlets", sel->ins);
-        drawPortSection("Outlets", "##outlets", sel->outs);
-        drawControlSection(sel->controls);
+        drawPortSection("Inputs", "##inputs", sel->ins);
+        drawPortSection("Outputs", "##outputs", sel->outs);
         drawBufferSection(sel->buffers);
         drawSampleBankSection(sel->banks);
-        if (sel->ins.empty() && sel->outs.empty()
-            && sel->controls.empty() && sel->buffers.empty())
-            ImGui::TextDisabled("no ports, controls, or buffers");
+        if (sel->ins.empty() && sel->outs.empty() && sel->buffers.empty())
+            ImGui::TextDisabled("no ports or buffers");
     }
     ImGui::EndChild();
 

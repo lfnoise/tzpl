@@ -24,6 +24,7 @@
 #include "graph_edits.hpp"
 #include "tzpl_app_context.hpp"
 #include "tzpl_client_interface.hpp"
+#include "tzpl_shape.hpp"
 
 namespace tzplapp {
 
@@ -91,11 +92,14 @@ static juce::Font portFont() {
     return juce::Font(juce::FontOptions(11.f));
 }
 
-// Short port label: name, channel count when > 1, elem/rate glyph when
-// not the common f32/audio pair (e.g. "trig ×1 i64e").
+// Short port label: name, shape when not scalar ("×4" for a row, "2×3"
+// for a matrix), elem/rate glyph when not the common f32/audio pair (e.g.
+// "trig i64c").
 static juce::String portLabel(graph::PortVM const& p) {
     juce::String s(p.name);
-    if (p.chans > 1) s << " ×" << p.chans;
+    int rank = tzpl::rank(p.shape);
+    if (rank == 1) s << " ×" << p.chans;
+    else if (rank > 1) s << " " << juce::String::fromUTF8(tzpl::shapeString(p.shape, "×").c_str());
     if (p.elem != tzpl_kF32 || p.rate != tzpl_audioRate) {
         char const* elem = p.elem == tzpl_kI32 ? "i32"
                          : p.elem == tzpl_kI64 ? "i64"

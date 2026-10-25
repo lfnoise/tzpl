@@ -166,7 +166,7 @@ static void VoicerTest_process(tzpl_SynthData* synth, int32_t off, int32_t n) {
 
 void engine::createVoicerTestNode(Engine* e) {
     NodeDefInfo info{};
-    info.name = "voicerTest";
+    info.name = "voicer";
     info.num_ins = 1;
     info.num_outs = 1;
     info.ins = portArray({PortInfo{"notes",

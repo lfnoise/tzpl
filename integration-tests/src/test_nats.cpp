@@ -184,18 +184,24 @@ static void test_engine_commands() {
     std::string reply = client.request("engine.isAudioRunning", "", 0, 1000);
     check(reply == "0", "engine.isAudioRunning returns 0 when not running");
 
-    // setControl takes a numeric controlID or a control name as its second
-    // argument. The built-in sinosc def has no controls, so both sets abort
-    // at submit (errControlNotFound); the point is that the string form
-    // parses as a name (it previously would have been atoi'd to 0). The
-    // trailing request roundtrip proves both handlers ran without crashing.
+    // The input forms take a port index or an input name as their second
+    // argument. The built-in sinosc def has no input "nosuch", so the
+    // by-name sets abort at submit (errInputOutOfRange); the point is that
+    // the name parses as a name (not atoi'd to 0). The trailing request
+    // roundtrip proves every handler ran without crashing.
     engine::begin(eng);
     engine::newNode("sinosc", 700);
     engine::go(0);
-    client.publish("engine.setControl", "700 freq 0.5");
-    client.publish("engine.setControl", "700 0 0.5");
+    client.publish("engine.setInput", "700 nosuch 0.5");
+    client.publish("engine.setInput", "700 0 440");
+    client.publish("engine.setInputAt", "700 0 0 330");
+    client.publish("engine.setInputRamp", "700 0 0.1 0 220");
+    client.publish("engine.setInputX", "700 0 110 0.1 0");
+    client.publish("engine.impulseInput", "700 nosuch 1");
+    client.publish("engine.noteSetParams", "700 1 0 0.5");
+    client.publish("engine.noteSetParamsRamp", "700 1 0 0.2 0.5");
     reply = client.request("engine.isAudioRunning", "", 0, 1000);
-    check(reply == "0", "setControl by-name and by-index dispatched without crash");
+    check(reply == "0", "input and noteSetParams forms dispatched without crash");
 
     dispatcher.unsubscribeAll();
     client.disconnect();
@@ -229,7 +235,7 @@ struct NatsVMTestEnv {
         nrtvm = new ts::NRTVM(16 * 1024 * 1024, types, target);
         // Hermetic: only MODULES_DIR -- $TZPL_PATH is intentionally not composed
         // in (ModuleCompiler no longer reads the environment; see module_paths.hpp).
-        moduleCompiler = new ts::ModuleCompiler(compiler, {MODULES_DIR});
+        moduleCompiler = new ts::ModuleCompiler(compiler, {MODULES_DIR, LANG_MODULES_DIR});
 
         natsDispatcher.setEngine(eng);
         natsDispatcher.setClient(&natsClient);
@@ -259,6 +265,7 @@ struct NatsVMTestEnv {
         if (result.success && result.mainBlock) {
             nrtvm->execute(result.mainBlock);
         }
+        for (auto const& e : result.errors) std::print("    {}\n", e.message);
         return result.success;
     }
 
@@ -543,7 +550,7 @@ static void test_namespaced_tzpl_eval() {
     auto* nrtvm = new ts::NRTVM(16 * 1024 * 1024, types, target);
     // Hermetic: only MODULES_DIR -- $TZPL_PATH is intentionally not composed
     // in (ModuleCompiler no longer reads the environment; see module_paths.hpp).
-    auto* moduleCompiler = new ts::ModuleCompiler(compiler, {MODULES_DIR});
+    auto* moduleCompiler = new ts::ModuleCompiler(compiler, {MODULES_DIR, LANG_MODULES_DIR});
 
     nats::NatsClient natsClient;
     nats::NatsDispatcher natsDispatcher;

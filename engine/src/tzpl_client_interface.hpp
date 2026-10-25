@@ -167,19 +167,6 @@ void addSynthDef(Engine* e, tzpl_SynthDef const& def, void* dlHandle = nullptr,
 // Collect the names of all registered node defs.
 void listNodeDefs(Engine* e, std::vector<std::string>& names);
 
-// Input metadata for the inputs of a def that carry a spec (the old
-// controls), for UI/introspection. controlID is the input port index.
-// DEPRECATED on the block-engine branch: use DefDesc::ins (hasSpec/spec).
-struct ControlDesc {
-    std::string name;
-    i64 controlID;
-    tzpl_ControlSpec spec;
-    tzpl_SignalType type{};
-};
-
-// Collect control metadata for def `defName`. Returns false if no such def.
-bool listDefControls(Engine* e, const char* defName, std::vector<ControlDesc>& out);
-
 // Full def metadata for UI/introspection (plugin browser).
 struct PortDesc {
     std::string name;
@@ -203,7 +190,6 @@ struct DefDesc {
     std::string name;
     std::vector<PortDesc> ins;
     std::vector<PortDesc> outs;
-    std::vector<ControlDesc> controls;
     std::vector<BufferDesc> buffers;
     std::vector<SampleBankDesc> banks;
     std::vector<std::string> tags;  // embedded category tags (may be empty)
@@ -363,6 +349,8 @@ tzpl_SErr setInput(i64 nodeID, char const* portName, Region const& region,
                    std::span<f64 const> values, f64 rampTime = 0., FadeCurve curve = fadeLinear);
 tzpl_SErr setInputX(PortAddr dst, Region const& region, std::span<f64 const> values,
                     f64 xfadeTime, FadeCurve curve = fadeLinear);
+tzpl_SErr setInputX(i64 nodeID, char const* portName, Region const& region,
+                    std::span<f64 const> values, f64 xfadeTime, FadeCurve curve = fadeLinear);
 tzpl_SErr impulseInput(PortAddr dst, Region const& region, std::span<f64 const> values);
 tzpl_SErr impulseInput(i64 nodeID, char const* portName, Region const& region,
                        std::span<f64 const> values);
@@ -377,24 +365,12 @@ tzpl_SErr setInput(PortAddr inPort, int numValues, i64 const* values, f64 xfadeT
 // Shared input: one process-global table of continuously varying values
 // (mouse position in the reserved slots, free slots for user values). Write
 // from any non-RT thread; plugin graphs read it at audio rate via the
-// sharedIn ugen -- no command traffic, no scheduling. Unlike setControl,
+// sharedIn ugen -- no command traffic, no scheduling. Unlike setInput,
 // changes are NOT sample-accurately scheduled and are not bundled. See
 // tzpl_SharedInput in tzpl_plugin_abi.h for slot assignments.
 tzpl_SharedInput* sharedInput();
 tzpl_SErr setSharedInput(int slot, f32 value);
 f32 getSharedInput(int slot);
-
-// DEPRECATED compatibility forms (block-engine branch, removed in M5):
-// controls are inputs. controlID is the input port index (ControlDesc), the
-// name an input name. Values broadcast over the port; set at the bundle time.
-tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, f32 const* values);
-tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, f64 const* values);
-tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, i32 const* values);
-tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, i64 const* values);
-tzpl_SErr setControl(i64 nodeID, char const* controlName, int numValues, f32 const* values);
-tzpl_SErr setControl(i64 nodeID, char const* controlName, int numValues, f64 const* values);
-tzpl_SErr setControl(i64 nodeID, char const* controlName, int numValues, i32 const* values);
-tzpl_SErr setControl(i64 nodeID, char const* controlName, int numValues, i64 const* values);
 
 // Signal taps: RT -> NRT readback of a node outlet for meters/scopes.
 // tapOutlet is a bundled command (record between begin() and go()/sched()):
@@ -510,6 +486,9 @@ f32 tapPeak(Engine* e, i64 tapID);
 f32 tapRms(Engine* e, i64 tapID);
 // Channel count captured by the tap (scope frames are interleaved).
 int tapChans(Engine* e, i64 tapID);
+// Shape of the tapped outlet (all dims 0 for an unknown tap; the master
+// bus taps as a row).
+tzpl_Shape tapShape(Engine* e, i64 tapID);
 // Drain up to maxSamples pending scope samples into dst; returns the count.
 // Scope data is interleaved frames of tapChans() channels; drain in
 // multiples of the channel count to keep frame alignment across drains.
@@ -558,6 +537,8 @@ tzpl_SErr noteSetParamRange(i64 nodeID, int noteID, int first, int length,
 // (silo tasks). No bundle, no allocation.
 tzpl_SErr rtNoteOn(Silo* s, i64 nodeID, int noteID, int length, f32 const* params);
 tzpl_SErr rtNoteOff(Silo* s, i64 nodeID, int noteID);
+tzpl_SErr rtNoteSetParams(Silo* s, i64 nodeID, int noteID, int first, int length,
+                          f32 const* values, f64 rampTime = 0.);
 
 // buffers
 tzpl_SErr resizeBuffer(i64 nodeID, i64 bufID, int numChannels, i64 length);

@@ -23,6 +23,7 @@
 
 #include "tzpl_builtin_defs.hpp"
 #include "tzpl_node.hpp"
+#include "tzpl_shape.hpp"
 
 #include <cstring>
 #include <mutex>
@@ -94,8 +95,11 @@ std::unordered_map<std::string, Registered*>& registry() {
     return r;
 }
 
-char const* ensureDef(Engine* e, char const* prefix, int chans, bool gain) {
-    std::string name = std::string(prefix) + std::to_string(chans);
+// Named by shape: a row (or scalar) keeps the plain width ("_wire4"); a
+// higher-rank shape spells its dims ("_wire2x3").
+char const* ensureDef(Engine* e, char const* prefix, tzpl_Shape shape, bool gain) {
+    std::string name = std::string(prefix)
+        + (tzpl::rank(shape) <= 1 ? std::to_string(tzpl::chans(shape)) : tzpl::shapeString(shape));
 
     Registered* reg;
     {
@@ -105,7 +109,7 @@ char const* ensureDef(Engine* e, char const* prefix, int chans, bool gain) {
         if (it == r.end()) {
             reg = new Registered();
             reg->name = name;
-            tzpl_SignalType wide{tzpl::shapeRow(chans), tzpl_kF32, tzpl_audioRate};
+            tzpl_SignalType wide{shape, tzpl_kF32, tzpl_audioRate};
             tzpl_SignalType mono{tzpl::shapeRow(1), tzpl_kF32, tzpl_audioRate};
             reg->ins[0] = PortInfo{"in", wide};
             reg->ins[1] = PortInfo{"vol", mono, 1, {0., 1., 0., 0., tzpl_cwLinear, tzpl_ckContinuous}};
@@ -138,11 +142,19 @@ char const* ensureDef(Engine* e, char const* prefix, int chans, bool gain) {
 } // namespace
 
 char const* ensureWireDef(Engine* e, int chans) {
-    return ensureDef(e, "_wire", chans, /*gain=*/false);
+    return ensureDef(e, "_wire", tzpl::shapeRow(chans), /*gain=*/false);
 }
 
 char const* ensureGainDef(Engine* e, int chans) {
-    return ensureDef(e, "_gain", chans, /*gain=*/true);
+    return ensureDef(e, "_gain", tzpl::shapeRow(chans), /*gain=*/true);
+}
+
+char const* ensureWireDef(Engine* e, tzpl_Shape shape) {
+    return ensureDef(e, "_wire", shape, /*gain=*/false);
+}
+
+char const* ensureGainDef(Engine* e, tzpl_Shape shape) {
+    return ensureDef(e, "_gain", shape, /*gain=*/true);
 }
 
 } // namespace engine

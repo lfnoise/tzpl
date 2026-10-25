@@ -436,11 +436,11 @@ beep defSynthX(<span class="hl-str">"beep"</span>) await;      <span class="cmt"
             <table>
                 <tr><th>Component</th><th>What it is</th><th>Values</th></tr>
                 <tr><td><strong>rate</strong></td><td>When the expression is computed</td>
-                    <td><code>constant</code>, <code>init</code>, <code>reset</code>, <code>event</code>, <code>audio</code></td></tr>
+                    <td><code>constant</code>, <code>init</code>, <code>reset</code>, <code>block</code>, <code>audio</code></td></tr>
                 <tr><td><strong>element type</strong></td><td>The numeric type of each channel value</td>
                     <td><code>i32</code>, <code>i64</code>, <code>f32</code>, <code>f64</code></td></tr>
-                <tr><td><strong>channels</strong></td><td>How many parallel values it carries per sample</td>
-                    <td>a power of two: 1, 2, 4, 8, &hellip;</td></tr>
+                <tr><td><strong>shape</strong></td><td>How many parallel values (channels) it carries per sample, arranged in up to 4 dimensions</td>
+                    <td>any count: 1, 2, 3, &hellip;; or a matrix such as 2&times;3</td></tr>
             </table>
 
             <h3 id="rates">2.1 Signal rates</h3>
@@ -455,45 +455,37 @@ beep defSynthX(<span class="hl-str">"beep"</span>) await;      <span class="cmt"
                     <td><code>fs()</code>, <code>T()</code>, random values with <code>rate: Rate.init</code>, delay allocation</td></tr>
                 <tr><td><code>Rate.reset</code></td><td>Once per note-on (inside a voicer; once at init otherwise)</td>
                     <td>Per-note setup: sample bank lookups (<a href="#samplebanks">&sect;10</a>), per-note random values with <code>rate: Rate.reset</code></td></tr>
-                <tr><td><code>Rate.event</code></td><td>When a parameter or note parameter change arrives</td>
-                    <td><code>control(...)</code> and <code>noteParam(...)</code> values and math derived only from them</td></tr>
+                <tr><td><code>Rate.block</code></td><td>Once per block while its inputs hold still; every sample while any of them moves</td>
+                    <td>Math derived only from inputs (<code>control(...)</code>, <code>noteParam(...)</code>) and slower values. The compiler places it; you never declare it.</td></tr>
                 <tr><td><code>Rate.audio</code></td><td>Every sample</td>
-                    <td>Oscillators, filters, the <code>gate()</code> note parameter, anything downstream of an audio signal</td></tr>
+                    <td>Oscillators, filters, anything downstream of an audio signal</td></tr>
             </table>
 
-            <p><strong>Note parameters are event rate.</strong> A voice's
-            <code>noteParam(...)</code> values change only at note events &mdash; note-on,
-            and <code>noteSetParams</code> during the note &mdash; so math derived purely
-            from note parameters (a frequency-dependent filter coefficient, a velocity
-            curve) recomputes per voice when a note event arrives, not every sample. The
-            one exception is <code>gate()</code>: the gate stays <em>audio</em> rate
-            because it drives per-sample envelope and trigger idioms
-            (<code>adsr</code>, <code>tr</code>) whose edge detection needs sample
-            granularity &mdash; an event-rate trigger would be a held value rather than a
-            one-sample impulse. A consequence worth knowing: feedforward
-            <code>z1</code>-style state over a note parameter advances once per note
-            event (the same behaviour such state has over controls), while recursions
-            through a delay reader &mdash; <code>lag</code>, <code>onepole</code> &mdash;
-            stay audio rate and smooth per sample as always.</p>
+            <p><strong>Inputs are signals.</strong> A synth has no separate &ldquo;controls&rdquo;:
+            every parameter is an input port, and every input is a signal. An input nothing is
+            connected to holds a value (its spec's <code>init</code>, else 0) until you set, ramp, or
+            patch it (<a href="#controls">&sect;7</a>). Math that depends only on inputs and slower
+            values is a <em>parameter group</em>, placed at <code>block</code> rate: the compiled
+            synth recomputes it once per block when one of its source inputs has changed, skips it
+            when none has, and computes it every sample while a source is ramping or connected to a
+            moving signal. So a knob that sits still costs nothing, and the same synth can be driven
+            from an audio-rate signal with no recompile.</p>
 
-            <p><strong><code>eventToAudio(a)</code></strong> promotes an event-rate signal to
-            audio rate: a stepped audio signal that re-reads the latched event value every
-            sample. Use it when you want per-sample semantics over a control or note
-            parameter &mdash; most usefully for triggers:
-            <code>eventToAudio(c) tr</code> fires a genuine <em>one-sample</em> impulse on
-            the sample a change of <code>c</code> lands, whereas <code>c tr</code> (all at
-            event rate) is a <em>held</em> trigger &mdash; 1 from a zero-to-positive change
-            until the next event over <code>c</code> clears it. It has no effect on signals
-            of any other rate: constants, init-, reset-, and audio-rate inputs pass through
-            unchanged.</p>
+            <p>Note parameters are columns of the voiced synth's <code>notes</code> input
+            (<a href="#voicer">&sect;12</a>), so they behave the same way: math derived purely from
+            note parameters (a frequency-dependent filter coefficient, a velocity curve) is
+            recomputed per voice when the note's parameters change, not every sample.
+            <code>gate()</code> is column 0 of the same input, set by the engine at note-on and
+            note-off; its edges land on the exact sample, so <code>adsr</code> and <code>tr</code>
+            over it see a genuine one-sample edge.</p>
 
             <p><strong>Rate propagation.</strong> The rate of a derived expression is the
-            <em>maximum</em> of its inputs' rates. Multiplying an audio-rate oscillator by an event-rate
+            <em>maximum</em> of its inputs' rates. Multiplying an audio-rate oscillator by a
             control gives an audio-rate result; adding two constants gives a constant that never reaches
             the generated code at all. You do not choose rates for computed expressions &mdash; the
             compiler infers them, and its rewrite passes actively factor low-rate subexpressions out of
             audio-rate code so that, e.g., <code>freq * <span class="hl-num">2</span> * pi * T()</code>
-            driven by an event-rate control is recomputed only when the control changes.</p>
+            driven by a control is recomputed only when the control changes.</p>
 
             <p>The places you <em>do</em> state a rate are source nodes whose rate is a free choice
             &mdash; the random generators (<a href="#random">&sect;8</a>) take a
@@ -503,7 +495,7 @@ beep defSynthX(<span class="hl-str">"beep"</span>) await;      <span class="cmt"
 
             <p><code>Rate</code> values are ordered (<code>&lt;</code>, <code>&lt;=</code>,
             <code>min</code>, <code>max</code> are defined on them) with
-            <code>constant &lt; init &lt; reset &lt; event &lt; audio</code>.</p>
+            <code>constant &lt; init &lt; reset &lt; block &lt; audio</code>.</p>
 
             <h3 id="numtypes">2.2 Element types</h3>
 
@@ -556,22 +548,24 @@ c &lt;- (c1 + t) i32 % n;</code></pre>
             is a 2-channel signal (two sines computed in lockstep). Multichannel expansion is how you get
             stereo, oscillator banks, and SIMD-friendly parallelism.</p>
 
-            <p>Channel counts are always <strong>rounded up to a power of two</strong>
-            (<code>asChans(n) = max(n,1) bitCeil</code>): a 3-element vector becomes a 4-channel signal
-            (the 4th channel duplicates cyclically). This lets generated code index channels with a
-            bit-mask instead of a modulo, and makes all channel counts broadcast-compatible. Functions
-            that create multichannel signals &mdash; <code>vec</code>, <code>fill</code>,
-            <code>control</code>, the random generators, <code>take</code>, <code>stutter</code>,
-            &hellip; &mdash; apply this rounding to their channel argument.</p>
+            <p>Channel counts are exact: a 3-element vector is a 3-channel signal. A signal may also
+            have a <strong>shape</strong> of up to 4 dimensions (a <code>Shape</code>, row-major, the
+            last dimension varying fastest); channel <code>c</code> is the row-major flattening, and a
+            plain channel count is a 1-dimensional shape. <code>shape([<span class="hl-num">2</span>, <span class="hl-num">3</span>])</code>
+            (or <code>matrix(<span class="hl-num">2</span>, <span class="hl-num">3</span>)</code>) is a 2&times;3
+            shape of 6 channels. The functions that create multichannel signals &mdash;
+            <code>inlet</code>, <code>control</code>, <code>fill</code>, &hellip; &mdash; take either an
+            <code>Int</code> channel count or a <code>Shape</code>.</p>
 
             <h3 id="broadcast">2.4 Channel broadcasting</h3>
 
-            <p>When a binary operation combines signals of different widths, the result has
-            <code>max(a.chans, b.chans)</code> channels, and the narrower signal's channels are
-            <strong>repeated cyclically</strong>: channel <code>i</code> of the result reads channel
-            <code>i mod chans</code> of each input. Because all widths are powers of two, this is always
-            well-defined &mdash; a 2-channel signal against an 8-channel one repeats its pair four
-            times.</p>
+            <p>When a binary operation combines signals of different shapes, each dimension of the
+            result is the <strong>least common multiple</strong> of the inputs' sizes in that
+            dimension, and each input is <strong>repeated cyclically</strong> to fill it: along each
+            dimension, index <code>i</code> of the result reads index <code>i mod size</code> of the
+            input. A 2-channel signal against an 8-channel one repeats its pair four times; a
+            2-channel signal against a 3-channel one gives 6 channels, each input cycling. A
+            1&times;3 row against a 2&times;1 column gives a 2&times;3 matrix.</p>
 
 <pre><code><span class="cmt">-- scalar against stereo: the scalar applies to both channels</span>
 [<span class="hl-num">330.0</span>, <span class="hl-num">331.0</span>] sinosc * <span class="hl-num">0.2</span>              <span class="cmt">-- 2 chans</span>
@@ -630,8 +624,8 @@ c &lt;- (c1 + t) i32 % n;</code></pre>
                 <tr><th>Function</th><th>Description</th></tr>
                 <tr><td><code>asSignal(x)</code></td><td>Convert a scalar, array, or signal to <code>S</code>. Identity on signals.</td></tr>
                 <tr><td><code>scalar(x)</code></td><td>1-channel constant from a <code>Bool</code>/<code>Int</code>/<code>Fraction</code>/<code>Float</code>.</td></tr>
-                <tr><td><code>vec(v)</code></td><td>Multichannel constant from an array; width = <code>v length asChans</code>, elements repeat cyclically to fill.</td></tr>
-                <tr><td><code>fill(chans, x)</code></td><td>Constant with <code>x</code> replicated across <code>chans</code> channels.</td></tr>
+                <tr><td><code>vec(v)</code></td><td>Multichannel constant from an array; width = <code>v length</code>.</td></tr>
+                <tr><td><code>fill(chans, x)</code><br><code>fill(shape, x)</code></td><td>Constant with <code>x</code> replicated across <code>chans</code> channels, or across a <code>Shape</code>.</td></tr>
             </table>
 
             <p><code>Fraction</code> literals (e.g. <code>3/2</code> in contexts where the language
@@ -698,14 +692,14 @@ urand() &lt; prob          <span class="cmt">-- Bernoulli trigger (see coin)</sp
             <h2>5. Channel (Vector) Operations</h2>
 
             <p>These operate on the channel dimension itself: indexing, rearranging, and reducing.
-            Remember that channel counts round to powers of two, and indexing is cyclic
-            (<code>index &amp; (chans-1)</code>).</p>
+            Indexing is cyclic (<code>index mod chans</code>), over the flattened channels of a
+            shaped signal.</p>
 
             <table>
                 <tr><th>Function</th><th>Description</th></tr>
                 <tr><td><code>at(a, i)</code></td><td>Select channel <code>i</code> (a signal or constant; cyclic). 1-channel result per index channel.</td></tr>
                 <tr><td><code>put(a, i, v)</code></td><td>Replace channel <code>i</code> of <code>a</code> with <code>v</code>.</td></tr>
-                <tr><td><code>take(a, n)</code></td><td>First <code>n</code> channels (widened to a power of two, cyclic fill).</td></tr>
+                <tr><td><code>take(a, n)</code></td><td>First <code>n</code> channels (cyclic fill when <code>n</code> exceeds the width).</td></tr>
                 <tr><td><code>drop(a, n)</code></td><td>Drop the first <code>n</code> channels.</td></tr>
                 <tr><td><code>stride(a, n)</code></td><td>Every <code>n</code>th channel: channels 0, n, 2n, &hellip;</td></tr>
                 <tr><td><code>stutter(a, n)</code></td><td>Repeat each channel <code>n</code> times: <code>[a b] stutter(2)</code> &rarr; <code>[a a b b]</code>.</td></tr>
@@ -747,7 +741,7 @@ urand() &lt; prob          <span class="cmt">-- Bernoulli trigger (see coin)</sp
                 <tr><th>Function</th><th>Description</th></tr>
                 <tr><td><code>fs()</code></td><td>The sample rate, as an init-rate signal. Never hard-code 44100/48000 &mdash; graphs are compiled independent of the device rate.</td></tr>
                 <tr><td><code>T()</code></td><td>The sample duration, <code>1/fs()</code>. The natural increment for phase accumulators: <code>freq * T()</code> is cycles per sample.</td></tr>
-                <tr><td><code>inlet(typ, chans = 1, name = "in")</code></td><td>Declare an audio input port. <code>typ</code> is a <code>NumType</code> (usually <code>FLOAT32</code>). A synthdef with inlets is an effect: the engine patches other nodes' outputs into it with <code>connect</code>.</td></tr>
+                <tr><td><code>inlet(typ, chans = 1, name = "in")</code><br><code>inlet(typ, shape, name)</code></td><td>Declare an input port. <code>typ</code> is a <code>NumType</code> (usually <code>FLOAT32</code>). A synthdef with inlets is an effect: the engine patches other nodes' outputs into it with <code>connect</code>.</td></tr>
                 <tr><td><code>outlet(a, name = "out")</code></td><td>Declare an output port carrying <code>a</code>. Every synthdef needs at least one; multiple named outlets are allowed. The outlet's channel count is the signal's.</td></tr>
                 <tr><td><code>debug(input, label = "debug", period = 4096, consecutive = 1)</code></td><td>Periodically dump the signal's value(s) to stderr: every <code>period</code> samples, print the next <code>consecutive</code> samples of all channels with the absolute sample time and <code>label</code>. Returns its input unchanged, so it drops into a pipeline: <code>x debug(<span class="hl-str">"x"</span>, <span class="hl-num">1024</span>, <span class="hl-num">4</span>)</code>.</td></tr>
             </table>
@@ -766,21 +760,26 @@ urand() &lt; prob          <span class="cmt">-- Bernoulli trigger (see coin)</sp
         <div class="section" id="controls">
             <h2>7. Controls</h2>
 
-            <p>A <strong>control</strong> is a named, settable parameter of the synth. Controls are
-            <em>event-rate</em> sources: the engine delivers value changes as events, and only the
-            subgraph that depends on a changed control recomputes. Set them from Tzopilotl with the
-            <code>audio_engine</code> bridge &mdash; <code>setControl(nodeID, controlID, value)</code>,
-            where <code>controlID</code> is the control's index in declaration order &mdash; or let the
-            app's UI generate widgets from them &mdash; the control's spec and kind determine the widget
-            (see <a href="Live_Controls_and_Notebooks.html">Live Controls and Notebooks</a>).</p>
+            <p>A <strong>control</strong> is an input port that carries a <code>ControlSpec</code>:
+            an <code>f32</code> input like any <code>inlet</code>, plus the range, initial value and
+            widget kind a UI needs. Until something sets or connects it, it holds its spec's
+            <code>init</code>. Because it is an ordinary input it can be stepped, ramped, crossfaded,
+            fired as a one-sample impulse, or patched from another node's output at run time, and a
+            multichannel control can be set one element or one region at a time. Only the subgraph
+            that depends on a changed control recomputes (<a href="#rates">&sect;2.1</a>). Set them
+            from Tzopilotl with the <code>audio_engine</code> bridge &mdash;
+            <code>setInput(nodeID, <span class="hl-str">"cutoff"</span>, <span class="hl-num">800.0</span>)</code>,
+            addressed by name or by input index, with an optional ramp time &mdash; or let the app's UI
+            generate widgets from them &mdash; the control's spec and kind determine the widget (see
+            <a href="Live_Controls_and_Notebooks.html">Live Controls and Notebooks</a>).</p>
 
             <h3>Constructors</h3>
             <table>
                 <tr><th>Function</th><th>Kind</th><th>Description</th></tr>
-                <tr><td><code>control(name, spec, chans = 1)</code></td><td>continuous</td>
+                <tr><td><code>control(name, spec, chans = 1)</code><br><code>control(name, spec, shape)</code></td><td>continuous</td>
                     <td>Ranged value; UIs render a slider.</td></tr>
                 <tr><td><code>trigger(name, chans = 1)</code></td><td>trigger</td>
-                    <td>Momentary event (0..1, init 0). A nonzero arrival is a one-shot edge &mdash; retrigger an envelope, reset a phase. UIs render a button.</td></tr>
+                    <td>Momentary input (0..1, init 0). Fire it with <code>impulseInput</code>: the value lasts one sample, then the input returns to 0 &mdash; retrigger an envelope, reset a phase. UIs render a button.</td></tr>
                 <tr><td><code>toggle(name, init = 0.0, chans = 1)</code></td><td>boolean</td>
                     <td>Latched 0/1 state. UIs render a toggle.</td></tr>
                 <tr><td><code>choice(name, numChoices, init = 0, chans = 1)</code></td><td>select</td>
@@ -804,9 +803,10 @@ urand() &lt; prob          <span class="cmt">-- Bernoulli trigger (see coin)</sp
             receives; it shapes the widget.</p>
 
             <div class="note">
-                <strong>Smoothing.</strong> Control changes arrive as steps. For anything audible
-                (gains, frequencies, filter cutoffs), smooth the control with <code>lag</code> to avoid
-                zipper noise. This is the standard output-gain idiom used by the examples:
+                <strong>Smoothing.</strong> A plain <code>setInput</code> is a step. For anything audible
+                (gains, frequencies, filter cutoffs), either ramp the change
+                (<code>setInput(node, <span class="hl-str">"gain"</span>, <span class="hl-num">0.5</span>, <span class="hl-num">0.05</span>)</code>)
+                or smooth the control with <code>lag</code> in the graph to avoid zipper noise. This is the standard output-gain idiom used by the examples:
 <pre style="margin-bottom: 0;"><code><span class="hl-kw">fn</span> gainOutlet(x S) S {
     <span class="hl-kw">let</span> gain = control(<span class="hl-str">"gain"</span>,
         ControlSpec{<span class="hl-num">0.001</span>, <span class="hl-num">1.0</span>, <span class="hl-num">0.2</span>, ControlWarp.exponential}) lag(<span class="hl-num">0.1</span>);
@@ -816,7 +816,7 @@ urand() &lt; prob          <span class="cmt">-- Bernoulli trigger (see coin)</sp
 
             <h3 id="sharedin">Shared input: the mouse without messages</h3>
 
-            <p>A control change is a message: it is bundled, scheduled, and delivered to one node.
+            <p>An input change is a message: it is bundled, scheduled, and delivered to one node.
             For values that change continuously and matter to <em>every</em> playing synth &mdash; the
             mouse position &mdash; the engine keeps a small <strong>shared-input table</strong> instead:
             the app writes it in the background (~60&times; a second for the mouse), and any graph
@@ -850,8 +850,8 @@ urand() &lt; prob          <span class="cmt">-- Bernoulli trigger (see coin)</sp
             <p>From the language side, <code>setSharedInput(slot, value)</code> writes a free slot and
             <code>getSharedInput(slot)</code> reads one back (audio_engine module) &mdash; a lightweight
             channel for any continuously varying value that would otherwise be a stream of
-            <code>setControl</code> messages. Two things to keep in mind: shared-input changes are
-            <em>not</em> sample-accurately scheduled (use controls when timing must be exact), and the
+            <code>setInput</code> messages. Two things to keep in mind: shared-input changes are
+            <em>not</em> sample-accurately scheduled (use inputs when timing must be exact), and the
             raw value steps at the writer's update rate, so smooth it with <code>lag</code> as the
             mouse ugens do.</p>
 
@@ -1146,9 +1146,12 @@ loadSampleBank(<span class="hl-num">100</span>, <span class="hl-num">0</span>, [
 
             <ul>
                 <li><strong><code>noteParam(name, spec)</code></strong> declares a per-note parameter
-                inside the voice body. When a note starts, the note's parameter values are latched into
-                that voice.</li>
-                <li><strong><code>gate()</code></strong> reads the implicit per-note gate: 1 while the
+                inside the voice body. The compiled synth gets one input named <code>notes</code>, a
+                matrix with a row per voice; each note parameter is a column of it. When a note starts,
+                the engine writes the note's parameter values into its voice's row; parameters the note
+                does not give take their spec's <code>init</code>.</li>
+                <li><strong><code>gate()</code></strong> reads the implicit per-note gate (column 0 of
+                <code>notes</code>, written by the engine): 1 while the
                 note is held, 0 after note-off. Drive an <code>asr</code>/<code>adsr</code> release from
                 it, or ignore it for one-shot percussive voices (use <code>gate() tr</code> as a
                 trigger and let a <code>decay2</code> ring out).</li>
@@ -1157,7 +1160,9 @@ loadSampleBank(<span class="hl-num">100</span>, <span class="hl-num">0</span>, [
             <p>Trigger notes from Tzopilotl with the <code>audio_engine</code> bridge:
             <code>noteOn(nodeID, noteID, params)</code> and <code>noteOff(nodeID, noteID)</code>.
             The <code>params</code> array matches <strong>the order in which <code>noteParam</code> is
-            declared in the voice body</strong>; <code>gate</code> is implicit and always last. The
+            declared in the voice body</strong>; <code>gate</code> is not part of it &mdash; the engine
+            sets it. <code>noteSetParams(nodeID, noteID, first, values, rampTime)</code> changes a
+            sounding note's parameters from index <code>first</code>, stepped or ramped. The
             music libraries' player and the app's piano roll drive voicers the same way.</p>
 
 <pre><code><span class="hl-kw">import</span> synthdef.*;
@@ -1179,9 +1184,9 @@ loadSampleBank(<span class="hl-num">100</span>, <span class="hl-num">0</span>, [
 <span class="hl-kw">fn</span> organ() S = voicer(<span class="hl-num">8</span>, organVoice) sum outlet;
 organ defSynthX(<span class="hl-str">"organ"</span>) await;
 
-<span class="cmt">-- engine side: params are [freq, amp, gate] -- declaration order, gate last</span>
+<span class="cmt">-- engine side: params are [freq, amp] -- declaration order; the engine sets gate</span>
 newNode(<span class="hl-str">"organ"</span>, <span class="hl-num">100</span>); connect(<span class="hl-num">100</span>, <span class="hl-num">0</span>, <span class="hl-num">0</span>, <span class="hl-num">0</span>);
-noteOn(<span class="hl-num">100</span>, <span class="hl-num">1</span>, [<span class="hl-num">261.6</span>, <span class="hl-num">0.5</span>, <span class="hl-num">1.0</span>]);
+noteOn(<span class="hl-num">100</span>, <span class="hl-num">1</span>, [<span class="hl-num">261.6</span>, <span class="hl-num">0.5</span>]);
 noteOff(<span class="hl-num">100</span>, <span class="hl-num">1</span>);</code></pre>
 
             <div class="note">
@@ -1678,8 +1683,8 @@ fillBuffer(<span class="hl-num">100</span>, <span class="hl-num">0</span>, <span
             </table>
 
             <p>All parameters are modulatable signals; the coefficient math runs at the rate of its
-            inputs, so filters driven by event-rate controls recompute coefficients only on control
-            changes.</p>
+            inputs, so filters driven by controls recompute coefficients only when a control
+            changes (and every sample while one ramps or is patched to a moving signal).</p>
 
             <h3>Filter unit generators (12 dB/8ve)</h3>
             <table>

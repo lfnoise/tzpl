@@ -685,39 +685,17 @@ void listNodeDefs(Engine* e, std::vector<std::string>& names) {
     }
 }
 
-bool listDefControls(Engine* e, const char* defName, std::vector<ControlDesc>& out) {
-    u64 hash = hash64(defName, kHashStart);
-    u32 bin = hash & kHashMask;
-
-    // Copy while holding the lock so the def can't be released underneath us.
-    std::lock_guard<std::mutex> lck(e->nrt_lock_);
-    NodeDef* def = e->defs_[bin];
-    while (def) {
-        if (def->hash_ == hash && strcmp(def->info_.name, defName) == 0) break;
-        def = def->next_;
-    }
-    if (!def) return false;
-    for (int i = 0; i < def->info_.num_ins; ++i) {
-        PortInfo const& p = def->info_.ins[i];
-        if (!p.hasSpec) continue;
-        out.push_back({p.name ? p.name : "", (i64)i, p.spec, p.type});
-    }
-    return true;
-}
-
 // Copy a def's full metadata. Caller must hold e->nrt_lock_.
 static void copyDefDesc(NodeDef const* def, DefDesc& out) {
     NodeDefInfo const& info = def->info_;
     out.name = info.name;
     out.ins.clear();
     out.outs.clear();
-    out.controls.clear();
     out.buffers.clear();
     out.banks.clear();
     for (int i = 0; i < info.num_ins; ++i) {
         PortInfo const& p = info.ins[i];
         out.ins.push_back({p.name ? p.name : "", p.type, p.hasSpec != 0, p.spec});
-        if (p.hasSpec) out.controls.push_back({p.name ? p.name : "", (i64)i, p.spec, p.type});
     }
     for (int i = 0; i < info.num_outs; ++i) {
         PortInfo const& p = info.outs[i];
@@ -889,7 +867,6 @@ static void defDescFromSynthDef(tzpl_SynthDef const& def,
     for (int i = 0; i < def.num_ins; ++i) {
         tzpl_PortDef const& p = def.ins[i];
         out.ins.push_back({p.name ? p.name : "", p.type, p.hasSpec != 0, p.spec});
-        if (p.hasSpec) out.controls.push_back({p.name ? p.name : "", (i64)i, p.spec, p.type});
     }
     for (int i = 0; i < def.num_outs; ++i) {
         tzpl_PortDef const& p = def.outs[i];
@@ -1570,6 +1547,7 @@ static tzpl_SErr applyTapOutlet(Engine* e, Silo* s, CommandList& out,
         slot->ownerSilo = ownerSilo;
         slot->chans = std::min(port->chans_, TapSlot::kMaxScopeChans);
         if (slot->chans < 1) slot->chans = 1;
+        slot->shape = port->type_.shape;
     }
     out.add(new TapOutletCmd(e, nodeID, outlet, tapID, slot));
     return tzpl_errNone;
@@ -1604,6 +1582,7 @@ static tzpl_SErr applyTapMaster(Engine* e, Silo* s, CommandList& out,
         slot->chans = std::min(e->streamParams_.channels,
                                TapSlot::kMaxScopeChans);
         if (slot->chans < 1) slot->chans = 1;
+        slot->shape = tzpl::shapeRow(slot->chans);
     }
     out.add(new TapMasterCmd(e, tapID, slot));
     return tzpl_errNone;
@@ -2138,6 +2117,12 @@ tzpl_SErr setInputX(PortAddr dst, Region const& region, std::span<f64 const> val
                           xfadeTime, curve, SetMode::fade);
 }
 
+tzpl_SErr setInputX(i64 nodeID, char const* portName, Region const& region,
+                    std::span<f64 const> values, f64 xfadeTime, FadeCurve curve) {
+    return recordSetInput({nodeID, 0}, portName, region, {values.begin(), values.end()},
+                          xfadeTime, curve, SetMode::fade);
+}
+
 tzpl_SErr impulseInput(PortAddr dst, Region const& region, std::span<f64 const> values) {
     return recordSetInput(dst, nullptr, region, {values.begin(), values.end()},
                           0., fadeLinear, SetMode::impulse);
@@ -2168,39 +2153,6 @@ tzpl_SErr setInput(PortAddr dst, int numValues, i32 const* values, f64 xfadeTime
 }
 tzpl_SErr setInput(PortAddr dst, int numValues, i64 const* values, f64 xfadeTime, FadeCurve curve) {
     return setInputFlat(dst, numValues, values, xfadeTime, curve);
-}
-
-tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, f32 const* values) {
-    return recordSetInput({nodeID, (int)controlID}, nullptr, Region::all(),
-                          toF64(numValues, values), 0., fadeLinear, SetMode::set);
-}
-tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, f64 const* values) {
-    return recordSetInput({nodeID, (int)controlID}, nullptr, Region::all(),
-                          toF64(numValues, values), 0., fadeLinear, SetMode::set);
-}
-tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, i32 const* values) {
-    return recordSetInput({nodeID, (int)controlID}, nullptr, Region::all(),
-                          toF64(numValues, values), 0., fadeLinear, SetMode::set);
-}
-tzpl_SErr setControl(i64 nodeID, i64 controlID, int numValues, i64 const* values) {
-    return recordSetInput({nodeID, (int)controlID}, nullptr, Region::all(),
-                          toF64(numValues, values), 0., fadeLinear, SetMode::set);
-}
-tzpl_SErr setControl(i64 nodeID, char const* name, int numValues, f32 const* values) {
-    return recordSetInput({nodeID, 0}, name, Region::all(), toF64(numValues, values),
-                          0., fadeLinear, SetMode::set);
-}
-tzpl_SErr setControl(i64 nodeID, char const* name, int numValues, f64 const* values) {
-    return recordSetInput({nodeID, 0}, name, Region::all(), toF64(numValues, values),
-                          0., fadeLinear, SetMode::set);
-}
-tzpl_SErr setControl(i64 nodeID, char const* name, int numValues, i32 const* values) {
-    return recordSetInput({nodeID, 0}, name, Region::all(), toF64(numValues, values),
-                          0., fadeLinear, SetMode::set);
-}
-tzpl_SErr setControl(i64 nodeID, char const* name, int numValues, i64 const* values) {
-    return recordSetInput({nodeID, 0}, name, Region::all(), toF64(numValues, values),
-                          0., fadeLinear, SetMode::set);
 }
 
 tzpl_SErr tapOutlet(i64 nodeID, int outlet, i64 tapID, int mode,
@@ -2445,6 +2397,14 @@ int tapChans(Engine* e, i64 tapID) {
     return it == e->taps_.end() ? 0 : it->second->chans;
 }
 
+tzpl_Shape tapShape(Engine* e, i64 tapID) {
+    tzpl_Shape none{{0, 0, 0, 0}};
+    if (!e) return none;
+    std::lock_guard<std::mutex> lck(e->nrt_lock_);
+    auto it = e->taps_.find(tapID);
+    return it == e->taps_.end() ? none : it->second->shape;
+}
+
 int tapDrain(Engine* e, i64 tapID, f32* dst, int maxSamples) {
     if (!e) return 0;
     TapSlot* slot = nullptr;
@@ -2528,6 +2488,19 @@ tzpl_SErr rtNoteOff(Silo* s, i64 nodeID, int noteID) {
     Node* node = s->rt_getNode(nodeID);
     if (!node) return tzpl_errNodeNotFound;
     return s->rt_noteOff(node, noteID);
+}
+
+tzpl_SErr rtNoteSetParams(Silo* s, i64 nodeID, int noteID, int first, int length,
+                          f32 const* values, f64 rampTime) {
+    Node* node = s->rt_getNode(nodeID);
+    if (!node) return tzpl_errNodeNotFound;
+    i64 ramp = rampTime > 0.
+        ? std::max((i64)1, (i64)(rampTime * s->engine_->streamParams_.sampleRate)) : 0;
+    for (int i = 0; i < length; ++i) {
+        tzpl_SErr err = s->rt_noteSetParam(node, noteID, first + i, values[i], ramp);
+        if (err != tzpl_errNone) return err;
+    }
+    return tzpl_errNone;
 }
 
 // -- Buffer commands --

@@ -376,9 +376,9 @@ fn granulator(x S, grainRate AsSignal = 12.0, spread AsSignal = 0.25,
 ---------------------------------------------------------------------------
 -- Vocal formant filter
 
--- four formants (F1..F4) per vowel: a, e, i, o, u (tenor voice data;
--- four rather than five so the formant bank keeps a power-of-two
--- channel count)
+-- four formants (F1..F4) per vowel: a, e, i, o, u (tenor voice data). Four
+-- dates from when channel counts were rounded to powers of two; any count
+-- works now, and four is kept so the effect sounds as it always has.
 let kVowelFreqs = [
 	[650.0, 1080.0, 2650.0, 2900.0],
 	[400.0, 1700.0, 2600.0, 3200.0],

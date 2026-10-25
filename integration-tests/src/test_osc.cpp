@@ -178,8 +178,8 @@ static void test_local_dispatch() {
     engine::freeEngine(eng);
 }
 
-static void test_setcontrol_by_name_dispatch() {
-    std::print("Test: /engine/setControl accepts int and string control arg\n");
+static void test_setinput_by_name_dispatch() {
+    std::print("Test: /engine/setInput & co. accept an int or string input arg\n");
 
     engine::Engine* eng = makeTestEngine();
 
@@ -191,27 +191,37 @@ static void test_setcontrol_by_name_dispatch() {
     engine::newNode("sinosc", 700);
     engine::go(0);
 
-    // String control arg selects the by-name overload. The built-in sinosc
-    // def has no controls, so the set aborts at submit (errControlNotFound);
-    // the point here is that the string form parses and dispatches -- before
-    // the by-name overload existed this message would throw in AsInt32.
+    // A string input arg selects addressing by name. The built-in sinosc
+    // def has no input "nosuch", so those sets abort at submit
+    // (errInputOutOfRange); the point is that every form parses and
+    // dispatches.
     osc::SenderInfo local{"127.0.0.1", 0};
     char buffer[256];
-    {
+    auto send = [&](auto build) {
         ::osc::OutboundPacketStream p(buffer, sizeof(buffer));
-        p << ::osc::BeginMessage("/engine/setControl")
-          << (::osc::int32)700 << "freq" << 0.5f << ::osc::EndMessage;
+        build(p);
         dispatcher.dispatch(p.Data(), static_cast<int>(p.Size()), local);
-    }
-    check(true, "by-name setControl dispatched without crash");
-
-    {
-        ::osc::OutboundPacketStream p(buffer, sizeof(buffer));
-        p << ::osc::BeginMessage("/engine/setControl")
-          << (::osc::int32)700 << (::osc::int32)0 << 0.5f << ::osc::EndMessage;
-        dispatcher.dispatch(p.Data(), static_cast<int>(p.Size()), local);
-    }
-    check(true, "by-index setControl still dispatches");
+    };
+    send([](auto& p) { p << ::osc::BeginMessage("/engine/setInput")
+                         << (::osc::int32)700 << "nosuch" << 0.5f << ::osc::EndMessage; });
+    send([](auto& p) { p << ::osc::BeginMessage("/engine/setInput")
+                         << (::osc::int32)700 << (::osc::int32)0 << 440.f << ::osc::EndMessage; });
+    send([](auto& p) { p << ::osc::BeginMessage("/engine/setInputAt")
+                         << (::osc::int32)700 << (::osc::int32)0 << (::osc::int32)0 << 330.f
+                         << ::osc::EndMessage; });
+    send([](auto& p) { p << ::osc::BeginMessage("/engine/setInputRamp")
+                         << (::osc::int32)700 << (::osc::int32)0 << 0.1f << (::osc::int32)0
+                         << 220.f << ::osc::EndMessage; });
+    send([](auto& p) { p << ::osc::BeginMessage("/engine/setInputX")
+                         << (::osc::int32)700 << "nosuch" << 110.f << 0.1f << (::osc::int32)0
+                         << ::osc::EndMessage; });
+    send([](auto& p) { p << ::osc::BeginMessage("/engine/impulseInputAt")
+                         << (::osc::int32)700 << (::osc::int32)0 << (::osc::int32)0 << 1.f
+                         << ::osc::EndMessage; });
+    send([](auto& p) { p << ::osc::BeginMessage("/engine/noteSetParamsRamp")
+                         << (::osc::int32)700 << (::osc::int32)1 << (::osc::int32)0 << 0.2f
+                         << 0.5f << ::osc::EndMessage; });
+    check(true, "input forms dispatched without crash");
 
     engine::freeEngine(eng);
 }
@@ -621,7 +631,7 @@ int main() {
     test_client_send();
     test_engine_commands();
     test_local_dispatch();
-    test_setcontrol_by_name_dispatch();
+    test_setinput_by_name_dispatch();
     test_ffi_registration();
 
     std::print("\n--- VM OSC Handler Tests ---\n\n");

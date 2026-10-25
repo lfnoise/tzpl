@@ -467,18 +467,26 @@ masterSpectrum(<span class="str">"spec"</span>);</code></pre>
 
 <pre><code><span class="kw">let</span> cutoff = slider(<span class="str">"cutoff"</span>, <span class="typ">ControlSpec</span> { lo: <span class="num">20.0</span>, hi: <span class="num">20000.0</span>, init: <span class="num">440.0</span>, warp: <span class="typ">ControlWarp</span>.exponential });
 
-<span class="cmt">-- FAST PATH: drive an engine control directly. The GUI thread sends</span>
-<span class="cmt">-- setControl without entering the VM, so the slider keeps working at</span>
-<span class="cmt">-- full rate even while a long eval (say, a synthdef compile) runs.</span>
-cutoff bindControl(node, <span class="str">"cutoff"</span>);
+<span class="cmt">-- FAST PATH: drive a synth input directly. The slider sets the input</span>
+<span class="cmt">-- without going through your code, so it keeps working at full rate</span>
+<span class="cmt">-- even while a long eval (say, a synthdef compile) runs.</span>
+cutoff bindInput(node, <span class="str">"cutoff"</span>);
 
 <span class="cmt">-- FLEXIBLE PATH: a callback, for logic (sequencing, bookkeeping, math).</span>
 <span class="cmt">-- Coalesced: fires with the LATEST value at most once per GUI frame.</span>
 cutoff onChange(<span class="kw">fn</span>(v <span class="typ">Float</span>) <span class="typ">Void</span> { <span class="str">"cutoff -&gt; %^"</span> fmt(v) println; });</code></pre>
 
-<p><code>bindControl</code> resolves the control <em>by name</em> against the node's synthdef and returns an <code>audio_engine</code> error code (0&nbsp;=&nbsp;ok; a wrong name prints <code>errControlNotFound</code> to the console). For an XY pad, bind each axis: <code>bindControl</code> drives X and <code>bindControlY</code> drives Y; <code>onChangeXY</code> receives both values. A range slider works the same way: <code>bindControl</code> drives the lo end, <code>bindControlY</code> the hi end, and <code>onChangeRange</code> receives <code>(lo, hi)</code>.</p>
+<p><code>bindInput</code> resolves the input <em>by name</em> against the node's synthdef and returns an <code>audio_engine</code> error code (0&nbsp;=&nbsp;ok; nonzero for a name the def doesn't have). Any input can be bound, not only the def's declared controls. For an XY pad, bind each axis: <code>bindInput</code> drives X and <code>bindInputY</code> drives Y; <code>onChangeXY</code> receives both values. A range slider works the same way: <code>bindInput</code> drives the lo end, <code>bindInputY</code> the hi end, and <code>onChangeRange</code> receives <code>(lo, hi)</code>.</p>
 
-<div class="tip"><p>Prefer <code>bindControl</code> for anything that shapes sound in real time. Use <code>onChange</code> when you need language-side logic. If an eval holds the VM busy, fast-path bindings keep sounding; callbacks queue their latest value and fire when the VM frees up.</p></div>
+<p>On a multichannel input, the optional <code>element</code> argument picks one element (a channel, counted row-major for a matrix-shaped input); the default, <code>-1</code>, drives the whole input with the widget's value(s) repeated across it. So one xy pad can steer two elements of the same input:</p>
+
+<pre><code><span class="cmt">-- "pos" is a 2-channel input: x drives element 0, y drives element 1</span>
+<span class="kw">let</span> pad = xy(<span class="str">"pos"</span>, <span class="typ">ControlSpec</span> { lo: <span class="num">0.0</span>, hi: <span class="num">1.0</span>, init: <span class="num">0.5</span>, warp: <span class="typ">ControlWarp</span>.linear },
+                     <span class="typ">ControlSpec</span> { lo: <span class="num">0.0</span>, hi: <span class="num">1.0</span>, init: <span class="num">0.5</span>, warp: <span class="typ">ControlWarp</span>.linear });
+pad bindInput(node, <span class="str">"pos"</span>, <span class="num">0</span>);
+pad bindInputY(node, <span class="str">"pos"</span>, <span class="num">1</span>);</code></pre>
+
+<div class="tip"><p>Prefer <code>bindInput</code> for anything that shapes sound in real time. Use <code>onChange</code> when you need language-side logic. If an eval holds the VM busy, fast-path bindings keep sounding; callbacks queue their latest value and fire when the VM frees up.</p></div>
 
 <p>When a node is freed (<code>stop(node)</code>, <code>freeNode</code>, <code>freeAllNodes</code>), widgets bound to it are automatically <strong>unbound</strong>: they stay on screen with their values but drive nothing until code rebinds them (e.g. re-running the cell after <code>play</code>ing the synth again). <code>onChange</code> callbacks are untouched &mdash; they're yours.</p>
 
@@ -542,7 +550,7 @@ cutoff onChange(<span class="kw">fn</span>(v <span class="typ">Float</span>) <sp
 <!-- -------------------------------- -->
 <h3 id="ui-derive">3.4 Widgets from Synthdefs</h3>
 
-<p>Compiled synthdefs carry each declared control's name and <code>ControlSpec</code>. The <code>ui</code> module can materialize widgets directly from them:</p>
+<p>Compiled synthdefs carry each declared control's name and <code>ControlSpec</code> (a control is an input with a spec). The <code>ui</code> module can materialize widgets directly from them; a multichannel control becomes a multislider (or a row of buttons, for toggles and triggers):</p>
 
 <pre><code><span class="cmt">-- One widget, everything (name, range, warp, init, binding) from the def:</span>
 <span class="kw">let</span> c = control(node, <span class="str">"cutoff"</span>);
@@ -605,7 +613,7 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
 <tr><th>Function</th><th>Description</th></tr>
 <tr><td><code>panel(name String) Void</code> / <code>currentPanel() String</code></td><td>set / read the target panel for subsequent constructors</td></tr>
 <tr><td><code>slider(name, spec) Widget</code><br><code>slider(name, lo, hi, init) Widget</code></td><td>slider (ControlSpec / linear form)</td></tr>
-<tr><td><code>range(name, spec) Widget</code><br><code>range(name, lo, hi, initLo, initHi) Widget</code></td><td>range slider (ControlSpec / linear form); <code>value</code>/<code>valueY</code> read the ends, <code>bindControl</code>/<code>bindControlY</code> drive them</td></tr>
+<tr><td><code>range(name, spec) Widget</code><br><code>range(name, lo, hi, initLo, initHi) Widget</code></td><td>range slider (ControlSpec / linear form); <code>value</code>/<code>valueY</code> read the ends, <code>bindInput</code>/<code>bindInputY</code> drive them</td></tr>
 <tr><td><code>number(name, init) Widget</code></td><td>number box</td></tr>
 <tr><td><code>button(name) Widget</code></td><td>momentary gate button</td></tr>
 <tr><td><code>toggle(name, init = false) Widget</code></td><td>checkbox</td></tr>
@@ -616,8 +624,8 @@ panel(<span class="str">""</span>);               <span class="cmt">-- back to t
 <tr><td><code>masterMeter(name) Widget</code><br><code>masterScope(name) Widget</code><br><code>masterSpectrum(name) Widget</code></td><td>the same three displays on the master output bus (post-limiter, post-gain) rather than a node outlet</td></tr>
 <tr><td><code>plot(name, data [Float]) Widget</code> / <code>setData(w, data)</code></td><td>static plot / replace its data</td></tr>
 <tr><td><code>waveform(name, node, buf) Widget</code></td><td>overview of the file loaded into a buffer slot</td></tr>
-<tr><td><code>bindControl(w, node, control String, silo = 0) Int</code></td><td>fast-path engine binding, by control name</td></tr>
-<tr><td><code>bindControlY(w, node, control String, silo = 0) Int</code></td><td>fast-path binding for an xy pad's Y axis</td></tr>
+<tr><td><code>bindInput(w, node, input String, element Int = -1, silo = 0) Int</code></td><td>fast-path engine binding, by input name; <code>element</code> picks one element of a multichannel input (<code>-1</code> = the whole input)</td></tr>
+<tr><td><code>bindInputY(w, node, input String, element Int = -1, silo = 0) Int</code></td><td>fast-path binding for an xy pad's Y axis (or a range slider's hi end)</td></tr>
 <tr><td><code>bindKey(w, key String)</code></td><td>keyboard binding for a button (momentary) or toggle (flip): <code>"a"</code>&ndash;<code>"z"</code>, <code>"0"</code>&ndash;<code>"9"</code>, <code>"space"</code>; <code>""</code> unbinds</td></tr>
 <tr><td><code>onChange(w, f (Float) Void)</code> / <code>onChangeXY(w, f (Float, Float) Void)</code> / <code>onChangeRange(w, f (Float, Float) Void)</code></td><td>coalesced value callback</td></tr>
 <tr><td><code>value(w) Float</code> / <code>valueY(w) Float</code> / <code>values(w) [Float]</code></td><td>read the widget</td></tr>

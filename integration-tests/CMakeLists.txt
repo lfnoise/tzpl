@@ -120,8 +120,10 @@ if(TARGET tzpl_nats_bridge)
         PRIVATE tzpl_clock_bridge
     )
 
+    # nats.x imports the stdlib (std.message, std.messageEncoding).
     target_compile_definitions(test_nats PRIVATE
         SCRIPTS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/scripts"
         MODULES_DIR="${CMAKE_SOURCE_DIR}/bridge/modules"
+        LANG_MODULES_DIR="${CMAKE_SOURCE_DIR}/lang/modules"
     )
 endif()

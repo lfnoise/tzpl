@@ -89,7 +89,7 @@ fn _cmdOnNode(c NoteCmd, node Int) EngineCmd {
     match (c) {
         noteOn(n, id, ps): EngineCmd.noteOn(node, id, ps);
         noteOff(n, id): EngineCmd.noteOff(node, id);
-        noteSetParams(n, id, first, ps): EngineCmd.noteSetParams(node, id, first, ps);
+        noteSetParams(n, id, first, ps, ramp): EngineCmd.noteSetParams(node, id, first, ps, ramp);
     }
 }
 

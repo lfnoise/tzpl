@@ -29,6 +29,7 @@
 #include "tzpl_client_interface.hpp"
 #include <print>
 #include <cstring>
+#include <string>
 #include <vector>
 
 namespace osc {
@@ -284,56 +285,120 @@ static void handleReconnectOutput(const char*, const void* data, int size,
     autoGo();
 }
 
+// Input values. Every form takes the node, then the input as an int32 port
+// index or a string name (resolved against the node's def at bundle submit),
+// then its own arguments; trailing floats are the values, broadcast
+// cyclically over the addressed channels.
+//   /engine/setInput       node port value...
+//   /engine/setInputAt     node port first:int32 value...
+//   /engine/setInputRamp   node port rampTime:float curve:int32 value...
+//   /engine/setInputX      node port value xfadeTime:float curve:int32
+//   /engine/impulseInput   node port value...
+//   /engine/impulseInputAt node port first:int32 value...
+
+namespace {
+struct InputTarget {
+    engine::i64 nodeID = 0;
+    int port = 0;
+    std::string name;   // non-empty: address by name
+};
+
+using ArgIt = ::osc::ReceivedMessage::const_iterator;
+
+InputTarget readInputTarget(ArgIt& arg) {
+    InputTarget t;
+    t.nodeID = static_cast<engine::i64>(arg->AsInt32()); ++arg;
+    if (arg->IsString()) t.name = arg->AsString();
+    else t.port = arg->AsInt32();
+    ++arg;
+    return t;
+}
+
+std::vector<engine::f64> readValues(ArgIt arg, ArgIt end) {
+    std::vector<engine::f64> vals;
+    for (; arg != end; ++arg) vals.push_back(arg->AsFloat());
+    return vals;
+}
+
+void sendSetInput(OscDispatcher& d, InputTarget const& t, engine::Region const& region,
+                  std::vector<engine::f64> const& vals, engine::f64 time = 0.,
+                  engine::FadeCurve curve = engine::fadeLinear) {
+    autoBegin(d.engine());
+    if (t.name.empty()) engine::setInput({t.nodeID, t.port}, region, vals, time, curve);
+    else engine::setInput(t.nodeID, t.name.c_str(), region, vals, time, curve);
+    autoGo();
+}
+
+void sendImpulse(OscDispatcher& d, InputTarget const& t, engine::Region const& region,
+                 std::vector<engine::f64> const& vals) {
+    autoBegin(d.engine());
+    if (t.name.empty()) engine::impulseInput({t.nodeID, t.port}, region, vals);
+    else engine::impulseInput(t.nodeID, t.name.c_str(), region, vals);
+    autoGo();
+}
+} // namespace
+
 static void handleSetInput(const char*, const void* data, int size,
                             const SenderInfo&, OscDispatcher& d) {
     ::osc::ReceivedMessage msg(::osc::ReceivedPacket(static_cast<const char*>(data), size));
     auto arg = msg.ArgumentsBegin();
-    engine::PortAddr port{static_cast<engine::i64>(arg->AsInt32()), 0}; ++arg;
-    port.index = arg->AsInt32(); ++arg;
-    engine::f32 val = arg->AsFloat();
+    InputTarget t = readInputTarget(arg);
+    sendSetInput(d, t, engine::Region::all(), readValues(arg, msg.ArgumentsEnd()));
+}
 
-    autoBegin(d.engine());
-    engine::setInput(port, 1, &val);
-    autoGo();
+static void handleSetInputAt(const char*, const void* data, int size,
+                              const SenderInfo&, OscDispatcher& d) {
+    ::osc::ReceivedMessage msg(::osc::ReceivedPacket(static_cast<const char*>(data), size));
+    auto arg = msg.ArgumentsBegin();
+    InputTarget t = readInputTarget(arg);
+    int first = arg->AsInt32(); ++arg;
+    std::vector<engine::f64> vals = readValues(arg, msg.ArgumentsEnd());
+    sendSetInput(d, t, engine::Region::channels(first, (int)vals.size()), vals);
+}
+
+static void handleSetInputRamp(const char*, const void* data, int size,
+                                const SenderInfo&, OscDispatcher& d) {
+    ::osc::ReceivedMessage msg(::osc::ReceivedPacket(static_cast<const char*>(data), size));
+    auto arg = msg.ArgumentsBegin();
+    InputTarget t = readInputTarget(arg);
+    engine::f64 ramp = arg->AsFloat(); ++arg;
+    auto curve = static_cast<engine::FadeCurve>(arg->AsInt32()); ++arg;
+    sendSetInput(d, t, engine::Region::all(), readValues(arg, msg.ArgumentsEnd()), ramp, curve);
 }
 
 static void handleSetInputX(const char*, const void* data, int size,
                              const SenderInfo&, OscDispatcher& d) {
     ::osc::ReceivedMessage msg(::osc::ReceivedPacket(static_cast<const char*>(data), size));
     auto arg = msg.ArgumentsBegin();
-    engine::PortAddr port{static_cast<engine::i64>(arg->AsInt32()), 0}; ++arg;
-    port.index = arg->AsInt32(); ++arg;
-    engine::f32 val = arg->AsFloat(); ++arg;
-    float xfade = arg->AsFloat(); ++arg;
+    InputTarget t = readInputTarget(arg);
+    std::vector<engine::f64> vals{arg->AsFloat()}; ++arg;
+    engine::f64 xfade = arg->AsFloat(); ++arg;
     auto curve = static_cast<engine::FadeCurve>(arg->AsInt32());
 
     autoBegin(d.engine());
-    engine::setInput(port, 1, &val, xfade, curve);
+    if (t.name.empty())
+        engine::setInputX({t.nodeID, t.port}, engine::Region::all(), vals, xfade, curve);
+    else
+        engine::setInputX(t.nodeID, t.name.c_str(), engine::Region::all(), vals, xfade, curve);
     autoGo();
 }
 
-// The control argument is either an int32 controlID or a string control
-// name (resolved against the node's def at bundle submit).
-static void handleSetControl(const char*, const void* data, int size,
-                              const SenderInfo&, OscDispatcher& d) {
+static void handleImpulseInput(const char*, const void* data, int size,
+                                const SenderInfo&, OscDispatcher& d) {
     ::osc::ReceivedMessage msg(::osc::ReceivedPacket(static_cast<const char*>(data), size));
     auto arg = msg.ArgumentsBegin();
-    auto nodeID = static_cast<engine::i64>(arg->AsInt32()); ++arg;
-    if (arg->IsString()) {
-        const char* controlName = arg->AsString(); ++arg;
-        engine::f32 val = arg->AsFloat();
+    InputTarget t = readInputTarget(arg);
+    sendImpulse(d, t, engine::Region::all(), readValues(arg, msg.ArgumentsEnd()));
+}
 
-        autoBegin(d.engine());
-        engine::setControl(nodeID, controlName, 1, &val);
-        autoGo();
-        return;
-    }
-    auto controlID = static_cast<engine::i64>(arg->AsInt32()); ++arg;
-    engine::f32 val = arg->AsFloat();
-
-    autoBegin(d.engine());
-    engine::setControl(nodeID, controlID, 1, &val);
-    autoGo();
+static void handleImpulseInputAt(const char*, const void* data, int size,
+                                  const SenderInfo&, OscDispatcher& d) {
+    ::osc::ReceivedMessage msg(::osc::ReceivedPacket(static_cast<const char*>(data), size));
+    auto arg = msg.ArgumentsBegin();
+    InputTarget t = readInputTarget(arg);
+    int first = arg->AsInt32(); ++arg;
+    std::vector<engine::f64> vals = readValues(arg, msg.ArgumentsEnd());
+    sendImpulse(d, t, engine::Region::channels(first, (int)vals.size()), vals);
 }
 
 static void handleNoteOn(const char*, const void* data, int size,
@@ -379,13 +444,16 @@ static void handleAllNotesOff(const char*, const void* data, int size,
     autoGo();
 }
 
-static void handleNoteSetParams(const char*, const void* data, int size,
-                                 const SenderInfo&, OscDispatcher& d) {
+// /engine/noteSetParams     node noteID first value...
+// /engine/noteSetParamsRamp node noteID first rampTime:float value...
+static void noteSetParamsImpl(const void* data, int size, OscDispatcher& d, bool ramped) {
     ::osc::ReceivedMessage msg(::osc::ReceivedPacket(static_cast<const char*>(data), size));
     auto arg = msg.ArgumentsBegin();
     auto nodeID = static_cast<engine::i64>(arg->AsInt32()); ++arg;
     int noteID = arg->AsInt32(); ++arg;
     int first = arg->AsInt32(); ++arg;
+    engine::f64 ramp = 0.;
+    if (ramped) { ramp = arg->AsFloat(); ++arg; }
 
     std::vector<engine::f32> values;
     while (arg != msg.ArgumentsEnd()) {
@@ -396,8 +464,18 @@ static void handleNoteSetParams(const char*, const void* data, int size,
     autoBegin(d.engine());
     engine::noteSetParamRange(nodeID, noteID, first,
                                static_cast<int>(values.size()),
-                               values.empty() ? nullptr : values.data());
+                               values.empty() ? nullptr : values.data(), ramp);
     autoGo();
+}
+
+static void handleNoteSetParams(const char*, const void* data, int size,
+                                 const SenderInfo&, OscDispatcher& d) {
+    noteSetParamsImpl(data, size, d, false);
+}
+
+static void handleNoteSetParamsRamp(const char*, const void* data, int size,
+                                     const SenderInfo&, OscDispatcher& d) {
+    noteSetParamsImpl(data, size, d, true);
 }
 
 // ---------------------------------------------------------------------------
@@ -443,11 +521,15 @@ void registerEngineHandlers(OscDispatcher& dispatcher) {
     dispatcher.addHandler("/engine/reconnectOutput",  wrap(handleReconnectOutput));
     dispatcher.addHandler("/engine/setInput",         wrap(handleSetInput));
     dispatcher.addHandler("/engine/setInputX",        wrap(handleSetInputX));
-    dispatcher.addHandler("/engine/setControl",       wrap(handleSetControl));
+    dispatcher.addHandler("/engine/setInputAt",       wrap(handleSetInputAt));
+    dispatcher.addHandler("/engine/setInputRamp",     wrap(handleSetInputRamp));
+    dispatcher.addHandler("/engine/impulseInput",     wrap(handleImpulseInput));
+    dispatcher.addHandler("/engine/impulseInputAt",   wrap(handleImpulseInputAt));
     dispatcher.addHandler("/engine/noteOn",           wrap(handleNoteOn));
     dispatcher.addHandler("/engine/noteOff",          wrap(handleNoteOff));
     dispatcher.addHandler("/engine/allNotesOff",      wrap(handleAllNotesOff));
     dispatcher.addHandler("/engine/noteSetParams",    wrap(handleNoteSetParams));
+    dispatcher.addHandler("/engine/noteSetParamsRamp", wrap(handleNoteSetParamsRamp));
 }
 
 } // namespace osc

@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-# NoteParam event-rate sample accuracy: noteSetParams mid-note must take
-# effect on exactly its scheduled sample. The test synth emits its noteParam
-# as DC while gated (noteparam_event_rate.x); the WAV must be a step function
-# 0.25 -> 0.75 (at 0.04 s) -> 0.5 (at 0.07 s) with edges on the exact
-# scheduled samples. Guards the np_active flag path: generated
-# noteSetParams/noteSetParamRange set per-serial flags, the engine flags the
-# node, and processEvents recomputes the per-voice value the same sample.
+# Note parameters as `notes` input stages: noteSetParams mid-note must take
+# effect on exactly its scheduled sample, ramps must be linear from the
+# current value, and voices' rows must stay independent. The test synth
+# emits its noteParam as DC while gated (noteparam_event_rate.x); the WAV is
+# 0.25 -> 0.75 (at 0.04 s) -> 0.5 (at 0.07 s), plus a second voice's 0.125
+# from 0.09 s, then voice 1 ramps 0.5 -> 1.0 over 20 ms from 0.10 s.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP="${TZPL_BUILD_DIR:-$ROOT/build}/app/tzpl_app"
@@ -55,7 +54,14 @@ check('level before first change is 0.25', abs(mono[s1 - 1] - 0.25) < eps)
 check('0.75 lands exactly at sample %d' % s1, abs(mono[s1] - 0.75) < eps)
 check('level before second change is 0.75', abs(mono[s2 - 1] - 0.75) < eps)
 check('0.5 lands exactly at sample %d' % s2, abs(mono[s2] - 0.5) < eps)
-check('steady tail at 0.5', abs(mono[-1] - 0.5) < eps)
+s3, s4 = round(0.09 * fs), round(0.10 * fs)
+n = round(0.02 * fs)
+check('second voice adds exactly at sample %d' % s3,
+      abs(mono[s3 - 1] - 0.5) < eps and abs(mono[s3] - 0.625) < eps)
+check('ramp starts from the current value', abs(mono[s4] - 0.625) < 1e-3)
+check('ramp is linear (midpoint)', abs(mono[s4 + n // 2] - 0.875) < 1e-3)
+check('ramp ends at the target', abs(mono[s4 + n + 2] - 1.125) < eps)
+check('steady tail at 1.125 (both voices)', abs(mono[-1] - 1.125) < eps)
 
 print('NOTEPARAM EVENT TEST ' + ('PASS' if failures == 0 else 'FAIL'))
 sys.exit(1 if failures else 0)

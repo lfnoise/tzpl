@@ -17,12 +17,29 @@ import synthdef.*;
 
 -- Anchor: passthrough node whose inlet is the proxy's summing point and
 -- whose outlet is its stable output. The engine's native _wire<N> def
--- (audio_engine.wireDef), one per channel count, never compiled.
+-- (audio_engine.wireDef), one per shape, never compiled.
 fn anchorDefName(chans Int) String = "_wire" $ chans toString;
+fn anchorDefName(sh Shape) String = "_wire" $ shapeTag(sh);
 
 -- Monitor: anchor -> monitor -> Audio Out, with volume as a fadeable inlet.
 -- The engine's native _gain<N> def (audio_engine.gainDef).
 fn monitorDefName(chans Int) String = "_gain" $ chans toString;
+fn monitorDefName(sh Shape) String = "_gain" $ shapeTag(sh);
+
+-- How the engine's native defs name a shape: a row (or scalar) by its width
+-- ("_wire4"), a higher-rank shape by its dims ("_wire2x3").
+fn shapeTag(sh Shape) String {
+	let r = sh rank;
+	if (r <= 1) { return sh chans toString; }
+	var out = "";
+	var d = MAX_RANK - r;
+	while (d < MAX_RANK) {
+		if (out length > 0) { out = out $ "x"; }
+		out = out $ sh.dims[d] toString;
+		d = d + 1;
+	}
+	out
+}
 
 -- Source wrapper: one def name per proxy, hot-reloaded on every redefine.
 fn pxDefName(silo Int, serial Int) String =
@@ -115,8 +132,8 @@ fn _countRefsAnywhere(g SignalGraph) Int {
 
 -- Names of every control() / trigger() / toggle() / choice() in the graph,
 -- in declaration order, including those inside subgraphs. Used to filter
--- stored params before re-applying them to a new source node (setControl on
--- an unknown name would abort the whole swap bundle).
+-- stored params before re-applying them to a new source node (setInput on
+-- an unknown input name would abort the whole swap bundle).
 fn scanControls(g SignalGraph) [String] {
     var out = [String]();
     g _scanControlsInto(out);
@@ -189,7 +206,7 @@ fn nextQuant(now Float, q Float) Float =
 enum PxOp {
     opNewNode (String, Int),                    -- defName, nodeID
     opFreeNode Int,                             -- nodeID
-    opSetControl (Int, String, Float),          -- node, control name, value
+    opSetInputNamed (Int, String, Float),       -- node, input name, value
     opSetInput (Int, Int, Float),               -- node, port, value
     opSetInputX (Int, Int, Float, Float),       -- node, port, value, fade
     opConnect (Int, Int, Int, Int),             -- src, srcPort, dst, dstPort
@@ -209,7 +226,7 @@ fn swapOps(defName String, newID Int, oldSrc Int, anchor Int,
     var ops = [PxOp]();
     ops push!(PxOp.opNewNode(defName, newID));
     for (p : params) {
-        ops push!(PxOp.opSetControl(newID, p.0, p.1));
+        ops push!(PxOp.opSetInputNamed(newID, p.0, p.1));
     }
     for (w : refWires) {
         ops push!(PxOp.opConnect(w.0, 0, newID, w.1));
@@ -282,7 +299,7 @@ fn toString(op PxOp) String {
     match (op) {
         opNewNode(def, id): "newNode(%^, %^)" fmt(def, id);
         opFreeNode(id): "freeNode(%^)" fmt(id);
-        opSetControl(n, nm, v): "setControl(%^, %^, %^)" fmt(n, nm, v);
+        opSetInputNamed(n, nm, v): "setInput(%^, %^, %^)" fmt(n, nm, v);
         opSetInput(n, p, v): "setInput(%^, %^, %^)" fmt(n, p, v);
         opSetInputX(n, p, v, f): "setInputX(%^, %^, %^, %^)" fmt(n, p, v, f);
         opConnect(s, sp, d, dp): "connect(%^, %^, %^, %^)" fmt(s, sp, d, dp);

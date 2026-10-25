@@ -35,12 +35,22 @@ let bad = bundle()
 let again = bundle() newNode("sinosc", 503) freeNode(503);
 "sched err: %^ (expect 0)" fmt(again sched(0, 0, 4.0)) println;
 
--- setControl by name resolves against the node's def at submit. The built-in
--- sinosc def has no controls, so the name can't resolve and the bundle
--- aborts atomically (errControlNotFound); the node never appears.
+-- An input named in a bundle resolves against the node's def at submit.
+-- The built-in sinosc def has no input "nosuch", so the bundle aborts
+-- atomically (errInputOutOfRange); the node never appears.
 let byName = bundle()
 	newNode("sinosc", 504)
-	setControl(504, "freq", 330.0);
+	setInput(504, "nosuch", 330.0);
 println(byName toString);
-"by-name on def without controls err: %^ (expect nonzero)" fmt(byName go(0)) println;
+"by-name unknown input err: %^ (expect nonzero)" fmt(byName go(0)) println;
 "node 504 free after abort err: %^ (expect 0)" fmt(bundle() newNode("sinosc", 504) freeNode(504) go(0)) println;
+
+-- Every input command form prints as the builder call that makes it.
+let forms = bundle()
+	setInput(505, "freq", 220.0, 0.5)
+	setInputAt(505, 1, 2, [0.25, 0.5])
+	setInputBox(505, "levels", [0, 1], [2, 1], 1.0)
+	setInputX(505, 0, 440.0, 0.1, FadeCurve.fadeEqualPower)
+	impulseInputAt(505, "trig", 3, 1.0)
+	noteSetParams(505, 7, 0, [330.0], 0.25);
+println(forms toString);

@@ -2028,10 +2028,15 @@ osc.<span class="fn">removeHandler</span>(<span class="str">"/trigger"</span>);<
   <tr><td><code>/engine/disconnectOutput</code></td><td><code>i</code> nodeID, <code>i</code> port</td><td>Disconnect an output.</td></tr>
   <tr><td><code>/engine/disconnectNode</code></td><td><code>i</code> nodeID</td><td>Disconnect all connections of a node.</td></tr>
   <tr><td><code>/engine/reconnectOutput</code></td><td><code>i i i i f i</code></td><td>Reconnect an output to a new source with crossfade.</td></tr>
-  <tr><td><code>/engine/setInput</code></td><td><code>i</code> nodeID, <code>i</code> port, <code>f</code> value</td><td>Set an input to a constant value.</td></tr>
-  <tr><td><code>/engine/setInputX</code></td><td><code>i i f f i</code></td><td>Set input with crossfade.</td></tr>
-  <tr><td><code>/engine/setControl</code></td><td><code>i</code> nodeID, <code>i</code> controlID <i>or</i> <code>s</code> name, <code>f</code> value</td><td>Set a control parameter, addressed by controlID or by name (a string argument is resolved against the node's def at submit).</td></tr>
+  <tr><td><code>/engine/setInput</code></td><td><code>i</code> nodeID, <code>i</code> port <i>or</i> <code>s</code> name, <code>f...</code> values</td><td>Set an input to a value (one or more floats, repeated cyclically over the input's channels).</td></tr>
+  <tr><td><code>/engine/setInputAt</code></td><td><code>i</code> nodeID, port, <code>i</code> first, <code>f...</code> values</td><td>Set channels <code>first</code> .. <code>first+n-1</code> of an input (flat, row-major channel index).</td></tr>
+  <tr><td><code>/engine/setInputRamp</code></td><td><code>i</code> nodeID, port, <code>f</code> rampTime, <code>i</code> curve, <code>f...</code> values</td><td>Ramp an input from its current value over <code>rampTime</code> seconds.</td></tr>
+  <tr><td><code>/engine/setInputX</code></td><td><code>i</code> nodeID, port, <code>f</code> value, <code>f</code> xfadeTime, <code>i</code> curve</td><td>Crossfade an input to a value; a connected input fades its signal out and is left holding the value.</td></tr>
+  <tr><td><code>/engine/impulseInput</code></td><td><code>i</code> nodeID, port, <code>f...</code> values</td><td>Set an input to a value for one sample, then back (a trigger).</td></tr>
+  <tr><td><code>/engine/impulseInputAt</code></td><td><code>i</code> nodeID, port, <code>i</code> first, <code>f...</code> values</td><td>Impulse on channels <code>first</code> .. <code>first+n-1</code> only.</td></tr>
 </table>
+
+<p>Every input message addresses the input by <code>i</code> port index or <code>s</code> name; a name is resolved against the node's def when the bundle is submitted. Synths have no separate controls: a control is an input with a spec, so these messages set controls too.</p>
 
 <h4>Notes</h4>
 
@@ -2041,6 +2046,7 @@ osc.<span class="fn">removeHandler</span>(<span class="str">"/trigger"</span>);<
   <tr><td><code>/engine/noteOff</code></td><td><code>i</code> nodeID, <code>i</code> noteID</td><td>Release a note.</td></tr>
   <tr><td><code>/engine/allNotesOff</code></td><td><code>i</code> nodeID</td><td>Release all notes on a node.</td></tr>
   <tr><td><code>/engine/noteSetParams</code></td><td><code>i</code> nodeID, <code>i</code> noteID, <code>i</code> firstParam, <code>f...</code> values</td><td>Update parameters on a playing note.</td></tr>
+  <tr><td><code>/engine/noteSetParamsRamp</code></td><td><code>i</code> nodeID, <code>i</code> noteID, <code>i</code> firstParam, <code>f</code> rampTime, <code>f...</code> values</td><td>Ramp a playing note's parameters over <code>rampTime</code> seconds.</td></tr>
 </table>
 
 <!-- -------------------------------- -->
@@ -2294,9 +2300,15 @@ nats.<span class="fn">removeHandler</span>(<span class="str">"trigger"</span>);<
   <tr><td><code>engine.disconnectInput</code></td><td><code>nodeID port</code></td><td>Disconnect an input.</td></tr>
   <tr><td><code>engine.disconnectOutput</code></td><td><code>nodeID port</code></td><td>Disconnect an output.</td></tr>
   <tr><td><code>engine.disconnectNode</code></td><td><code>nodeID</code></td><td>Disconnect all connections of a node.</td></tr>
-  <tr><td><code>engine.setInput</code></td><td><code>nodeID port value</code></td><td>Set an input to a constant value.</td></tr>
-  <tr><td><code>engine.setControl</code></td><td><code>nodeID controlID|name value</code></td><td>Set a control parameter. The second argument is a controlID if it is all digits, otherwise a control name (resolved against the node's def at submit).</td></tr>
+  <tr><td><code>engine.setInput</code></td><td><code>nodeID port|name value...</code></td><td>Set an input to a value (one or more numbers, repeated cyclically over the input's channels).</td></tr>
+  <tr><td><code>engine.setInputAt</code></td><td><code>nodeID port|name first value...</code></td><td>Set channels <code>first</code> .. <code>first+n-1</code> of an input.</td></tr>
+  <tr><td><code>engine.setInputRamp</code></td><td><code>nodeID port|name rampTime curve value...</code></td><td>Ramp an input from its current value over <code>rampTime</code> seconds.</td></tr>
+  <tr><td><code>engine.setInputX</code></td><td><code>nodeID port|name value xfadeTime curve</code></td><td>Crossfade an input to a value.</td></tr>
+  <tr><td><code>engine.impulseInput</code></td><td><code>nodeID port|name value...</code></td><td>Set an input to a value for one sample, then back (a trigger).</td></tr>
+  <tr><td><code>engine.impulseInputAt</code></td><td><code>nodeID port|name first value...</code></td><td>Impulse on channels <code>first</code> .. <code>first+n-1</code> only.</td></tr>
 </table>
+
+<p>The input argument is a port index if it is all digits, otherwise an input name (resolved against the node's def at submit). A control is an input with a spec, so these set controls too.</p>
 
 <h4>Notes</h4>
 
@@ -2305,6 +2317,8 @@ nats.<span class="fn">removeHandler</span>(<span class="str">"trigger"</span>);<
   <tr><td><code>engine.noteOn</code></td><td><code>nodeID noteID [param...]</code></td><td>Trigger a note with optional float parameters.</td></tr>
   <tr><td><code>engine.noteOff</code></td><td><code>nodeID noteID</code></td><td>Release a note.</td></tr>
   <tr><td><code>engine.allNotesOff</code></td><td><code>nodeID</code></td><td>Release all notes on a node.</td></tr>
+  <tr><td><code>engine.noteSetParams</code></td><td><code>nodeID noteID first value...</code></td><td>Update parameters on a playing note.</td></tr>
+  <tr><td><code>engine.noteSetParamsRamp</code></td><td><code>nodeID noteID first rampTime value...</code></td><td>Ramp a playing note's parameters over <code>rampTime</code> seconds.</td></tr>
 </table>
 
 <h4>Example: controlling the engine from the command line</h4>
@@ -2608,7 +2622,7 @@ module's internal timeline.</p>
 
 <p>The orchestration side (main / NRT VM) loads parts and starts them together via <code>attachVM</code>, <code>siloLoad</code> (an awaitable load barrier returning <code>Future&lt;String&gt;</code>), and <code>siloStartAt(beat, silos)</code>. See &sect;13 (Silo VM) for the full lifecycle.</p>
 
-<p class="note"><strong>Silo-only enforcement.</strong> The silo-side primitives &mdash; <code>spawn(clock, c)</code>, <code>scheduleTask</code>, <code>playNote</code>, <code>releaseNote</code> &mdash; need the real-time silo context and are rejected <em>at compile time</em> if called from code compiled for the main/NRT VM (a script, the REPL, a notebook cell): &ldquo;Function &hellip; is silo-only&rdquo;. This is the mirror of the rule that keeps non-RT-safe functions out of silo code. Defining a wrapper around one in a shared module is fine; the wrapper itself becomes silo-only.</p>
+<p class="note"><strong>Silo-only enforcement.</strong> The silo-side primitives &mdash; <code>spawn(clock, c)</code>, <code>scheduleTask</code>, <code>playNote</code>, <code>releaseNote</code>, <code>setNoteParams</code> &mdash; need the real-time silo context and are rejected <em>at compile time</em> if called from code compiled for the main/NRT VM (a script, the REPL, a notebook cell): &ldquo;Function &hellip; is silo-only&rdquo;. This is the mirror of the rule that keeps non-RT-safe functions out of silo code. Defining a wrapper around one in a shared module is fine; the wrapper itself becomes silo-only.</p>
 
 <!-- -------------------------------- -->
 <h3 id="clock-examples">11.9 Examples</h3>
@@ -2825,7 +2839,7 @@ module's internal timeline.</p>
   <li><code>gc</code> and <code>disassemble</code> are rejected at compile time.</li>
   <li>Non-RT-safe foreign functions (e.g., <code>loadPlugins</code>, <code>compileSynthDef</code>) are rejected at compile time.</li>
   <li>All user-defined functions that only call RT-safe functions are permitted.</li>
-  <li>Engine command functions (<code>begin</code>, <code>newNode</code>, <code>connect</code>, <code>setControl</code>, <code>noteOn</code>, etc.) are available.</li>
+  <li>Engine command functions (<code>begin</code>, <code>newNode</code>, <code>connect</code>, <code>setInput</code>, <code>noteOn</code>, etc.) are available.</li>
 </ul>
 
 <!-- -------------------------------- -->
@@ -3472,9 +3486,13 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
 <span class="kw">fn</span> <span class="fn">playNote</span>(node <span class="typ">Int</span>, noteID <span class="typ">Int</span>, params <span class="typ">[Float]</span>) <span class="typ">Int</span>
 
 <span class="cmt">-- Release a sounding note on `node`. (audio_engine, rt-safe)</span>
-<span class="kw">fn</span> <span class="fn">releaseNote</span>(node <span class="typ">Int</span>, noteID <span class="typ">Int</span>) <span class="typ">Int</span></code></pre>
+<span class="kw">fn</span> <span class="fn">releaseNote</span>(node <span class="typ">Int</span>, noteID <span class="typ">Int</span>) <span class="typ">Int</span>
+
+<span class="cmt">-- Change a sounding note's parameters from index `first`, stepped</span>
+<span class="cmt">-- (rampTime 0) or ramped over rampTime seconds. (audio_engine, rt-safe)</span>
+<span class="kw">fn</span> <span class="fn">setNoteParams</span>(node <span class="typ">Int</span>, noteID <span class="typ">Int</span>, first <span class="typ">Int</span>, values <span class="typ">[Float]</span>, rampTime <span class="typ">Float</span>) <span class="typ">Int</span></code></pre>
 <div class="note">
-  <strong>Note:</strong> These are the in-task counterparts to the NRT <code>noteOn</code>/<code>noteOff</code> bundle commands (&sect;<a href="#silo-vm">13</a>): same effect, but issued from inside the silo rather than queued from NRT.
+  <strong>Note:</strong> These are the in-task counterparts to the NRT <code>noteOn</code>/<code>noteOff</code>/<code>noteSetParams</code> bundle commands (&sect;<a href="#silo-vm">13</a>): same effect, but issued from inside the silo rather than queued from NRT.
 </div>
 
 <h3 id="silo-msg-nats">17.6 NATS Bridge</h3>
@@ -3562,8 +3580,8 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
   <tr><th>Function</th><th>Description</th></tr>
   <tr><td><code>loadPlugins(path String) Bool</code></td><td>Load all plugin definitions found in the directory at <code>path</code>. Returns <code>true</code> on success.</td></tr>
   <tr><td><code>loadPlugin(path String, name String) Bool</code></td><td>Load a single plugin definition from the shared library at <code>path</code> under the given <code>name</code>. Returns <code>true</code> on success.</td></tr>
-  <tr><td><code>wireDef(chans Int) String</code></td><td>Name of the engine's native <code>chans</code>-channel pass-through def (<code>_wire2</code>, <code>_wire4</code>, &hellip;: <code>out = in</code>), registering it on the current engine on first use. No plugin compile; usable in <code>newNode</code> as soon as it returns. Empty string if there is no engine.</td></tr>
-  <tr><td><code>gainDef(chans Int) String</code></td><td>Name of the engine's native <code>chans</code>-channel gain def (<code>_gain2</code>, &hellip;: <code>out = in * vol</code>, inlet 0 = <code>in</code>, inlet 1 = <code>vol</code>, one channel, so it can be set with <code>setInput</code> or ramped with <code>setInputX</code>). Registered on first use, never compiled. The <code>live</code> module builds every proxy's anchor and monitor from these two.</td></tr>
+  <tr><td><code>wireDef(chans Int) String</code><br><code>wireDef(shape [Int]) String</code></td><td>Name of the engine's native pass-through def of <code>chans</code> channels, or of a shape given as its dimensions, row-major (<code>_wire2</code>, <code>_wire3</code>, <code>_wire2x3</code>, &hellip;: <code>out = in</code>), registering it on the current engine on first use. No plugin compile; usable in <code>newNode</code> as soon as it returns. Empty string if there is no engine.</td></tr>
+  <tr><td><code>gainDef(chans Int) String</code><br><code>gainDef(shape [Int]) String</code></td><td>Name of the engine's native gain def of that many channels or that shape (<code>_gain2</code>, &hellip;: <code>out = in * vol</code>, inlet 0 = <code>in</code>, inlet 1 = <code>vol</code>, one channel, so it can be set with <code>setInput</code>, ramped, or crossfaded with <code>setInputX</code>). Registered on first use, never compiled. The <code>live</code> module builds every proxy's anchor and monitor from these two.</td></tr>
 </table>
 
 <!-- -------------------------------- -->
@@ -3632,21 +3650,31 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
 </table>
 
 <div class="note">
-  <strong>Note:</strong> Connections are validated on the audio thread; a connection that would create a cycle, or whose ports disagree in element type, signal rate, or channel count, is rejected with the corresponding <code>Err</code> code (&sect;<a href="#ae-enums">18.12</a>).
+  <strong>Note:</strong> Connections are validated on the audio thread; a connection that would create a cycle, or whose ports disagree in element type or have incompatible shapes, is rejected with the corresponding <code>Err</code> code (&sect;<a href="#ae-enums">18.12</a>).
 </div>
 
 <!-- -------------------------------- -->
 <h3 id="ae-params">18.7 Parameter Control</h3>
 
-<p>These must be called within a <code>begin()</code>/<code>go(silo)</code> bundle.</p>
+<p>Synths have no separate controls: every parameter is an input port, and a <em>control</em> is an input that carries a <code>ControlSpec</code>. An input nothing is connected to holds a value (its spec's <code>init</code>, else 0). Each function below addresses the input by <code>port</code>, either an <code>Int</code> port index or a <code>String</code> input name (resolved against the node's def when the bundle is submitted; an unknown name aborts the bundle). <code>value</code> is a <code>Float</code> or a <code>[Float]</code>, repeated cyclically over the addressed channels. <code>curve</code> is a <code>FadeCurve</code> (default <code>FadeCurve.fadeLinear</code>). All must be called within a <code>begin()</code>/<code>go(silo)</code> bundle and take effect at the bundle's sample.</p>
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
-  <tr><td><code>setInput(nodeID Int, portIndex Int, value Float) Int</code></td><td>Set an input port to a constant value (no crossfade). Overrides any existing connection on that port.</td></tr>
-  <tr><td><code>setInputX(nodeID Int, portIndex Int, value Float, xfade Float, curve Int) Int</code></td><td>Set an input port to a constant value with a crossfade from the current value.</td></tr>
-  <tr><td><code>setControl(nodeID Int, controlID Int, value Float) Int</code></td><td>Set a control parameter on a node. Controls are node-specific named parameters distinct from audio-rate input ports.</td></tr>
-  <tr><td><code>setControl(nodeID Int, name String, value Float) Int</code></td><td>By-name overload: the engine resolves the control name against the node's def when the bundle is submitted. An unknown name aborts the bundle with <code>errControlNotFound</code>.</td></tr>
+  <tr><td><code>setInput(nodeID Int, port, value, rampTime Float = 0.0, curve = fadeLinear) Int</code></td><td>Set the whole input to a value: a step, or with <code>rampTime &gt; 0</code> a ramp from the current value. On a connected input this changes the value it reverts to when disconnected.</td></tr>
+  <tr><td><code>setInputAt(nodeID Int, port, first Int, values, rampTime Float = 0.0, curve = fadeLinear) Int</code></td><td>Set channels <code>first</code> .. <code>first + n - 1</code> only (flat, row-major channel index), where <code>n</code> is the number of values.</td></tr>
+  <tr><td><code>setInputBox(nodeID Int, port, offset [Int], extent [Int], values, rampTime Float = 0.0, curve = fadeLinear) Int</code></td><td>Set a box region of a shaped input, in shape coordinates: <code>offset</code> and <code>extent</code> per dimension (an extent of 0 runs to the end of that dimension). For a 4&times;3 input, <code>setInputBox(n, "gains", [0, 1], [0, 1], 0.5)</code> sets column 1 of every row.</td></tr>
+  <tr><td><code>setInputX(nodeID Int, port, value, xfadeTime Float, curve = fadeLinear) Int</code></td><td>Crossfade the input to a value over <code>xfadeTime</code> seconds. A connected input fades its signal out and is left holding the value.</td></tr>
+  <tr><td><code>impulseInput(nodeID Int, port, value) Int</code></td><td>The value for one sample, then back to the input's held value &mdash; a trigger.</td></tr>
+  <tr><td><code>impulseInputAt(nodeID Int, port, first Int, values) Int</code></td><td>An impulse on channels <code>first</code> .. <code>first + n - 1</code> only.</td></tr>
 </table>
+
+<pre><code><span class="kw">import</span> audio_engine.*;
+
+<span class="fn">begin</span>();
+<span class="fn">setInput</span>(<span class="num">101</span>, <span class="str">"cutoff"</span>, <span class="num">800.0</span>, <span class="num">0.25</span>);          <span class="cmt">-- ramp to 800 over 0.25 s</span>
+<span class="fn">setInputAt</span>(<span class="num">101</span>, <span class="str">"pan"</span>, <span class="num">1</span>, [<span class="num">-0.5</span>]);            <span class="cmt">-- element 1 of a multichannel input</span>
+<span class="fn">impulseInput</span>(<span class="num">101</span>, <span class="str">"retrig"</span>, <span class="num">1.0</span>);             <span class="cmt">-- fire a trigger</span>
+<span class="fn">go</span>(<span class="num">0</span>);</code></pre>
 
 <h4>Shared inputs</h4>
 
@@ -3665,10 +3693,10 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
-  <tr><td><code>noteOn(nodeID Int, noteID Int, params [Float]) Int</code></td><td>Start a new voice on the given voicer node. <code>noteID</code> identifies the voice for later <code>noteOff</code>/<code>noteSetParams</code> calls; <code>params</code> holds the voice's initial parameter values.</td></tr>
+  <tr><td><code>noteOn(nodeID Int, noteID Int, params [Float]) Int</code></td><td>Start a new voice on the given voicer node. <code>noteID</code> identifies the voice for later <code>noteOff</code>/<code>noteSetParams</code> calls; <code>params</code> holds the voice's initial parameter values, in the order the voice body declares its <code>noteParam</code>s (the engine sets the gate itself; parameters left out take their spec's <code>init</code>).</td></tr>
   <tr><td><code>noteOff(nodeID Int, noteID Int) Int</code></td><td>Release the voice identified by <code>noteID</code>.</td></tr>
   <tr><td><code>allNotesOff(nodeID Int) Int</code></td><td>Release all active voices on the given voicer node.</td></tr>
-  <tr><td><code>noteSetParams(nodeID Int, noteID Int, firstParam Int, values [Float]) Int</code></td><td>Update parameters on an active voice: sets <code>values length</code> consecutive parameters starting at index <code>firstParam</code>.</td></tr>
+  <tr><td><code>noteSetParams(nodeID Int, noteID Int, firstParam Int, values [Float]) Int</code><br><code>noteSetParams(nodeID Int, noteID Int, firstParam Int, values [Float], rampTime Float) Int</code></td><td>Update parameters on an active voice: sets <code>values length</code> consecutive parameters starting at index <code>firstParam</code>, stepped or ramped over <code>rampTime</code> seconds.</td></tr>
 </table>
 
 <div class="note">
@@ -3724,6 +3752,7 @@ go(<span class="num">0</span>);</code></pre>
   <tr><td><code>tapExists(tapID Int) Bool</code></td><td>Whether the tap is live. Unknown ids read <code>false</code> rather than failing.</td></tr>
   <tr><td><code>tapPeak(tapID Int) Float</code> / <code>tapRms(tapID Int) Float</code></td><td>Level over the last publish window (512 samples), collapsed across channels. Unknown ids read <code>0.0</code>.</td></tr>
   <tr><td><code>tapChans(tapID Int) Int</code></td><td>Channel count captured by the tap.</td></tr>
+  <tr><td><code>tapShape(tapID Int) [Int]</code></td><td>Shape of the tapped outlet, as its dimensions (row-major; <code>[2, 3]</code> for a 2&times;3 outlet). NRT only.</td></tr>
   <tr><td><code>tapSamples(tapID Int, max Int) [Float]</code></td><td>Drain captured samples (<code>tapScope</code> mode only): interleaved frames of <code>tapChans</code> channels. The count is clamped to whole frames and to 4096 samples; call repeatedly for more.</td></tr>
 </table>
 
@@ -3807,7 +3836,7 @@ freeVmTaps();</code></pre>
   <tr><td><code>errNodeDefNotFound</code></td><td>No plugin definition with the given name</td></tr>
   <tr><td><code>errNodeNotFound</code></td><td>No node with the given ID</td></tr>
   <tr><td><code>errNoteNotFound</code></td><td>No active note with the given ID</td></tr>
-  <tr><td><code>errControlNotFound</code></td><td>No control with the given ID</td></tr>
+  <tr><td><code>errControlNotFound</code></td><td>Retired (synths have no controls); kept so later codes keep their values</td></tr>
   <tr><td><code>errDeviceNotFound</code></td><td>Audio device not found</td></tr>
   <tr><td><code>errAlreadyAdded</code></td><td>Node was already added to the silo</td></tr>
   <tr><td><code>errAlreadyRemoved</code></td><td>Node was already removed from the silo</td></tr>
@@ -3822,7 +3851,7 @@ freeVmTaps();</code></pre>
   <tr><td><code>errCyclicConnection</code></td><td>Connection would create a cycle</td></tr>
   <tr><td><code>errTypeMismatch</code></td><td>Port element types do not match</td></tr>
   <tr><td><code>errRateMismatch</code></td><td>Port signal rates do not match</td></tr>
-  <tr><td><code>errChanMismatch</code></td><td>Port channel counts do not match (<code>connect</code> adapts them instead; this is for <code>setInput</code>/<code>replaceNode</code>, which do not)</td></tr>
+  <tr><td><code>errChanMismatch</code></td><td>Port shapes are incompatible (<code>connect</code> adapts compatible shapes; this is for <code>replaceNode</code>, which does not)</td></tr>
   <tr><td><code>errNumPortsMismatch</code></td><td>Number of ports does not match</td></tr>
   <tr><td><code>errNotImplemented</code></td><td>Feature not yet implemented</td></tr>
   <tr><td><code>errTooLate</code></td><td>Scheduled event missed its deadline</td></tr>
@@ -3879,7 +3908,7 @@ freeVmTaps();</code></pre>
 <!-- -------------------------------- -->
 <h3 id="ae-index">18.14 Function Index</h3>
 
-<p>Every function that <code>import audio_engine.*;</code> brings in, with where it is described and where it may run. <em>Bundled</em> functions record into the open <code>begin()</code> bundle and are RT-safe; <em>RT-safe</em> functions may be called from silo code as well as the main VM; <em>NRT</em> functions may only be called on the main (non-real-time) VM; <em>silo-only</em> functions need the real-time silo context and are rejected at compile time elsewhere. The functions themselves are registered by the bridge into the foreign module <code>audio_engine_ffi</code>, which <code>audio_engine.x</code> re-exports &mdash; so a search of the module sources finds only the handful defined in Tzopilotl (<code>spawn</code>, <code>sampleZone</code>, the array-of-zones <code>loadSampleBank</code>).</p>
+<p>Every function that <code>import audio_engine.*;</code> brings in, with where it is described and where it may run. <em>Bundled</em> functions record into the open <code>begin()</code> bundle and are RT-safe; <em>RT-safe</em> functions may be called from silo code as well as the main VM; <em>NRT</em> functions may only be called on the main (non-real-time) VM; <em>silo-only</em> functions need the real-time silo context and are rejected at compile time elsewhere. The functions themselves are registered by the bridge into the foreign module <code>audio_engine_ffi</code>, which <code>audio_engine.x</code> re-exports &mdash; so a search of the module sources finds only the handful defined in Tzopilotl (<code>spawn</code>, <code>sampleZone</code>, the array-of-zones <code>loadSampleBank</code>, and the <code>setInput</code> family).</p>
 
 <table>
   <tr><th>Function</th><th>Section</th><th>Runs</th></tr>
@@ -3889,13 +3918,14 @@ freeVmTaps();</code></pre>
   <tr><td><code>setTempo(clock, bpm)</code>, <code>schedTempoChange(clock, &hellip;)</code>, <code>clockBeats</code>, <code>clockTempo</code></td><td>&sect;<a href="#clock-engine-slots">11.6</a> Engine TempoClock Slots</td><td>RT-safe</td></tr>
   <tr><td><code>newNode</code>, <code>freeNode</code>, <code>freeAllNodes</code>, <code>channelOffset</code></td><td>&sect;<a href="#ae-nodes">18.5</a> Node Operations</td><td>Bundled</td></tr>
   <tr><td><code>connect</code>, <code>connectX</code>, <code>disconnectInput</code>, <code>disconnectInputX</code>, <code>disconnectSource</code>, <code>disconnectSourceX</code>, <code>disconnectOutput</code>, <code>disconnectNode</code>, <code>reconnectOutput</code>, <code>replaceNode</code></td><td>&sect;<a href="#ae-connections">18.6</a> Connections</td><td>Bundled</td></tr>
-  <tr><td><code>setInput</code>, <code>setInputX</code>, <code>setControl</code> (by id and by name)</td><td>&sect;<a href="#ae-params">18.7</a> Parameter Control</td><td>Bundled</td></tr>
+  <tr><td><code>setInput</code>, <code>setInputAt</code>, <code>setInputBox</code>, <code>setInputX</code>, <code>impulseInput</code>, <code>impulseInputAt</code> (by index and by name)</td><td>&sect;<a href="#ae-params">18.7</a> Parameter Control</td><td>Bundled</td></tr>
   <tr><td><code>setSharedInput</code>, <code>getSharedInput</code></td><td>&sect;<a href="#ae-params">18.7</a> Parameter Control</td><td>RT-safe, no bundle</td></tr>
   <tr><td><code>noteOn</code>, <code>noteOff</code>, <code>allNotesOff</code>, <code>noteSetParams</code></td><td>&sect;<a href="#ae-notes">18.8</a> Note / Voice Management</td><td>Bundled</td></tr>
-  <tr><td><code>playNote</code>, <code>releaseNote</code></td><td>&sect;<a href="#silo-msg-notes">17.5</a> Silo Messaging</td><td>silo-only</td></tr>
+  <tr><td><code>playNote</code>, <code>releaseNote</code>, <code>setNoteParams</code></td><td>&sect;<a href="#silo-msg-notes">17.5</a> Silo Messaging</td><td>silo-only</td></tr>
   <tr><td><code>resizeBuffer</code></td><td>&sect;<a href="#ae-buffers">18.9</a> Buffers &amp; Sample Banks</td><td>Bundled</td></tr>
   <tr><td><code>loadBuffer</code>, <code>fillBuffer</code>, <code>loadSampleBank</code> (both forms), <code>sampleZone</code></td><td>&sect;<a href="#ae-buffers">18.9</a> Buffers &amp; Sample Banks</td><td>Bundled, NRT</td></tr>
   <tr><td><code>allocTapID</code>, <code>tapExists</code>, <code>tapPeak</code>, <code>tapRms</code>, <code>tapChans</code>, <code>tapSamples</code>, <code>freeVmTaps</code>, <code>freeAllTaps</code></td><td>&sect;<a href="#ae-taps">18.10</a> Signal Taps</td><td>RT-safe</td></tr>
+  <tr><td><code>tapShape</code></td><td>&sect;<a href="#ae-taps">18.10</a> Signal Taps</td><td>NRT</td></tr>
   <tr><td><code>tapOutlet</code>, <code>tapMaster</code>, <code>untap</code></td><td>&sect;<a href="#ae-taps">18.10</a> Signal Taps</td><td>Bundled</td></tr>
   <tr><td><code>listSynthDefs</code>, <code>readFile</code>, <code>sleepMs</code></td><td>&sect;<a href="#ae-introspection">18.11</a> Introspection &amp; Utilities</td><td>NRT</td></tr>
   <tr><td><code>attachVM</code>, <code>detachVM</code>, <code>siloEval</code>, <code>siloLoad</code>, <code>siloStartAt</code></td><td>&sect;<a href="#silo-vm">13</a> Silo VM</td><td>NRT</td></tr>

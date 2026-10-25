@@ -30,6 +30,8 @@ tapOutlet(700, 0, a, TapMode.tapMeter);
 "tapOutlet err: %^ (expect 0)" fmt(go(0)) println;
 "tapExists: %^ (expect true)" fmt(tapExists(a)) println;
 "tapChans: %^ (expect 2)" fmt(tapChans(a)) println;
+"tapShape: %^ (expect [2])" fmt(tapShape(a)) println;
+"tapShape of unknown tap: %^ (expect [])" fmt(tapShape(987654)) println;
 "tapPeak: %^ (expect 0.0, nothing rendered)" fmt(tapPeak(a)) println;
 "tapRms: %^ (expect 0.0)" fmt(tapRms(a)) println;
 

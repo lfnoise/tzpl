@@ -33,9 +33,9 @@ tapMaster(t, TapMode.tapMeter);
 -- Fire a quiet burst as long as the delay time so the echoes overlap into a
 -- continuous tail (a shorter burst rings as a pulse train with silent gaps,
 -- and a single meter window could land in a gap).
-begin(); setControl(100, 0, 0.2); sched(0);
+begin(); setInput(100, 0, 0.2); sched(0);
 await delayReal(0.4);
-begin(); setControl(100, 0, 0.0); sched(0);
+begin(); setInput(100, 0, 0.0); sched(0);
 await delayReal(0.6);
 
 let ringing = tapPeak(t);

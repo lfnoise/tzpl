@@ -26,7 +26,8 @@
 namespace graph {
 
 static PortVM portVM(engine::PortDesc const& p) {
-    return {p.name, tzpl_shapeChans(p.type.shape), (int)p.type.elem, (int)p.type.rate};
+    return {p.name, tzpl_shapeChans(p.type.shape), (int)p.type.elem, (int)p.type.rate,
+            p.type.shape};
 }
 
 void buildViewModel(engine::GraphDesc const& g, int silo,
@@ -50,7 +51,9 @@ void buildViewModel(engine::GraphDesc const& g, int silo,
             // Mirrors what openNodeControls materializes: one widget per
             // control (bindControlWidget never declines) plus a load button
             // per buffer slot.
-            node.numControls = (int)(def.controls.size() + def.buffers.size());
+            int specced = 0;
+            for (auto const& p : def.ins) specced += p.hasSpec ? 1 : 0;
+            node.numControls = specced + (int)def.buffers.size();
         } else {
             node.defMissing = true;
         }

@@ -689,17 +689,26 @@ fn _scalarConstLit(ctx Ctx, n NIdx) String = match (ctx.kind[n]) {
 };
 
 -- A scalar (1-chan) put/join operand outside any voice context: a scalar
--- constant emits its literal; anything else is a declared value.
+-- constant emits its literal; an input port is its gathered array's element
+-- 0; anything else is a declared value.
 fn _scalarRef(ctx Ctx, n NIdx) String {
 	let lit = ctx _scalarConstLit(n);
-	lit length > 0 ? lit : _varName(ctx, n)
+	if (lit length > 0) { return lit; }
+	ctx _scalarVar(n)
 }
+
+-- A 1-channel value's storage as a scalar expression. Gathered input ports
+-- are arrays (p->in<sn>[]), so their scalar is element 0.
+fn _scalarVar(ctx Ctx, n NIdx) String = match (ctx.kind[n]) {
+	inletK(_, _, _): _varName(ctx, n) $ "[0]";
+	_:               _varName(ctx, n);
+};
 
 fn _voiceElem(ctx Ctx, n NIdx) String {
 	let lit = ctx _scalarConstLit(n);
 	if (lit length > 0) { return lit; }
 	if (ctx.chans[n] == 1) {
-		return ctx _isVoiceLocalStorage(n) ? "%^[i]" fmt(_varName(ctx, n)) : _varName(ctx, n);
+		return ctx _isVoiceLocalStorage(n) ? "%^[i]" fmt(_varName(ctx, n)) : ctx _scalarVar(n);
 	}
 	ctx _isVoiceLocalStorage(n)
 		? "%^[i * %^ + _j]" fmt(_varName(ctx, n), ctx.chans[n])

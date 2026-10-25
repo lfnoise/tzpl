@@ -31,6 +31,11 @@ import audio_engine.*;
 -- Cases mirror the bundleable audio_engine FFI builders; payload order
 -- matches the FFI argument order.
 
+-- The kinds of input value operation (EngineCmd.input's op field).
+const kInputStep = 0;            -- set (with a ramp time: ramp)
+const kInputFade = 1;            -- crossfade (setInputX)
+const kInputImpulse = 2;         -- one sample, then back
+
 enum EngineCmd {
 	newNode(String, Int),                              -- defName, nodeID
 	freeNode Int,                                      -- nodeID
@@ -46,14 +51,16 @@ enum EngineCmd {
 	disconnectNode Int,                                -- nodeID
 	reconnectOutput(Int, Int, Int, Int, Float, FadeCurve), -- old src, new src, xfade, curve
 	replaceNode(Int, Int, Float, FadeCurve),           -- oldID, newID, xfade, curve
-	setInput(Int, Int, Float),                         -- node, port, value
-	setInputX(Int, Int, Float, Float, FadeCurve),      -- node, port, value, xfade, curve
-	setControl(Int, Int, Float),                       -- node, controlID, value
-	setControlNamed(Int, String, Float),               -- node, controlName, value
+	-- An input value operation (setInput & co. in audio_engine.x): node;
+	-- port index, or -1 and the input's name; region: flat channels [first,
+	-- first+count) (count 0 = the whole input), or a box when offset is
+	-- non-empty; values; time (ramp or crossfade); curve; op (kInput*).
+	-- Kept flat (no nested enum payloads): see the note at _issueInput.
+	input(Int, Int, String, Int, Int, [Int], [Int], [Float], Float, FadeCurve, Int),
 	noteOn(Int, Int, [Float]),                         -- node, noteID, params
 	noteOff(Int, Int),                                 -- node, noteID
 	allNotesOff Int,                                   -- node
-	noteSetParams(Int, Int, Int, [Float]),             -- node, noteID, firstParam, params
+	noteSetParams(Int, Int, Int, [Float], Float),      -- node, noteID, firstParam, params, ramp
 }
 
 ---------------------------------------------------------------------------
@@ -140,22 +147,47 @@ fn replaceNode(b Bundle, oldID Int, newID Int, xfade Float, curve FadeCurve) Bun
 	b add(EngineCmd.replaceNode(oldID, newID, xfade, curve))
 }
 
-fn setInput(b Bundle, node Int, port Int, value Float) Bundle {
-	b add(EngineCmd.setInput(node, port, value))
+-- Input values: the bundle forms of audio_engine.x's setInput family. The
+-- port is an index or a name (a name is resolved when the bundle is
+-- submitted; unknown names abort it); the value is a Float or [Float].
+fn _portIndex(port Int) Int = port;
+fn _portIndex(port String) Int = -1;
+fn _portName(port Int) String = "";
+fn _portName(port String) String = port;
+fn _values(v Float) [Float] = [v];
+fn _values(v Int) [Float] = [v toFloat];
+fn _values(vs [Float]) [Float] = vs;
+
+fn setInput<P, V>(b Bundle, node Int, port P, value V, rampTime Float = 0.0,
+                  curve FadeCurve = FadeCurve.fadeLinear) Bundle =
+	b add(EngineCmd.input(node, _portIndex(port), _portName(port), 0, 0, [Int](), [Int](),
+	                      _values(value), rampTime, curve, kInputStep));
+
+fn setInputAt<P, V>(b Bundle, node Int, port P, first Int, value V, rampTime Float = 0.0,
+                    curve FadeCurve = FadeCurve.fadeLinear) Bundle {
+	let vs = _values(value);
+	b add(EngineCmd.input(node, _portIndex(port), _portName(port), first, vs length,
+	                      [Int](), [Int](), vs, rampTime, curve, kInputStep))
 }
 
-fn setInputX(b Bundle, node Int, port Int, value Float, xfade Float, curve FadeCurve) Bundle {
-	b add(EngineCmd.setInputX(node, port, value, xfade, curve))
-}
+fn setInputBox<P, V>(b Bundle, node Int, port P, offset [Int], extent [Int], value V,
+                     rampTime Float = 0.0, curve FadeCurve = FadeCurve.fadeLinear) Bundle =
+	b add(EngineCmd.input(node, _portIndex(port), _portName(port), 0, 0, offset, extent,
+	                      _values(value), rampTime, curve, kInputStep));
 
-fn setControl(b Bundle, node Int, controlID Int, value Float) Bundle {
-	b add(EngineCmd.setControl(node, controlID, value))
-}
+fn setInputX<P, V>(b Bundle, node Int, port P, value V, xfade Float,
+                   curve FadeCurve = FadeCurve.fadeLinear) Bundle =
+	b add(EngineCmd.input(node, _portIndex(port), _portName(port), 0, 0, [Int](), [Int](),
+	                      _values(value), xfade, curve, kInputFade));
 
--- By-name overload: the engine resolves the name against the node's def when
--- the bundle is submitted (unknown names abort the bundle).
-fn setControl(b Bundle, node Int, controlName String, value Float) Bundle {
-	b add(EngineCmd.setControlNamed(node, controlName, value))
+fn impulseInput<P, V>(b Bundle, node Int, port P, value V) Bundle =
+	b add(EngineCmd.input(node, _portIndex(port), _portName(port), 0, 0, [Int](), [Int](),
+	                      _values(value), 0.0, FadeCurve.fadeLinear, kInputImpulse));
+
+fn impulseInputAt<P, V>(b Bundle, node Int, port P, first Int, value V) Bundle {
+	let vs = _values(value);
+	b add(EngineCmd.input(node, _portIndex(port), _portName(port), first, vs length,
+	                      [Int](), [Int](), vs, 0.0, FadeCurve.fadeLinear, kInputImpulse))
 }
 
 fn noteOn(b Bundle, node Int, noteID Int, params [Float]) Bundle {
@@ -170,8 +202,11 @@ fn allNotesOff(b Bundle, node Int) Bundle {
 	b add(EngineCmd.allNotesOff(node))
 }
 
-fn noteSetParams(b Bundle, node Int, noteID Int, firstParam Int, params [Float]) Bundle {
-	b add(EngineCmd.noteSetParams(node, noteID, firstParam, params))
+-- Change a sounding note's parameters from firstParam (0 = the first note
+-- parameter), stepped or ramped over rampTime seconds.
+fn noteSetParams(b Bundle, node Int, noteID Int, firstParam Int, params [Float],
+                 rampTime Float = 0.0) Bundle {
+	b add(EngineCmd.noteSetParams(node, noteID, firstParam, params, rampTime))
 }
 
 ---------------------------------------------------------------------------
@@ -194,15 +229,24 @@ fn _issue(c EngineCmd) Int {
 		disconnectNode(id)                : disconnectNode(id);
 		reconnectOutput(os, osp, ns, nsp, x, cv) : reconnectOutput(os, osp, ns, nsp, x, cv ordinal);
 		replaceNode(oldID, newID, x, cv)  : replaceNode(oldID, newID, x, cv ordinal);
-		setInput(n, p, v)                 : setInput(n, p, v);
-		setInputX(n, p, v, x, cv)         : setInputX(n, p, v, x, cv ordinal);
-		setControl(n, cid, v)             : setControl(n, cid, v);
-		setControlNamed(n, name, v)       : setControl(n, name, v);
+		input(n, pi, pn, first, count, off, ext, vs, t, cv, op) :
+			_issueInput(n, pi, pn, first, count, off, ext, vs, t, cv, op);
 		noteOn(n, nid, params)            : noteOn(n, nid, params);
 		noteOff(n, nid)                   : noteOff(n, nid);
 		allNotesOff(n)                    : allNotesOff(n);
-		noteSetParams(n, nid, first, params) : noteSetParams(n, nid, first, params);
+		noteSetParams(n, nid, first, params, ramp) : noteSetParams(n, nid, first, params, ramp);
 	}
+}
+
+-- EngineCmd.input's payload is deliberately flat. An earlier form carried
+-- nested enums (port: index | named, region: whole | channels | box) and
+-- crashed the VM intermittently in tzpl_app renders after bundles built from
+-- it were discarded (a garbage Float word later read as an object pointer
+-- in ListNode::force) -- a VM bug with nested enum payloads not yet found.
+fn _issueInput(n Int, pi Int, pn String, first Int, count Int, off [Int], ext [Int],
+               vs [Float], t Float, cv FadeCurve, op Int) Int {
+	if (off length > 0) { return inputOpBox(n, pi, pn, off, ext, vs, t, cv ordinal, op); }
+	inputOp(n, pi, pn, first, count, vs, t, cv ordinal, op)
 }
 
 -- Submit `b` to `silo` on clock slot `clock` at `beat` with the given policy.
@@ -266,15 +310,38 @@ fn toString(c EngineCmd) String {
 		disconnectNode(id)                : "disconnectNode(%^)" fmt(id);
 		reconnectOutput(os, osp, ns, nsp, x, cv) : "reconnectOutput(%^, %^, %^, %^, %^, %^)" fmt(os, osp, ns, nsp, x, cv tag toString);
 		replaceNode(oldID, newID, x, cv)  : "replaceNode(%^, %^, %^, %^)" fmt(oldID, newID, x, cv tag toString);
-		setInput(n, p, v)                 : "setInput(%^, %^, %^)" fmt(n, p, v);
-		setInputX(n, p, v, x, cv)         : "setInputX(%^, %^, %^, %^, %^)" fmt(n, p, v, x, cv tag toString);
-		setControl(n, cid, v)             : "setControl(%^, %^, %^)" fmt(n, cid, v);
-		setControlNamed(n, name, v)       : "setControl(%^, \"%^\", %^)" fmt(n, name, v);
+		input(n, pi, pn, first, count, off, ext, vs, t, cv, op) :
+			_inputString(n, pi, pn, first, count, off, ext, vs, t, cv, op);
 		noteOn(n, nid, params)            : "noteOn(%^, %^, %^)" fmt(n, nid, params _fmtFloats);
 		noteOff(n, nid)                   : "noteOff(%^, %^)" fmt(n, nid);
 		allNotesOff(n)                    : "allNotesOff(%^)" fmt(n);
-		noteSetParams(n, nid, first, params) : "noteSetParams(%^, %^, %^, %^)" fmt(n, nid, first, params _fmtFloats);
+		noteSetParams(n, nid, first, params, ramp) : ramp > 0.0
+			? "noteSetParams(%^, %^, %^, %^, %^)" fmt(n, nid, first, params _fmtFloats, ramp)
+			: "noteSetParams(%^, %^, %^, %^)" fmt(n, nid, first, params _fmtFloats);
 	}
+}
+
+-- An input command printed as the builder call that makes it.
+fn _inputString(n Int, pi Int, pn String, first Int, count Int, off [Int], ext [Int],
+                vs [Float], t Float, cv FadeCurve, op Int) String {
+	let ps = pi >= 0 ? pi toString : "\"" $ pn $ "\"";
+	let v = vs length == 1 ? vs[0] toString : vs _fmtFloats;
+	let name = op == kInputStep ? "setInput" : (op == kInputFade ? "setInputX" : "impulseInput");
+	var fname = name;
+	var at = "";
+	if (off length > 0) {
+		fname = name == "setInput" ? "setInputBox" : name $ "Box";
+		at = ", [" $ (off @ toString) _joined(", ") $ "], [" $ (ext @ toString) _joined(", ") $ "]";
+	} else if (count > 0) {
+		fname = name $ "At";
+		at = ", " $ first toString;
+	}
+	var args = "%^, %^%^, %^" fmt(n, ps, at, v);
+	if (op != kInputImpulse && (t > 0.0 || op == kInputFade)) {
+		args = args $ ", " $ t toString;
+		if (cv != FadeCurve.fadeLinear) { args = args $ ", " $ cv tag toString; }
+	}
+	"%^(%^)" fmt(fname, args)
 }
 
 fn toString(b Bundle) String {

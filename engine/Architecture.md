@@ -7,8 +7,10 @@ The audio engine is a real-time system for instantiating, connecting, and proces
 a dynamic graph of audio processing nodes. It supports:
 
 - Dynamic loading of native synth plugins (`.dylib`)
-- Multi-channel connections between nodes with type checking
-- Cross-fading on connect, disconnect, and parameter changes (7 curve types)
+- Block processing (default 64 samples) over tensor-shaped signals (up to 4 dimensions)
+- Multi-channel connections between nodes with type checking and broadcasting
+- Inputs that hold values: stepped, ramped, impulsed, or crossfaded per channel
+- Cross-fading on connect, disconnect, and input changes (7 curve types)
 - Polyphonic voice management with voice stealing
 - Sample-accurate command scheduling
 - Parallel processing across multiple silos
@@ -105,18 +107,27 @@ design avoids any locking on the RT thread.
 
 ### Audio Processing Pipeline
 
-Per audio callback (one buffer of N frames):
+Per audio callback (one buffer of N frames), the buffer is processed in chunks of up to
+one block (`blockSize_`, default 64; the last chunk may be shorter). `processBlock(off, n)`:
 
 1. **Process RT commands**: Pop command lists from `from_nrt_` FIFO. Immediate commands
-   execute directly. Scheduled commands are inserted into the scheduler queue.
-2. **Per-sample inner loop** (for each frame):
-   a. `processScheduledEvents()` — Pop and execute commands due at the current sample time.
-   b. `sortNodes()` — Re-run topological sort if connections changed.
-   c. `runNodes()` — Walk the sorted list, calling `processAudio()` on each node.
-   d. Copy the output node's input data to the silo's output buffer.
-   e. Increment `sampleTime_`.
-3. **Mixdown**: Binary-tree reduction — even-indexed silos wait for their odd-indexed
-   sibling and sum the output buffers. This cascades until silo 0 has the final mix.
+   execute directly. Scheduled commands are queued on their TempoClock slot.
+2. **Collect and run the block's events** (`collectAndRunEvents`): every clock-scheduled
+   command due in `[T0, T0+n)` and every RT task wakeup, in time order. Each is resolved
+   to a (fractional) sample time in the block and applied to the state it targets:
+   input changes go to the input's per-channel value stages; node start/free and voice
+   resets go to the node's per-block event list.
+3. Deinterleave the hardware input into the input node's outlet.
+4. `sortNodes()` — Re-run topological sort if connections changed.
+5. `runNodes()` — Walk the sorted list; for each node, render its input stages
+   (steps, ramps, impulses written into the input's own buffers; `isConst`/`version`
+   set per channel), then call `process(off, len)` for each segment between the node's
+   discrete events.
+6. Taps; interleave the output node's input into the silo's output buffer.
+7. Retire finished crossfaders and pending frees; `sampleTime_ += n`.
+
+Then **Mixdown**: binary-tree reduction — even-indexed silos wait for their odd-indexed
+sibling and sum the output buffers. This cascades until silo 0 has the final mix.
 
 ### Topological Sort
 
@@ -125,9 +136,10 @@ Nodes are sorted via depth-first traversal starting from the `outputNode_`:
 - Follow each InPort's `srcPort_` connection upstream to the source node.
 - Recurse on the source node's inputs.
 - Append to the sorted list in post-order (dependencies before dependents).
-- **Cycle handling**: If a node is encountered while already being visited (`sortVisiting`
-  state), the recursion stops. This means cycles introduce a one-sample delay rather than
-  causing an error — the feedback signal is simply one sample old.
+- **Cycles**: The graph is feed-forward. A connection that would close a cycle is refused
+  at connect time with `tzpl_errCyclicConnection` (`Silo::wouldCycle`), so the sort never
+  meets one. (One-sample feedback between nodes went away with block processing; feedback
+  belongs inside a synth, as `delayVar` relations.)
 
 The sort only runs when `needsSort_` is true (set by connect/disconnect operations).
 
@@ -147,48 +159,61 @@ A **Node** is an instance of a synth plugin within a silo. It contains:
 - **`nodeID`**: An integer identifier. 0 = output node, 1 = input node, -1 = crossfader
   sub-node. User nodes have arbitrary positive IDs.
 - **`def`**: Pointer to the `NodeDef` describing this node type.
-- **`funs`**: The `tzpl_SynthFuns` function table (alloc, free, init, processAudio, etc.).
-- **`ins`**: Vector of `InPort` objects.
+- **`funs`**: The `tzpl_SynthFuns` function table (alloc, free, init, process, resetVoice, etc.).
+- **`ins`**: Vector of `InPort` objects. There are no separate controls: every parameter
+  is an input, and a "control" is an input whose def carries a `tzpl_ControlSpec`.
 - **`outs`**: Vector of `OutPort` objects.
-- **`controls`**: Vector of `Control` objects.
+- **`events_`**: The discrete events (start, free, resetVoice, reset) in the current block.
+- **`voicer_`** / **`notesPort_`**: For voiced defs, the engine-side voice allocator and
+  the index of the `notes` input.
 
 ### Ports
 
+Every port channel is its own buffer of `maxBlock` samples. A synth sees each port as a
+`tzpl_InPort` / `tzpl_OutPort`: an array of per-channel pointers plus per-channel
+`isConst` and `version` flags.
+
 **`InPort`** (input port):
-- `dataBuffer_`: Heap-allocated buffer holding a constant/default value. When disconnected,
-  the plugin reads from this buffer.
+- `chanPtrs_`: The per-channel pointers the synth reads. Each points either at the input's
+  own buffer (`ownBufs_`) or at a source outlet channel.
+- `stages_`: One `ChanStage` per channel, the value an unconnected channel holds: a
+  constant, a running ramp (`rampTo`), or a pending one-sample impulse. `render()` writes
+  them into the input's own buffers before the node runs, and sets `isConst_` /
+  `version_`. A channel that holds still reports `isConst` and keeps its `version`, so
+  generated code can skip recomputing what depends only on it.
 - `srcPort_`: Pointer to the connected `OutPort`, or `nullptr` if disconnected.
+- `srcMap_`: The source channel each channel reads when connected (broadcasting).
 - `prev_`, `next_`: Doubly-linked list pointers — an InPort is linked into the source
   OutPort's destination list for fan-out tracking.
+- `mixerNode_`: Hidden fan-in mixer, when two or more sources feed the input.
+
+An unconnected input holds its spec's `init` (or 0) until something sets it.
 
 **`OutPort`** (output port):
-- `dataBuffer_`: Heap-allocated buffer where the plugin writes its output.
+- `bufs_`: Per-channel buffers the plugin writes, plus the producer's `isConst_` /
+  `version_` report.
 - `dstList_`: Head of a doubly-linked list of connected `InPort*` objects. This tracks
   all destinations (fan-out).
 
 ### Zero-Copy Connection Mechanism
 
-When `connect(outPort, inPort)` executes:
+When `connect(outPort, inPort)` executes, each input channel's pointer is pointed at the
+outlet channel it broadcasts from (per dimension, input index mod source size):
 ```
 inPort->srcPort_ = outPort;
-inPort->node_->synth->inlets[inPort->index_] = outPort->dataBuffer_;
+inPort->chanPtrs_[c] = outPort->bufs_[inPort->srcMap_[c]];
 ```
 
-The inlet pointer is redirected to point directly at the source's output buffer.
-No data is copied during audio processing — the downstream node reads directly from the
-upstream node's output buffer.
-
-When disconnected, the inlet pointer reverts to the InPort's own `dataBuffer_`:
-```
-inPort->srcPort_ = nullptr;
-inPort->node_->synth->inlets[inPort->index_] = inPort->dataBuffer_;
-```
+No data is copied during audio processing, and broadcasting a narrower source over a
+wider input costs nothing: several channel pointers alias one buffer. When disconnected,
+the channel pointers revert to the input's own buffers, refilled from its stages
+(`restoreOwnBuffers`).
 
 ### Node Lifecycle
 
 1. **Creation** (NRT): `Node::setupSynth()` allocates the `tzpl_SynthData` via
-   `funs.alloc()`, sets up the inlet/outlet/control pointer arrays, creates port objects
-   with their own data buffers, calls `funs.init()`, and inserts the node into the NRT
+   `funs.alloc(maxBlock)`, creates the port objects with their per-channel buffers and
+   value stages, sets up the `tzpl_InPort`/`tzpl_OutPort` arrays the synth sees, calls `funs.init()`, and inserts the node into the NRT
    node table.
 2. **Activation** (RT): `AddNodeCmd::doRT()` inserts the node into the RT node table and
    sets `rt_active = true`.
@@ -206,10 +231,12 @@ Key fields:
 
 - `name`: The def name (e.g., `"SinOsc"`, `"VoicerTest"`).
 - `funs`: The `tzpl_SynthFuns` function table.
-- `numIns`, `numOuts`, `numControls`: Port and control counts.
-- `ins`, `outs`: Arrays of `PortInfo` (name + signal type).
-- `controls`: Array of `ControlInfo` (name + signal type + controlID + spec).
-- `controlMap_`: Maps controlID to control index for O(1) lookup.
+- `num_ins`, `num_outs`: Port counts.
+- `ins`, `outs`: Arrays of `PortInfo` (name + signal type, plus an optional
+  `tzpl_ControlSpec` on inputs: UI range, warp, kind, and the `init` value an unconnected
+  input holds).
+- `voiced`, `maxVoices`, `noteDefaults`: For voiced defs, which have a `notes` input of
+  shape `{maxVoices, 1+N}` (column 0 the gate, columns 1..N the note parameters).
 
 ### Plugin ABI (`../shared/tzpl_plugin_abi.h`)
 
@@ -217,28 +244,29 @@ The plugin ABI is a pure C interface shared between the engine and the synthdef 
 It defines:
 
 - **`tzpl_SynthData`**: The base struct for plugin instances. Contains the function table,
-  engine/node pointers, inlet/outlet/control arrays, sample rate, and sample duration.
+  engine/node pointers, `maxBlock`, the `tzpl_InPort`/`tzpl_OutPort` arrays, sample rate,
+  and sample duration.
   Plugins extend this by placing `tzpl_SynthData` as the first member of their own struct.
 
 - **`tzpl_SynthFuns`**: The plugin function table:
   | Function | Required | Purpose |
   |----------|----------|---------|
-  | `alloc` | Yes | Allocate a new instance |
+  | `alloc(maxBlock)` | Yes | Allocate a new instance |
   | `free` | Yes | Deallocate an instance |
   | `init` | Yes | Initialize after allocation (sample rate is set) |
   | `uninit` | No | Cleanup before deallocation |
   | `reset` | No | Reset state |
-  | `processAudio` | Yes | Process one sample frame |
-  | `processEvents` | No | Process pending events |
-  | `event` | No | Handle an event |
-  | `noteOn` | No | Start a polyphonic note |
-  | `noteOff` | No | Release a note |
-  | `allNotesOff` | No | Release all notes |
-  | `noteSetParams` | No | Set note parameters by index-value pairs |
-  | `noteSetParamRange` | No | Set a range of note parameters |
+  | `process(offset, n)` | Yes | Compute samples `[offset, offset+n)` of every output |
+  | `resetVoice(voice, offset)` | Voiced only | A new note starts on `voice` at `offset` |
+  | `swapBuffer` | No | Replace a buffer slot, returning the old buffer for NRT cleanup |
+
+  Notes are not plugin calls: the engine allocates voices and writes the rows of the
+  `notes` input itself (§7).
 
 - **`tzpl_SignalType`**: Describes a port's data format: element type (`i32`/`f32`/`i64`/`f64`),
-  rate (`const`/`init`/`reset`/`event`/`audio`), and channel count.
+  rate (`const`/`init`/`reset`/`audio`; informational on ports, every input is audio
+  rate at the ABI), and `tzpl_Shape`: up to 4 dimensions, row-major, unused leading
+  dimensions 1. Channel counts are exact (no power-of-two rounding).
 
 - **`tzpl_SynthDef`**: The static description of a plugin type, provided by the plugin's
   `load` function.
@@ -258,11 +286,12 @@ A single plugin can also be loaded by name via `loadDef(engine, dirPath, defName
 
 Connections require type compatibility:
 
-- **Strict** (`compatibleTypes`): Exact match of rate, element type, and channel count.
+- **Strict** (`compatibleTypes`): Exact match of element type and shape.
   Applies to the direct port-to-port links the engine builds internally.
-- **Relaxed** (`relaxedCompatibleTypes`): Rate and element type only. This is what
-  `connect()` requires of a user connection -- differing channel counts are adapted
-  rather than rejected (see *Channel Adaptation*).
+- **Connectable** (`connectableTypes`): Element type only. This is what `connect()`
+  requires of a user connection. Where the source is no larger than the input in every
+  dimension it broadcasts (`broadcastsTo`: pointer remapping, no node); where it is
+  larger in some dimension, a fold adapter is spliced in (see *Channel Adaptation*).
 
 Type checking happens before any link is broken, so a rejected connect leaves whatever
 was already feeding the inlet in place.
@@ -313,9 +342,10 @@ dropped.
 - **`schedBetterLateThanNever`**: Convert stream time to sample time. If late, execute anyway.
 - **`schedOnTimeOnly`**: If late, set error and discard.
 
-The `SchedulerQueue` is a hash wheel with 1021 bins. Each bin holds a `TimeSortedCommandList`
-(doubly-linked, sorted by sample time). At each sample frame, `processScheduledEvents()`
-pops commands due at the current `sampleTime_`.
+Each TempoClock slot keeps a beat-sorted command queue. Once per block,
+`collectAndRunEvents()` pops every command due in the block from every clock, resolves
+each to its exact (fractional) sample time, and runs them, merged with RT task wakeups,
+in time order (see *Audio Processing Pipeline*).
 
 ### Command Types
 
@@ -327,15 +357,14 @@ pops commands due at the current `sampleTime_`.
 | `ConnectCmd` | Connect ports, optionally with crossfade |
 | `ReconnectOutputCmd` | Move all connections from one output to another |
 | `DisconnectInputCmd` | Disconnect an input, optionally with fade-out |
+| `DisconnectSourceCmd` | Disconnect one specific source from an input |
 | `DisconnectOutputCmd` | Disconnect all destinations from an output |
 | `DisconnectNodeCmd` | Disconnect all ports of a node |
-| `SetInputCmd<T>` | Set input to a constant value, optionally with crossfade |
-| `SetControlCmd<T>` | Set a control parameter on a node |
-| `NoteOnCmd` | Trigger a polyphonic note |
-| `NoteOffCmd` | Release a note |
+| `SetInputCmd` | Value-stage operation on some channels of an input: step, ramp, impulse, or (on a connected input) a crossfade to constants via an XFader |
+| `NoteOnCmd` | Allocate a voice, split the node at the onset (resetVoice), write its `notes` row |
+| `NoteOffCmd` | Drop the voice's gate |
 | `AllNotesOffCmd` | Release all notes |
-| `NoteSetParamRangeCmd` | Set a range of note parameters |
-| `NoteSetParamsCmd` | Set note parameters by index-value pairs |
+| `NoteSetParamsCmd` | Step or ramp note parameters (index-value pairs) |
 
 
 ## 6. Cross-Fading (`tzpl_xfader.hpp/cpp`)
@@ -365,9 +394,16 @@ This entire lifecycle is automatic and happens within the RT thread.
 | Variant | Input 0 | Input 1 | Use Case |
 |---------|---------|---------|----------|
 | `XFadeTwo` | Old source (connected) | New source (connected) | Replacing one connection with another |
-| `XFadeIn` | Constant (normalled value) | New source (connected) | Fading in from silence/default |
-| `XFadeOut` | Old source (connected) | Constant (normalled value) | Fading out to silence/default |
-| `XFadeSet` | Old constant | New constant | Changing a `setInput` value smoothly |
+| `XFadeIn` | Constant (the input's held value) | New source (connected) | Fading in from silence/default |
+| `XFadeOut` | Old source (connected) | Constant (the input's held value) | Fading out to silence/default |
+| `XFadeSet` | Old constant | New constant | Crossfading between constants |
+
+A `setInputX` on an *unconnected* input needs no fader: a crossfade between two
+constants is a ramp in the input's value stages. On a connected input, an XFader fades
+the signal out to the new value, which the input then holds. Fades compose: a crossfade
+started while another runs takes the running fader's output as its old input. Fade
+starts are sub-sample (a fractional start time), and the curves are shared with ramps
+(`tzpl_fade_curves.hpp`).
 
 ### Fade Curves
 
@@ -403,17 +439,19 @@ buffer).
 
 ### Channel Adaptation (`tzpl_chanadapt.hpp/cpp`)
 
-Any outlet can drive any inlet of the same element type and rate. If the channel counts
-differ, an adapter node is spliced in immediately after the source, so everything
-downstream of it -- crossfader, mixer, destination -- sees matching types:
+Any outlet can drive any inlet of the same element type. Shapes combine per dimension:
 
-- **Widening** (src < dst): `out[c] = in[c & (srcChans-1)]`. A mono source fills every
-  destination channel; stereo into a quad inlet lands as (L, R, L, R).
-- **Narrowing** (src > dst): `out[c] = sum of in[j] for all j & (dstChans-1) == c`. An
+- **Broadcasting** (source no larger than the input in every dimension): no node at all.
+  Each input channel points at the source channel it maps to (input index mod source size,
+  per dimension). A mono source fills every destination channel; stereo into a quad inlet
+  lands as (L, R, L, R).
+- **Folding** (source larger in some dimension): a fold adapter node is spliced in
+  immediately after the source, so everything downstream of it -- crossfader, mixer,
+  destination -- sees a shape that broadcasts. Each output channel sums every source
+  channel that lands on it (source index mod destination size, per dimension). An
   8-channel source into a stereo inlet mixes down to (a0+a2+a4+a6, a1+a3+a5+a7).
 
-Channel counts are required to be powers of two, so the index wrap is a mask -- the same
-assumption the synthdef compiler's codegen makes when it wraps channel indices.
+Channel counts are exact; nothing is rounded to a power of two.
 
 An adapter belongs to exactly one connection and retires itself (disconnects and goes to
 the dead-node queue) as soon as either end is unlinked. `Silo::unlink` is the single
@@ -422,20 +460,25 @@ re-routing a source, **connect the new link before breaking the old one**, or an
 in that source's path will retire out from under the rewire.
 
 
-## 7. Polyphonic Voice Management (`main.cpp` — Voicer template)
+## 7. Polyphonic Voice Management (`tzpl_note_voicer.hpp`)
 
-The `Voicer<MaxVoices, NumParams, RowsOrCols>` template class provides polyphonic voice
-allocation for plugins that support `noteOn`/`noteOff`:
+Voices are allocated by the engine, not the plugin. A voiced def has an input named
+`notes` of shape `{maxVoices, 1+N}`: column 0 is the gate, columns 1..N the note
+parameters. `NoteVoicer` only decides which row a note gets; the silo then writes the row
+as input-stage steps at the command's sample:
 
-- **Voice stealing**: When all voices are active, steals the oldest released voice. If none
-  are released, steals the oldest active voice.
-- **Note ID lookup**: A hash table maps noteID to voice index for O(1) access.
-- **Memory layouts**: `VoicesInColumns` (SIMD-friendly, parameters are contiguous across
-  voices) or `VoicesInRows` (scalar-friendly, voices are contiguous).
-- **Parameter setting**: `noteSetParamRange` and `noteSetParams` update per-voice parameters.
+- **`noteOn`**: Allocate a voice, add a `resetVoice` event at the onset (the node's block
+  is split there, and the plugin re-initializes that voice), step the gate to 1 and the
+  parameters to the note's values. Parameters the note does not give take the def's
+  `noteDefaults`.
+- **`noteOff`**: Step the voice's gate to 0.
+- **`noteSetParams`**: Step or ramp parameter columns of the note's row.
+- **Voice stealing**: Take the voice released longest ago, else steal the one started
+  longest ago, scanning from a rotating start so voices freed at the same time are handed
+  out in turn (policy shared with `shared/tzpl_voicer.hpp`).
 
-The `VoicerTest` in `main.cpp` demonstrates a 32-voice FM/waveshaping synthesizer using
-this system.
+Silo tasks reach the same operations without a bundle (`rtNoteOn`, `rtNoteOff`,
+`rtNoteSetParams`), at the task's wake time.
 
 
 ## 8. Threading Model
@@ -492,16 +535,21 @@ A binary serialization format (`Builder`/`ListBuilder`) is partially implemented
 compact encoding of s-expressions.
 
 
-## 10. Built-In Plugins (`main.cpp`)
+## 10. Built-In Plugins (`tzpl_test_plugins.cpp`)
 
-Several plugins are defined directly in `main.cpp` for testing:
+Several hand-written ABI v3 plugins are defined in `tzpl_test_plugins.cpp` for testing:
 
 | Plugin | Description | Inputs | Outputs |
 |--------|-------------|--------|---------|
-| `VoicerTest` | 32-voice FM/waveshaping synth with pan, envelope, drive | None | 2ch (stereo) f32 audio |
-| `SinOsc` | Sine oscillator | 2: freq (f32), amp (f32) | 1: out (2ch f32 audio) |
-| `AddOp` | Addition operator | 2: a (2ch f32 audio), b (2ch f32 audio) | 1: out (2ch f32 audio) |
-| `MulOp` | Multiplication operator | 2: a (2ch f32 audio), b (2ch f32 audio) | 1: out (2ch f32 audio) |
+| `voicer` | 32-voice sine voicer (params: pitch, amp) | `notes` (32x3 f32) | 1: out (2ch f32) |
+| `sinosc` | Sine oscillator | 2: freq, amp (f32, with specs) | 1: out (2ch f32) |
+| `+` / `*` | Addition / multiplication | 2: a, b (2ch f32) | 1: out (2ch f32) |
+| `counter` | Sample counter | none | 1: out (1ch f32) |
+| `vtest` | Voiced test def | `notes` (4x2 f32) | 1: out (4ch f32) |
+| pass / rec defs | Pass-through and recorder, any shape | 1: in | 1: out |
+
+The bridge also registers native `_wireN` / `_gainN` defs (and shaped forms such as
+`_wire2x3`) on demand (`tzpl_builtin_defs.cpp`).
 
 
 ## 11. Client API Summary (`tzpl_client_interface.hpp`)
@@ -518,21 +566,26 @@ Several plugins are defined directly in `main.cpp` for testing:
 
 ### Graph Mutation
 - `newNode(defName, nodeID)` / `freeNode(nodeID)` / `freeAllNodes()`
-- `connect(src, dst, xfadeTime, curve)`
+- `connect(src, dst, xfadeTime, curve)` -- broadcasts or folds differing shapes
 - `disconnectInput(dst, xfadeTime, curve)` / `disconnectOutput(src)` / `disconnectNode(nodeID)`
 - `reconnectOutput(oldSrc, newSrc, xfadeTime, curve)`
 - `replaceNode(oldNodeID, newNodeID, xfadeTime, curve)`
 
 ### Parameter Control
-- `setInput(inPort, numValues, values, xfadeTime, curve)` — Set input to constant.
-- `setControl(nodeID, controlID, numValues, values)` — Set a control parameter.
+Inputs are addressed by port index or by name (resolved at submit), and a `Region`
+(a box: offset and extent per dimension, or a flat channel range) picks the channels.
+Values are broadcast cyclically over the region.
+- `setInput(port, region, values, rampTime = 0, curve)` — Step, or ramp from the current value.
+- `setInputX(port, region, values, xfadeTime, curve)` — Crossfade to the values (a connected
+  input fades its signal out and is left holding them).
+- `impulseInput(port, region, values)` — The values for one sample, then back.
 
 ### Polyphonic Notes
 - `noteOn(nodeID, noteID, length, paramValues)`
 - `noteOff(nodeID, noteID)`
 - `allNotesOff(nodeID)`
-- `noteSetParams(nodeID, noteID, n, params)`
-- `noteSetParamRange(nodeID, noteID, first, length, values)`
+- `noteSetParams(nodeID, noteID, n, params, rampTime = 0)`
+- `noteSetParamRange(nodeID, noteID, first, length, values, rampTime = 0)`
 
 ### Buffers (declared, not yet implemented)
 - `newBuffer` / `freeBuffer` / `resizeBuffer` / `loadBuffer` / `zeroBuffer`

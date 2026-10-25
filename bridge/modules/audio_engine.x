@@ -56,6 +56,66 @@ enum Err {
     errBadSampleBank,
 }
 
+-- Input values (block engine: synths have no controls; every parameter is
+-- an input, and an unconnected input holds a value). Address the input by
+-- port index or by name; give one value or an array, which broadcasts
+-- cyclically over the addressed channels. All are bundled commands
+-- (between begin() and go()/sched()), applied at the bundle's sample.
+--
+--   setInput(node, port, value)              step the whole input
+--   setInput(node, port, value, rampTime)    ramp from the current value
+--   setInputAt(node, port, first, values)    flat channels [first, first+n)
+--   setInputBox(node, port, offset, extent, values)
+--                                            a box in shape coordinates
+--                                            (extent 0 = to the end)
+--   setInputX(node, port, value, xfadeTime)  crossfade to the value; a
+--                                            connected input fades its
+--                                            signal out and is left holding it
+--   impulseInput(node, port, value)          the value for one sample (a
+--   impulseInputAt(node, port, first, values) trigger), then back
+--
+-- On a connected input setInput/setInputAt change the value it reverts to
+-- when disconnected.
+
+fn _portIndex(port Int) Int = port;
+fn _portIndex(port String) Int = -1;
+fn _portName(port Int) String = "";
+fn _portName(port String) String = port;
+fn _inputValues(v Float) [Float] = [v];
+fn _inputValues(v Int) [Float] = [v toFloat];
+fn _inputValues(vs [Float]) [Float] = vs;
+
+fn setInput<P, V>(nodeID Int, port P, value V, rampTime Float = 0.0,
+                  curve FadeCurve = FadeCurve.fadeLinear) Int =
+	inputOp(nodeID, _portIndex(port), _portName(port), 0, 0, _inputValues(value),
+	        rampTime, curve ordinal, 0);
+
+fn setInputAt<P, V>(nodeID Int, port P, first Int, value V, rampTime Float = 0.0,
+                    curve FadeCurve = FadeCurve.fadeLinear) Int {
+	let vs = _inputValues(value);
+	inputOp(nodeID, _portIndex(port), _portName(port), first, vs length, vs,
+	        rampTime, curve ordinal, 0)
+}
+
+fn setInputBox<P, V>(nodeID Int, port P, offset [Int], extent [Int], value V,
+                     rampTime Float = 0.0, curve FadeCurve = FadeCurve.fadeLinear) Int =
+	inputOpBox(nodeID, _portIndex(port), _portName(port), offset, extent,
+	           _inputValues(value), rampTime, curve ordinal, 0);
+
+fn setInputX<P, V>(nodeID Int, port P, value V, xfadeTime Float,
+                   curve FadeCurve = FadeCurve.fadeLinear) Int =
+	inputOp(nodeID, _portIndex(port), _portName(port), 0, 0, _inputValues(value),
+	        xfadeTime, curve ordinal, 1);
+
+fn impulseInput<P, V>(nodeID Int, port P, value V) Int =
+	inputOp(nodeID, _portIndex(port), _portName(port), 0, 0, _inputValues(value),
+	        0.0, 0, 2);
+
+fn impulseInputAt<P, V>(nodeID Int, port P, first Int, value V) Int {
+	let vs = _inputValues(value);
+	inputOp(nodeID, _portIndex(port), _portName(port), first, vs length, vs, 0.0, 0, 2)
+}
+
 -- One zone of a sample bank: a sound file covering an inclusive pitch and
 -- velocity range (MIDI 0-127). rootKey is the note at which the sample
 -- plays back unshifted; loopStart/loopEnd are a sustain loop in frames of

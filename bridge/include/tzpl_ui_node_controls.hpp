@@ -22,8 +22,8 @@
 //  (from its def's ControlSpecs) as engine-bound UIState widgets. Shared
 //  by the `ui` module FFI (ui.control / ui.controls) and the app's graph
 //  view (double-click a node); both apps' widget renderers and the
-//  ControlsDispatcher then handle drawing and coalesced setControl
-//  delivery.
+//  ControlsDispatcher then handle drawing and coalesced setInput
+//  delivery. A def's controls are its inputs with a spec.
 //
 
 #ifndef tzpl_ui_node_controls_hpp
@@ -45,11 +45,11 @@ UISpec specFromControl(tzpl_ControlSpec const& cs);
 // Button, Boolean -> Toggle, Select -> Number.
 UIWidgetKind widgetKindForControl(tzpl_ControlKind kind);
 
-// Upsert one widget for `c` in `panel`, bound fast-path to the node's
-// control (an existing widget keeps its value but rebinds). Requires
-// ui->mtx NOT held. Returns the widget id.
+// Upsert one widget for input `c` (port index `port`) in `panel`, bound
+// fast-path to the node's input (an existing widget keeps its value but
+// rebinds). Requires ui->mtx NOT held. Returns the widget id.
 std::uint64_t bindControlWidget(UIState* ui, std::string const& panel,
-                                engine::ControlDesc const& c,
+                                engine::PortDesc const& c, int port,
                                 long long nodeID, int silo);
 
 // Materialize the whole control interface of a node of def `defName`

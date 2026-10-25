@@ -32,11 +32,13 @@
 -- Note params are kept to what genuinely varies per note -- pitch and
 -- velocity (sample players) or freq and amp (synthesis models); params
 -- omitted from the array take their spec defaults, and `gate` is implicit
--- and always last. Everything panel-like -- envelope segments, cutoff,
--- resonance, damping -- is a regular control, as on a physical synth:
--- node-level, shared by all voices, set with
---     setControl(nodeID, controlIndex, value);
--- (controls are indexed in declaration order, documented per def below).
+-- (column 0 of the def's `notes` input; the engine sets it). Everything
+-- panel-like -- envelope segments, cutoff, resonance, damping -- is a
+-- control (an input with a spec), as on a physical synth: node-level,
+-- shared by all voices, set by name with
+--     setInput(nodeID, "cutoff", value);
+-- (or by input index: controls come first, in declaration order,
+-- documented per def below).
 --
 -- Per-node data. The sample players resolve notes against sample bank 0 --
 -- load one per node before playing:

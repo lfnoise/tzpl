@@ -37,7 +37,7 @@ fn toEngineCmd(c NoteCmd) EngineCmd {
     match (c) {
         noteOn(n, id, ps): EngineCmd.noteOn(n, id, ps);
         noteOff(n, id): EngineCmd.noteOff(n, id);
-        noteSetParams(n, id, first, ps): EngineCmd.noteSetParams(n, id, first, ps);
+        noteSetParams(n, id, first, ps, ramp): EngineCmd.noteSetParams(n, id, first, ps, ramp);
     }
 }
 
@@ -202,7 +202,6 @@ fn enqueue(p Player, events List<Event>) Void {
 ---------------------------------------------------------------------------
 -- Silo-task player: walk a score with immediate playNote/releaseNote.
 -- Use from code loaded INTO a silo:  fn start() Void { spawn(0, scorePlayer(sc)); }
--- (noteSetParams is not emitted by score(); it is ignored here.)
 
 coro fn scorePlayer(sc0 List<(Float, NoteCmd)>) Float {
     var sc = sc0;
@@ -216,7 +215,7 @@ coro fn scorePlayer(sc0 List<(Float, NoteCmd)>) Float {
             match (tc.1) {
                 noteOn(n, id, ps): playNote(n, id, ps);
                 noteOff(n, id): releaseNote(n, id);
-                noteSetParams(n, id, first, ps): 0;
+                noteSetParams(n, id, first, ps, ramp): setNoteParams(n, id, first, ps, ramp);
             }
             sc = sc tail;
         }

@@ -43,6 +43,7 @@ struct PortVM {
     int chans = 0;
     int elem = 0; // tzpl_ElemType
     int rate = 0; // tzpl_Rate
+    tzpl_Shape shape{{1, 1, 1, 1}};
 };
 
 struct NodeVM {

@@ -45,6 +45,9 @@ namespace engine {
 // running. chans must be >= 1.
 char const* ensureWireDef(Engine* e, int chans);
 char const* ensureGainDef(Engine* e, int chans);
+// The same for any shape (row and scalar shapes name as their width).
+char const* ensureWireDef(Engine* e, tzpl_Shape shape);
+char const* ensureGainDef(Engine* e, tzpl_Shape shape);
 
 } // namespace engine
 

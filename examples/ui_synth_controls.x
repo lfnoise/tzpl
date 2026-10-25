@@ -4,7 +4,7 @@
 -- the compiled plugin, so `controls(node)` can materialize a panel of
 -- correctly ranged, warped, engine-bound widgets -- no manual slider
 -- setup. The panel is named after the def ("wobble" here); dragging a
--- widget sends setControl directly from the GUI thread (no VM entry),
+-- widget sets the node's input directly from the GUI thread (no VM entry),
 -- so it stays live even while a long eval is running.
 --
 -- Run: evaluate this file in the app, with audio on.
@@ -42,11 +42,11 @@ let sc = scope("out", node);
 let freqW = control(node, "freq");
 freqW setValue(330.0);
 
--- Or skip the widget: setControl also addresses controls by name,
+-- Or skip the widget: setInput also addresses inputs by name,
 -- resolved against the node's def when the bundle is submitted. (The
 -- widget doesn't see this value; it moves only on drags and setValue.)
 begin();
-setControl(node, "rate", 6.0);
+setInput(node, "rate", 6.0);
 sched(0);
 
 "interface ready -- drag away" println;

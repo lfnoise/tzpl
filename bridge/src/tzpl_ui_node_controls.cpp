@@ -55,7 +55,7 @@ UIWidgetKind widgetKindForControl(tzpl_ControlKind kind) {
 }
 
 std::uint64_t bindControlWidget(UIState* ui, std::string const& panel,
-                                engine::ControlDesc const& c,
+                                engine::PortDesc const& c, int port,
                                 long long nodeID, int silo) {
     if (!ui) return 0;
     UISpec spec = specFromControl(c.spec);
@@ -66,10 +66,9 @@ std::uint64_t bindControlWidget(UIState* ui, std::string const& panel,
     if (chans == 1) {
         w = ui->upsert(panel, c.name, widgetKindForControl(c.spec.kind), spec, {});
     } else if (c.spec.kind == tzpl_ckBoolean || c.spec.kind == tzpl_ckTrigger) {
-        // Multichannel on/off or trigger: a 1 x chans button row. The
-        // dispatcher sends the whole cell vector as ONE setControl (there
-        // is no per-element setControl form, so per-channel widgets could
-        // not bind independently).
+        // Multichannel on/off or trigger: a 1 x chans button row, sent as
+        // the whole cell vector in one setInput. (A widget bound with
+        // ui.bindInput(w, node, name, element) drives a single element.)
         w = ui->upsert(panel, c.name, UIWidgetKind::ButtonMatrix, UISpec{}, {});
         if (w->rows != 1 || w->cols != chans) {
             w->values.assign((size_t)chans, 0.0);
@@ -84,13 +83,12 @@ std::uint64_t bindControlWidget(UIState* ui, std::string const& panel,
         w->momentary = c.spec.kind == tzpl_ckTrigger;
     } else {
         // Multichannel continuous/select: one bar per channel, all mapped
-        // through the control's spec; sent as one vector setControl.
+        // through the control's spec; sent as one vector setInput.
         w = ui->upsert(panel, c.name, UIWidgetKind::MultiSlider, spec, {});
         w->values.resize((size_t)chans, spec.clamp(spec.init));
         for (auto& v : w->values) v = spec.clamp(v);
     }
-    w->target = UIEngineTarget{static_cast<long>(nodeID),
-                               static_cast<long>(c.controlID), silo};
+    w->target = UIEngineTarget{static_cast<long>(nodeID), port, 0, 0, silo};
     w->dirtyEngine = true;  // push current value(s) through the fresh binding
     if (ui->wake) ui->wake();
     return w->id;
@@ -101,12 +99,14 @@ int materializeNodeControls(UIState* ui, engine::Engine* e,
                             long long nodeID, int silo,
                             char const* defName) {
     if (!ui || !e || !defName) return -1;
-    std::vector<engine::ControlDesc> controls;
-    if (!engine::listDefControls(e, defName, controls)) return -1;
+    engine::DefDesc def;
+    if (!engine::getDefDesc(e, defName, def)) return -1;
 
+    // The controls are the inputs with a spec.
     int bound = 0;
-    for (auto const& c : controls)
-        if (bindControlWidget(ui, panel, c, nodeID, silo)) ++bound;
+    for (int i = 0; i < (int)def.ins.size(); ++i)
+        if (def.ins[i].hasSpec && bindControlWidget(ui, panel, def.ins[i], i, nodeID, silo))
+            ++bound;
     return bound;
 }
 

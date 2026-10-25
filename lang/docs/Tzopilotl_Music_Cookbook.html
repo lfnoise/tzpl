@@ -601,9 +601,11 @@ trigger with <code>gate()</code> (gate is voice input 0, injected automatically)
 sineSynth <span class="fn">defSynthX</span>(<span class="str">"sine_voice"</span>) await;</code></pre>
 <p><strong>How it works.</strong> <code>voicer(16, sineVoice)</code> instantiates the
 voice graph 16 times with independent note state; <code>sum</code> reduces them to
-one stereo signal. <code>noteParam</code> values arrive in the order they are
-declared (here index 1 = pitch, index 2 = amp; index 0 is always the gate), which
-is the layout you pass to <code>noteOn</code> when you play the synth in
+one stereo signal. <code>noteParam</code>s become columns of the synth's
+<code>notes</code> input in the order they are declared (column 0 is always the
+gate, which the engine sets; here column 1 = pitch, column 2 = amp), and the
+params after the gate &mdash; <code>[pitch, amp]</code> &mdash; are the layout you
+pass to <code>noteOn</code> when you play the synth in
 <a href="#notes">section&nbsp;4</a>. The <code>adsr</code> envelope opens when the
 gate goes high (note on) and releases when it goes low (note off).</p>
 <div class="note"><strong>Tip</strong>
@@ -611,7 +613,7 @@ Compiling a synthdef invokes <code>clang</code> to build a <code>.dylib</code>. 
 skip that while prototyping note logic, use the engine's built-in
 <code>"voicer"</code> node def (used throughout the silo recipes below) &mdash; it
 needs no compilation. Its note params are
-<code>[pitch, amp, drive, pan, attack, release]</code>.</div>
+<code>[pitch, amp]</code>.</div>
 
 <h3 id="synthdef-wavetable">2.4 A band-limited wavetable oscillator</h3>
 <p>The <code>lf*</code> oscillators alias at high frequencies, and
@@ -642,7 +644,16 @@ wtsaw <span class="fn">defSynthX</span>(<span class="str">"wtsaw"</span>) await;
 <span class="fn">fillBuffer</span>(<span class="num">102</span>, <span class="num">0</span>, <span class="num">1</span>, <span class="fn">sawTables</span>());   <span class="cmt">-- compute the bank, swap it in</span>
 <span class="fn">connect</span>(<span class="num">102</span>, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);
 <span class="fn">sched</span>(<span class="num">0</span>);</code></pre>
-<p>Sweep the <code>freq</code> control up and down: unlike <code>lfsaw</code>, the
+<p>Sweep the <code>freq</code> control up and down &mdash; here a 4-second ramp
+to the top and back:</p>
+<pre><code><span class="fn">begin</span>();
+<span class="fn">setInput</span>(<span class="num">102</span>, <span class="str">"freq"</span>, <span class="num">4000.0</span>, <span class="num">4.0</span>, FadeCurve.fadeExponential);
+<span class="fn">sched</span>(<span class="num">0</span>);
+
+<span class="fn">begin</span>();
+<span class="fn">setInput</span>(<span class="num">102</span>, <span class="str">"freq"</span>, <span class="num">110.0</span>, <span class="num">4.0</span>, FadeCurve.fadeExponential);
+<span class="fn">sched</span>(<span class="num">0</span>);</code></pre>
+<p>Unlike <code>lfsaw</code>, the
 top of the spectrum stays clean because <code>osc</code> re-selects (and
 crossfades between) tables as the frequency moves, keeping every partial below
 Nyquist.</p>
@@ -742,6 +753,7 @@ trigger and release voices by a <em>note id</em> you choose:</p>
   <tr><th>From NRT</th><th>From inside a silo</th><th>Meaning</th></tr>
   <tr><td><code>noteOn(node, noteId, params)</code></td><td><code>playNote(node, noteId, params)</code></td><td>Start a voice.</td></tr>
   <tr><td><code>noteOff(node, noteId)</code></td><td><code>releaseNote(node, noteId)</code></td><td>Release that voice.</td></tr>
+  <tr><td><code>noteSetParams(node, noteId, first, values, rampTime)</code></td><td><code>setNoteParams(node, noteId, first, values, rampTime)</code></td><td>Change a sounding voice's params from index <code>first</code>, stepped (<code>rampTime</code> 0) or ramped.</td></tr>
 </table>
 <p>The two columns differ in more than where they run. <code>noteOn</code> /
 <code>noteOff</code> are <em>bundle commands</em>: they must appear between
@@ -755,7 +767,7 @@ no bundle and no scheduling &mdash; the running task <em>is</em> the schedule).<
 <p><code>params</code> is a <code>[Float]</code> of the voice's
 <code>noteParam</code>s, in declaration order. For your <code>sine_voice</code> it
 is <code>[pitch, amp]</code>. The engine's built-in <code>"voicer"</code> takes
-<code>[pitch, amp, drive, pan, attack, release]</code>.</p>
+<code>[pitch, amp]</code> too.</p>
 <pre><code><span class="kw">import</span> audio_engine.*;
 
 <span class="fn">engineStart</span>();
@@ -794,13 +806,13 @@ playback helpers, standard note parameters) for composing your own voices, and
 six ready-made defs, each a polyphonic voicer wrapped around one synthesis
 model:</p>
 <table>
-  <tr><th>Def</th><th>Sound</th><th><code>noteOn</code> params</th><th>Controls (index&nbsp;&middot;&nbsp;name)</th><th>Out</th></tr>
+  <tr><th>Def</th><th>Sound</th><th><code>noteOn</code> params</th><th>Controls</th><th>Out</th></tr>
   <tr><td><code>smpPerc</code></td><td>Percussive sample player: the resolved sample plays once, at the pitch-shifted rate, and stops at its end. Note-off is ignored.</td><td><code>[pitch, vel]</code></td><td>&mdash;</td><td>stereo</td></tr>
   <tr><td><code>smpLoopTail</code></td><td>Sample player: loops the sample's sustain loop while the note is held; on release the playhead runs on through the sample's own recorded decay.</td><td><code>[pitch, vel]</code></td><td>&mdash;</td><td>stereo</td></tr>
-  <tr><td><code>smpLoopEnv</code></td><td>Sample player: keeps looping through sustain <em>and</em> release; an exponential envelope of <code>release</code> seconds shapes the tail.</td><td><code>[pitch, vel]</code></td><td>0&nbsp;release</td><td>stereo</td></tr>
-  <tr><td><code>wtLead</code></td><td>Band-limited wavetable oscillator (<a href="#synthdef-wavetable">&sect;2.4</a>) through a resonant lowpass; separate ADSR envelopes for amplitude and filter, the latter sweeping the cutoff up to <code>envOct</code> octaves.</td><td><code>[freq, amp]</code></td><td>0&nbsp;attack, 1&nbsp;decay, 2&nbsp;sustain, 3&nbsp;release, 4&nbsp;cutoff, 5&nbsp;envOct, 6&nbsp;res, 7&nbsp;fattack, 8&nbsp;fdecay, 9&nbsp;fsustain</td><td>mono</td></tr>
-  <tr><td><code>resonBank</code></td><td>Harmonic ringing-filter bank excited by gated noise: hold the note for a bowed, breathy tone; release it and the modes ring out over <code>decay</code> seconds.</td><td><code>[freq, amp]</code></td><td>0&nbsp;attack, 1&nbsp;release, 2&nbsp;decay</td><td>mono</td></tr>
-  <tr><td><code>ksPluck</code></td><td>Karplus-Strong plucked string: a noise burst of <code>pluck</code> seconds excites a tuned string that rings for <code>decay</code> seconds; <code>damp</code> darkens it. Note-off is ignored.</td><td><code>[freq, amp]</code></td><td>0&nbsp;pluck, 1&nbsp;decay, 2&nbsp;damp</td><td>mono</td></tr>
+  <tr><td><code>smpLoopEnv</code></td><td>Sample player: keeps looping through sustain <em>and</em> release; an exponential envelope of <code>release</code> seconds shapes the tail.</td><td><code>[pitch, vel]</code></td><td>release</td><td>stereo</td></tr>
+  <tr><td><code>wtLead</code></td><td>Band-limited wavetable oscillator (<a href="#synthdef-wavetable">&sect;2.4</a>) through a resonant lowpass; separate ADSR envelopes for amplitude and filter, the latter sweeping the cutoff up to <code>envOct</code> octaves.</td><td><code>[freq, amp]</code></td><td>attack, decay, sustain, release, cutoff, envOct, res, fattack, fdecay, fsustain</td><td>mono</td></tr>
+  <tr><td><code>resonBank</code></td><td>Harmonic ringing-filter bank excited by gated noise: hold the note for a bowed, breathy tone; release it and the modes ring out over <code>decay</code> seconds.</td><td><code>[freq, amp]</code></td><td>attack, release, decay</td><td>mono</td></tr>
+  <tr><td><code>ksPluck</code></td><td>Karplus-Strong plucked string: a noise burst of <code>pluck</code> seconds excites a tuned string that rings for <code>decay</code> seconds; <code>damp</code> darkens it. Note-off is ignored.</td><td><code>[freq, amp]</code></td><td>pluck, decay, damp</td><td>mono</td></tr>
 </table>
 <p>Two conventions to know:</p>
 <ul>
@@ -817,8 +829,8 @@ model:</p>
   players, <code>[freq, amp]</code> (Hz, 0&ndash;1) for the synthesis models.
   Everything panel-like &mdash; envelope segments, cutoff, damping &mdash; is a
   node-level <em>control</em>, shared by all voices like the panel of a
-  hardware synth: set it with <code>setControl(node, index, value)</code>
-  (a bundle command), using the indexes in the table.</li>
+  hardware synth: set it by name with <code>setInput(node, name, value)</code>
+  (a bundle command; add a ramp time to glide), using the names in the table.</li>
 </ul>
 <p>The plucked string, end to end &mdash; compile, instantiate, play a chord,
 then turn the panel:</p>
@@ -847,8 +859,8 @@ then turn the panel:</p>
 
 <span class="cmt">-- turn the panel: darker, shorter strings -- then re-run the chord block</span>
 <span class="fn">begin</span>();
-<span class="fn">setControl</span>(<span class="num">210</span>, <span class="num">2</span>, <span class="num">0.8</span>);   <span class="cmt">-- damp: roll the highs off the string loop</span>
-<span class="fn">setControl</span>(<span class="num">210</span>, <span class="num">1</span>, <span class="num">1.0</span>);   <span class="cmt">-- decay: ring time down to 1 s</span>
+<span class="fn">setInput</span>(<span class="num">210</span>, <span class="str">"damp"</span>, <span class="num">0.8</span>);    <span class="cmt">-- roll the highs off the string loop</span>
+<span class="fn">setInput</span>(<span class="num">210</span>, <span class="str">"decay"</span>, <span class="num">1.0</span>);   <span class="cmt">-- ring time down to 1 s</span>
 <span class="fn">sched</span>(<span class="num">0</span>);</code></pre>
 <p>And to stop:</p>
 <pre><code><span class="fn">begin</span>();
@@ -858,7 +870,7 @@ then turn the panel:</p>
 <code>voicer(maxVoices, voiceFn)</code> exactly as you did by hand in
 <a href="#synthdef-voice">&sect;2.3</a> &mdash; the library just ships the
 voice. <code>noteOn</code> params land in declaration order (the gate is
-implicit, always input&nbsp;0), and omitted trailing params take their spec
+implicit: the engine sets it), and omitted trailing params take their spec
 defaults, so <code>noteOn(<span class="num">210</span>, <span
 class="num">5</span>, [<span class="num">440.0</span>])</code> plucks at the
 default amplitude. Controls are read by the voices as shared values, so a
@@ -900,8 +912,8 @@ bank (buffer&nbsp;0) built by the <code>wavetables</code> module, as in
 
 <span class="cmt">-- play the panel while they hold: open the filter, sharpen the resonance</span>
 <span class="fn">begin</span>();
-<span class="fn">setControl</span>(<span class="num">211</span>, <span class="num">4</span>, <span class="num">3000.0</span>);   <span class="cmt">-- cutoff up</span>
-<span class="fn">setControl</span>(<span class="num">211</span>, <span class="num">6</span>, <span class="num">0.15</span>);     <span class="cmt">-- res is 1/Q -- smaller is more resonant</span>
+<span class="fn">setInput</span>(<span class="num">211</span>, <span class="str">"cutoff"</span>, <span class="num">3000.0</span>, <span class="num">1.0</span>);   <span class="cmt">-- open the filter over 1 s</span>
+<span class="fn">setInput</span>(<span class="num">211</span>, <span class="str">"res"</span>, <span class="num">0.15</span>);             <span class="cmt">-- res is 1/Q -- smaller is more resonant</span>
 <span class="fn">sched</span>(<span class="num">0</span>);</code></pre>
 <p>These notes are sustained, so release them to stop:</p>
 <pre><code><span class="fn">begin</span>();
@@ -979,7 +991,7 @@ kicks off the music; <code>siloStartAt</code> calls it on the grid.</p>
 <span class="str">async fn melody(self Actor&lt;Msg&gt;, init Msg) Void {</span>
 <span class="str">    var i = 0;</span>
 <span class="str">    while (true) {</span>
-<span class="str">        playNote(101, i % 16, [scale[i % 6], 0.6, 4.7, 0.0, 0.01, 0.2]);</span>
+<span class="str">        playNote(101, i % 16, [scale[i % 6], 0.6]);</span>
 <span class="str">        await delay(0.4);</span>
 <span class="str">        releaseNote(101, i % 16);</span>
 <span class="str">        await delay(0.1);</span>
@@ -1135,7 +1147,7 @@ cheaply.</p>
 <span class="str">    var i = 0;</span>
 <span class="str">    while (true) {</span>
 <span class="str">        let pitch = root + chord[i % 4];</span>
-<span class="str">        playNote(101, i % 16, [pitch, 0.3, 4.5, 0.0, 0.005, 0.2]);</span>
+<span class="str">        playNote(101, i % 16, [pitch, 0.3]);</span>
 <span class="str">        await delay(0.25);</span>
 <span class="str">        releaseNote(101, i % 16);</span>
 <span class="str">        i = i + 1;</span>
@@ -1165,8 +1177,9 @@ cheaply.</p>
 <p>A module like this can also live in its own <code>.x</code> file and load with
 <code>await siloLoadFile(0, "parts/arp.x")</code>. The same shape generates
 <em>control</em> automation rather than notes &mdash; sweep a filter cutoff by
-calling <code>setControl(node, ctl, value)</code> (or <code>setInput</code>) each
-step instead of <code>playNote</code>.</p>
+calling <code>setInput(node, name, value)</code> each step instead of
+<code>playNote</code> (inside a <code>begin()</code>/<code>go</code> bundle, like
+any graph command) &mdash; or pass a ramp time so each step glides to the next.</p>
 <div class="note"><strong>Coroutine form</strong>
 There is an older equivalent: a <code>coro fn ... yield beats</code> coroutine,
 launched with <code>spawn(clock, coro())</code> (the <code>audio_engine.spawn</code>
@@ -1286,7 +1299,7 @@ behavior itself stays name-agnostic:</p>
 <span class="str">    while (true) {</span>
 <span class="str">        let m = await receive(self);</span>
 <span class="str">        match (m) {</span>
-<span class="str">            Msg.float(pitch): { playNote(101, id % 16, [pitch, 0.6, 4.7, 0.0, 0.01, 0.2]); id = id + 1; }</span>
+<span class="str">            Msg.float(pitch): { playNote(101, id % 16, [pitch, 0.6]); id = id + 1; }</span>
 <span class="str">            _: {}</span>
 <span class="str">        }</span>
 <span class="str">    }</span>
@@ -1464,7 +1477,7 @@ all loaded in parallel and started together on a downbeat. This mirrors
 <span class="str">async fn play(self Actor&lt;Msg&gt;, init Msg) Void {</span>
 <span class="str">    var i = 0;</span>
 <span class="str">    while (true) {</span>
-<span class="str">        playNote(101, i % 8, [notes[i % 4], 0.7, 4.7, 0.0, 0.005, 0.15]);</span>
+<span class="str">        playNote(101, i % 8, [notes[i % 4], 0.7]);</span>
 <span class="str">        await delay(1.0); releaseNote(101, i % 8); await delay(0.0); i = i + 1;</span>
 <span class="str">    }</span>
 <span class="str">}</span>
@@ -1478,7 +1491,7 @@ all loaded in parallel and started together on a downbeat. This mirrors
 <span class="str">async fn play(self Actor&lt;Msg&gt;, init Msg) Void {</span>
 <span class="str">    var i = 0;</span>
 <span class="str">    while (true) {</span>
-<span class="str">        playNote(301, i % 16, [p[i % 4], 0.25, 4.5, 0.0, 0.005, 0.1]);</span>
+<span class="str">        playNote(301, i % 16, [p[i % 4], 0.25]);</span>
 <span class="str">        await delay(0.25); releaseNote(301, i % 16); i = i + 1;</span>
 <span class="str">    }</span>
 <span class="str">}</span>
@@ -1683,8 +1696,8 @@ p enqueue(canon perform);    <span class="cmt">-- the 11.3 canon follows when it
 <span class="str">"wrote /tmp/take.wav"</span> println;</code></pre>
 <p>For code running <em>inside</em> a silo (section&nbsp;5), use
 <code>scorePlayer</code> with <code>spawn</code> instead &mdash; it walks the same
-score with immediate <code>playNote</code>/<code>releaseNote</code> on the silo's
-audio thread.</p>
+score with immediate <code>playNote</code>/<code>releaseNote</code>/<code>setNoteParams</code>
+on the silo's audio thread.</p>
 <div class="note"><strong>Runnable examples</strong>
 &mdash; <code>integration-tests/scripts/pat_audible.x</code>,
 <code>media_audible.x</code>, <code>shape_audible.x</code>,
@@ -1837,6 +1850,11 @@ has to be rebuilt by hand. Proxies reading it keep working through the change
 (the engine wraps or folds the width difference) and adopt the new width at
 their next redefinition:</p>
 <pre><code>reshape(drone, <span class="num">4</span>);              <span class="cmt">-- stereo -&gt; quad, dependents keep running</span></code></pre>
+<p>Channel counts are exact (a 3-channel proxy is 3 channels), and a proxy can
+also carry a multidimensional <code>Shape</code> from <code>synthdef</code>:
+<code>ndef(shape([<span class="num">2</span>, <span class="num">3</span>]))</code> makes a
+silent 2&times;3 proxy, and <code>reshape(p, shape([<span class="num">2</span>, <span class="num">2</span>]))</code>
+reshapes one.</p>
 <p>Finally, <code>ndef</code> also accepts a symbol name as an opt-in identity:
 <code>ndef('drone, fn() S {&hellip;})</code> finds the existing <code>'drone</code>
 proxy and crossfades it instead of creating a new one, so a whole cell &mdash;
@@ -1861,7 +1879,7 @@ drone free;</code></pre>
   <tr><td><code>newNode / connect / freeNode</code></td><td>audio_engine</td><td>NRT</td></tr>
   <tr><td><code>noteOn / noteOff</code></td><td>audio_engine</td><td>NRT</td></tr>
   <tr><td><code>playNote / releaseNote</code></td><td>audio_engine</td><td>silo</td></tr>
-  <tr><td><code>setControl / setInput</code></td><td>audio_engine</td><td>NRT / silo</td></tr>
+  <tr><td><code>setInput / setInputX / impulseInput</code></td><td>audio_engine</td><td>NRT / silo</td></tr>
   <tr><td><code>setTempo(clock,bpm) / clockBeats / clockTempo</code></td><td>audio_engine</td><td>NRT</td></tr>
   <tr><td><code>attachVM / siloLoad / siloStartAt / detachVM</code></td><td>audio_engine</td><td>NRT</td></tr>
   <tr><td><code>defSynthX / defSynth / listSynthDefs</code></td><td>synthc.compile / synthdef / audio_engine</td><td>NRT</td></tr>
