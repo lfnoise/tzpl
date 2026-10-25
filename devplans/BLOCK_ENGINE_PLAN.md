@@ -1470,12 +1470,26 @@ Reference-ugen comparison (2026-10-25), `benchmarks/ugen_compare/`:
 - **Speed:** we are 1.2–2.6× TU at 1 channel and 1.1–6× at 4 channels, against the
   1.25× target. We are faster only for `sinosc` (4 ch) and audio-rate `rlpf` (4 ch).
   The worst cases:
-  - **Serial recurrences keep their state in the synth struct** (`p->d0`) inside the
-    loop. The compiler can't rule out that the output stores alias it, so the state goes
-    through memory every sample: 1-channel `leakdc` 7×, `brf` 8.5×, `ring` 7.7×. These
-    loops should load the state into locals and store it once after the loop.
+  - **Serial recurrences kept their state in the synth struct** (`p->d0`) inside the
+    loop. The compiler can't rule out that the output stores alias it, so the state went
+    through memory every sample: 1-channel `leakdc` 7×, `brf` 8.5×, `ring` 7.7×.
+    **Fixed** (`_localizeDelays` in codegen.x), 1-channel, in each plain region:
+    - a one-channel root delay (a single value, or an inline ring of 2–8 samples with
+      its write position) used only by that region is loaded into a local before the
+      sample loop and stored after it;
+    - instance values the region only reads are loaded once.
+
+    Results:
+    - `leakdc` 3.5 → 0.95 ns, `brf` 4.4 → 2.1, `lagud` 3.2 → 2.05, audio-rate `rlpf`
+      7.2 → 3.3 (now 0.74× TU).
+    - Corpus against the previous codegen: 101/118 identical. The rest differ by
+      −103 to −163 dBFS (more FMA contraction), except `sc2_2` and `sc2_7`, which
+      differ between two renders of the same code.
+    - App benchmarks barely move (knobs 0.333 → 0.324, chorus 1.026 → 1.004, bank
+      2.330 → 2.327): their state is mostly multichannel.
   - `brf` and `ring` classify as affine order 2 and 3, but run serially, not as state
-    space.
+    space. `ring` stays at 6× even with its rings in locals; the fix is state space.
+  - Multichannel delay state still lives in the struct.
   - `leakdc`'s dump says block (affine), but its generated code is serial: the dump's
     STRATEGY and codegen disagree there.
   - 4-channel ports pay the temporary interleave copy (M8 removes it).

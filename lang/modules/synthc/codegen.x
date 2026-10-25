@@ -4251,6 +4251,124 @@ fn _genStateSpace(ctx Ctx, k Int, region [Int], delays [DelayInfo]) String {
 }
 
 -- One region: its loops sample by sample, and the root delays it owns.
+-- Serial regions keep their state and coefficients in locals: through p, the
+-- compiler can't rule out that the output stores alias them, so they would go
+-- through memory every sample. In each plain region (not a block form):
+--  - a root-graph, one-channel delay used in that region alone (and nowhere
+--    else in process, given as `rest`) is loaded before the sample loop and
+--    stored after it: a single value, or a small inline ring (2..8 samples)
+--    with its write position;
+--  - an instance value p->v<k> the region only reads is loaded before it.
+-- Rewrites texts in place.
+fn _localizeDelays(ctx Ctx, texts [String], plain [Bool], rest String) Void {
+	let head = "\t{\n";
+	let tail = "\t}\n";
+	var pre [String] = [];
+	var post [String] = [];
+	var subs [[(String, String)]] = [];
+	for (t : texts) { pre push!(""); post push!(""); subs push!([(String, String)]()); }
+	for (d : ctx.delays) {
+		if (d.chans != 1 || ctx _isVoiceGraphDeep(ctx _delayGraph(d))) { continue; }
+		let ring = d.allocSize >= 2 && d.allocSize <= 8;
+		if (d.allocSize != 1 && !ring) { continue; }
+		let nm = "p->d%^" fmt(d.serial);
+		let wp = nm $ "_wrpos";
+		if (_usesName(rest, nm) || _usesName(rest, wp)) { continue; }
+		var at = NONE;
+		var uses = 0;
+		var i = 0;
+		while (i < texts length) {
+			if (_usesName(texts[i], nm) || _usesName(texts[i], wp)) { uses = uses + 1; at = i; }
+			i = i + 1;
+		}
+		if (uses != 1 || !plain[at]) { continue; }
+		let loc = "l_d%^" fmt(d.serial);
+		let ty = cppType(d.typ);
+		if (ring) {
+			pre[at] = pre[at] $ "\t%^ %^[%^]; std::memcpy(%^, %^, sizeof %^);\n" fmt(ty, loc, d.allocSize, loc, nm, loc)
+			          $ "\tu64 %^_wrpos = %^;\n" fmt(loc, wp);
+			post[at] = post[at] $ "\tstd::memcpy(%^, %^, sizeof %^);\n" fmt(nm, loc, loc)
+			           $ "\t%^ = %^_wrpos;\n" fmt(wp, loc);
+			subs[at] push!((wp, loc $ "_wrpos"));
+		} else {
+			pre[at] = pre[at] $ "\t%^ %^ = %^;\n" fmt(ty, loc, nm);
+			post[at] = post[at] $ "\t%^ = %^;\n" fmt(nm, loc);
+		}
+		subs[at] push!((nm, loc));
+	}
+	var i = 0;
+	while (i < texts length) {
+		let t = texts[i];
+		-- A plain region is "\t{\n" ... "\t}\n\t}\n": the sample loop sits in a scope.
+		if (plain[i] && t startsWith(head) && t endsWith(tail)) {
+			var body = t substring(head length, t length - head length - tail length);
+			for (sub : subs[i]) { body = body _replaceName(sub.0, sub.1); }
+			var loads = pre[i];
+			for (nm : _readOnlyValues(body)) {
+				let loc = "l_" $ nm substring(3, nm length - 3);
+				loads = loads $ "\tauto const %^ = %^;\n" fmt(loc, nm);
+				body = body _replaceName(nm, loc);
+			}
+			texts[i] = head $ loads $ body $ post[i] $ tail;
+		}
+		i = i + 1;
+	}
+}
+
+fn _isIdentCp(cp Int) Bool =
+	(cp >= 48 && cp <= 57) || (cp >= 65 && cp <= 90) || (cp >= 97 && cp <= 122) || cp == 95;
+
+-- The instance values "p->v<k>" that code only reads as scalars: never
+-- assigned, incremented, indexed or taken the address of.
+fn _readOnlyValues(code String) [String] {
+	var names [String] = [];
+	var bad [String] = [];
+	let parts = code split("p->v");
+	var i = 1;
+	while (i < parts length) {
+		var cps [Int] = [];
+		for (c : parts[i] codePoints) { cps push!(c); }
+		let ncp = cps length;
+		var k = 0;
+		while (k < ncp && cps[k] >= 48 && cps[k] <= 57) { k = k + 1; }
+		if (k > 0 && (k == ncp || !_isIdentCp(cps[k]))) {
+			let nm = "p->v" $ parts[i] substring(0, k);
+			var j = k;
+			while (j < ncp && cps[j] == 32) { j = j + 1; }
+			let c0 = j < ncp ? cps[j] : 0;
+			let c1 = j + 1 < ncp ? cps[j + 1] : 0;
+			let prevPart = parts[i - 1];
+			let prevAmp = prevPart length > 0 && prevPart endsWith("&") && !(prevPart endsWith("&&"));
+			let prevInc = prevPart endsWith("++") || prevPart endsWith("--");
+			let assign = (c0 == 61 && c1 != 61)                            -- =, not ==
+				|| ((c0 == 43 || c0 == 45 || c0 == 42 || c0 == 47 || c0 == 124 || c0 == 38 || c0 == 94) && c1 == 61)
+				|| (c0 == 43 && c1 == 43) || (c0 == 45 && c1 == 45);
+			if (assign || c0 == 91 || prevAmp || prevInc) {
+				if (!(bad contains(nm))) { bad push!(nm); }
+			} else if (!(names contains(nm))) {
+				names push!(nm);
+			}
+		}
+		i = i + 1;
+	}
+	names filter(fn(nm String) Bool { !(bad contains(nm)) })
+}
+
+-- code with every use of the name nm (not followed by an identifier
+-- character, as _usesName) replaced by repl.
+fn _replaceName(code String, nm String, repl String) String {
+	let parts = code split(nm);
+	var out = parts[0];
+	var i = 1;
+	while (i < parts length) {
+		let tail = parts[i];
+		let ident = tail length > 0 && _isIdentCp(tail codePoints head);
+		out = out $ (ident ? nm : repl) $ tail;
+		i = i + 1;
+	}
+	out
+}
+
 fn _genRegion(ctx Ctx, region [Int], delays [DelayInfo]) String {
 	var `cgIndent Int = 2;
 	var body = genLoops(ctx, region);
@@ -4286,14 +4404,19 @@ fn genTickFun(ctx Ctx, name String) String {
 		}
 		if (k >= 0) { owned[k] push!(d); }
 	}
+	var texts [String] = [];
+	var plain [Bool] = [];
 	var ri = 0;
 	while (ri < regions length) {
 		let k = ctx _regionBlockCycle(regions[ri]);
-		s = s $ (k == NONE ? ctx _genRegion(regions[ri], owned[ri])
-		        : (ctx _blockCycleForm(k) == "statespace" ? ctx _genStateSpace(k, regions[ri], owned[ri])
-		                                                   : ctx _genBlockCycle(k, regions[ri])));
+		texts push!(k == NONE ? ctx _genRegion(regions[ri], owned[ri])
+		            : (ctx _blockCycleForm(k) == "statespace" ? ctx _genStateSpace(k, regions[ri], owned[ri])
+		                                                       : ctx _genBlockCycle(k, regions[ri])));
+		plain push!(k == NONE);
 		ri = ri + 1;
 	}
+	ctx _localizeDelays(texts, plain, s);
+	for (t : texts) { s = s $ t; }
 	s = s $ "\t%^_scatter(p, off, n);\n" fmt(name);
 	if (ctx _pgActive) {
 		s = s $ "\tp->pg_first = 0;\n";
