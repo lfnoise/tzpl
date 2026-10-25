@@ -50,10 +50,16 @@ TypeChecker::ImportedModuleScopeGuard::ImportedModuleScopeGuard(TypeChecker& tc,
         auto& existing = tc.functions_[name];
         addedFunctions.push_back({name, existing.size()});
         for (const auto& fi : overloads) {
-            // Avoid duplicates: skip if already present (by globalIndex)
+            // Avoid duplicates: skip if already present. Templates have no
+            // global slot (globalIndex 0 for all of them), so compare their
+            // declarations instead, or every template overload after the
+            // first would be dropped.
             bool found = false;
             for (const auto& ef : existing) {
-                if (ef.globalIndex == fi.globalIndex) { found = true; break; }
+                bool same = fi.isTemplate || ef.isTemplate
+                    ? ef.isTemplate == fi.isTemplate && ef.declNode == fi.declNode
+                    : ef.globalIndex == fi.globalIndex;
+                if (same) { found = true; break; }
             }
             if (!found) existing.push_back(fi);
         }
