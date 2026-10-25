@@ -45,6 +45,7 @@ struct NoteVoicer {
     std::vector<i64> onTime;
     std::vector<i64> offTime;
     std::vector<u8> gate;
+    std::vector<f32> defaults;   // per column of `notes` (column 0 is the gate)
     int scanStart = 0;
     int active = 0;
 

@@ -1093,7 +1093,7 @@ Deviations and notes:
   before the in-place store; `addDelayAntecedents` used to do that.
 - **A second voicer in one synth** gets an input `notes1`.
 
-**M4: synthc serial-loop codegen.**
+**M4: synthc serial-loop codegen (done 2026-10-25)**
 - Correctness first. Emit `process(p, off, n)` with every loop serial: an outer sample
   loop around today's one-sample loop bodies:
   - channel-vector SIMD where `chans % 4 == 0`;
@@ -1104,6 +1104,86 @@ Deviations and notes:
 - There are no parameter groups yet: every inlet is read per sample.
 - This produces plugins that run on the M2 engine with the old semantics, so every later
   layer has something real to integrate against.
+
+What landed (2026-10-25):
+- **`codegen.x` on ABI v3:**
+  - The struct header is v3 (`num_ins`, `num_outs`, `maxBlock`, `ins`, `outs`).
+  - `NAME_process(p, off, n)` is a sample loop. Each sample:
+    1. `NAME_gather(p, bi)` copies every input port's channels into
+       `alignas(16) p->in<sn>[]`;
+    2. the old loop bodies run on those arrays;
+    3. delays advance;
+    4. outlets `p->out<sn>[]` scatter to `outs[sn].chans[c][bi]`.
+  - `load()` emits static `tzpl_PortDef` tables (shape, element type, spec), plus
+    `voiced`, `maxVoices` and `noteDefaults`. `alloc(maxBlock)` is v3 too.
+- **Rates.** `block` is demoted to `audio` (`demoteBlockRate`), so every inlet is read
+  per sample. Write-after-read delay ordering (`addDelayOrdering`) is kept for the
+  serial bodies.
+- **Non-power-of-two channel counts:**
+  - `_indexWrapShape` wraps with a mask (power of two), `%`, or a static `bmap` table
+    for shaped broadcasts.
+  - SIMD and flat voice mode need power-of-two channel counts; other loops run scalar,
+    or AoS for voices.
+- **Voicers:**
+  - `noteParam` reads its column of the `notes` input.
+  - `resetVoice(p, vi, off)` gathers the inputs at `off`, zeroes the voice state,
+    reseeds the voice's RNG and runs the reset loops.
+- **ABI and engine:**
+  - `resetVoice` gained the `offset` argument.
+  - `tzpl_SynthDef` gained `noteDefaults` (appended).
+  - The engine voicer fills columns a noteOn doesn't give from the defaults; idle rows
+    hold them too.
+- **Driver.** `defSynthX` compiles and loads again. `dumpCorpus` with
+  `SYNTHC_CORPUS_MODE=compile` compiles and loads every graph; all 158 dump graphs
+  load.
+- **Fixed four latent flat-voice indexing bugs** shared by both old compilers. The M0
+  references contain them, and the new noteDefaults exposed them (idle voices are
+  no longer all zero):
+  - `reduce` over a voice-local input summed a window at the flat index instead of
+    the voice's rows, so voices leaked into each other.
+  - Vec ops (`ncyc`, `transpose`, `stride`, ...) on a voice-local input remapped the
+    flat index and lost the voice base.
+  - A voice temp narrower than the loop was indexed `[i]` and read past its voice's
+    slots.
+  - `rotate` read its amount at element 0, which is voice 0's slot.
+- **`TZPL_POW2_CHANS=1`.** A verification-only switch that restores the old
+  power-of-two rounding (rows, vec ops, `reduce`, note-param columns, constant
+  padding, `join`). With it the corpus can be compared with the old engine.
+- **Corpus tooling:**
+  - The `synthc_render_ab_*` scripts and `event_to_audio.x` are restored under
+    `tools/block_engine/scripts/`.
+  - `corpus_fx.x` writes its chord as four explicit voices, matching the old padding.
+
+Verification:
+- **Oracle.** The old app, built at 6261a06, with the four indexing fixes applied to
+  both of its compilers. It is a local worktree and is not committed.
+- **Corpus in `TZPL_POW2_CHANS=1` mode against the oracle: 107 of 118 pass.** The
+  rest:
+  - `event_to_audio` is silent: its API is gone, and it is rewritten in M5.
+  - `sc2_6`: the old engine is silent for the first note of each
+    `stringWanderVibrato` voice (24–28 s). This is an old defect; the new engine
+    plays them, and the renders match exactly afterwards.
+  - Precision only, -53 to -98 dBFS: `live_nrt_render`, `music_fx_demos`, `fxPingPong`,
+    `fxMultiTap`, `sc2_3`, `sc2_7`, `sc2_8`.
+  - Slow phase drift in high-Q resonators: `instrument_test` (modalBell, from
+    27.6 s) and `sc2_9`.
+- **Normal mode: 101 of 118.** The extra differences are exact tensor shapes, by
+  design: a 7-partial organ is no longer padded to 8 by repeating a partial, and
+  20 Klank modes are no longer 32.
+- **Unchanged:** the dump goldens, the lang suite (486) and `test_block_engine`
+  (121) all pass.
+
+Deviations and notes:
+- **Precision differences come from per-sample recomputation.** Values the old code
+  computed once at noteOn or on an event (ring and resonator coefficients, envelope
+  rates) are recomputed per sample. The SIMD `cos` and scalar `std::cos` differ by
+  an ulp, and FMA contraction changes. A per-voice compare (a filter's `freq <
+  0.45 fs` mask) now disqualifies a loop from SIMD. M6 parameter groups hoist all of
+  these again.
+- **Ring sizes are unchanged.** The serial sample loop advances delays per sample,
+  so it needs no block-aware sizing. That comes with block strategies (M7/M8).
+- **One known gap.** Flat-voice SIMD `take`/`drop` of a partial-width voice-local
+  input still indexes without a voice base. The corpus doesn't hit it.
 
 **M5: Consumers (§6).**
 - Port the bridge FFI, `bundles.x`, the music libs, live, ui, the app (JUCE and ImGui),

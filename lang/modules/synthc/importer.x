@@ -278,6 +278,21 @@ fn _addFoldedConstant(v ConstVal, initType NumType, sh Shape) Int {
 	_addExprNode(NodeKind.constant(v, initType), [Int](), Rate.constant, initType, sh)
 }
 
+-- TZPL_POW2_CHANS=1 (verification only, see synthdef.x pow2Compat): a
+-- constant zero-extends to a power-of-two length, as it did before the
+-- block engine.
+fn _compatPad(v ConstVal) ConstVal {
+	if (!pow2CompatOn()) { return v; }
+	let n = v constSize;
+	let m = n bitCeil;
+	if (m == n) { return v; }
+	match (v) {
+		ints(a): { var o = a copy; while (o length < m) { o push!(0); } ConstVal.ints(o) }
+		floats(a): { var o = a copy; while (o length < m) { o push!(0.0); } ConstVal.floats(o) }
+	}
+}
+fn _compatShape(v ConstVal, sh Shape) Shape = (v constSize == sh chans) ? sh : row(v constSize);
+
 -- A shape not known yet (0 channels): the identity of broadcast.
 fn noShape() Shape = shape([0]);
 
@@ -609,7 +624,7 @@ fn _makeReduce(ctx Ctx, ins [Int], op BinaryOp, cols Int) Int {
 fn _vecChans(ctx Ctx, vop VecOp, ins [Int]) Int = match (vop) {
 	at:   ctx.chans[ins[1]];
 	put:  ctx.chans[ins[0]];
-	join: { var raw = 0; for (x : ins) { raw = raw + ctx.chans[x]; } raw }
+	join: { var raw = 0; for (x : ins) { raw = raw + ctx.chans[x]; } raw pow2Compat }
 	_:    vecOutChans(ctx.chans[ins[0]], vop);
 };
 fn _vecRate(ctx Ctx, vop VecOp, ins [Int]) Rate = match (vop) {
@@ -646,11 +661,13 @@ fn _importExpr(e SignalExpr) Void {
 	match (e.kind) {
 		int(a, typ, sh): {
 			-- Constants keep f64 storage (folding yields i64 only through casts).
-			let n = _addConstantNode(NodeKind.constant(ConstVal.floats(a toFloat), typ), sh);
+			let v = _compatPad(ConstVal.floats(a toFloat));
+			let n = _addConstantNode(NodeKind.constant(v, typ), _compatShape(v, sh));
 			_mapId(e.id, n);
 		}
 		float(a, typ, sh): {
-			let n = _addConstantNode(NodeKind.constant(ConstVal.floats(a), typ), sh);
+			let v = _compatPad(ConstVal.floats(a));
+			let n = _addConstantNode(NodeKind.constant(v, typ), _compatShape(v, sh));
 			_mapId(e.id, n);
 		}
 		sampleRate: {
@@ -930,8 +947,8 @@ fn _importExpr(e SignalExpr) Void {
 			_mapId(e.id, swNode);
 		}
 		varexpr(name): {
-			-- VarExpr: no inputs, initial_type any_int, audio rate; chans stays 0
-			-- (Expr default; calcShape is a no-op), so it broadcasts to its use.
+			-- A loop variable: no inputs, any_int, audio rate; its shape stays
+			-- unset (it is always emitted as the C++ loop variable itself).
 			-- Hash-consed by name via the VAR| cons key.
 			_mapId(e.id, _addExprNode(NodeKind.varK(name), [Int](), Rate.audio, ANY_INT, noShape()));
 		}

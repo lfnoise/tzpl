@@ -17,7 +17,9 @@ FAILED=0
 for x in "$DIR"/*.x; do
     name="$(basename "$x" .x)"
     exp="$DIR/$name.expected"
-    out="$("$APP" --nogui --no-audio "${MODS[@]}" "$x" 2>&1)" || true
+    # Some graphs draw language random numbers while they are built (e.g.
+    # effects' delay times): seed them so the dumps are stable.
+    out="$(TZPL_LANG_SEED=0x7a91 "$APP" --nogui --no-audio "${MODS[@]}" "$x" 2>&1)" || true
     if [ "$UPDATE" = 1 ]; then
         printf '%s\n' "$out" > "$exp"
         echo "updated $name"

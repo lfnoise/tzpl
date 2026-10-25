@@ -19,15 +19,15 @@
 # in M5; the expectation is about the audio, not the script text.
 
 # --- integration-test renders (synthc variants; the C++ variants are bit-identical)
-ab_audio	0.1	-	-	integration-tests/scripts/synthc_render_ab_synthc.x	same	
-ab_ctrl	0.1	-	-	integration-tests/scripts/synthc_render_ab_ctrl_synthc.x	same	
-ab_vdelay	0.1	-	-	integration-tests/scripts/synthc_render_ab_vdelay_synthc.x	same	
-ab_bubbles	0.1	-	-	integration-tests/scripts/synthc_render_ab_bubbles_synthc.x	same	
-ab_cf	0.1	-	-	integration-tests/scripts/synthc_render_ab_cf_synthc.x	same	
-ab_merge	0.1	-	-	integration-tests/scripts/synthc_render_ab_merge_synthc.x	same	
-ab_rng	0.1	-	-	integration-tests/scripts/synthc_render_ab_rng_synthc.x	same	
-ab_voicer12	0.1	-	-	integration-tests/scripts/synthc_render_ab_voicer12_synthc.x	same	
-ab_spectral	0.3	-	-	integration-tests/scripts/synthc_render_ab_spectral_synthc.x	same	
+ab_audio	0.1	-	-	tools/block_engine/scripts/synthc_render_ab_synthc.x	same	
+ab_ctrl	0.1	-	-	tools/block_engine/scripts/synthc_render_ab_ctrl_synthc.x	same	
+ab_vdelay	0.1	-	-	tools/block_engine/scripts/synthc_render_ab_vdelay_synthc.x	same	
+ab_bubbles	0.1	-	-	tools/block_engine/scripts/synthc_render_ab_bubbles_synthc.x	same	
+ab_cf	0.1	-	-	tools/block_engine/scripts/synthc_render_ab_cf_synthc.x	same	
+ab_merge	0.1	-	-	tools/block_engine/scripts/synthc_render_ab_merge_synthc.x	same	
+ab_rng	0.1	-	-	tools/block_engine/scripts/synthc_render_ab_rng_synthc.x	same	
+ab_voicer12	0.1	-	-	tools/block_engine/scripts/synthc_render_ab_voicer12_synthc.x	same	
+ab_spectral	0.3	-	-	tools/block_engine/scripts/synthc_render_ab_spectral_synthc.x	same	
 widen_0	0.25	TZPL_WIDEN_MODE=x TZPL_WIDEN_FORM=widened TZPL_WIDEN_CASE=0	-	integration-tests/scripts/widen_render.x	same	
 widen_1	0.25	TZPL_WIDEN_MODE=x TZPL_WIDEN_FORM=widened TZPL_WIDEN_CASE=1	-	integration-tests/scripts/widen_render.x	same	
 widen_2	0.25	TZPL_WIDEN_MODE=x TZPL_WIDEN_FORM=widened TZPL_WIDEN_CASE=2	-	integration-tests/scripts/widen_render.x	same	
@@ -43,7 +43,7 @@ negabs_negconst	0.1	TZPL_ABS_MODE=x TZPL_ABS_CASE=negconst	-	integration-tests/s
 negabs_negctl	0.1	TZPL_ABS_MODE=x TZPL_ABS_CASE=negctl	-	integration-tests/scripts/neg_abs_rewrite.x	same	
 negabs_posconst	0.1	TZPL_ABS_MODE=x TZPL_ABS_CASE=posconst	-	integration-tests/scripts/neg_abs_rewrite.x	same	
 const_outlet	0.05	TZPL_CONST_MODE=x	-	integration-tests/scripts/const_outlet.x	same	
-event_to_audio	0.15	-	-	integration-tests/scripts/event_to_audio.x	same	control-set timing; becomes input steps and impulses in M5
+event_to_audio	0.15	-	-	tools/block_engine/scripts/event_to_audio.x	same	control-set timing; becomes input steps and impulses in M5
 noteparam_event	0.15	-	-	integration-tests/scripts/noteparam_event_rate.x	same	noteSetParams becomes a notes-row element set (D2)
 linen_envelope	1.6	-	-	integration-tests/scripts/linen_envelope.x	same	
 fill_buffer_sine_ref	0.1	-	-	integration-tests/scripts/fill_buffer_sine_ref.x	same	

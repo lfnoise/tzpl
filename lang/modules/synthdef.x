@@ -123,7 +123,13 @@ fn shape(dims [Int]) Shape {
 	Shape { dims: d }
 }
 fn scalarShape() Shape = shape([1]);
-fn row(n Int) Shape = shape([n]);
+fn row(n Int) Shape = shape([n pow2Compat]);
+
+-- Verification only: with TZPL_POW2_CHANS=1 channel counts round up to
+-- powers of two as they did before the block engine, so renders can be
+-- compared with references made then. Not a supported mode.
+fn pow2CompatOn() Bool = match (getEnv("TZPL_POW2_CHANS")) { some(v): v == "1"; none: false; };
+fn pow2Compat(n Int) Int = (pow2CompatOn() && n > 0) ? n bitCeil : n;
 fn matrix(rows Int, cols Int) Shape = shape([rows, cols]);
 fn cuboid(planes Int, rows Int, cols Int) Shape = shape([planes, rows, cols]);
 
@@ -702,7 +708,7 @@ fn choice(name String, numChoices Int, init Int = 0, chans Int = 1) S =
 -- synth's `notes` input (gate is column 0; the others follow in the order
 -- they are declared). Set per note by noteOn / noteSetParams.
 fn noteParam(name String, spec ControlSpec, chans Int = 1) S {
-    SignalExprKind.noteParam(spec, chans max(1), name) _newSignalExpr
+    SignalExprKind.noteParam(spec, chans max(1) pow2Compat, name) _newSignalExpr
 }
 
 fn gate() S {
@@ -1130,26 +1136,26 @@ fn put(a AsSignal, i AsSignal, v AsSignal) S {
 -- fn matmul(a S, b AsSignal) S = SignalExprKind.vecop(VecOp.at) _newSignalExpr([a asSignal, i asSignal]);
 -- fn matmul(a AsSignal, b S) S = SignalExprKind.vecop(VecOp.at) _newSignalExpr([a asSignal, i asSignal]);
 
-fn take(a S, n Int) S = SignalExprKind.vecop(VecOp.take(n)) _newSignalExpr([a]);
+fn take(a S, n Int) S = SignalExprKind.vecop(VecOp.take(n pow2Compat)) _newSignalExpr([a]);
 
 fn drop(a S, n Int) S = SignalExprKind.vecop(VecOp.drop(n)) _newSignalExpr([a]);
 
-fn stride(a S, n Int) S = SignalExprKind.vecop(VecOp.stride(n)) _newSignalExpr([a]);
+fn stride(a S, n Int) S = SignalExprKind.vecop(VecOp.stride(n pow2Compat)) _newSignalExpr([a]);
 
-fn stutter(a S, n Int) S = SignalExprKind.vecop(VecOp.stutter(n)) _newSignalExpr([a]);
+fn stutter(a S, n Int) S = SignalExprKind.vecop(VecOp.stutter(n pow2Compat)) _newSignalExpr([a]);
 
-fn ncyc(a S, n Int) S = SignalExprKind.vecop(VecOp.ncyc(n)) _newSignalExpr([a]);
+fn ncyc(a S, n Int) S = SignalExprKind.vecop(VecOp.ncyc(n pow2Compat)) _newSignalExpr([a]);
 
 fn rotate(a AsSignal, b AsSignal) S = SignalExprKind.vecop(VecOp.rotate) _newSignalExpr([a asSignal, b asSignal]);
 
 fn reverse(a S) S = SignalExprKind.vecop(VecOp.reverse) _newSignalExpr([a]);
 
-fn transpose(a S, n Int) S = SignalExprKind.vecop(VecOp.transpose(n)) _newSignalExpr([a]);
+fn transpose(a S, n Int) S = SignalExprKind.vecop(VecOp.transpose(n pow2Compat)) _newSignalExpr([a]);
 
 fn join(a [S]) S = SignalExprKind.vecop(VecOp.join) _newSignalExpr(a);
 
 fn reduce(a S, op BinaryOp, chans Int = 1) S {
-    SignalExprKind.vecop(VecOp.reduce(op, chans max(1))) _newSignalExpr([a])
+    SignalExprKind.vecop(VecOp.reduce(op, chans max(1) pow2Compat)) _newSignalExpr([a])
 }
 fn sum(a S, chans Int = 1) S = a reduce(BinaryOp.add, chans);
 

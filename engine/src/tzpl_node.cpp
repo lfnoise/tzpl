@@ -347,6 +347,17 @@ Node::Node(Engine* e, Silo* silo, NodeDef* def, i64 nodeID)
             int cols = (int)np.type_.shape.dims[3];
             int maxVoices = info.maxVoices > 0 ? std::min(info.maxVoices, rows) : rows;
             voicer_ = new NoteVoicer(maxVoices, cols - 1);
+            if (info.noteDefaults) {
+                // Every row starts at the column defaults (gate column 0).
+                voicer_->defaults.assign(info.noteDefaults, info.noteDefaults + cols);
+                voicer_->defaults[0] = 0.f;
+                InPort& np = ins[notesPort_];
+                for (int c = 0; c < np.chans_; ++c) {
+                    f64 v = voicer_->defaults[c % cols];
+                    np.stages_[c].value = v;
+                    fillBuffer(np.ownBufs_[c], np.type_.elem, v, 0, synth->maxBlock);
+                }
+            }
         }
     }
 
@@ -482,7 +493,7 @@ void Node::runBlock(Silo* s, int n) {
                     pos = off;
                 }
                 if (ev.kind == nodeEvReset) reset();
-                else if (funs.resetVoice) funs.resetVoice(synth, ev.arg);
+                else if (funs.resetVoice) funs.resetVoice(synth, ev.arg, off);
                 break;
         }
     }

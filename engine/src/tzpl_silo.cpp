@@ -802,8 +802,12 @@ tzpl_SErr Silo::rt_noteOn(Node* node, int noteID, int n, f32 const* params) {
     // Split the node at the onset: the voice's state restarts here.
     node->addEvent(this, off, nodeEvResetVoice, v);
     notes.stepTo(this, v * cols, 1., off);
-    int np = std::min(n, cols - 1);
-    for (int i = 0; i < np; ++i) notes.stepTo(this, v * cols + 1 + i, params[i], off);
+    // Parameters the note does not give take the column defaults.
+    for (int i = 0; i < cols - 1; ++i) {
+        f64 x = i < n ? params[i]
+              : (usize)(i + 1) < vc->defaults.size() ? vc->defaults[i + 1] : 0.;
+        if (i < n || !vc->defaults.empty()) notes.stepTo(this, v * cols + 1 + i, x, off);
+    }
     return tzpl_errNone;
 }
 

@@ -9805,7 +9805,7 @@ OUT 0 out f32 2
      12   44 [                ]  0  1 Const    None      f32     1 0.0f
      13   45 [43 44           ]  2  1 Audio    None      f32     1 >
      14   46 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
-     15   36 [                ]  0  1 Const    None      f32     1 0.7632625f
+     15   36 [                ]  0  1 Const    None      f32     1 0.91853666f
      16    2 [                ]  0  1 Block    Input     f32     1 control(spread)
      17   16 [                ]  0  1 Const    None      f32     1 1.0f
      18   17 [2 16            ]  2  1 Block    None      f32     1 min
@@ -9843,7 +9843,7 @@ OUT 0 out f32 2
      50   86 [                ]  0  1 Const    None      f32     1 0.0f
      51   87 [85 86           ]  2  1 Audio    None      f32     1 >
      52   88 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
-     53   78 [                ]  0  1 Const    None      f32     1 0.9119195f
+     53   78 [                ]  0  1 Const    None      f32     1 0.31863356f
      54   79 [78 19           ]  2  1 Block    Rate      f32     1 *
      55   89 [87 88 79        ]  3  2 Audio    FanOut    f32     1 select
      56   93 [77 50           ]  2  1 Audio    None      f32     1 *
@@ -9869,7 +9869,7 @@ OUT 0 out f32 2
      76  129 [                ]  0  1 Const    None      f32     1 0.0f
      77  130 [128 129         ]  2  1 Audio    None      f32     1 >
      78  131 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
-     79  121 [                ]  0  1 Const    None      f32     1 0.2776359f
+     79  121 [                ]  0  1 Const    None      f32     1 0.90442556f
      80  122 [121 19          ]  2  1 Block    Rate      f32     1 *
      81  132 [130 131 122     ]  3  2 Audio    FanOut    f32     1 select
      82  136 [120 50          ]  2  1 Audio    None      f32     1 *
@@ -9895,7 +9895,7 @@ OUT 0 out f32 2
     102  172 [                ]  0  1 Const    None      f32     1 0.0f
     103  173 [171 172         ]  2  1 Audio    None      f32     1 >
     104  174 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
-    105  164 [                ]  0  1 Const    None      f32     1 0.12230265f
+    105  164 [                ]  0  1 Const    None      f32     1 0.560142f
     106  165 [164 19          ]  2  1 Block    Rate      f32     1 *
     107  175 [173 174 165     ]  3  2 Audio    FanOut    f32     1 select
     108  179 [163 50          ]  2  1 Audio    None      f32     1 *
@@ -9979,7 +9979,7 @@ OUT 0 out f32 2
       1   17 [2 16            ]  2  1 Block    None      f32     1 min
       2   19 [17 5            ]  2  4 Block    FanOut    f32     1 *
     TREE 7    [6] Block  Rate      f32     1
-      0   36 [                ]  0  1 Const    None      f32     1 0.7632625f
+      0   36 [                ]  0  1 Const    None      f32     1 0.91853666f
       1   37 [36 19           ]  2  1 Block    Rate      f32     1 *
     TREE 8    [4 7] Audio  FanOut    f32     1
       0   39 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
@@ -10024,7 +10024,7 @@ OUT 0 out f32 2
     TREE 18   [17] Audio  FanOut    f32     1
       0   77 [67              ]  1  4 Audio    FanOut    f32     1 cast_f32
     TREE 19   [6] Block  Rate      f32     1
-      0   78 [                ]  0  1 Const    None      f32     1 0.9119195f
+      0   78 [                ]  0  1 Const    None      f32     1 0.31863356f
       1   79 [78 19           ]  2  1 Block    Rate      f32     1 *
     TREE 20   [18 19] Audio  FanOut    f32     1
       0   81 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
@@ -10056,7 +10056,7 @@ OUT 0 out f32 2
     TREE 25   [24] Audio  FanOut    f32     1
       0  120 [110             ]  1  4 Audio    FanOut    f32     1 cast_f32
     TREE 26   [6] Block  Rate      f32     1
-      0  121 [                ]  0  1 Const    None      f32     1 0.2776359f
+      0  121 [                ]  0  1 Const    None      f32     1 0.90442556f
       1  122 [121 19          ]  2  1 Block    Rate      f32     1 *
     TREE 27   [25 26] Audio  FanOut    f32     1
       0  124 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
@@ -10088,7 +10088,7 @@ OUT 0 out f32 2
     TREE 32   [31] Audio  FanOut    f32     1
       0  163 [153             ]  1  4 Audio    FanOut    f32     1 cast_f32
     TREE 33   [6] Block  Rate      f32     1
-      0  164 [                ]  0  1 Const    None      f32     1 0.12230265f
+      0  164 [                ]  0  1 Const    None      f32     1 0.560142f
       1  165 [164 19          ]  2  1 Block    Rate      f32     1 *
     TREE 34   [32 33] Audio  FanOut    f32     1
       0  167 [                ]  0  1 Audio    None      f32     1 delay_fix_read(1)
@@ -10239,7 +10239,7 @@ OUT 0 out f32 2
       1   17 [2 16            ]  2  1 Block    None      f32     1 min
       2   19 [17 5            ]  2  4 Block    FanOut    f32     1 *
     TREE 7    [6] Block  Rate      f32     1
-      0   36 [                ]  0  1 Const    None      f32     1 0.7632625f
+      0   36 [                ]  0  1 Const    None      f32     1 0.91853666f
       1   37 [36 19           ]  2  1 Block    Rate      f32     1 *
     TREE 9    [] Block  Input     f32     1
       0    1 [                ]  0  2 Block    Input     f32     1 control(rate)
@@ -10255,19 +10255,19 @@ OUT 0 out f32 2
       0   52 [                ]  0  1 Const    None      f32     1 1.0f
       1   53 [52 15           ]  2  1 Block    Rate      f32     1 -
     TREE 19   [6] Block  Rate      f32     1
-      0   78 [                ]  0  1 Const    None      f32     1 0.9119195f
+      0   78 [                ]  0  1 Const    None      f32     1 0.31863356f
       1   79 [78 19           ]  2  1 Block    Rate      f32     1 *
     TREE 21   [12] Block  Rate      f32     1
       0   94 [                ]  0  1 Const    None      f32     1 1.0f
       1   95 [94 15           ]  2  1 Block    Rate      f32     1 -
     TREE 26   [6] Block  Rate      f32     1
-      0  121 [                ]  0  1 Const    None      f32     1 0.2776359f
+      0  121 [                ]  0  1 Const    None      f32     1 0.90442556f
       1  122 [121 19          ]  2  1 Block    Rate      f32     1 *
     TREE 28   [12] Block  Rate      f32     1
       0  137 [                ]  0  1 Const    None      f32     1 1.0f
       1  138 [137 15          ]  2  1 Block    Rate      f32     1 -
     TREE 33   [6] Block  Rate      f32     1
-      0  164 [                ]  0  1 Const    None      f32     1 0.12230265f
+      0  164 [                ]  0  1 Const    None      f32     1 0.560142f
       1  165 [164 19          ]  2  1 Block    Rate      f32     1 *
     TREE 35   [12] Block  Rate      f32     1
       0  180 [                ]  0  1 Const    None      f32     1 1.0f

@@ -133,7 +133,7 @@ struct VoicerTest : tzpl_SynthData {
     struct Voice { f64 phase = 0., level = 0.; } voices[kVoices];
 };
 
-static tzpl_SErr VoicerTest_resetVoice(tzpl_SynthData* synth, int32_t v) {
+static tzpl_SErr VoicerTest_resetVoice(tzpl_SynthData* synth, int32_t v, int32_t) {
     auto* o = static_cast<VoicerTest*>(synth);
     if (v >= 0 && v < VoicerTest::kVoices) o->voices[v].phase = 0.;
     return tzpl_errNone;
@@ -259,7 +259,7 @@ struct VTest : tzpl_SynthData {
     i64 processed = 0;   // samples processed so far (the node's own clock)
 };
 
-static tzpl_SErr VTest_resetVoice(tzpl_SynthData* synth, int32_t v) {
+static tzpl_SErr VTest_resetVoice(tzpl_SynthData* synth, int32_t v, int32_t) {
     auto* o = static_cast<VTest*>(synth);
     if (v >= 0 && v < 4) o->age[v] = 0;
     vtestResets.push_back({o->processed, v});

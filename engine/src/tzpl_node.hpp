@@ -71,6 +71,7 @@ struct NodeDefInfo
     PortInfo* outs;
     int voiced = 0;
     int maxVoices = 0;
+    const float* noteDefaults = nullptr;
     int num_buffers = 0;
     BufferInfo* buffers = nullptr;
     int num_tags = 0;

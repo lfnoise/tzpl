@@ -242,9 +242,11 @@ typedef struct tzpl_SynthFuns {
     /* Compute samples [offset, offset+n) of every output from the same range
      * of every input. Any n in [1, maxBlock - offset]. */
     void (*process)(struct tzpl_SynthData* synth, int32_t offset, int32_t n);
-    /* Voiced synths only (NULL otherwise): re-initialize voice `voice`'s
-     * state; called by the engine at a note onset, between process calls. */
-    tzpl_SErr (*resetVoice)(struct tzpl_SynthData* synth, int32_t voice);
+    /* Voiced synths only (NULL otherwise): voice `voice` starts a new note at
+     * block offset `offset`. Called by the engine between process calls, after
+     * the inputs (including the note's row of `notes`) are valid at offset;
+     * re-initializes the voice's state and runs its per-note setup. */
+    tzpl_SErr (*resetVoice)(struct tzpl_SynthData* synth, int32_t voice, int32_t offset);
     /* Buffer swap -- replaces buffer pointer, returns old buffer for NRT cleanup */
     struct tzpl_Buffer* (*swapBuffer)(struct tzpl_SynthData* synth, int64_t bufID,
                                       struct tzpl_Buffer* newBuffer);
@@ -263,6 +265,10 @@ typedef struct tzpl_SynthDef {
     tzpl_PortDef* outs;
     int voiced;      /* 1 if the def has a "notes" input driven by the voicer */
     int maxVoices;   /* rows of "notes" (0 when not voiced) */
+    /* Voiced: one default per column of "notes" (column 0, the gate, is 0).
+     * The engine starts every row at these and fills a new note's
+     * unspecified parameters from them. NULL means all 0. */
+    const float* noteDefaults;
 } tzpl_SynthDef;
 
 /* Synth instance data - base struct (plugins extend this with custom data) */

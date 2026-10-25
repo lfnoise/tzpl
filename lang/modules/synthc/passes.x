@@ -398,6 +398,21 @@ fn shapeInference(ctx Ctx) Void {
 			_: {}
 		}
 	}
+	ctx _settleUnsetShapes;
+}
+
+-- A value computed only from loop variables has no shape of its own after
+-- inference: it is a scalar. (The loop variable itself and a delay init
+-- stay unset.)
+fn _settleUnsetShapes(ctx Ctx) Void {
+	for (n : ctx.sorted) {
+		if (ctx.shape[n] chans != 0) { continue; }
+		match (ctx.kind[n]) {
+			varK(_): {}
+			delayInitK(_, _): {}
+			_: { ctx.shape[n] = scalarShape(); ctx.chans[n] = 1; }
+		}
+	}
 }
 
 fn _widenDelay(ctx Ctx, d Int, sh Shape, wl WorkList) Void {
@@ -1223,6 +1238,51 @@ fn analyzeTrees(ctx Ctx) Ctx {
 	ctx inplaceDelayOps;
 	ctx addSubgraphAntecedents;
 	ctx sortTrees;
+	ctx
+}
+
+-- The serial code generator (M4) computes everything per sample: there are
+-- no parameter groups yet, so block placement is audio.
+fn demoteBlockRate(ctx Ctx) Void {
+	var n = 0;
+	while (n < ctx numNodes) {
+		if (ctx.nrate[n] == Rate.block) { ctx.nrate[n] = Rate.audio; }
+		n = n + 1;
+	}
+}
+
+-- In a per-sample body a delay's writer must come after its readers' trees
+-- (a read sees the previous sample, and rings are sized for read-then-write).
+-- The block code generator replaces this with block-sized rings (M7/M8).
+fn addDelayOrdering(ctx Ctx) Void {
+	for (n : ctx.sorted) {
+		match (ctx.kind[n]) {
+			delayWriteK(d): {
+				let wtree = ctx.treeOf[n];
+				for (rd : ctx.delays[d].fixReaders) {
+					if (ctx.treeOf[rd] != wtree) { _treeAddAntecedent(ctx, wtree, ctx.treeOf[rd], false); }
+				}
+				for (rd : ctx.delays[d].varReaders) {
+					if (ctx.treeOf[rd] != wtree) { _treeAddAntecedent(ctx, wtree, ctx.treeOf[rd], false); }
+				}
+			}
+			_: {}
+		}
+	}
+}
+
+-- The pipeline the serial code generator runs on.
+fn analyzeForCodegen(ctx Ctx) Ctx {
+	ctx demoteBlockRate;
+	ctx analyzeTypes;
+	ctx cutGraphToTrees;
+	ctx removeDeadCode;
+	ctx inplaceDelayOps;
+	ctx addDelayOrdering;
+	ctx addSubgraphAntecedents;
+	ctx sortTrees;
+	ctx treesToLoops;
+	ctx splitRates;
 	ctx
 }
 

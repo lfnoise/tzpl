@@ -641,6 +641,7 @@ void addSynthDef(Engine* e, tzpl_SynthDef const& def, void* dlHandle,
                 && p.type.shape.dims[3] >= 1) {
                 info.voiced = 1;
                 info.maxVoices = def.maxVoices;
+                info.noteDefaults = def.noteDefaults;
             }
         }
         if (!info.voiced) {

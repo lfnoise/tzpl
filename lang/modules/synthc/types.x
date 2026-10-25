@@ -63,7 +63,7 @@ fn _vecNarrowType(ctx Ctx, n NIdx, vop VecOp, ins [Int]) NumType = match (vop) {
 fn _vecShapeOf(ctx Ctx, vop VecOp, ins [Int]) Shape = match (vop) {
 	at:   row(ctx.chans[ins[1]]);
 	put:  row(ctx.chans[ins[0]]);
-	join: { var raw = 0; for (x : ins) { raw = raw + ctx.chans[x]; } row(raw) }
+	join: { var raw = 0; for (x : ins) { raw = raw + ctx.chans[x]; } row(raw pow2Compat) }
 	_:    row(vecOutChans(ctx.chans[ins[0]], vop));
 };
 

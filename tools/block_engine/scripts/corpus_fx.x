@@ -18,7 +18,10 @@ fn envOr(name String, dflt String) String = match (getEnv(name)) {
 fn corpusSrc() S {
 	let tone = white(2) * 0.5 + [220.0, 331.0] lfsaw * 0.5;
 	let hits = [2.0, 3.0] lfsaw tr decay2(0.002, 0.25) * tone;
-	let chord = ([110.0, 165.0, 220.5] lfsaw * 0.08) sum;
+	-- The fourth, 0 Hz voice is the zero channel the per-sample compiler
+	-- padded this 3-voice chord to (power-of-two channel counts); the M0
+	-- references were rendered with it, so it is spelled out here.
+	let chord = ([110.0, 165.0, 220.5, 0.0] lfsaw * 0.08) sum;
 	let sweep = 0.25 sinosc * 600.0 + 900.0 |> sinosc * 0.1;
 	hits * 0.6 + chord + sweep |> outlet
 }

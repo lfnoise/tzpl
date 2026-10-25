@@ -650,7 +650,7 @@ OUT 0 out f32 1
      15   15 [14 13           ]  2  1 Audio    None      f32     1 *
      16   19 [18 15           ]  2  1 Audio    Graph     f32     1 +
      17   20 [                ]  0  1 Audio    Graph     i32     0 i
-     18   22 [20              ]  1  1 Audio    Broadcast f32     0 cast_f32
+     18   22 [20              ]  1  1 Audio    None      f32     1 cast_f32
      19   23 [19 22           ]  2  1 Audio    Temp      f32     1 *
      20   24 [23              ]  1  0 Audio    Phi       f32     1 PhiNode
      21   25 [21              ]  1  1 Audio    ControlFlow f32     1 for_loop
@@ -680,16 +680,15 @@ OUT 0 out f32 1
       4   19 [18 15           ]  2  1 Audio    Graph     f32     1 +
     TREE 7    [] Audio  Graph     i32     0
       0   20 [                ]  0  1 Audio    Graph     i32     0 i
-    TREE 8    [7] Audio  Broadcast f32     0
-      0   22 [20              ]  1  1 Audio    Broadcast f32     0 cast_f32
-    TREE 9    [6 8] Audio  Temp      f32     1
-      0   23 [19 22           ]  2  1 Audio    Temp      f32     1 *
-    TREE 10   [9] Audio  Phi       f32     1
+    TREE 8    [6 7] Audio  Temp      f32     1
+      0   22 [20              ]  1  1 Audio    None      f32     1 cast_f32
+      1   23 [19 22           ]  2  1 Audio    Temp      f32     1 *
+    TREE 9    [8] Audio  Phi       f32     1
       0   24 [23              ]  1  0 Audio    Phi       f32     1 PhiNode
-    TREE 11   [10*] Audio  ControlFlow f32     1
+    TREE 10   [9*] Audio  ControlFlow f32     1
       0   21 [                ]  0  1 Const    None      i32     1 4
       1   25 [21              ]  1  1 Audio    ControlFlow f32     1 for_loop
-    TREE 12   [11] Audio  Sink      f32     1
+    TREE 11   [10] Audio  Sink      f32     1
       0   26 [25              ]  1  0 Audio    Sink      f32     1 outlet
 -- INIT
   LOOP  1 [] Init   0
@@ -724,21 +723,19 @@ GRAPH 0
   LOOP  3 [] Audio  0
     TREE 7    [] Audio  Graph     i32     0
       0   20 [                ]  0  1 Audio    Graph     i32     0 i
-  LOOP  6 [5] Audio  1
-    TREE 11   [10*] Audio  ControlFlow f32     1
+  LOOP  5 [4] Audio  1
+    TREE 10   [9*] Audio  ControlFlow f32     1
       0   21 [                ]  0  1 Const    None      i32     1 4
       1   25 [21              ]  1  1 Audio    ControlFlow f32     1 for_loop
-  LOOP  7 [6] Audio  1
-    TREE 12   [11] Audio  Sink      f32     1
+  LOOP  6 [5] Audio  1
+    TREE 11   [10] Audio  Sink      f32     1
       0   26 [25              ]  1  0 Audio    Sink      f32     1 outlet
 GRAPH 1
-  LOOP  4 [3] Audio  0
-    TREE 8    [7] Audio  Broadcast f32     0
-      0   22 [20              ]  1  1 Audio    Broadcast f32     0 cast_f32
-  LOOP  5 [0 4] Audio  1
-    TREE 9    [6 8] Audio  Temp      f32     1
-      0   23 [19 22           ]  2  1 Audio    Temp      f32     1 *
-    TREE 10   [9] Audio  Phi       f32     1
+  LOOP  4 [0 3] Audio  1
+    TREE 8    [6 7] Audio  Temp      f32     1
+      0   22 [20              ]  1  1 Audio    None      f32     1 cast_f32
+      1   23 [19 22           ]  2  1 Audio    Temp      f32     1 *
+    TREE 9    [8] Audio  Phi       f32     1
       0   24 [23              ]  1  0 Audio    Phi       f32     1 PhiNode
 -- PARAMETER GROUPS
 -- CYCLES
@@ -770,7 +767,7 @@ OUT 0 out f32 1
      15   15 [14 13           ]  2  1 Audio    None      f32     1 *
      16   19 [18 15           ]  2  1 Audio    Graph     f32     1 +
      17   20 [                ]  0  1 Audio    Graph     i32     0 k
-     18   22 [20              ]  1  1 Audio    Broadcast f32     0 cast_f32
+     18   22 [20              ]  1  1 Audio    None      f32     1 cast_f32
      19   23 [19 22           ]  2  1 Audio    Temp      f32     1 +
      20   24 [23              ]  1  0 Audio    Phi       f32     1 PhiNode
      21   25 [21              ]  1  1 Audio    ControlFlow f32     1 for_loop
@@ -800,16 +797,15 @@ OUT 0 out f32 1
       4   19 [18 15           ]  2  1 Audio    Graph     f32     1 +
     TREE 7    [] Audio  Graph     i32     0
       0   20 [                ]  0  1 Audio    Graph     i32     0 k
-    TREE 8    [7] Audio  Broadcast f32     0
-      0   22 [20              ]  1  1 Audio    Broadcast f32     0 cast_f32
-    TREE 9    [6 8] Audio  Temp      f32     1
-      0   23 [19 22           ]  2  1 Audio    Temp      f32     1 +
-    TREE 10   [9] Audio  Phi       f32     1
+    TREE 8    [6 7] Audio  Temp      f32     1
+      0   22 [20              ]  1  1 Audio    None      f32     1 cast_f32
+      1   23 [19 22           ]  2  1 Audio    Temp      f32     1 +
+    TREE 9    [8] Audio  Phi       f32     1
       0   24 [23              ]  1  0 Audio    Phi       f32     1 PhiNode
-    TREE 11   [10*] Audio  ControlFlow f32     1
+    TREE 10   [9*] Audio  ControlFlow f32     1
       0   21 [                ]  0  1 Const    None      i32     1 3
       1   25 [21              ]  1  1 Audio    ControlFlow f32     1 for_loop
-    TREE 12   [11] Audio  Sink      f32     1
+    TREE 11   [10] Audio  Sink      f32     1
       0   26 [25              ]  1  0 Audio    Sink      f32     1 outlet
 -- INIT
   LOOP  1 [] Init   0
@@ -844,21 +840,19 @@ GRAPH 0
   LOOP  3 [] Audio  0
     TREE 7    [] Audio  Graph     i32     0
       0   20 [                ]  0  1 Audio    Graph     i32     0 k
-  LOOP  6 [5] Audio  1
-    TREE 11   [10*] Audio  ControlFlow f32     1
+  LOOP  5 [4] Audio  1
+    TREE 10   [9*] Audio  ControlFlow f32     1
       0   21 [                ]  0  1 Const    None      i32     1 3
       1   25 [21              ]  1  1 Audio    ControlFlow f32     1 for_loop
-  LOOP  7 [6] Audio  1
-    TREE 12   [11] Audio  Sink      f32     1
+  LOOP  6 [5] Audio  1
+    TREE 11   [10] Audio  Sink      f32     1
       0   26 [25              ]  1  0 Audio    Sink      f32     1 outlet
 GRAPH 1
-  LOOP  4 [3] Audio  0
-    TREE 8    [7] Audio  Broadcast f32     0
-      0   22 [20              ]  1  1 Audio    Broadcast f32     0 cast_f32
-  LOOP  5 [0 4] Audio  1
-    TREE 9    [6 8] Audio  Temp      f32     1
-      0   23 [19 22           ]  2  1 Audio    Temp      f32     1 +
-    TREE 10   [9] Audio  Phi       f32     1
+  LOOP  4 [0 3] Audio  1
+    TREE 8    [6 7] Audio  Temp      f32     1
+      0   22 [20              ]  1  1 Audio    None      f32     1 cast_f32
+      1   23 [19 22           ]  2  1 Audio    Temp      f32     1 +
+    TREE 9    [8] Audio  Phi       f32     1
       0   24 [23              ]  1  0 Audio    Phi       f32     1 PhiNode
 -- PARAMETER GROUPS
 -- CYCLES
