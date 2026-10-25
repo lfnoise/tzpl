@@ -837,12 +837,73 @@ Each milestone ends green on its own tests, with a commit series on `block-engin
   - the cookbook notebooks, which are binary `.tzd` files that depend on silos and
     interactive cells. Their libraries are covered by other entries.
 
-**M1: Runtime support library (§5).**
+**M1: Runtime support library (§5) (done 2026-10-25)**
 - Independent of everything else, so it can run in parallel with M2.
 - The vec types, vmath with both backends, scans, the state space builder and random.
 - Move the tensor-ugens UGens into `benchmarks/tensor_ugens_ref/` as oracles and
   baselines.
 - Add the tests to CI on macOS arm64 and Linux x86-64.
+- **What landed:**
+  - `shared/tzpl_dsp/`, header only, namespace `tzpl::dsp`: `vec_types.hpp`,
+    `vmath.hpp`, `scan.hpp`, `state_space.hpp`, `random.hpp`, and `tzpl_dsp.hpp`
+    including them all. CMake target `tzpl_dsp` (interface).
+  - vmath has three backends: Apple simd, Sleef and a libm lane fallback.
+    `TZPL_DSP_VMATH_LIBM` and `TZPL_DSP_VMATH_SLEEF` force one. Rounding, abs,
+    sqrt, fma, min and max are `__builtin_elementwise_*` on every backend. Scalar
+    `sinpi`/`cospi`/`tanpi` are computed by exact reduction, since libm has none.
+  - scan.hpp has prefix scans for `+`, `max`, `min`, `xor`, wrapped `+` (the
+    phasor) and affine maps, each with a carry form and a block form that takes any
+    `n` (scalar tail) and stride-0 inputs.
+  - random.hpp: xoroshiro128++ `RandState<1>` and `RandState<4>`.
+    - Each lane is seeded with splitmix64 from a caller's seed and stream number,
+      with no system calls. tensor-ugens seeds from `arc4random`.
+    - `uniform` and `bipolar` give f32 and f64 values with 23- and 52-bit mantissas,
+      and `uniform` gives i32 and i64 bits.
+  - `BlockStateSpace<Z, N>::build(step)` takes any N. It is tested for N = 1, 2, 3
+    and 4 (lpf1, decay, RBJ lowpass, lag3, formlet), in segments of mixed length,
+    with switches to the recurrence part way through.
+  - `tzpl_dsp_tests` runs 482 checks. It is built three ways: the platform backend,
+    forced libm, and `-ffast-math`. All three pass on macOS arm64. The Sleef backend
+    also passes on arm64 against a local Sleef 3.7 build.
+  - CI: a step in `lang-tests` (macOS) and in `linux-core` (Linux x86-64, Sleef)
+    runs all three. The workflow triggers on pushes to `main` and on pull requests,
+    so the Linux run happens on the first PR from this branch.
+  - `benchmarks/tensor_ugens_ref/`: the tensor-ugens sources, copied unchanged from
+    commit 062f75e, as the static library `tensor_ugens_ref`, plus
+    `bench_tensor_ugens`, which prints ns/sample/channel at 1, 2, 4 and 16 channels.
+    - It is Apple only, since the sources use `<simd/simd.h>`, and it is off by
+      default (`TZPL_BUILD_BENCHMARKS`).
+    - The root CMake no longer requires the synthdef compiler for `benchmarks/`.
+    - The f64 numbers are close to TU §8. For example, at 1/4/16 channels:
+      sinosc 1.67/1.39/1.40, white 0.59/0.41/0.40, lfnoise0 0.37/0.26/0.28.
+    - Two rows differ from TU §8:
+      - phasor at 1 channel: 0.99 to 1.35 across two runs, against 0.90;
+      - lfnoise3 with an audio-rate frequency at 16 channels: 0.64, against 1.15.
+    - It also measures the filters, which TU §8 doesn't: lpf with constant
+      parameters 0.44 to 0.57 / 1.03 / 1.04, and with an audio-rate frequency
+      4.7 / 3.8 / 3.8.
+- **Deviations:**
+  - **Sleef link library, not inline headers.** The Sleef backend calls the dispatch
+    functions in `<sleef.h>`, using the Sleef that `shared/` already fetches on
+    Linux. `f64x4` is two `d2` calls on every ISA, as in `tzpl_simd.hpp`, because
+    the `d4` names exist only in AVX builds. Inline headers and per-ISA `d4` calls
+    are left for when synthc picks its target ISA.
+  - The Sleef backend maps only the functions `tzpl_simd.hpp` already calls. So
+    `logb`, `erf`, `erfc`, `tgamma`, `lgamma`, `remainder`, `fdim` and `nextafter`
+    run lane by lane on Linux. On Apple, only `logb` does.
+  - **f32 state space contract is 2e-5, not 1e-5.** Errors are measured against
+    the recurrence in f64. On an RBJ lowpass at f = .01, q = 2, the f32 state space
+    is 1.4e-5 to 1.7e-5 off, while the f32 recurrence is 3e-6 to 8e-6 off. The test
+    accepts the larger of 2e-5 and 3 times the f32 recurrence's own error.
+    - Typical f64 cycles are within 2e-13.
+    - The ill-conditioned case, poles at radius 0.9997 (f = .001, q = 10),
+      reaches 1.3e-11 for f64 and up to 7.6e-4 for f32. It is tested at 1e-10 and
+      1e-3.
+    - `build` computes the matrices in f64 for an f32 cycle whose step also takes
+      f64, and rounds them once. This helps the slow decays most: 3.6e-7 against
+      1.8e-6 when built in f32.
+  - `i64` is `long`, not `int64_t`, so that `i64x4` is the same type as Apple's
+    `simd::long4` and `tzpl_simd.hpp`'s `i64x4`.
 
 **M2: Engine core on ABI v3 (§3), with hand-written test plugins.**
 - Port buffers, the block loop, input stages, XFader nodes (block form, region-shaped,
