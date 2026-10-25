@@ -1,0 +1,295 @@
+//
+//  ops.def
+//  tensor-ugens
+//
+//  The elementwise ops on S, one per line. Not a normal header: ops.hpp and
+//  ops.cpp each define the DEF_* macros and include this, to declare and to
+//  define every op.
+//
+
+DEF_PREFIX_UNOP(neg, -)
+
+// trigonometric
+DEF_STD_UNOP(sin)
+DEF_STD_UNOP(cos)
+DEF_STD_UNOP(tan)
+DEF_STD_UNOP(asin)
+DEF_STD_UNOP(acos)
+DEF_STD_UNOP(atan)
+
+// hyperbolic
+DEF_STD_UNOP(sinh)
+DEF_STD_UNOP(cosh)
+DEF_STD_UNOP(tanh)
+DEF_STD_UNOP(asinh)
+DEF_STD_UNOP(acosh)
+DEF_STD_UNOP(atanh)
+
+// exponential and logarithmic
+DEF_STD_UNOP(exp)
+DEF_STD_UNOP(exp2)
+DEF_STD_UNOP(expm1)
+DEF_STD_UNOP(log)
+DEF_STD_UNOP(log10)
+DEF_STD_UNOP(log2)
+DEF_STD_UNOP(log1p)
+DEF_STD_UNOP(logb)
+
+// power
+DEF_STD_UNOP(sqrt)
+DEF_STD_UNOP(cbrt)
+
+// error and gamma
+DEF_STD_UNOP(erf)
+DEF_STD_UNOP(erfc)
+DEF_STD_UNOP(tgamma)
+DEF_STD_UNOP(lgamma)
+
+// rounding
+DEF_STD_UNOP(ceil)
+DEF_STD_UNOP(floor)
+DEF_STD_UNOP(trunc)
+DEF_STD_UNOP(round)
+DEF_STD_UNOP(nearbyint)
+DEF_STD_UNOP(rint)
+
+// absolute value
+DEF_STD_UNOP(abs)
+DEF_STD_UNOP(fabs)
+
+// arithmetic
+DEF_INFIX_BINOP(add, +)
+DEF_INFIX_BINOP(sub, -)
+DEF_INFIX_BINOP(mul, *)
+DEF_INFIX_BINOP(div, /)
+
+// comparison; each yields 1 for true and 0 for false
+DEF_INFIX_BINOP(lt, <)
+DEF_INFIX_BINOP(le, <=)
+DEF_INFIX_BINOP(gt, >)
+DEF_INFIX_BINOP(ge, >=)
+DEF_INFIX_BINOP(eq, ==)
+DEF_INFIX_BINOP(ne, !=)
+
+DEF_STD_BINOP(pow)
+DEF_STD_BINOP(atan2)
+DEF_STD_BINOP(hypot)
+DEF_STD_BINOP(fmod)
+DEF_STD_BINOP(remainder)
+DEF_STD_BINOP(fmin)
+DEF_STD_BINOP(fmax)
+DEF_STD_BINOP(fdim)
+DEF_STD_BINOP(copysign)
+DEF_STD_BINOP(nextafter)
+
+// sign, powers and roots
+DEF_UNOP(sgn)
+DEF_UNOP(sgnz)
+DEF_UNOP(sq)
+DEF_UNOP(cb)
+DEF_UNOP(qu)
+DEF_UNOP(ssq)
+DEF_UNOP(ssqrt)
+
+// reciprocal, sinc, fractional parts and range tests
+DEF_UNOP(recip)
+DEF_UNOP(sinc)
+DEF_UNOP(sinc1)
+DEF_UNOP(princ1)
+DEF_UNOP(frac)
+DEF_UNOP(isuni)
+DEF_UNOP(isbi)
+DEF_UNOP(isint)
+
+// range mappings, clipping, wrapping and folding
+DEF_UNOP(bi)
+DEF_UNOP(uni)
+DEF_UNOP(uclip)
+DEF_UNOP(bclip)
+DEF_UNOP(uwrap)
+DEF_UNOP(bwrap)
+DEF_UNOP(ufold)
+DEF_UNOP(bfold)
+
+// units conversions
+DEF_UNOP(ampdb)
+DEF_UNOP(dbamp)
+DEF_UNOP(hzmel)
+DEF_UNOP(melhz)
+DEF_UNOP(nnhz)
+DEF_UNOP(hznn)
+DEF_UNOP(ratiocents)
+DEF_UNOP(centsratio)
+DEF_UNOP(ratiosemi)
+DEF_UNOP(semiratio)
+DEF_UNOP(octhz)
+DEF_UNOP(hzoct)
+DEF_UNOP(degrad)
+DEF_UNOP(raddeg)
+DEF_UNOP(bpmhz)
+DEF_UNOP(hzbpm)
+DEF_UNOP(bpmsec)
+DEF_UNOP(secbpm)
+
+// unipolar phasor waveshaping
+DEF_UNOP(quadr)
+DEF_UNOP(sinpi)
+DEF_UNOP(cospi)
+DEF_UNOP(tanpi)
+DEF_UNOP(sin2pi)
+DEF_UNOP(cos2pi)
+DEF_UNOP(tan2pi)
+DEF_UNOP(sin1)
+DEF_UNOP(cos1)
+DEF_UNOP(tan1)
+DEF_UNOP(usin)
+DEF_UNOP(fsin)
+DEF_UNOP(fsinx)
+DEF_UNOP(fcos)
+DEF_UNOP(fcosx)
+
+// square, triangle and parabolic waves
+DEF_UNOP(usquare)
+DEF_UNOP(bsquare)
+DEF_UNOP(utri)
+DEF_UNOP(btri)
+DEF_UNOP(par)
+DEF_UNOP(btri0)
+DEF_UNOP(btri1)
+DEF_UNOP(btri2)
+DEF_UNOP(btri3)
+DEF_UNOP(utri0)
+DEF_UNOP(utri1)
+DEF_UNOP(utri2)
+DEF_UNOP(utri3)
+
+// trapezoid and zigzag waves
+DEF_UNOP(trapez0)
+DEF_UNOP(trapez1)
+DEF_UNOP(trapez2)
+DEF_UNOP(trapez3)
+DEF_UNOP(izigzag)
+DEF_UNOP(ozigzag)
+
+// distortion, smooth steps and decay coefficients
+DEF_UNOP(distort)
+DEF_UNOP(softclip)
+DEF_UNOP(sstep)
+DEF_UNOP(sstep2)
+DEF_UNOP(decay40dB)
+DEF_UNOP(decay60dB)
+
+// signed power
+DEF_BINOP(spow)
+
+// clipping, wrapping, folding and inversion
+DEF_BINOP(clip0)
+DEF_BINOP(clip2)
+DEF_BINOP(excess)
+DEF_BINOP(mod)
+DEF_BINOP(wrap0)
+DEF_BINOP(wrap2)
+DEF_BINOP(fold0)
+DEF_BINOP(fold2)
+DEF_BINOP(invert_about)
+
+// warping
+DEF_BINOP(bwarp)
+DEF_BINOP(bwarps)
+DEF_BINOP(warp)
+DEF_BINOP(warps)
+DEF_BINOP(phasewarp1)
+
+// thresholds
+DEF_BINOP(above)
+DEF_BINOP(below)
+DEF_BINOP(absabove)
+DEF_BINOP(absbelow)
+DEF_BINOP(thresh)
+
+// amplitude and ring modulation
+DEF_BINOP(vca)
+DEF_BINOP(scaleneg)
+DEF_BINOP(scalepos)
+DEF_BINOP(ring1)
+DEF_BINOP(ring2)
+DEF_BINOP(ring3)
+DEF_BINOP(ring4)
+
+// SuperCollider-style helpers
+DEF_BINOP(sumsq)
+DEF_BINOP(difsq)
+DEF_BINOP(sqsum)
+DEF_BINOP(sqdif)
+DEF_BINOP(absdif)
+
+// waveshaping with a phase or pulse width
+DEF_BINOP(sawshift)
+DEF_BINOP(vartri)
+DEF_BINOP(varsaw)
+DEF_BINOP(upulse)
+DEF_BINOP(bpulse)
+DEF_BINOP(zpulse)
+DEF_BINOP(eoc)
+
+// decay coefficient
+DEF_BINOP(decayCoeff)
+
+// selection and division
+DEF_TRIOP(sel2)
+DEF_TRIOP(divz)
+
+// range mappings, clipping, wrapping and folding
+DEF_TRIOP(lin)
+DEF_TRIOP(clip)
+DEF_TRIOP(wrap)
+DEF_TRIOP(fold)
+DEF_TRIOP(unilin)
+DEF_TRIOP(uniexp)
+DEF_TRIOP(linuni)
+DEF_TRIOP(expuni)
+DEF_TRIOP(bilin)
+DEF_TRIOP(biexp)
+DEF_TRIOP(linbi)
+DEF_TRIOP(expbi)
+DEF_TRIOP(unilinc)
+DEF_TRIOP(uniexpc)
+DEF_TRIOP(bilinc)
+DEF_TRIOP(biexpc)
+DEF_TRIOP(invert_between)
+DEF_TRIOP(lerp)
+
+// amplitude modulation
+DEF_TRIOP(scalenegpos)
+
+// smooth min and max
+DEF_TRIOP(smooth_adjustment)
+DEF_TRIOP(smin)
+DEF_TRIOP(smax)
+
+// waveforms with dynamic shape
+DEF_TRIOP(sawenvsin)
+DEF_TRIOP(altsawenvsin)
+
+// range mapping with warping
+DEF_QUADOP(unilinw)
+DEF_QUADOP(unilinws)
+DEF_QUADOP(bilinw)
+DEF_QUADOP(bilinws)
+
+// range mappings
+DEF_QUINTOP(linlin)
+DEF_QUINTOP(linexp)
+DEF_QUINTOP(explin)
+DEF_QUINTOP(expexp)
+DEF_QUINTOP(linlinc)
+DEF_QUINTOP(linexpc)
+DEF_QUINTOP(explinc)
+DEF_QUINTOP(expexpc)
+
+// interpolation
+DEF_QUINTOP(cubicInterpolate)
+
+// range mapping with warping
+DEF_SEXTOP(linlinw)
+DEF_SEXTOP(linlinws)

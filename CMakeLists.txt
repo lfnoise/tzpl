@@ -106,7 +106,8 @@ if(TZPL_BUILD_TESTS AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/integration-tests/CMa
     add_subdirectory(integration-tests)
 endif()
 
-if(TZPL_BUILD_BENCHMARKS AND TZPL_BUILD_SYNTHDEF_COMPILER AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/CMakeLists.txt)
+# benchmarks/CMakeLists.txt guards each benchmark on the targets it needs.
+if(TZPL_BUILD_BENCHMARKS AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/CMakeLists.txt)
     add_subdirectory(benchmarks)
 endif()
 
