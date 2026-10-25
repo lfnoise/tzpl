@@ -518,6 +518,134 @@ template <class Z> void testStateSpace() {
     testStateSpaceCase<Z, 4>("formlet", formlet<Z>(0.05, 50, 500));
 }
 
+// --- State space, several inputs and outputs -----------------------------------------------
+
+// Step functions in BlockStateSpaceIO's form, step(s, x, y), generic over T.
+template <class Z> struct RingIO {  // N = 4, 1 in, 1 out: ring's direct form I, states
+                                     // y[-1], y[-2], x[-1], x[-2] as shift registers
+    Z a1, a2;
+    template <class T> void operator()(T* s, T const* x, T* y) const {
+        T v = T(0.5) * (x[0] - s[3]) + T(a1) * s[0] + T(a2) * s[1];
+        s[1] = s[0];
+        s[0] = v;
+        s[3] = s[2];
+        s[2] = x[0];
+        y[0] = v;
+    }
+};
+template <class Z> struct CoupledIO {  // N = 2, 2 in, 2 out
+    Z a, b, c;
+    template <class T> void operator()(T* s, T const* x, T* y) const {
+        T n0 = T(a) * s[0] + x[0] + T(0.3) * x[1];
+        T n1 = T(b) * s[1] + T(c) * s[0] + x[1];
+        y[0] = s[0] + x[1];
+        y[1] = n1 - T(0.5) * x[0];
+        s[0] = n0;
+        s[1] = n1;
+    }
+};
+template <class Z> struct BiquadIO {  // N = 2, 1 in, 1 out: Biquad in the IO form
+    Biquad<Z> bq;
+    template <class T> void operator()(T* s, T const* x, T* y) const { y[0] = bq(s, x[0]); }
+};
+
+// BlockStateSpaceIO of step against the f64 recurrence, in segments that
+// alternate with the recurrence (they share the state layout), every input
+// at stride 1 except input 1 held for the block (stride 0) when I > 1.
+template <class Z, int N, int I, int O, class Step>
+void testStateSpaceIOCase(char const* name, Step step, double tol64 = 1e-12, double tol32 = 2e-5) {
+    char const* tn = typeName<Z>();
+    TestRng rng;
+    int const n = 1001;
+    std::vector<Z> x[I];
+    std::vector<double> xd[I];
+    for (int i = 0; i < I; ++i) {
+        x[i].resize(n);
+        xd[i].resize(n);
+        for (int t = 0; t < n; ++t) xd[i][t] = double(x[i][t] = t == 0 ? Z(1) : Z(rng.bi()));
+    }
+    int inc[I];
+    for (int i = 0; i < I; ++i) inc[i] = i == 1 ? 0 : 1;
+    auto bss = BlockStateSpaceIO<Z, N, I, O>::build(step);
+    int const segs[] = {64, 1, 7, 4, 128, 3, 2, 64, 5, 8};
+    double sd[N] = {};
+    Z sz[N] = {}, sr[N] = {};
+    std::vector<double> ref[O];
+    std::vector<Z> y[O], yr[O];
+    for (int o = 0; o < O; ++o) { ref[o].resize(n); y[o].resize(n); yr[o].resize(n); }
+    for (int i0 = 0, k = 0; i0 < n; ) {
+        int len = std::min(segs[k++ % 10], n - i0);
+        double const* ind[I];
+        Z const* inz[I];
+        double* yd[O];
+        Z* yz[O];
+        Z* yzr[O];
+        for (int i = 0; i < I; ++i) { ind[i] = xd[i].data() + i0 * inc[i]; inz[i] = x[i].data() + i0 * inc[i]; }
+        for (int o = 0; o < O; ++o) { yd[o] = ref[o].data() + i0; yz[o] = y[o].data() + i0; yzr[o] = yr[o].data() + i0; }
+        int yinc[O];
+        for (int o = 0; o < O; ++o) yinc[o] = 1;
+        runRecurrenceIO<double, I, O>(step, sd, ind, inc, yd, yinc, len);
+        runRecurrenceIO<Z, I, O>(step, sr, inz, inc, yzr, yinc, len);
+        if (k % 3 == 0) runRecurrenceIO<Z, I, O>(step, sz, inz, inc, yz, yinc, len);
+        else runStateSpaceIO(bss, step, sz, inz, inc, yz, yinc, len);
+        i0 += len;
+    }
+    for (int o = 0; o < O; ++o) {
+        double recErr = peakRelErr(yr[o], ref[o]);
+        double tol = sizeof(Z) == 8 ? tol64 : std::max(tol32, 3 * recErr);
+        double err = peakRelErr(y[o], ref[o]);
+        check(err <= tol, "{} N={} I={} O={} {} output {}: error {:.3g} > {:.3g}", tn, N, I, O, name, o, err, tol);
+        if (gVerbose)
+            std::println("   {} N={} I={} O={} {:<16} out {} err {:.3g}  recurrence err {:.3g}", tn, N, I, O,
+                         name, o, err, recErr);
+    }
+}
+
+template <class Z> void testStateSpaceIO() {
+    double cs = std::cos(2 * std::numbers::pi * 0.02), R = std::exp(std::log(0.001) / 480);
+    testStateSpaceIOCase<Z, 4, 1, 1>("ring f=.02", RingIO<Z>{Z(2 * R * cs), Z(-R * R)}, 1e-11, 1e-4);
+    testStateSpaceIOCase<Z, 2, 2, 2>("coupled", CoupledIO<Z>{Z(0.9), Z(0.7), Z(0.2)});
+    testStateSpaceIOCase<Z, 2, 1, 1>("rbj lpf f=.01 q=2", BiquadIO<Z>{rbjLowpass<Z>(0.01, 2)});
+    // Interleaved rows (one channel of a multichannel buffer): inputs at
+    // element stride 3 and 5, outputs at 2 and 4, give exactly the contiguous
+    // results, over a length with a tail.
+    {
+        auto step = CoupledIO<Z>{Z(0.9), Z(0.7), Z(0.2)};
+        auto bss = BlockStateSpaceIO<Z, 2, 2, 2>::build(step);
+        int const n = 70;
+        TestRng rng;
+        std::vector<Z> a(n), b(n), ia(3 * n), ib(5 * n), y0(n), y1(n), iy0(2 * n), iy1(4 * n);
+        for (int t = 0; t < n; ++t) { ia[3 * t] = a[t] = Z(rng.bi()); ib[5 * t] = b[t] = Z(rng.bi()); }
+        Z s1[2] = {}, s2[2] = {};
+        Z const* in1[2] = {a.data(), b.data()};
+        int inc1[2] = {1, 1}, yinc1[2] = {1, 1};
+        Z* out1[2] = {y0.data(), y1.data()};
+        runStateSpaceIO(bss, step, s1, in1, inc1, out1, yinc1, n);
+        Z const* in2[2] = {ia.data(), ib.data()};
+        int inc2[2] = {3, 5}, yinc2[2] = {2, 4};
+        Z* out2[2] = {iy0.data(), iy1.data()};
+        runStateSpaceIO(bss, step, s2, in2, inc2, out2, yinc2, n);
+        double d = 0;
+        for (int t = 0; t < n; ++t)
+            d = std::max({d, std::fabs(double(y0[t] - iy0[2 * t])), std::fabs(double(y1[t] - iy1[4 * t]))});
+        check(d == 0 && s1[0] == s2[0] && s1[1] == s2[1], "{} BlockStateSpaceIO strided rows differ by {:.3g}",
+              typeName<Z>(), d);
+    }
+    // The 1-in 1-out form matches BlockStateSpace's outputs exactly in
+    // structure: compare the two directly.
+    {
+        auto bq = rbjLowpass<Z>(0.05, 1);
+        auto a = BlockStateSpace<Z, 2>::build(bq);
+        auto b = BlockStateSpaceIO<Z, 2, 1, 1>::build(BiquadIO<Z>{bq});
+        double d = 0;
+        for (int q = 0; q < 2; ++q)
+            for (int k = 0; k < kVecLen; ++k) d = std::max(d, std::fabs(double(a.ys[q][k] - b.ys[0][q][k])));
+        for (int j = 0; j < kVecLen; ++j)
+            for (int k = 0; k < kVecLen; ++k) d = std::max(d, std::fabs(double(a.yx[j][k] - b.yx[0][0][j][k])));
+        check(d == 0, "{} BlockStateSpaceIO<2,1,1> matrices differ from BlockStateSpace by {:.3g}", typeName<Z>(), d);
+    }
+}
+
 // --- vmath ---------------------------------------------------------------------------------
 
 // Vector and scalar vmath::F against std::F over [lo, hi], for element type E.
@@ -801,6 +929,8 @@ int main(int argc, char** argv) {
     section("state_space");
     testStateSpace<f32>();
     testStateSpace<f64>();
+    testStateSpaceIO<f32>();
+    testStateSpaceIO<f64>();
 
     section("vmath");
     testVmath<f32>();

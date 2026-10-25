@@ -217,6 +217,201 @@ inline void runRecurrence(Step&& step, Z* s, Z const* in, int inc, Z* y, int n) 
     for (int i = 0; i < n; ++i) y[i] = step(s, in[i * inc]);
 }
 
+// --- Several inputs and outputs ---------------------------------------------------------
+//
+// The same form for a cycle with I inputs and O outputs: step(W* s, W const* x,
+// W* y) updates s[0..N) from s and x[0..I) and writes y[0..O). Over a vector of
+// 4 samples of every input,
+//      y[o] = Ys[o] s + sum_i Yx[o][i] x[i]
+//      s'   = Ss s    + sum_i Sx[i] x[i]
+// with the matrices found as for BlockStateSpace: from each unit state with
+// zero input, and from zero state with a unit sample of each input.
+//
+// Layout (V = vec_t<Z>):
+//      ys[o][q]          V: lane k = output o at sample k from unit state q
+//      yx[o][i][j]       V: lane k = output o at sample k from unit input i at sample j
+//      ss[m][q]          Z: as BlockStateSpace
+//      sx[m][i]          V: lane j = state m after 4 samples from unit input i at sample j
+//      ss2[m][q]         Z: Ss^2
+//      sx2[m][i][0|1]    V: state m after 8 samples from input i's first / second vector
+
+template <class F, class Z>
+concept StateStepIO = requires(F f, Z* s, Z const* x, Z* y) { f(s, x, y); };
+
+template <class Z, int N, int I, int O>
+struct BlockStateSpaceIO {
+    static_assert(std::is_floating_point_v<Z>, "block state space is for f32 and f64");
+    static_assert(N >= 1 && I >= 1 && O >= 1);
+    using V = vec_t<Z>;
+
+    V ys[O][N], yx[O][I][kVecLen], sx[N][I], sx2[N][I][2];
+    Z ss[N][N], ss2[N][N];
+
+    // As BlockStateSpace::build: in f64 for an f32 cycle whose step takes f64.
+    template <class Step>
+        requires StateStepIO<Step, Z>
+    static BlockStateSpaceIO build(Step&& step) {
+        if constexpr (std::is_same_v<Z, f32> && StateStepIO<Step, f64>) return buildIn<f64>(step);
+        else return buildIn<Z>(step);
+    }
+
+    template <class W, class Step>
+        requires StateStepIO<Step, W>
+    static BlockStateSpaceIO buildIn(Step&& step) {
+        W ys[O][N][kVecLen], yx[O][I][kVecLen][kVecLen], ss[N][N], sx[N][I][kVecLen];
+        W x[I], y[O];
+        for (int q = 0; q < N; ++q) {
+            W s[N] = {};
+            s[q] = 1;
+            for (int i = 0; i < I; ++i) x[i] = 0;
+            for (int k = 0; k < kVecLen; ++k) {
+                step(s, x, y);
+                for (int o = 0; o < O; ++o) ys[o][q][k] = y[o];
+            }
+            for (int m = 0; m < N; ++m) ss[m][q] = s[m];
+        }
+        for (int i = 0; i < I; ++i) {
+            for (int j = 0; j < kVecLen; ++j) {
+                W s[N] = {};
+                for (int k = 0; k < kVecLen; ++k) {
+                    for (int ii = 0; ii < I; ++ii) x[ii] = ii == i && k == j ? 1 : 0;
+                    step(s, x, y);
+                    for (int o = 0; o < O; ++o) yx[o][i][j][k] = y[o];
+                }
+                for (int m = 0; m < N; ++m) sx[m][i][j] = s[m];
+            }
+        }
+        BlockStateSpaceIO b;
+        for (int o = 0; o < O; ++o) {
+            for (int q = 0; q < N; ++q)
+                for (int k = 0; k < kVecLen; ++k) b.ys[o][q][k] = Z(ys[o][q][k]);
+            for (int i = 0; i < I; ++i)
+                for (int j = 0; j < kVecLen; ++j)
+                    for (int k = 0; k < kVecLen; ++k) b.yx[o][i][j][k] = Z(yx[o][i][j][k]);
+        }
+        for (int m = 0; m < N; ++m) {
+            for (int q = 0; q < N; ++q) {
+                W a = 0;
+                for (int r = 0; r < N; ++r) a += ss[m][r] * ss[r][q];
+                b.ss2[m][q] = Z(a);
+                b.ss[m][q] = Z(ss[m][q]);
+            }
+            for (int i = 0; i < I; ++i) {
+                for (int j = 0; j < kVecLen; ++j) {
+                    W a = 0;
+                    for (int r = 0; r < N; ++r) a += ss[m][r] * sx[r][i][j];
+                    b.sx2[m][i][0][j] = Z(a);
+                    b.sx[m][i][j] = b.sx2[m][i][1][j] = Z(sx[m][i][j]);
+                }
+            }
+        }
+        return b;
+    }
+
+    // Output o's 4 samples from state s and input vectors x[0..I).
+    V out(int o, Z const* s, V const* x) const {
+        V y = ys[o][0] * s[0];
+        for (int q = 1; q < N; ++q) y += ys[o][q] * s[q];
+        for (int i = 0; i < I; ++i)
+            for (int j = 0; j < kVecLen; ++j) y += yx[o][i][j] * x[i][j];
+        return y;
+    }
+
+    // s after input vectors x[0..I).
+    void next(Z* s, V const* x) const {
+        Z n[N];
+        for (int m = 0; m < N; ++m) {
+            V acc = sx[m][0] * x[0];
+            for (int i = 1; i < I; ++i) acc += sx[m][i] * x[i];
+            Z a = reduceAdd(acc);
+            for (int q = 0; q < N; ++q) a += ss[m][q] * s[q];
+            n[m] = a;
+        }
+        for (int m = 0; m < N; ++m) s[m] = n[m];
+    }
+
+    // s after input vectors x0[0..I) then x1[0..I).
+    void next2(Z* s, V const* x0, V const* x1) const {
+        Z n[N];
+        for (int m = 0; m < N; ++m) {
+            V acc = sx2[m][0][0] * x0[0] + sx2[m][0][1] * x1[0];
+            for (int i = 1; i < I; ++i) acc += sx2[m][i][0] * x0[i] + sx2[m][i][1] * x1[i];
+            Z a = reduceAdd(acc);
+            for (int q = 0; q < N; ++q) a += ss2[m][q] * s[q];
+            n[m] = a;
+        }
+        for (int m = 0; m < N; ++m) s[m] = n[m];
+    }
+};
+
+// A vector of 4 samples k apart from p: held (k = 0), contiguous (k = 1) or
+// gathered from interleaved rows (k > 1).
+template <class V> inline V loadStrided(elem_t<V> const* p, int k) {
+    if (k == 1) return load<V>(p);
+    if (k == 0) return V(p[0]);
+    V v;
+    for (int j = 0; j < kVecLen; ++j) v[j] = p[j * k];
+    return v;
+}
+template <class V> inline void storeStrided(elem_t<V>* p, int k, V v) {
+    if (k == 1) return store(p, v);
+    for (int j = 0; j < kVecLen; ++j) p[j * k] = v[j];
+}
+
+// n samples (any n): input i from in[i] at element stride inc[i] (0 for an
+// input held for the block, 1 for a buffer, the row length for one channel of
+// interleaved rows), output o into y[o] at stride yinc[o] (1 or a row
+// length), with state s. Whole vectors through bss, two at a time; the tail
+// through step. Every input of a pair is read before any output is written,
+// so an output may alias an input.
+template <class Z, int N, int I, int O, class Step>
+    requires StateStepIO<Step, Z>
+inline void runStateSpaceIO(BlockStateSpaceIO<Z, N, I, O> const& bss, Step&& step, Z* s,
+                            Z const* const* in, int const* inc, Z* const* y, int const* yinc, int n) {
+    using V = vec_t<Z>;
+    int nv = n / kVecLen;
+    auto ld = [&](int i, int v) { return loadStrided<V>(in[i] + v * kVecLen * inc[i], inc[i]); };
+    auto st = [&](int o, int v, V x) { storeStrided(y[o] + v * kVecLen * yinc[o], yinc[o], x); };
+    int v = 0;
+    for (; v + 2 <= nv; v += 2) {
+        V x0[I], x1[I];
+        for (int i = 0; i < I; ++i) { x0[i] = ld(i, v); x1[i] = ld(i, v + 1); }
+        Z mid[N];
+        for (int m = 0; m < N; ++m) mid[m] = s[m];
+        bss.next(mid, x0);
+        for (int o = 0; o < O; ++o) {
+            V y0 = bss.out(o, s, x0), y1 = bss.out(o, mid, x1);
+            st(o, v, y0);
+            st(o, v + 1, y1);
+        }
+        bss.next2(s, x0, x1);
+    }
+    if (v < nv) {
+        V x[I];
+        for (int i = 0; i < I; ++i) x[i] = ld(i, v);
+        for (int o = 0; o < O; ++o) st(o, v, bss.out(o, s, x));
+        bss.next(s, x);
+    }
+    for (int t = nv * kVecLen; t < n; ++t) {
+        Z x[I], yo[O];
+        for (int i = 0; i < I; ++i) x[i] = in[i][t * inc[i]];
+        step(s, x, yo);
+        for (int o = 0; o < O; ++o) y[o][t * yinc[o]] = yo[o];
+    }
+}
+
+// The plain recurrence over n samples, for blocks whose coefficients vary.
+template <class Z, int I, int O, class Step>
+inline void runRecurrenceIO(Step&& step, Z* s, Z const* const* in, int const* inc, Z* const* y,
+                            int const* yinc, int n) {
+    for (int t = 0; t < n; ++t) {
+        Z x[I], yo[O];
+        for (int i = 0; i < I; ++i) x[i] = in[i][t * inc[i]];
+        step(s, x, yo);
+        for (int o = 0; o < O; ++o) y[o][t * yinc[o]] = yo[o];
+    }
+}
+
 }  // namespace tzpl::dsp
 
 #endif  // tzpl_dsp_state_space_hpp
