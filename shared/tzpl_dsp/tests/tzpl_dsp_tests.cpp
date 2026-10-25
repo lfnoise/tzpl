@@ -434,11 +434,16 @@ std::vector<Z> runSegments(BlockStateSpace<Z, N> const& bss, Step const& step, s
 // within 3 times the f32 recurrence's own error where rounding f32 states
 // alone costs more than that. tol32 is 2e-5, not the plan's 1e-5: an RBJ
 // lowpass at f = .01, q = 2 measures 1.4e-5 to 1.7e-5 (with and without
-// -ffast-math), against 3e-6 to 8e-6 for the f32 recurrence. Very low, sharp
+// -ffast-math), against 3e-6 to 8e-6 for the f32 recurrence. A block state
+// space built in f32 itself (a step that only takes f32, "built in Z") rounds
+// its matrices in f32 as well and gets tol32BuiltInZ, 1e-4: that same lowpass
+// measured 4.2e-5 to 5.3e-5 on the CI runners (Apple clang -ffast-math, Linux
+// Sleef). Very low, sharp
 // resonances are ill-conditioned in either form (TU §7 quotes up to 1e-12
 // and 2e-4); those cases pass looser tolerances.
 template <class Z, int N, class Step>
-void testStateSpaceCase(char const* name, Step step, double tol64 = 1e-12, double tol32 = 2e-5) {
+void testStateSpaceCase(char const* name, Step step, double tol64 = 1e-12, double tol32 = 2e-5,
+                        double tol32BuiltInZ = 1e-4) {
     char const* tn = typeName<Z>();
     TestRng rng;
     int const n = 1001;
@@ -462,17 +467,18 @@ void testStateSpaceCase(char const* name, Step step, double tol64 = 1e-12, doubl
     for (int which = 0; which < 2; ++which) {
         auto const& bss = which ? bssZ : bssGeneric;
         char const* how = which ? "built in Z" : "built generic";
+        double caseTol = (sizeof(Z) == 4 && which) ? std::max(tol, tol32BuiltInZ) : tol;
         Z s[N] = {};
         std::vector<Z> y = runSegments(bss, step, x, s);
         double err = peakRelErr(y, ref);
-        check(err <= tol, "{} N={} {} {}: error {:.3g} > {:.3g} (recurrence's own {:.3g})", tn, N, name, how,
-              err, tol, recErr);
+        check(err <= caseTol, "{} N={} {} {}: error {:.3g} > {:.3g} (recurrence's own {:.3g})", tn, N, name,
+              how, err, caseTol, recErr);
         if (gVerbose)
             std::println("   {} N={} {:<22} {:<14} err {:.3g}  recurrence err {:.3g}", tn, N, name, how, err,
                          recErr);
         double stateErr = 0;
         for (int m = 0; m < N; ++m) stateErr = std::max(stateErr, std::fabs(double(s[m]) - sd[m]) / peakOf(ref));
-        check(stateErr <= tol, "{} N={} {} {}: final state error {:.3g}", tn, N, name, how, stateErr);
+        check(stateErr <= caseTol, "{} N={} {} {}: final state error {:.3g}", tn, N, name, how, stateErr);
     }
 
     // A held input (stride 0): the step response.

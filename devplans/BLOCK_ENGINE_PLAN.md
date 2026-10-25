@@ -896,6 +896,9 @@ Each milestone ends green on its own tests, with a commit series on `block-engin
     the recurrence in f64. On an RBJ lowpass at f = .01, q = 2, the f32 state space
     is 1.4e-5 to 1.7e-5 off, while the f32 recurrence is 3e-6 to 8e-6 off. The test
     accepts the larger of 2e-5 and 3 times the f32 recurrence's own error.
+    - A state space built in f32 itself (from a step that only takes f32) has its
+      own limit, 1e-4 (accepted 2026-10-25). The same lowpass measured 4.2e-5 to
+      5.3e-5 on the CI runners (Apple clang -ffast-math, Linux Sleef).
     - Typical f64 cycles are within 2e-13.
     - The ill-conditioned case, poles at radius 0.9997 (f = .001, q = 10),
       reaches 1.3e-11 for f64 and up to 7.6e-4 for f32. It is tested at 1e-10 and
