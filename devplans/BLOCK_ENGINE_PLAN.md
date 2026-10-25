@@ -78,8 +78,8 @@ semantics.
 - Today a cycle between nodes is a one-sample delay. With blocks it becomes a one-block
   delay, unless the cycle runs a sample at a time.
 - **Phase 1 (M2–M10): feed-forward only.**
-  - A `connect` or `reconnectOutput` that would close a cycle is refused with a new
-    `errCycle`, appended to the append-only `tzpl_SErr`.
+  - A `connect` or `reconnectOutput` that would close a cycle is refused with
+    `tzpl_errCyclicConnection` (already in `tzpl_SErr`, previously unused).
   - The check runs in NRT, on the graph shadow, before the bundle is submitted.
   - The whole bundle aborts, as on any other apply error.
 - **Phase 2 (milestone MF): sample-interleaved feedback.**
@@ -449,7 +449,7 @@ test plugins (`tzpl_test_plugins.cpp`, rewritten for v3), covering:
 - broadcasting connections at shapes {3}→{6}, {2,3}→{4,3}, and a narrowing fold;
 - node start and free at offsets; voice reset at an offset;
 - cycle refusal (D1 phase 1): a connect, a reconnect, and a bundle that closes a cycle
-  are each refused with `errCycle`, and the graph is left unchanged. Phase 2 (MF) adds
+  are each refused with `tzpl_errCyclicConnection`, and the graph is left unchanged. Phase 2 (MF) adds
   these: a 2-node cycle with `feedbackMode=sample` must equal the old one-sample
   semantics, and `block` mode gives a one-block delay;
 - silo RT task wakeups at sample offsets within a block (`playNote` from a task lands
@@ -905,7 +905,7 @@ Each milestone ends green on its own tests, with a commit series on `block-engin
   - `i64` is `long`, not `int64_t`, so that `i64x4` is the same type as Apple's
     `simd::long4` and `tzpl_simd.hpp`'s `i64x4`.
 
-**M2: Engine core on ABI v3 (§3), with hand-written test plugins.**
+**M2: Engine core on ABI v3 (§3), with hand-written test plugins (done 2026-10-25)**
 - Port buffers, the block loop, input stages, XFader nodes (block form, region-shaped,
   sub-sample start), broadcasting, the mixer and narrow nodes,
   event collection with offsets, node splitting, cycle refusal (D1 phase 1), device
@@ -913,6 +913,95 @@ Each milestone ends green on its own tests, with a commit series on `block-engin
 - Port the clock and task scheduler ticks to block form.
 - Pass `test_block_engine`.
 - Run the `audio_engine_lib` ASan build (live-mode scripts, per [[asan-nrt-stack-overflow]]).
+
+What landed:
+- **ABI v3** in `shared/tzpl_plugin_abi.h`, as in §3.6:
+  - `tzpl_Shape`, the new element order, and `process(off, n)` / `resetVoice`.
+  - `tzpl_PortDef` gains `hasSpec`/`spec`; `tzpl_SynthDef` gains `voiced`/`maxVoices`.
+  - `tzpl_OutPort` also carries `isConst`/`version`, so producers can report
+    constness and the engine passes it on to the inputs they feed.
+  - Loaders refuse ABI < 3.
+  - Shape helpers are in `shared/tzpl_shape.hpp`.
+- **Engine** (`engine/src/`):
+  - Each port channel is its own 64-byte-aligned buffer of `blockSize` samples.
+  - Connections remap pointers per channel. When the destination is larger in every
+    dimension, a connection broadcasts; when it is smaller in some dimension, a
+    hidden fold node sums.
+  - Per-channel input stages (`InPort::stepTo/rampTo/impulse`) render
+    incrementally to each event's offset and report `isConst`/`version`.
+  - XFader nodes run on blocks and take a fractional start. They nest, and retire
+    after the block in which they finish. The fade curves are in `tzpl_fade_curves.hpp`.
+  - `Silo::processBlock`:
+    1. processes the device buffer in chunks of up to `blockSize`;
+    2. runs immediate bundles at offset 0;
+    3. merges clock-scheduled commands with task wakeups in time order, each run
+       with `now_` (fractional) and `nowOffset_`;
+    4. splits nodes at start, free and resetVoice events;
+    5. returns the block's commands to NRT only after the block, so nodes freed
+       mid-block are still alive while it runs.
+  - The engine-side voicer (`tzpl_note_voicer.hpp`) drives the `notes` input
+    tensor (D2).
+  - Cycle refusal (the existing, previously unused `tzpl_errCyclicConnection`) runs at submit, on the shadow plus the
+    bundle's edits, and again on RT.
+  - `EngineConfig::blockSize` defaults to 64.
+- **Tests:**
+  - `integration-tests/src/test_block_engine.cpp`: 121 closed-form checks, covering
+    - block sizes 1, 4, 64 and 256 against device chunks of 37, 64 and 100;
+    - start and free at fractional offsets;
+    - step, ramp, interrupted ramp and impulse;
+    - box regions;
+    - broadcast {3}→{6} and {2,3}→{4,3}, and folds {8}→{2} and {3}→{2};
+    - all 7 curves;
+    - nested A→B→C→D fades;
+    - setInputX on a connected input;
+    - scheduled cuts;
+    - cycles;
+    - voices and resetVoice offsets;
+    - task wakeups;
+    - multi-silo mixdown, taps and the limiter.
+  - Mutating the event offset rounding or the fade position makes about 100 of the
+    checks fail.
+  - `test_stopped_engine`, `test_graph_shadow`, `test_metering`, `test_audio_engine_ffi`,
+    the app tests, the JUCE self-test and the lang suite (486) all pass.
+  - Under ASan+UBSan, all four engine tests and the FFI test are clean apart from one
+    downcast report in `lang/src/tzpl_cpp.cpp`, outside the engine.
+
+Deviations and notes:
+- **No live-mode ASan scripts.** No v3 synths exist until M4 (synthc still emits v2,
+  which the loader refuses), so the engine tests and the FFI test ran under
+  ASan+UBSan instead. Two bugs found that way are fixed:
+  - **A use-after-free in `sortNodes`.** It walked the previous sorted list, which
+    could hold hidden nodes the NRT side had already deleted. The old engine's
+    unexplained second `sortNodes()` call was masking this. Sorting is now
+    generation-stamped and never walks the old list, and `pushDeadNode` unlinks
+    the node first.
+  - **An init-order race.** `Engine::sampleRateChanged_` was read by the NRT thread
+    before it was constructed.
+- **Deferred to M5 (consumers):**
+  - region-shaped faders, and `connect` into a destination `Region`;
+  - `setInputX` on part of a *connected* input. Value regions work everywhere
+    (`setInput`/`impulseInput` on an element, a range or a box). `setInputX` fades
+    a connected input only over the whole port.
+- **Graph edits at a mid-block offset.** In a scheduled bundle, connect, reconnect
+  and disconnect pre-allocate a 0-length (step) fader, so a cut lands on its exact
+  sample on float ports. Integer ports, `disconnectOutput`, `disconnectNode` and
+  `freeAllNodes` apply at the block start.
+- **Freeing a node at offset t** zeroes its outputs from t on. Inputs it fed revert
+  to their stage values from the next block.
+- **The offset rule** for a clock event is the first sample whose beat has reached
+  it, as in the per-sample engine.
+  - Silo tasks fire at their beat's exact fractional sample and reschedule from
+    their own beat, so jitter no longer accumulates.
+  - Silo actor timers resolve at the sample their beat falls on (`VM::nextActorTimerBeat`).
+- **Compatibility shims, removed in M5:**
+  - `setControl` by name, and by ID (the ID is now the input index);
+  - `ControlDesc`/`listDefControls`, derived from inputs with specs;
+  - the flat `setInput(port, n, values)` overloads.
+  Notes keep their API names and run on the engine voicer.
+- **The C++ synthdef-compiler executable** is behind `TZPL_SYNTHDEF_LEGACY_EXE`
+  (off). Its CI step is replaced by `test_block_engine`. The library still builds,
+  for compile-and-link.
+- **The M0 corpus** cannot render until synthc emits v3 plugins (M4/M5).
 
 **M3: synthc front end and IR.**
 - `Shape` and the new rates in `synthdef.x` and `ir.x`; shape and type inference; inlets
@@ -987,7 +1076,7 @@ merge.
 - SCC detection in `sortNodes`.
 - Sample-interleaved SCC execution, with input and output pointers offset per sample.
 - `feedbackMode = sample | block` per silo.
-- Lift the `errCycle` refusal.
+- Lift the `tzpl_errCyclicConnection` refusal.
 - Test against the old one-sample semantics, using a corpus file from M0 that has
   inter-node feedback.
 
