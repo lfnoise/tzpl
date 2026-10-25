@@ -7,6 +7,24 @@ documentation site as the Changelog page.
 
 ## Unreleased
 
+**Fixed**
+
+- Mixing `f32` and `f64` signals in a synthdef no longer fails with
+  "intersected to empty". An `f64` phase minus an `f32` oscillator, an
+  `f32` control times an `f64` playhead, a comparison or `select2` between
+  the two -- all now widen to `f64`, as the SynthDef guide always said, in
+  both compilers. The result is exactly what writing the casts by hand
+  gives; synthdefs that compiled before are unchanged. (#16)
+- A cast on a literal now sticks: `1.5 f64` stays `f64` when the compiler
+  folds it into another constant, instead of quietly reverting to `f32`.
+- `-2.0 * abs(x)` (any negative constant or control times `abs(x)`) came out
+  positive: an algebraic rewrite assumed the factor was non-negative. (#13)
+- A file named after a library module that imports it -- a notebook saved as
+  `live.x` doing `import live.*` -- now gets an error that says the file
+  hides the library module and should be renamed, instead of "Circular
+  import detected". Errors at an `import` inside an imported module now also
+  point at that module's line. (#15)
+
 ## v0.2.6 (24 October 2026)
 
 **Fixed**

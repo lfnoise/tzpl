@@ -160,6 +160,8 @@ namespace synthdef {
         void inplaceDelayOps();
         void shapeInference();
         void typeInference();
+        void typeInferenceWithWidening();
+        usize insertWideningCasts();
         void setNonConcreteTypesToDefault();
         void addDelayAntecedents();
         void addSubgraphAntecedents();

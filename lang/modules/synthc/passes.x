@@ -420,10 +420,217 @@ fn shapeInference(ctx Ctx) Void {
 fn typeInference(ctx Ctx) Void {
 	let wl = newWorkList(ctx numNodes);
 	for (n : ctx.sorted) { wl wlPush(n); }
-	while (!(wl wlEmpty)) {
-		let n = wl wlPop;
-		updateTypeOf(ctx, n, wl);
+	ctx drainTypes(wl);
+}
+
+---------------------------------------------------------------------------
+-- Widen on conflict (mirrors Synth::typeInferenceWithWidening /
+-- insertWideningCasts in synthdef_synth.cpp, step for step).
+--
+-- Plain unification first: an operation and its operands get one type, and
+-- every graph that infers today takes that path unchanged. Only when it has no
+-- solution (an f64 signal meeting an f32 one) is inference re-run in widening
+-- mode -- operands no wider than their operation -- to find the operands that
+-- need a cast; those get an explicit cast and inference runs again.
+
+struct _TypeSnap {
+	typ [NumType],
+	cmpTyp [NumType],
+	delayTyp [NumType],
+	nErrors Int,
+}
+
+fn _snapTypes(ctx Ctx) _TypeSnap {
+	var dt [NumType] = [];
+	for (d : ctx.delays) { dt push!(d.typ); }
+	_TypeSnap { typ: ctx.typ copy, cmpTyp: ctx.cmpTyp copy, delayTyp: dt,
+	            nErrors: ctx.errors length }
+}
+
+-- Restore the snapshot's nodes (nodes added since keep their own types) and
+-- drop errors reported since.
+fn _restoreTypes(ctx Ctx, s _TypeSnap) Void {
+	var i = 0;
+	while (i < s.typ length) { ctx.typ[i] = s.typ[i]; ctx.cmpTyp[i] = s.cmpTyp[i]; i = i + 1; }
+	var di = 0;
+	while (di < s.delayTyp length) {
+		ctx.delays[di] = DelayInfo { ...ctx.delays[di], typ: s.delayTyp[di] };
+		di = di + 1;
 	}
+	while (ctx.errors length > s.nErrors) { ctx.errors pop!; }
+}
+
+-- An empty type left on a live non-constant node (what
+-- setNonConcreteTypesToDefault rejects).
+fn _leftEmptyType(ctx Ctx) Bool {
+	for (n : ctx.sorted) {
+		if (ctx.typ[n] isEmpty && ctx.consumers[n] length > 0
+				&& !(ctx.kind[n] isConstantKind)) { return true; }
+	}
+	false
+}
+
+-- Same preference as setNonConcreteTypesToDefault.
+fn _preferredType(t NumType) NumType {
+	if ((t & FLOAT32) notEmpty) { return FLOAT32; }
+	if ((t & FLOAT64) notEmpty) { return FLOAT64; }
+	if ((t & INT32) notEmpty) { return INT32; }
+	if ((t & INT64) notEmpty) { return INT64; }
+	t
+}
+
+fn _settle(ctx Ctx, n NIdx) Void {
+	let wl = newWorkList(ctx numNodes);
+	wl wlPush(n);
+	propagateTypes(ctx, n, wl);
+	ctx drainTypes(wl);
+}
+
+-- The serial the next analysis-time expr takes: the import's counter plus one
+-- per maxDelay Constant the C++ calcDelayLengths created (a delay bounded only
+-- by its fixed readers/initters), each of which burned a userial.
+fn _analysisSerialBase(ctx Ctx) Int {
+	var n = ctx.nextSerial[0];
+	for (d : ctx.delays) { if (d.maxDelay == NONE && d.hasMaxBound) { n = n + 1; } }
+	n
+}
+
+-- An existing cast of `inp` to `t` in graph `g` (the C++ addExpr hash-conses
+-- the new CastOpExpr against the op's graph).
+fn _findCast(ctx Ctx, inp NIdx, t NumType, g Int) Int {
+	var i = 0;
+	while (i < ctx numNodes) {
+		match (ctx.kind[i]) {
+			castopK(ct): {
+				if (ct == t && ctx.graphOf[i] == g && ctx.ins[i] length == 1
+						&& ctx.ins[i][0] == inp) { return i; }
+			}
+			_: {}
+		}
+		i = i + 1;
+	}
+	NONE
+}
+
+fn _appendCastNode(ctx Ctx, inp NIdx, t NumType, g Int, serial Int) Int {
+	let idx = ctx numNodes;
+	ctx.kind push!(NodeKind.castopK(t));
+	ctx.ins push!([inp]);
+	ctx.subs push!([Int]());
+	ctx.serial push!(serial);
+	ctx.nrate push!(ctx.nrate[inp]);
+	ctx.typ push!(t);
+	ctx.chans push!(ctx.chans[inp]);
+	ctx.graphOf push!(g);
+	ctx.cut push!(GraphCut.none);
+	ctx.treeOf push!(NONE);
+	ctx.consumers push!([Int]());
+	ctx.suppressed push!(false);
+	ctx.cmpTyp push!(ANY_NUM);
+	idx
+}
+
+-- Solve with widening, choose concrete types in sorted order with the default
+-- preference, then cast each non-constant operand narrower than its
+-- operation. Returns the number of casts, or -1 when widening has no solution
+-- either.
+fn _insertWideningCasts(ctx Ctx) Int {
+	let errs0 = ctx.errors length;
+	ctx.widening[0] = true;
+	ctx typeInference;
+	for (n : ctx.sorted) {
+		if (ctx.errors length > errs0) { break; }
+		if (!(ctx.typ[n] isConcrete)) {
+			ctx.typ[n] = ctx.typ[n] _preferredType;
+			_settle(ctx, n);
+		}
+		match (ctx.kind[n]) {
+			compareopK(_): {
+				if (!(ctx.cmpTyp[n] isConcrete)) {
+					ctx.cmpTyp[n] = ctx.cmpTyp[n] _preferredType;
+					_settle(ctx, n);
+				}
+			}
+			_: {}
+		}
+	}
+	ctx.widening[0] = false;
+	if (ctx.errors length > errs0) { return -1; }
+	-- An emptied fixed-type node (unchecked by _propagateTypes) means widening
+	-- has no solution either: keep the original error (mirrors the C++).
+	if (ctx _leftEmptyType) { return -1; }
+
+	var eOp [Int] = [];
+	var eIn [Int] = [];
+	var eTo [NumType] = [];
+	for (n : ctx.sorted) {
+		var first = 0;
+		var to = NO_NUM;
+		var isOp = true;
+		match (ctx.kind[n]) {
+			binopK(_):     { to = ctx.typ[n]; }
+			compareopK(_): { to = ctx.cmpTyp[n]; }
+			selectK:       { to = ctx.typ[n]; first = 1; }
+			_:             { isOp = false; }
+		}
+		if (!isOp) { continue; }
+		var i = first;
+		while (i < ctx.ins[n] length) {
+			let inp = ctx.ins[n][i];
+			if (!(ctx.kind[inp] isConstantKind) && ctx.typ[inp] != to) {
+				eOp push!(n); eIn push!(i); eTo push!(to);
+			}
+			i = i + 1;
+		}
+	}
+
+	var serial = ctx _analysisSerialBase;
+	var k = 0;
+	while (k < eOp length) {
+		let op = eOp[k];
+		let inp = ctx.ins[op][eIn[k]];
+		let g = ctx.graphOf[op];
+		let s = serial;
+		serial = serial + 1;                -- `new CastOpExpr` burns a userial
+		var c = _findCast(ctx, inp, eTo[k], g);
+		if (c == NONE) { c = _appendCastNode(ctx, inp, eTo[k], g, s); }
+		let row = ctx.ins[op];
+		row[eIn[k]] = c;
+		k = k + 1;
+	}
+	eOp length
+}
+
+fn typeInferenceWithWidening(ctx Ctx) Void {
+	let before = ctx _snapTypes;
+	ctx typeInference;
+	if (ctx.errors length == before.nErrors && !(ctx _leftEmptyType)) { return; }
+
+	_restoreTypes(ctx, before);
+	let n = ctx _insertWideningCasts;
+	_restoreTypes(ctx, before);
+	if (n <= 0) {
+		-- Report the original conflict, exactly as before.
+		ctx typeInference;
+		return;
+	}
+
+	-- The casts are new nodes: redo the passes that index the graph, keeping
+	-- the sort to what it held before plus the casts (mirrors the C++).
+	var keep [Bool] = false repeat(ctx numNodes);
+	for (s : ctx.sorted) { keep[s] = true; }
+	var i = before.typ length;
+	while (i < ctx numNodes) { keep[i] = true; i = i + 1; }
+	ctx.sorted clear!;
+	for (cs : ctx.consumers) { cs clear!; }
+	ctx topologicalSortExprs;
+	let resorted = ctx.sorted copy;
+	ctx.sorted clear!;
+	for (s : resorted) { if (keep[s]) { ctx.sorted push!(s); } }
+	ctx collectConsumers;
+	ctx calcDelayLengths;
+	ctx shapeInference;
+	ctx typeInference;
 }
 
 ---------------------------------------------------------------------------
@@ -1258,7 +1465,7 @@ fn analyzeTypes(ctx Ctx) Ctx {
 	ctx collectConsumers;
 	ctx calcDelayLengths;
 	ctx shapeInference;
-	ctx typeInference;
+	ctx typeInferenceWithWidening;
 	ctx setNonConcreteTypesToDefault;
 	ctx setDelayReaderRates;
 	ctx findGraphCuts;

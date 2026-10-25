@@ -127,6 +127,36 @@ namespace synthdef {
         }
         NumType operator|(NumType that) const { return NumType(flags | that.flags); }
 
+        // The types a binary operation can produce when its operands are
+        // widened to the wider of the two: { max(a, b) | a in this, b in that }
+        // under i32 < i64 < f32 < f64 (floats win over ints, as in the
+        // SynthDef guide). The flag bits are in that order, so max is the
+        // larger bit.
+        NumType widen(NumType that) const {
+            u8 out = 0;
+            for (u8 a = 1; a <= F64; a <<= 1) {
+                if (!(flags & a)) continue;
+                for (u8 b = 1; b <= F64; b <<= 1) {
+                    if (that.flags & b) out |= std::max(a, b);
+                }
+            }
+            return NumType(out);
+        }
+        // Types no narrower than some member: what a value of this type can be
+        // widened to. up(f32) = {f32, f64}.
+        NumType up() const {
+            if (!flags) return NumType(0);
+            u8 lo = flags & -flags;  // lowest set bit
+            return NumType(u8(0xF & ~(lo - 1)));
+        }
+        // Types no wider than some member: what can be widened into this type.
+        // down(f32) = {i32, i64, f32}.
+        NumType down() const {
+            if (!flags) return NumType(0);
+            u8 hi = u8(1u << (7 - std::countl_zero(flags)));  // highest set bit
+            return NumType(u8(hi | (hi - 1)));
+        }
+
         NumType as_bool_type() const {
             u8 new_flags = 0;
             if (supports_32_bits()) {

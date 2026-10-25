@@ -53,6 +53,7 @@ fn importGraph(g SignalGraph, name String, applyRewrites Bool = false,
 	for (e : g.exprs) {
 		_importExpr(e);
 	}
+	`scCtx.nextSerial[0] = `scExprSerials;
 	`scCtx
 }
 
@@ -208,6 +209,7 @@ fn _appendNode(kind NodeKind, ins [Int], serial Int, r Rate, t NumType, ch Int) 
 	ctx.treeOf push!(NONE);
 	ctx.consumers push!([Int]());
 	ctx.suppressed push!(false);
+	ctx.cmpTyp push!(ANY_NUM);
 
 	if (kind isSinkKind) { ctx.sinks push!(idx); }
 
@@ -483,13 +485,33 @@ fn _allConst(ctx Ctx, ins [Int]) Bool {
 	true
 }
 
+fn _constInitOf(ctx Ctx, n NIdx) NumType = match (ctx.kind[n]) {
+	constant(_, t): t;
+	_:              ANY_NUM;
+};
+
+-- A folded constant keeps its operands' types (mirrors foldedType in
+-- synthdef_expr.cpp): `1.0 f64` stays f64 through a fold, conflicting fixed
+-- types widen, and untyped operands give the storage default as before.
+fn _foldedType1(a NumType, r ConstVal) NumType {
+	let d = r _foldInitType;
+	let t = a & d;
+	(t notEmpty) ? t : d
+}
+fn _foldedType2(a NumType, b NumType, r ConstVal) NumType {
+	let d = r _foldInitType;
+	var t = a & b & d;
+	if (t isEmpty) { t = numWiden(a, b) & d; }
+	(t notEmpty) ? t : d
+}
+
 fn _foldUnopNode(ctx Ctx, op UnaryOp, ins [Int]) Int {
 	let r = foldUnary(_constValOf(ctx, ins[0]), op);
-	_addFoldedConstant(r, r _foldInitType)
+	_addFoldedConstant(r, _foldedType1(_constInitOf(ctx, ins[0]), r))
 }
 fn _foldBinopNode(ctx Ctx, op BinaryOp, ins [Int]) Int {
 	let r = foldBinary(_constValOf(ctx, ins[0]), _constValOf(ctx, ins[1]), op);
-	_addFoldedConstant(r, r _foldInitType)
+	_addFoldedConstant(r, _foldedType2(_constInitOf(ctx, ins[0]), _constInitOf(ctx, ins[1]), r))
 }
 fn _foldCmpNode(ctx Ctx, op CompareOp, ins [Int]) Int {
 	let r = foldCompare(_constValOf(ctx, ins[0]), _constValOf(ctx, ins[1]), op);

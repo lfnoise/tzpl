@@ -24,6 +24,13 @@
 
 namespace synthdef {
 
+    // Widening mode for type inference (see Synth::typeInferenceWithWidening).
+    // Normally an operation and its operands unify to one type. When that has
+    // no solution, inference is re-run with this set: a binary op's, compare's
+    // or select's operands then only need to be no wider than the operation
+    // (i32 < i64 < f32 < f64), which locates the operands that need a cast.
+    extern thread_local bool gWidenTypes;
+
     enum class GraphCut {
         None,
         Unused,
@@ -390,6 +397,9 @@ namespace synthdef {
         }
         NumType initial_type() const override;
         void update_type(ExprWorkList& worklist) override;
+        NumType inputTypeConstraint(int i) const override {
+            return gWidenTypes ? type.down() : type;
+        }
         void calcShape()  override;
 
         void accept(ExprVisitor& visitor) override;
@@ -417,7 +427,7 @@ namespace synthdef {
         }
         void update_type(ExprWorkList& worklist) override;
         NumType inputTypeConstraint(int i) const override {
-            return input_type;
+            return gWidenTypes ? input_type.down() : input_type;
         }
         void calcShape()  override;
 
@@ -679,7 +689,8 @@ namespace synthdef {
         NumType initial_type() const override { return NumType::any; }
         void update_type(ExprWorkList& worklist) override;
         NumType inputTypeConstraint(int index) const override { 
-            return index == 0 ? NumType::any_int : type; 
+            if (index == 0) return NumType::any_int;
+            return gWidenTypes ? type.down() : type;
         }
         void calcShape() override;
 

@@ -214,10 +214,32 @@ namespace synthdef {
         }
     }
 #endif
+    // A folded constant keeps its operands' types: `1.0 f64` stays f64 through
+    // `-(1.0 f64)` or a rewrite that folds it into another constant, instead of
+    // reverting to the storage default. Operands with conflicting fixed types
+    // widen (f32 with f64 -> f64). With untyped operands this is the storage
+    // default, as before.
+    static NumType foldDefaultType(Constant const* c) {
+        return c->is_f64() ? NumType::any_float : NumType::any;
+    }
+    static NumType foldedType(NumType a, Constant const* r) {
+        NumType d = foldDefaultType(r);
+        NumType t = a & d;
+        return t ? t : d;
+    }
+    static NumType foldedType(NumType a, NumType b, Constant const* r) {
+        NumType d = foldDefaultType(r);
+        NumType t = a & b & d;
+        if (!t) t = a.widen(b) & d;
+        return t ? t : d;
+    }
+
     S unary_op(S a, UnaryOp op) {
         Constant const* ca = a.as<Constant>();
         if (ca) {
-            return addExpr(unary_op(ca, op));
+            Constant* r = unary_op(ca, op);
+            r->init_type = foldedType(ca->init_type, r);
+            return addExpr(r);
         } else {
             return addExpr(new UnaryOpExpr{op, a});
         }
@@ -226,8 +248,10 @@ namespace synthdef {
     S binary_op(S a, S b, BinaryOp op) {
         Constant const* ca = a.as<Constant>();
         Constant const* cb = b.as<Constant>();
-        if (ca && cb) { 
-            return addExpr(binary_op(ca, cb, op));
+        if (ca && cb) {
+            Constant* r = binary_op(ca, cb, op);
+            r->init_type = foldedType(ca->init_type, cb->init_type, r);
+            return addExpr(r);
         } else {
             return addExpr(new BinaryOpExpr{op, a, b});
         }
@@ -412,7 +436,10 @@ namespace synthdef {
     }
 
     void BinaryOpExpr::update_type(ExprWorkList& worklist) {
-        auto new_type = type & in0()->type & in1()->type;
+        // Widening: the result is no narrower than either operand.
+        auto new_type = gWidenTypes
+            ? type & in0()->type.up() & in1()->type.up()
+            : type & in0()->type & in1()->type;
         checkType(new_type);
         if (type != new_type) {
             type = new_type;
@@ -421,7 +448,9 @@ namespace synthdef {
     }
 
     void CompareOpExpr::update_type(ExprWorkList& worklist) {
-        auto new_input_type = in0()->type & in1()->type;
+        auto new_input_type = gWidenTypes
+            ? input_type & in0()->type.up() & in1()->type.up()
+            : in0()->type & in1()->type;
         checkType(new_input_type);
         if (input_type != new_input_type) {
             // Commit the narrowed operand type before propagating. Without this
@@ -546,7 +575,7 @@ namespace synthdef {
     void SelectExpr::update_type(ExprWorkList& worklist) {
         auto new_type = type;
         for (S in : inputs | stdv::drop(1)) {
-            new_type = new_type & in->type;
+            new_type = new_type & (gWidenTypes ? in->type.up() : in->type);
         }
         checkType(new_type);
         if (type != new_type) {

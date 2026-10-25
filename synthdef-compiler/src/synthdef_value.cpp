@@ -263,7 +263,7 @@ namespace synthdef {
         auto a = as<Constant>();
         if (a) {
             auto b = to_float(a);
-            b->init_type = NumType::f32;
+            b->init_type = NumType::f64;
             return addConstantExpr(b);
         } else {
             return addExpr(new CastOpExpr(NumType::f64, expr));

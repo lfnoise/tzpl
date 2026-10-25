@@ -971,6 +971,13 @@ static void test_synthc_prod_diff() {
         "synthc production output (defSynthX: rewrites-on, width 4) byte-matches the C++ compiler");
 }
 
+static void test_synthc_widen_diff() {
+    std::print("Test: widen-on-conflict (f32/f64 mixing) byte-matches C++ (#16)\n");
+    run_synthc_diff_script(
+        "synthc_widen_diff.x", "SYNTHC WIDEN DIFF ALL PASS",
+        "graphs that take the widening path byte-match between synthc and the C++ compiler");
+}
+
 static void test_effects_prod_diff() {
     std::print("Test: effects library defs byte-match C++ at production config\n");
     run_synthc_diff_script(
@@ -1082,6 +1089,7 @@ int main(int argc, char const* argv[]) {
     test_synthc_voicer_simd_diff();
     test_synthc_buffer_simd_diff();
     test_synthc_prod_diff();
+    test_synthc_widen_diff();
     test_effects_prod_diff();
     test_synthc_compile_and_load();
 

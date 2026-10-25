@@ -22,11 +22,13 @@
 #include <algorithm>
 #include <queue>
 #include <format>
+#include <exception>
 
 namespace synthdef {
     thread_local Synth* gSynth = nullptr;
     thread_local Graph* gGraph = nullptr;
     thread_local bool gApplyRewrites = true;
+    thread_local bool gWidenTypes = false;
 
     Graph::Graph(Synth *synth, Graph* parent)
         : synth(synth), parent(parent) 
@@ -530,6 +532,27 @@ namespace synthdef {
         }
     }
 
+    // The operations whose operand constraints widening relaxes.
+    static bool isWideningOp(S expr) {
+        return expr.as<BinaryOpExpr>() || expr.as<CompareOpExpr>() || expr.as<SelectExpr>();
+    }
+
+    // Under widening, a visit to a widening op also applies its operand
+    // constraints. update_type propagates them only when the node's own type
+    // changes, so a type narrowed from outside (a select's integer selector
+    // pinning a `*`) never reaches the op's operands. Unification tolerates
+    // such holes -- each leftover set defaults independently -- but labeling
+    // (insertWideningCasts) needs the widening ops' domains consistent. Only
+    // these ops: other nodes' default constraints (e.g. a bank lookup's) are
+    // never applied by unification either, and graphs depend on that.
+    static void drainTypes(ExprWorkList& worklist) {
+        while (!worklist.empty()) {
+            S expr = pop(worklist);
+            if (gWidenTypes && isWideningOp(expr)) expr->propagate_input_type(worklist);
+            expr->update_type(worklist);
+        }
+    }
+
     void Synth::typeInference() {
         ExprWorkList worklist;
         for (S expr : sorted) {
@@ -537,12 +560,175 @@ namespace synthdef {
 //            std::println("typeInference expr {} {} {}", 
 //                expr->typeName(), (void*)expr.get(), expr->type.str());
         }
-        while (!worklist.empty()) {
-            S expr = pop(worklist);
-            expr->update_type(worklist);
-        }
+        drainTypes(worklist);
     }
     
+    // Every type that inference mutates, so a failed attempt can be undone
+    // exactly. (Not initial_type(): imported constants start at `any`
+    // whatever their init_type.)
+    namespace {
+        struct TypeSnapshot {
+            vector<std::pair<S, NumType>> exprs;
+            vector<std::pair<CompareOpExpr*, NumType>> compares;
+            vector<std::pair<D, NumType>> delays;
+        };
+        TypeSnapshot snapshotTypes(Synth* synth) {
+            TypeSnapshot s;
+            for (S e : synth->exprs) {
+                s.exprs.push_back({e, e->type});
+                if (auto c = e.as<CompareOpExpr>()) s.compares.push_back({c, c->input_type});
+            }
+            for (D d : synth->delayBufs) s.delays.push_back({d, d->type});
+            return s;
+        }
+        void restoreTypes(TypeSnapshot const& s) {
+            for (auto [e, t] : s.exprs) e->type = t;
+            for (auto [c, t] : s.compares) c->input_type = t;
+            for (auto [d, t] : s.delays) d->type = t;
+        }
+        // Same preference as setNonConcreteTypesToDefault.
+        NumType preferredType(NumType t) {
+            for (NumType p : {NumType::f32, NumType::f64, NumType::i32, NumType::i64}) {
+                if (t & p) return p;
+            }
+            return t;
+        }
+        struct WidenGuard {
+            WidenGuard() { gWidenTypes = true; }
+            ~WidenGuard() { gWidenTypes = false; }
+        };
+    }
+
+    // Plain unification first: an operation and its operands get one type.
+    // Every graph that infers today takes this path unchanged. Only when that
+    // has no solution -- typically an f64 signal (a cast, a phase accumulator)
+    // meeting an f32 one (a control, an oscillator) -- are the operands that
+    // must be widened found, cast explicitly, and inference re-run, which
+    // gives the guide's rule: f32 + f64 -> f64, floats win over ints.
+    void Synth::typeInferenceWithWidening() {
+        // A conflict either throws here, or -- when a consumer's input
+        // constraint empties a fixed-type node (a control, an inlet), which
+        // propagate_input_type does not check -- leaves an empty type for
+        // setNonConcreteTypesToDefault to reject.
+        auto leftEmptyType = [&] {
+            for (S e : sorted) {
+                if (e->type.is_empty() && e->consumers.total() > 0 && !e->is_constant())
+                    return true;
+            }
+            return false;
+        };
+        TypeSnapshot before = snapshotTypes(this);
+        std::exception_ptr failure;
+        try {
+            typeInference();
+            if (!leftEmptyType()) return;
+        } catch (std::runtime_error const&) {
+            failure = std::current_exception();
+        }
+
+        restoreTypes(before);
+        usize n = 0;
+        try {
+            n = insertWideningCasts();
+        } catch (std::runtime_error const&) {
+            n = 0;  // no widening resolves it either
+        }
+        restoreTypes(before);
+        if (n == 0) {
+            // Report the original conflict, exactly as before.
+            if (failure) std::rethrow_exception(failure);
+            typeInference();
+            return;
+        }
+
+        // The casts are new nodes: redo the passes that index the graph.
+        // Keep the sort to what it held before plus the casts: the re-sort
+        // would also pick up the maxDelay constants calcDelayLengths created
+        // after the first sort, which the graph never sorted before (and
+        // synthc never creates).
+        ExprIdentitySet keep(sorted.begin(), sorted.end());
+        for (usize i = before.exprs.size(); i < exprs.size(); ++i) keep.insert(exprs[i]);
+        sorted.clear();
+        for (S e : exprs) e->consumers.clear();
+        topologicalSortExprs();
+        std::erase_if(sorted, [&](S e) { return !keep.contains(e); });
+        collectConsumers();
+        calcDelayLengths();
+        shapeInference();
+        typeInference();
+    }
+
+    // Solve with widening (operands no wider than their operation), choose
+    // concrete types in sorted order with the default preference, then cast
+    // each non-constant operand that came out narrower than its operation.
+    // Returns the number of casts inserted; throws if widening has no
+    // solution either.
+    usize Synth::insertWideningCasts() {
+        struct Edge { S op; usize input; NumType to; };
+        vector<Edge> edges;
+        {
+            WidenGuard widen;
+            typeInference();
+            for (S e : sorted) {
+                auto settle = [&](auto&& assign) {
+                    ExprWorkList worklist;
+                    assign();
+                    worklist.insert(e);
+                    e->propagate_types(worklist);
+                    drainTypes(worklist);
+                };
+                if (!e->type.is_concrete()) {
+                    settle([&]{ e->type = preferredType(e->type); });
+                }
+                if (auto c = e.as<CompareOpExpr>(); c && !c->input_type.is_concrete()) {
+                    settle([&]{ c->input_type = preferredType(c->input_type); });
+                }
+            }
+            // An emptied fixed-type node (unchecked by propagate_input_type)
+            // means widening has no solution either: keep the original error.
+            for (S e : sorted) {
+                if (e->type.is_empty() && e->consumers.total() > 0 && !e->is_constant())
+                    throw std::runtime_error("widening has no solution");
+            }
+            for (S e : sorted) {
+                usize first = 0;
+                NumType to;
+                if (e.as<BinaryOpExpr>()) {
+                    to = e->type;
+                } else if (auto c = e.as<CompareOpExpr>()) {
+                    to = c->input_type;
+                } else if (e.as<SelectExpr>()) {
+                    to = e->type;
+                    first = 1;  // input 0 is the integer selector
+                } else {
+                    continue;
+                }
+                for (usize i = first; i < e->inputs.size(); ++i) {
+                    S in = e->inputs[i];
+                    if (in->is_constant() || in->type == to) continue;
+                    edges.push_back({e, i, to});
+                }
+            }
+        }
+
+        bool rewrites = gApplyRewrites;
+        gApplyRewrites = false;
+        for (Edge& edge : edges) {
+            Graph* g = edge.op->graph;
+            PushGraph pg(g);
+            S cast = addExpr(new CastOpExpr(edge.to, edge.op->inputs[edge.input]));
+            // The op's hash covers its inputs: re-key it in its graph's set
+            // (only if the entry there is this node, not an equal one).
+            auto it = g->hashConsSet.find(edge.op);
+            bool keyed = it != g->hashConsSet.end() && it->get() == edge.op.get();
+            if (keyed) g->hashConsSet.erase(it);
+            edge.op->inputs[edge.input] = cast;
+            if (keyed) g->hashConsSet.insert(edge.op);
+        }
+        gApplyRewrites = rewrites;
+        return edges.size();
+    }
+
     void Synth::setNonConcreteTypesToDefault() {
         for (S expr : sorted) {
             // A live expr whose type intersected to empty has conflicting
@@ -1291,7 +1477,7 @@ namespace synthdef {
             runPass("COLLECT CONSUMERS",            [&]{ collectConsumers(); });
             runPass("CALC DELAY LENGTHS",           [&]{ calcDelayLengths(); });
             runPass("SHAPE INFERENCE",              [&]{ shapeInference(); });
-            runPass("TYPE INFERENCE",               [&]{ typeInference(); });
+            runPass("TYPE INFERENCE",               [&]{ typeInferenceWithWidening(); });
             runPass("NON-CONCRETE TYPES TO DEFAULT",[&]{ setNonConcreteTypesToDefault(); });
             runPass("SET DELAY READER RATES",       [&]{ setDelayReaderRates(); });
             runPass("FIND GRAPH CUTS",              [&]{ findGraphCuts(); });

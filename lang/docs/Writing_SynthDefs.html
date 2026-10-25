@@ -525,7 +525,14 @@ beep defSynthX(<span class="hl-str">"beep"</span>) await;      <span class="cmt"
                 <code>popCount</code>, &hellip;) constrain theirs to integer.</li>
                 <li>When two types meet in a binary operation, the common type is the wider one, floats
                 winning over ints (<code>i32</code>+<code>f32</code> &rarr; <code>f32</code>,
-                <code>f32</code>+<code>f64</code> &rarr; <code>f64</code>).</li>
+                <code>f32</code>+<code>f64</code> &rarr; <code>f64</code>). The compiler converts the
+                narrower operand for you: an <code>f32</code> oscillator added to an <code>f64</code>
+                phase is computed in <code>f64</code>. The same holds for comparisons and for the two
+                values of <code>select2</code>. Other places that join signals &mdash; a delay's write
+                and its reads, the branches of <code>if_</code> &mdash; still need one type, so cast
+                there.</li>
+                <li>A cast on a literal sticks: <code>1.5 f64</code> stays <code>f64</code> even when
+                the compiler folds it into another constant.</li>
             </ul>
 
             <p>When you need a specific width, use the <strong>cast operators</strong>

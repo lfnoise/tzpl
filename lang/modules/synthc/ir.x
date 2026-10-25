@@ -79,6 +79,37 @@ fn rateStr(r Rate) String = match (r) {
 	audio:    "Audio";
 };
 
+-- Widening (mirror NumType::widen / up / down in synthdef_signal_type.hpp).
+-- Order i32 < i64 < f32 < f64 is the flag-bit order, so max is the larger bit.
+-- numWiden: { max(a, b) | a in x, b in y }; numUp: types no narrower than some
+-- member; numDown: types no wider than some member.
+fn numWiden(x NumType, y NumType) NumType {
+	var out = 0;
+	var a = 1;
+	while (a <= 8) {
+		if ((x.0 & a) != 0) {
+			var b = 1;
+			while (b <= 8) {
+				if ((y.0 & b) != 0) { out = out | max(a, b); }
+				b = b << 1;
+			}
+		}
+		a = a << 1;
+	}
+	NumType(out)
+}
+fn numUp(x NumType) NumType {
+	if (x.0 == 0) { return NO_NUM; }
+	let lo = x.0 & (0 - x.0);
+	NumType(15 & ~(lo - 1))
+}
+fn numDown(x NumType) NumType {
+	if (x.0 == 0) { return NO_NUM; }
+	var hi = 8;
+	while ((x.0 & hi) == 0) { hi = hi >> 1; }
+	NumType(hi | (hi - 1))
+}
+
 fn numTypeStr(t NumType) String = match (t.0) {
 	0:  "empty";
 	1:  "i32";
@@ -470,6 +501,13 @@ struct Ctx {
 	resetLoops [Int],
 	eventLoops [Int],
 	usesRng [Bool],           -- single element; mutable through Ctx copies
+	cmpTyp [NumType],         -- per node: a compare's input_type (the C++
+	                          -- CompareOpExpr::input_type); ANY_NUM elsewhere
+	widening [Bool],          -- single element: type inference in widening
+	                          -- mode (C++ gWidenTypes)
+	nextSerial [Int],         -- single element: the expr serial counter at the
+	                          -- end of import (C++ exprSerialNos), for nodes
+	                          -- created during analysis
 	errors [String],          -- import/pass errors (no exceptions in the
 	                          -- language; callers must check)
 }
@@ -510,6 +548,9 @@ fn newCtx(name String) Ctx {
 		resetLoops: [Int](),
 		eventLoops: [Int](),
 		usesRng: [false],
+		cmpTyp: [NumType](),
+		widening: [false],
+		nextSerial: [0],
 		errors: [String](),
 	}
 }

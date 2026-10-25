@@ -180,9 +180,11 @@ fn _checkType(ctx Ctx, n NIdx, t NumType) Bool {
 -- inputTypeConstraint(i): the type a node imposes on its input i. Defaults to
 -- the node's own type; a few kinds override.
 fn inputConstraintOf(ctx Ctx, n NIdx, i Int) NumType = match (ctx.kind[n]) {
-	compareopK(_): ctx.typ[n];          -- handled via input_type below; see note
+	compareopK(_): ctx.widening[0] ? numDown(ctx.cmpTyp[n]) : ctx.typ[n];
+	                                    -- unifying: handled via input_type below
 	castopK(_):    ANY_NUM;             -- cast input is unconstrained
-	selectK:       i == 0 ? ANY_INT : ctx.typ[n];
+	selectK:       i == 0 ? ANY_INT : (ctx.widening[0] ? numDown(ctx.typ[n]) : ctx.typ[n]);
+	binopK(_):     ctx.widening[0] ? numDown(ctx.typ[n]) : ctx.typ[n];
 	-- vec input constraints: put's index (i=1) is integer, its array+value are the
 	-- output type; join constrains every input to the output type (base default);
 	-- at + the reorders constrain the data input (0) to the type, indices to int.
@@ -234,7 +236,12 @@ fn updateTypeOf(ctx Ctx, n NIdx, wl WorkList) Void {
 		outletK(_, _):       { ctx.typ[n] = ctx.typ[ins[0]]; }
 		debugK(_, _, _, _):  { ctx.typ[n] = ctx.typ[ins[0]]; }
 		unopK(_):            { _narrow(ctx, n, ctx.typ[n] & ctx.typ[ins[0]], wl); }
-		binopK(_):           { _narrow(ctx, n, ctx.typ[n] & ctx.typ[ins[0]] & ctx.typ[ins[1]], wl); }
+		binopK(_):           {
+			-- Widening: the result is no narrower than either operand.
+			_narrow(ctx, n, ctx.widening[0]
+				? ctx.typ[n] & numUp(ctx.typ[ins[0]]) & numUp(ctx.typ[ins[1]])
+				: ctx.typ[n] & ctx.typ[ins[0]] & ctx.typ[ins[1]], wl);
+		}
 		compareopK(_):       { _updateCompare(ctx, n, wl); }
 		castopK(_):          {}                  -- output is cast_type; input unconstrained
 		eventToAudioK:       { _narrow(ctx, n, ctx.typ[n] & ctx.typ[ins[0]], wl); }
@@ -263,6 +270,17 @@ fn updateTypeOf(ctx Ctx, n NIdx, wl WorkList) Void {
 -- types converge. Mirrors CompareOpExpr::update_type.
 fn _updateCompare(ctx Ctx, n NIdx, wl WorkList) Void {
 	let ins = ctx.ins[n];
+	if (ctx.widening[0]) {
+		-- Widening (mirrors CompareOpExpr::update_type under gWidenTypes): the
+		-- stored input_type is no narrower than either operand.
+		let newIn = ctx.cmpTyp[n] & numUp(ctx.typ[ins[0]]) & numUp(ctx.typ[ins[1]]);
+		if (!_checkType(ctx, n, newIn)) { return; }
+		if (newIn != ctx.cmpTyp[n]) {
+			ctx.cmpTyp[n] = newIn;
+			_propagateTypes(ctx, n, wl);
+		}
+		return;
+	}
 	let merged = ctx.typ[ins[0]] & ctx.typ[ins[1]];
 	if (!_checkType(ctx, n, merged)) { return; }
 	-- push the merged constraint back onto both operands
@@ -283,10 +301,47 @@ fn _updateSelect(ctx Ctx, n NIdx, wl WorkList) Void {
 	var newt = ctx.typ[n];
 	var i = 1;
 	while (i < ins length) {
-		newt = newt & ctx.typ[ins[i]];
+		newt = newt & (ctx.widening[0] ? numUp(ctx.typ[ins[i]]) : ctx.typ[ins[i]]);
 		i = i + 1;
 	}
 	_narrow(ctx, n, newt, wl);
+}
+
+-- Public form of _propagateTypes, for the widening driver in passes.x.
+fn propagateTypes(ctx Ctx, n NIdx, wl WorkList) Void = _propagateTypes(ctx, n, wl);
+
+-- The operations whose operand constraints widening relaxes.
+fn isWideningOp(ctx Ctx, n NIdx) Bool = match (ctx.kind[n]) {
+	binopK(_):     true;
+	compareopK(_): true;
+	selectK:       true;
+	_:             false;
+};
+
+-- propagate_input_type alone (no consumer re-queue).
+fn _propagateInputs(ctx Ctx, n NIdx, wl WorkList) Void {
+	let ins = ctx.ins[n];
+	var i = 0;
+	while (i < ins length) {
+		let inp = ins[i];
+		let newt = inputConstraintOf(ctx, n, i) & ctx.typ[inp];
+		if (newt != ctx.typ[inp]) {
+			ctx.typ[inp] = newt;
+			wl wlPush(inp);
+		}
+		i = i + 1;
+	}
+}
+
+-- Mirrors drainTypes in synthdef_synth.cpp: under widening, a visit to a
+-- widening op also applies its operand constraints (update_type propagates
+-- them only when the node's own type changes).
+fn drainTypes(ctx Ctx, wl WorkList) Void {
+	while (!(wl wlEmpty)) {
+		let n = wl wlPop;
+		if (ctx.widening[0] && ctx isWideningOp(n)) { _propagateInputs(ctx, n, wl); }
+		updateTypeOf(ctx, n, wl);
+	}
 }
 
 -- Control-flow node (if/switch/for): type = type & each branch/body phi type
