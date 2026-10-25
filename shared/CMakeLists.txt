@@ -42,6 +42,7 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/
     DESTINATION include
     COMPONENT dist
     FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
+    PATTERN "tests" EXCLUDE
 )
 
 install(FILES
@@ -56,3 +57,6 @@ install(FILES
     synthdef_types.hpp
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/tzpl
 )
+
+# --- tzpl_dsp: block-engine runtime support library and its tests ---
+add_subdirectory(tzpl_dsp)

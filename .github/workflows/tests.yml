@@ -25,6 +25,15 @@ jobs:
       - name: Build tzpl
         run: cmake --build build --target tzpl -j$(sysctl -n hw.ncpu)
 
+      # Block-engine runtime support library (shared/tzpl_dsp): the Apple simd
+      # backend, the forced libm fallback, and the -ffast-math build.
+      - name: tzpl_dsp tests
+        run: |
+          cmake --build build --target tzpl_dsp_tests tzpl_dsp_tests_libm tzpl_dsp_tests_fastmath -j$(sysctl -n hw.ncpu)
+          ./build/shared/tzpl_dsp/tzpl_dsp_tests
+          ./build/shared/tzpl_dsp/tzpl_dsp_tests_libm
+          ./build/shared/tzpl_dsp/tzpl_dsp_tests_fastmath
+
       # Runs every *.x golden test (existentials included). The runner exits
       # non-zero on any failure; the grep guards against the filter/runner
       # silently matching zero tests (which would otherwise exit 0).
@@ -150,6 +159,14 @@ jobs:
 
       - name: Synthdef compiler tests
         run: ./build/synthdef-compiler/synthdef-compiler --test
+
+      # Block-engine runtime support library (shared/tzpl_dsp) on x86-64: the
+      # Sleef backend, the forced libm fallback, and the -ffast-math build.
+      - name: tzpl_dsp tests
+        run: |
+          ./build/shared/tzpl_dsp/tzpl_dsp_tests
+          ./build/shared/tzpl_dsp/tzpl_dsp_tests_libm
+          ./build/shared/tzpl_dsp/tzpl_dsp_tests_fastmath
 
       - name: Integration tests (headless)
         run: |
