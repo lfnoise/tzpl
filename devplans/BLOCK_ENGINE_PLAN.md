@@ -1184,6 +1184,11 @@ Deviations and notes:
   so it needs no block-aware sizing. That comes with block strategies (M7/M8).
 - **One known gap.** Flat-voice SIMD `take`/`drop` of a partial-width voice-local
   input still indexes without a voice base. The corpus doesn't hit it.
+- **CI runs on `block-engine` pushes.** Seven render scripts pass again and are back in
+  the headless integration step: fx compile, fillBuffer, bit ops/d0, osc, pink,
+  neg-abs and widen. `run_live_test.sh` is gated off on this branch because live
+  proxy self-reference needs inter-node feedback (MF). The C++-oracle scripts
+  (codegen validity, render A/B) were removed in M3.
 
 **M5: Consumers (§6).**
 - Port the bridge FFI, `bundles.x`, the music libs, live, ui, the app (JUCE and ImGui),
