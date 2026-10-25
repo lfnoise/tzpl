@@ -5047,7 +5047,7 @@ fn genCpp(ctx Ctx, name String, simdWidth Int = 0) String {
 	if (ctx.blockCycles length > 0) {
 		s = s $ "#include \"tzpl_dsp/scan.hpp\"\n#include \"tzpl_dsp/state_space.hpp\"\n";
 	}
-	s = s $ "#include <cmath>\n#include <cstdio>\n#include <cstring>\n#include <cstdlib>\n#include <array>\n\n";
+	s = s $ "#include <algorithm>\n#include <cmath>\n#include <cstdio>\n#include <cstring>\n#include <cstdlib>\n#include <array>\n\n";
 	s = s $ "using namespace synthdef;\nusing namespace simd;\n";
 	s = s $ "\n";
 

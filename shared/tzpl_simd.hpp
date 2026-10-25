@@ -110,6 +110,12 @@ using f64x8 = double        __attribute__((ext_vector_type(8)));
 #else // !__APPLE__
 
 #include <type_traits>
+// At global scope: included inside the namespace below, its include guard
+// would keep the Sleef functions out of the global namespace for every
+// later includer (tzpl_dsp/vmath.hpp), and its own system headers would
+// land in simd_compat.
+#include <sleef.h>
+#include <cmath>
 
 namespace simd_compat {
 
@@ -181,8 +187,7 @@ template <> struct Vector<unsigned long, 8> { using type = u64x8; };
 // SECTION C — Math wrappers (4-wide only, via Sleef)
 // ============================================================================
 
-#include <sleef.h>
-#include <cmath>
+// (<sleef.h> and <cmath> are included at global scope above.)
 
 // --- f32x4 math ---
 inline f32x4 sin(f32x4 x)        { return Sleef_sinf4_u10(x); }
