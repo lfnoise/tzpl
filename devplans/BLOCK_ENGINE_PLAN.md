@@ -1,0 +1,1033 @@
+# Block Engine Plan: tensor signals, block processing, no Controls
+
+**Branch:** `block-engine` (from `main` at 53f3c5f)
+**Status:** proposal, 2026-10-25
+**References:** `~/Dropbox/dev/tensor-ugens/ARCHITECTURE.md` (cited below as TU §n) and
+the `tensor-ugens/` code.
+
+---
+
+## 0. Summary
+
+Today the engine runs one sample at a time, and every synth's `processAudio()` computes
+one frame. This keeps one-sample feedback between nodes, but SIMD can only run across
+channels, so mono signals get none.
+
+This plan moves the engine and synthc to **blocks** (default 64 samples), with:
+
+- **Tensor signals.** A signal is a `Shape` (up to rank 4) of non-interleaved channel
+  buffers, each holding a block of samples. Channel counts are no longer rounded to
+  powers of two, and broadcasting uses the lcm of each dimension.
+- **No Controls and no event rate.** A control is an ordinary input, so it can be
+  patched, ramped and crossfaded. Individual elements or slices of an input tensor can
+  be set. Rates are `const`, `init`, `reset` and `audio`.
+- **Sample accuracy, with sub-sample fade starts.** It comes from two mechanisms:
+  - Value changes (sets, ramps, impulses) are rendered into input buffers by the
+    engine. Crossfades remain XFader nodes, which nest (§3.2).
+  - Discrete events (node start and stop, voice reset) split the node's block at the
+    event's offset.
+- **Change detection to win back event-rate efficiency.** Parameter-only subgraphs are
+  recomputed only when their source inputs change, or are not constant over the block.
+- **synthc rewritten for block code.** Operations are fused into loops that each have a
+  strategy: channel-vector, sample-vector or serial (see Terminology below).
+  - Recurrences are still written as `delayVar` relations. synthc classifies each
+    feedback cycle and derives its parallel form: scan, block state space, or a minimal
+    scalar cycle.
+  - A small runtime support header (vector types and vmath for i32, i64, f32 and f64,
+    transposes, scans) is adapted from tensor-ugens.
+- **The C++ synthdef-compiler is deprecated**, except for the compile-and-link step,
+  which moves out of it.
+
+The order is **correctness first**:
+1. Port the engine to blocks.
+2. Have synthc emit block-shaped code whose inner loop is still per sample, and get the
+   whole system (bridge, music libs, live, app) working end to end.
+3. Only then build recurrence analysis (scans, block state space) and the loop fusion
+   optimiser.
+
+### Terminology
+
+A block of a signal has two axes: **channels** and **samples**. A loop is named by what
+its SIMD vector holds:
+
+| Term | A vector holds | Loop nesting | tensor-ugens name |
+|---|---|---|---|
+| **channel-vector loop** | the same sample of 4 channels | groups of 4 channels outside, samples inside | "across channels" |
+| **sample-vector loop** | 4 consecutive samples of 1 channel | channels outside, vectors of samples inside | "along samples" |
+| **serial loop** | one sample at a time; channels may still share vectors | samples outside | "per sample" / run1 |
+
+Buffer layouts:
+- **planar:** one buffer per channel. Sample-vector loops read it directly.
+- **channel-interleaved:** for each group of 4 channels, sample-major, so that each
+  vector is one sample of the 4. Channel-vector loops read it directly.
+
+Other terms:
+- A **channel group** is the 4 channels that share one channel vector.
+- **Per sample** describes how often something happens (a value that changes every
+  sample). It is not a loop kind.
+
+---
+
+## 1. Decisions needed before work starts
+
+D1, D2, D7 and D10 are decided (2026-10-25). Each other item gives the plan's
+recommendation, and the milestones assume it. Items marked ⚑ change the user-visible
+semantics.
+
+**D1 ⚑ Feedback between nodes (decided, in two phases).**
+- Today a cycle between nodes is a one-sample delay. With blocks it becomes a one-block
+  delay, unless the cycle runs a sample at a time.
+- **Phase 1 (M2–M10): feed-forward only.**
+  - A `connect` or `reconnectOutput` that would close a cycle is refused with a new
+    `errCycle`, appended to the append-only `tzpl_SErr`.
+  - The check runs in NRT, on the graph shadow, before the bundle is submitted.
+  - The whole bundle aborts, as on any other apply error.
+- **Phase 2 (milestone MF): sample-interleaved feedback.**
+  - The engine finds strongly connected components (SCCs) of nodes and runs each one
+    sample-interleaved: `process(p, off, 1)` per node, per sample.
+  - Every synth supports `n = 1` anyway (§4.3), so this keeps today's semantics at a cost
+    paid only by cyclic patches.
+  - A per-silo option, `feedbackMode = sample | block`, gives the cheap
+    SuperCollider-style one-block delay instead.
+
+**D2 ⚑ The note model: noteParams become a voice-parameter input tensor (decided).**
+- A voiced synth gets an ordinary input port, `notes`, of shape `{maxVoices, 1+N}`.
+  Column 0 is the gate.
+- Voice allocation moves out of the generated code into the engine (one
+  `tzpl_voicer.hpp` instance per voiced node).
+- `noteOn` works in three steps:
+  1. allocate a voice v;
+  2. split the node at the onset offset and call `resetVoice(p, v)`;
+  3. write row v of `notes` (gate = 1, params) as a step at that offset.
+- `noteSetParams` is then just an element set, so per-voice glides come free with ramps.
+- The plugin ABI loses `noteOn`, `noteOff`, `noteSetParams` and their variants, and
+  gains `resetVoice`.
+- The alternative is to keep note functions in the ABI with a sample offset. It is less
+  uniform, and it duplicates the input stage machinery inside every plugin.
+
+**D3 Recurrences stay in the notation; synthc finds their parallel forms.**
+- `delayVar` is how the language writes a recurrence relation, and it stays that way.
+  `common_ugens.x` keeps its mathematical definitions (phasor, lag, onepole, biquad,
+  adsr). No opaque ugen primitives are added to the IR.
+- synthc analyses each feedback cycle (a strongly connected component through delay
+  reads) and chooses its implementation (§4.7):
+  - **Outside the cycle:** coefficient design, shaping and scaling are ordinary
+    elementwise code in sample-vector loops.
+  - **Associative accumulation** (`s = frac(s(1) + x)`, running sums): a prefix scan.
+  - **Affine in the state, with coefficients constant for the block:** block state space
+    (TU §6.2), with the matrices derived automatically from the cycle body.
+  - **First-order affine with audio-rate coefficients:** a scan over affine maps.
+  - **Everything else** (higher-order with time-varying coefficients, nonlinear): a
+    channel-vector loop when there are 4 or more channels or voices, otherwise a serial
+    loop over the cycle alone.
+- tensor-ugens is the **reference** for the code these forms should produce and the
+  speed they should reach. It is not a library that synths call.
+
+**D4 Block-constant inputs: runtime flags, values passed with a stride.**
+- Any input can be patched at run time, so whether an input is constant for a block is
+  only known at run time.
+- Each input channel carries a `constant this block` flag and a version counter (§3.3).
+- Values computed by a parameter group reach audio loops through a pointer plus stride,
+  counted in vectors:
+  - stride 0 for a value designed once per block;
+  - stride 1 for a per-sample buffer.
+  This is the TU wire scheme.
+- **Constness is per channel, at two times.** Per-channel buffers make shape operations
+  free at run time, because channel remappings are resolved at compile time. So any
+  value can be a "scrambled Rubik's cube" of constant and audio channels: columns joined
+  into a matrix where some are constants, then a rotated row; or a matrix with an
+  audio-rate diagonal and constant zeroes elsewhere.
+  - **Compile time:** a channel that resolves to a literal is known statically. It is
+    folded per channel and never reaches run time (§4.2 step 1a).
+  - **Run time:** inlet channels are constant or not individually, through per-element
+    `setInput`, region faders, and inputs only partly patched. Whatever depends on them
+    inherits that per channel.
+- **Stride granularity is the consumer's vector, not the value:**
+  - **Sample-vector consumer:** stride **per channel**. The buffer is planar. A constant
+    channel is a **splat**, `{c, c, c, c}`.
+  - **Channel-vector consumer:** stride **per channel group**. The buffer is
+    channel-interleaved.
+    - A group whose 4 channels are all constant has stride 0 and stores one **lane
+      vector**, `{c0, c1, c2, c3}`.
+    - A mixed group has stride 1. Its producer fills the constant lanes of every vector
+      with their values, which is a cheap store.
+  - Either way the inner loop is the same, `V x = *in; in += inc`, with no transpose and
+    no branch, whatever the mix of constant and audio channels.
+  - The producer writes the layout its consumer wants. The consumer's strategy is known
+    at compile time (§4.2 step 6), so a transpose is paid at most once, on the producer's
+    store: none when the producer is itself a channel-vector loop, one per vector when
+    it is a sample-vector loop.
+  - This is TU's per-wire stride scheme, with the transpose moved from the consumer's
+    every vector to the producer's store.
+- This avoids compiling every audio loop twice. Recurrences branch on the stride, as TU's
+  `Filter_run` does, to choose block state space or per-sample design.
+
+**D5 Device buffer sizes that are not a multiple of the block.**
+- The engine processes each device buffer in chunks of up to B samples. The last chunk
+  may be shorter.
+- Synths already handle any `n` (vector body plus scalar tail), so no latency is added.
+
+**D6 Block size.**
+- Set when the engine is created (`EngineConfig::blockSize`, default 64, a multiple of 4,
+  up to 1024). It is passed to synths in `SynthData::maxBlock` at `alloc` time, and the
+  synth sizes its arena from it.
+- Generated code never assumes a fixed n.
+
+**D7 Shape layout: row-major (decided).**
+- The first sketch of `Shape::strides()` had the order backwards (`s[0] = 1`).
+- The decision is row-major, as in tensor-ugens: `cols`, the last dimension, has stride 1,
+  and `strides()` counts down from `dims[3]`, matching `Shape_strides` and
+  `broadcastChannel`.
+- Also choose the element type order: the ABI today has `kI32=0, kF32=1, kI64=2, kF64=3`,
+  while the proposed enum is `kI32, kI64, kF32, kF64`. *Recommendation:* adopt the new
+  order in ABI v3. Nothing persisted depends on the old order.
+
+**D8 Trigger inputs.**
+- With event rate gone, a trigger input (`tr`, buttons) is set with an **impulse** input
+  operation: the value at the offset, then 0 from the next sample. It is the same
+  machinery as a step.
+
+**D9 What happens to the C++ synthdef-compiler.**
+- Freeze it at the branch point. `defSynth`, the s-expression path and the parity tests
+  against it are removed on the branch.
+- `synthdef_compile_link.cpp` (PCH, compile flags, dylib link) moves to
+  `bridge/src/tzpl_synth_build.cpp`, because synthc depends on it.
+- The `synthdef-compiler/` directory is deleted at merge (M10).
+
+**D10 No MLIR or LLVM dependency (decided).**
+- synthc keeps emitting C++ that the system clang compiles. The domain analyses (§4.2,
+  §4.5, §4.7) are custom passes either way, and clang -O3 handles the low-level work on
+  explicit vector code.
+- The IR is designed to stay translatable: SSA values, explicit loop ops tagged with
+  their strategy, regions for structured control flow and recurrences.
+- Compile latency (from `defSynthX` until the synth is loaded) is tracked in the M8/M9
+  benchmarks.
+
+---
+
+## 2. Data model
+
+### 2.1 Shape, SignalType, Rate, ElemType (shared C header and synthdef.x)
+
+```c
+// shared/tzpl_plugin_abi.h (ABI v3)
+#define TZPL_MAX_RANK 4
+typedef struct tzpl_Shape { uint32_t dims[TZPL_MAX_RANK]; } tzpl_Shape;   // row-major (D7)
+typedef enum { tzpl_constRate, tzpl_initRate, tzpl_resetRate, tzpl_audioRate } tzpl_Rate;
+typedef enum { kI32, kI64, kF32, kF64 } tzpl_ElemType;
+typedef struct tzpl_SignalType { tzpl_Shape shape; tzpl_ElemType elem; tzpl_Rate rate; } tzpl_SignalType;
+```
+
+- The C++ helpers from the request go in a new header, `shared/tzpl_shape.hpp`:
+  constructors, `chans()`, `rank()`, `strides()`, `broadcast()`, and
+  `broadcastChannel(src, out, w)`, ported from tensor-ugens.
+- `synthdef.x` gets a matching `struct Shape { dims [Int] }` with the same operations.
+- `type Chans`, `asChans` and `padPow2` are deleted.
+- Constants become shaped tensors, with cyclic indexing per dimension.
+- `rate` on a port is only informational. Every input is audio rate at the ABI level
+  (D4). `const`, `init` and `reset` remain *internal* rates in synthc:
+  - `const`: literals.
+  - `init`: `sampleRate()`, `maxBlock`, and values computed once at `init`.
+  - `reset`: values latched at `resetVoice` (sample bank lookup, per-voice init).
+  - `block`: the internal placement level for parameter groups, with a run-time
+    fallback to `audio` (§4.2, §4.5). It never appears on a port.
+
+### 2.2 Ports and their metadata
+
+- `tzpl_ControlDef`, `tzpl_ControlDispatchTable` and the controls arrays go away.
+- `tzpl_ControlSpec` (lo, hi, init, warp, kind) moves onto **input port definitions** as
+  optional UI metadata, so widgets and the plugin browser keep working:
+
+```c
+typedef struct tzpl_PortDef {
+    const char* name; tzpl_SignalType type;
+    int hasSpec; tzpl_ControlSpec spec;     // init = default value of an unconnected input
+} tzpl_PortDef;
+```
+
+- An unconnected input holds its `spec.init` value (or 0), constant per channel.
+
+---
+
+## 3. Engine (`engine/`)
+
+### 3.1 Buffers and the block loop
+
+- Every port channel is a 64-byte-aligned buffer of `maxBlock` elements. Its
+  `OutPort::chanBufs[c]` is allocated in the NRT node constructor from a per-silo pool.
+- A synth sees, for each port, a pointer to an array of channel pointers:
+
+```c
+typedef struct tzpl_InPort  { void* const* chans; const uint8_t* isConst; const uint32_t* version; } tzpl_InPort;
+typedef struct tzpl_OutPort { void* const* chans; } tzpl_OutPort;
+```
+
+**Connections are still zero-copy.**
+- An input's channel pointer table points straight at the source output's channel
+  buffers.
+- Broadcasting (lcm, per-channel mapping) is pointer remapping, computed once at connect
+  time, as TU `mapInputWires` does.
+- `ChanAdapt`'s widening case disappears. **Narrowing** (fold-sum) and **fan-in**
+  (mixing) still need hidden mixer nodes, which now sum blocks.
+
+**`Silo::processBlock(T0, n)`** replaces the per-frame loop in `processFrames`:
+1. `processRTCommands()`: NRT bundles, as today.
+2. **Collect the block's events.** Gather every clock- or time-scheduled command due in
+   `[T0, T0+n)`, plus RT task wakeups. Resolve each to a fractional sample time t in the
+   block (`TempoClock::beatAtSample` once per command, not once per sample). Run RT tasks
+   in time order; the commands they issue (such as `playNote`) carry the task's wake time.
+3. **Apply each event**, in time order, to the state it targets:
+   - Input changes go to an *input stage* (§3.2).
+   - Node start and free events, and voice resets, go to the node's per-block event list
+     (§3.4).
+   - Graph edits take effect at their offsets: a new connection starts as a crossfade or
+     cut at t.
+4. Copy the hardware input: deinterleave the device frames into the audio-in node's
+   channel buffers.
+5. `sortNodes()` if needed. The graph is acyclic in phase 1 (D1); SCC detection comes in
+   MF.
+6. `runNodes()`, for each node in sorted order:
+   - **render input stages:** for each input channel, write a ramp or impulse into the
+     input's own buffer, or just repoint, and set `isConst` and `version`;
+   - **process segments:** call `process(p, off, len)` for each segment between that
+     node's discrete events;
+   - **SCCs (MF):** a cyclic SCC runs sample-interleaved (D1 phase 2).
+7. Taps (per block, per channel); interleave into the silo's `outbuf_`.
+8. `sampleTime_ += n`. The GC heartbeat stays per block.
+
+Then `mixDown`, the safety limiter (already block-based; it now reads channel buffers)
+and the master meter.
+
+### 3.2 Input stages and XFader nodes: the engine side of "no Controls"
+
+There are two mechanisms, split by whether the operation has to compose.
+
+**Input stages (per input channel, processed before the node runs).** These cover
+constant values only:
+
+| Stage | Buffer contents | isConst |
+|---|---|---|
+| `Const(v)` | not written; pointer to a 1-element splat buffer, or a filled block | 1 |
+| `Connected` | the channel pointer is the source's channel buffer (zero-copy) | 0 |
+| `Ramp(v0→v1, t0, dur, curve)` | rendered into the input's own buffer; reverts to `Const(v1)` at the end | 0 while ramping |
+| `Impulse(v, t)` | v at t, else the previous const value | 0 for that block |
+
+- A ramp started while another ramp is running starts from the current rendered value.
+  It doesn't need to keep the old ramp alive, so stages don't need to nest.
+
+**XFader nodes (kept from today, now block-based).** These cover every crossfade:
+`connect`, `disconnect*`, `reconnectOutput`, `replaceNode`, and `setInputX` to a
+constant.
+
+- **They compose.** A crossfade started while another is still running uses the running
+  fader's output as its "old" input, giving a crossfade of a crossfade, with three (or N)
+  sources audible at once.
+  - The existing finish logic carries over. When the inner fader completes, it hands its
+    new source to whatever its output fed, which is now the outer fader's `in0`, and
+    retires.
+  - The topological sort orders nested faders like any other nodes.
+- `XFadeTwo`, `XFadeIn`, `XFadeOut` and `XFadeSet` keep their roles. A fader's inputs are
+  ordinary node inputs, so a constant endpoint is a `Const` stage on the fader's own
+  input, replacing today's `norm = dst->dataBuffer_` trick.
+- **Faders can cover a region.** Input channel pointer tables are per channel, and one
+  table may point different channels at different outputs. A fader can therefore be
+  shaped to a region, such as one element of a control tensor. The destination's table
+  points that region's channels at the fader output, and the other channels keep their
+  current sources.
+  - Its `in0` table is the region's previous per-channel mapping, which may itself
+    include another fader's output.
+- **Fade starts are sub-sample.** The fader is given a fractional start time t0 (a double,
+  in samples). The gain at sample i is `curve(clamp((i - t0)/dur))`, so a fade starting
+  at t0 = 17.3 gives its first sample g(0.7/dur). No node split is needed, and ramps are
+  evaluated the same way.
+- The 7 curves from `tzpl_xfader.cpp` move into a `tzpl_fade_curves.hpp`, shared by
+  faders and ramps.
+- `fade()` becomes a sample-vector loop over channel buffers.
+- A fader's output reports `isConst = 0` while it runs. When it retires, the destination
+  reverts to the plain stage or connection, and that channel's `version` is bumped.
+
+**Each stage change bumps the channel's `version`.** A const channel whose value changes
+by a *step* renders as non-constant for the block containing the step, then reports
+`isConst` with the new version from the next block on. Change detection (§4.5) keys on
+`(isConst, version)`.
+
+### 3.3 Public API changes (`tzpl_client_interface.hpp`)
+
+**Removed:**
+- `setControl` (every overload), `listDefControls`, `ControlDesc`, `errControlNotFound`;
+- `noteOn`, `noteOff`, `noteSetParams` and `noteSetParamRange` in their ABI forms (they
+  return as engine-side calls, below);
+- the event-rate parts of `DefDesc`.
+
+**Added or changed:**
+- `setInput(node, port | portName, Region, span<T> values, rampTime = 0, curve = Linear)`.
+  - `Region` is a box: `offset[4]` plus `extent[4]` in shape coordinates, with helpers
+    for a whole port, one element, and a slice of the last dimension.
+  - `values` are broadcast cyclically over the region.
+  - `rampTime > 0` ramps from the current value.
+- `setInputX(... , xfadeTime, curve)` keeps its meaning: crossfade from the current stage
+  to a new constant.
+- `impulseInput(node, port, Region, values)` (D8).
+- Every `connect` / `disconnect*` / `reconnectOutput` / `replaceNode` keeps its xfade
+  arguments, still implemented by XFader nodes (§3.2), which nest. `connect` may take a
+  destination `Region`, so a signal can be patched into one element of a control tensor,
+  with or without a fade.
+- **Notes, engine-side** (D2):
+  - `noteOn(node, noteID, span<f32> params)`;
+  - `noteOff(node, noteID)`;
+  - `allNotesOff`;
+  - `noteSetParams(node, noteID, first, span<f32>, rampTime = 0)`.
+  These become voicer operations plus `notes`-row input stages. The voicer lives in the
+  engine's RT node.
+- `PortDesc` gains `shape` and `spec`. `DefDesc` gains `voiced` and `maxVoices`.
+  `tzpl_SErr` drops nothing (it is append-only), but `errControlNotFound` is retired.
+
+**Bundles:** `BundleOp` and `bundles.x`'s `EngineCmd` lose `setControl` and
+`setControlNamed`. `setInput` gains its region, ramp and impulse fields.
+
+### 3.4 Discrete events and node splitting
+
+- A node keeps a small RT array of `(offset, kind, arg)` events for the current block:
+  - `start`: a new node's first block starts at its offset; the output is zero before it.
+  - `free`: the node runs up to the offset, and the output is zero after it.
+  - `resetVoice(v)`.
+  - `reset`.
+- `runNodes` walks the events, calls `process(p, segStart, segLen)` between them, and
+  applies each event at its boundary.
+
+### 3.5 Things that move from per sample to per block
+
+| Thing | Today | Block engine |
+|---|---|---|
+| TempoClock `process` | each sample, if the queue is non-empty | once per block: pop everything due before T0+n, with offsets |
+| `SiloTaskScheduler::tick` and `tickActors` | each sample | once per block; wake tasks in time order with `sampleTime_` set to each task's wake time; the commands they issue carry it |
+| Taps (peak, RMS, scope) | each sample, interleaved | each block, per channel buffer; scope FIFO stays interleaved for readers |
+| Hardware I/O memcpy | each frame | deinterleave and interleave once per block |
+| Legacy `sched_` / `streamTime_` path | unreachable | delete |
+
+### 3.6 Plugin ABI v3 (`shared/tzpl_plugin_abi.h`)
+
+```c
+#define TZPL_PLUGIN_ABI_VERSION 3
+typedef struct tzpl_SynthFuns {
+    struct tzpl_SynthData* (*alloc)(int32_t maxBlock);
+    tzpl_SErr (*free)(struct tzpl_SynthData*);
+    tzpl_SErr (*init)(struct tzpl_SynthData*);
+    tzpl_SErr (*uninit)(struct tzpl_SynthData*);
+    tzpl_SErr (*reset)(struct tzpl_SynthData*);
+    void      (*process)(struct tzpl_SynthData*, int32_t offset, int32_t n);   // any n in [1, maxBlock-offset]
+    tzpl_SErr (*resetVoice)(struct tzpl_SynthData*, int32_t voice);            // NULL if not voiced
+    struct tzpl_Buffer* (*swapBuffer)(struct tzpl_SynthData*, int64_t bufID, struct tzpl_Buffer*);
+} tzpl_SynthFuns;
+typedef struct tzpl_SynthData {
+    tzpl_SynthFuns funs; struct tzpl_Engine* engine; struct tzpl_Node* node;
+    int32_t num_ins, num_outs, maxBlock;
+    tzpl_InPort* ins; tzpl_OutPort* outs;
+    double fs, sd;
+} tzpl_SynthData;
+```
+
+- The loader refuses `abi_version < 3`. Old dylibs in caches have to be rebuilt, which
+  the plugin cache's revision check already handles.
+- `tzpl_Buffer` drops its power-of-two `chans` rounding.
+- `swapSampleBank`, `loadBufferDefs`, `loadTags` and `tzpl_sharedInput` are unchanged.
+- The `tzpl_SynthDef` port arrays gain a `voiced`/`maxVoices` field (or a `loadVoiceInfo`
+  symbol; follow the rule in [[app-plugin-browser]] about never growing a by-value struct
+  without a version bump; v3 is that bump).
+
+### 3.7 Engine tests (new; there is no engine unit-test harness today)
+
+`integration-tests/src/test_block_engine.cpp` drives an NRT engine with hand-written C++
+test plugins (`tzpl_test_plugins.cpp`, rewritten for v3), covering:
+
+- block sizes 1, 4, 64 and 256, and device chunks of 37 and 100 samples (D5);
+- input stages: set, step, ramp and impulse at fractional offsets, each checked
+  per sample against a closed-form reference; per-element and slice sets; xfades with
+  every curve; **nested crossfades**: start A→B, then B→C halfway through, then C→D,
+  and check every sample against the closed-form three-way and four-way mix and the
+  clean retirement of the inner faders; region faders on one element of a 2×3 input;
+- broadcasting connections at shapes {3}→{6}, {2,3}→{4,3}, and a narrowing fold;
+- node start and free at offsets; voice reset at an offset;
+- cycle refusal (D1 phase 1): a connect, a reconnect, and a bundle that closes a cycle
+  are each refused with `errCycle`, and the graph is left unchanged. Phase 2 (MF) adds
+  these: a 2-node cycle with `feedbackMode=sample` must equal the old one-sample
+  semantics, and `block` mode gives a one-block delay;
+- multi-silo mixdown; taps; the safety limiter; engine stop clearing state (keeping the
+  regressions in [[engine-stop-clears-buffers]] and [[engine-stopped-mode-sorted-list-uaf]]
+  fixed).
+
+---
+
+## 4. synthc rewrite (`lang/modules/synthc/`, `lang/modules/synthdef.x`)
+
+synthc stops being a byte-for-byte port of the C++ compiler. Its tests become
+**equivalence of forms** and **reference renders** (§8), not text diffs against an oracle.
+
+### 4.1 Front end (`synthdef.x`)
+
+- `Shape` replaces `Chans` (§2.1). Every constructor takes a shape: `inlet`, `take`,
+  `stride`, `reduce`, `transpose`, and the others. Broadcasting is lcm per dimension.
+- `control(name, spec, shape)` stays as *syntax* but builds an ordinary `inlet` with a
+  spec. `trigger`, `toggle` and `choice` are inlets whose spec kind sets the widget and
+  the impulse/step behaviour.
+- `noteParam` and `gate` declare columns of the voiced synth's `notes` input (D2).
+- Deleted: `eventToAudio`, `Rate.event`, `asChans` and `padPow2`, and `defSynth` (the
+  legacy C++ path).
+- No new expression kinds for DSP. Ugens remain Tzopilotl definitions over `delayVar`
+  (D3).
+
+### 4.2 IR and passes
+
+`Ctx`'s `chans [Int]` becomes `shape [Shape]`.
+
+#### IR model: a signal flow graph with delay-weighted edges
+
+`SignalExpr` graphs are already close to a sea-of-nodes IR:
+- pure ops whose edges are only data dependencies, with no instruction order;
+- value numbering through hash-consing at construction (`importer.x:544`);
+- peephole folding and rewriting as nodes are built;
+- scheduling decided late (`cutGraphToTrees`, `treesToLoops`).
+
+The block compiler keeps all of that and changes two things.
+
+**1. Delays become explicit edges.**
+- *Today:* state flows through side-effecting delay writer and reader nodes. A read has
+  no edge to its writer, so the graph is a DAG, and order is recovered afterwards as
+  "write after reads" antecedents (pass 13). Feedback is implicit and has to be
+  rediscovered.
+- *Block IR:* a read `d(k)` is an **edge from the value written to the delay, with delay
+  weight k**. The graph becomes the classic signal flow graph with delays on edges
+  (synchronous dataflow, Leiserson–Saxe retiming), and cycles are real cycles:
+  - **The delay node** keeps only storage facts: ring size, initial contents, `maxDelay`,
+    element type. It becomes an annotation on the edge set of one written value.
+  - **Feedback cycles** are the SCCs of the graph.
+  - **A cycle's delay weight** is the sum of the weights around it. It decides vector
+    feasibility directly: weight ≥ `kVecLen` can run a vector at a time, weight 1–3 must
+    run in a serial loop.
+  - **Weight 0 cannot occur.** A zero-weight cycle is a zero-delay feedback loop, which
+    is already an error at graph build (`synthdef.x:859-871`) and is now also checked
+    structurally.
+  - **Variable reads** (`vread(idx)`) get weight equal to a static lower bound of `idx`.
+    It comes from interval analysis of the index expression (clamps, `max(…, k)`,
+    constants), and defaults to 1 when nothing is known.
+  - **Recurrence classification** (§4.7) is a walk around a cycle.
+  - **Retiming** (moving delay weight across nodes to raise a cycle's per-vector slack,
+    or to shorten a cycle) becomes available as a later optimisation.
+  - **Ordering** of writer and readers falls out of the edges, so pass 13
+    (`addDelayAntecedents`) goes away.
+  - **Feedforward small delays** (`x - x(1)`) are edges of weight 1 that lie on no
+    cycle. They run in block form.
+  - **The front end is unchanged.** `delayVar`, `<-`, `d(k)`, `init` and `vread` build the
+    same graphs; the importer turns writer and reader pairs into weighted edges.
+
+**2. Rates become a schedule lattice with a per-block level.**
+- Rate inference is already global code motion: "a node's rate is the max of its
+  inputs'" places each node in the outermost loop where its inputs are available
+  (schedule-early). The rewriter's lower-rate reassociations are loop-invariant code
+  motion.
+- The block compiler makes this explicit as a placement lattice:
+
+  `const` (compile time) < `init` (once) < `reset` (per voice onset) < `block` (per block or segment) < `audio` (per sample)
+
+  - `block` is new. A node is placed at `block` when its inputs are all at `block` or
+    lower, where inlets are *nominally* `block`.
+  - Each `block`-placed region is a **parameter group** (§4.5), compiled with its
+    run-time fallback to `audio`. The fallback is used when any source channel reports
+    `isConst = 0`, and its values then flow with stride 1 rather than 0 (D4).
+  - Parameter groups stop being a separate analysis. They are the nodes that float to
+    `block`.
+- Within `audio`, placement into loops (strategy and fusion) is the schedule-late half
+  of global code motion: put each node in the loop that saves the most, per TU §10.
+
+**What stays structured.** `if_`, `switch_`, `for_`, `voicer` and `spectralChain` keep
+nested subgraphs with phi roots, which are regions in the MLIR sense. They do not become
+floating control edges. That suits DSP, and gives fusion clean boundaries.
+
+**Prior art: Faust.** Faust's signal IR is hash-consed signal expressions with explicit
+recursion groups. Its vector mode (`-vec`) splits a block into separate loops, keeping
+recursive loops scalar and vectorizing the rest: the "minimal cycle plus vectorized
+inputs" strategy of §4.7's General class. Before M7 and M8, read Faust's signal
+normalisation, recursion-group handling and `-vec` loop separation and scheduling. Its
+papers are on automatic vectorization and parallelization. What this plan adds beyond
+it: scans and block state space for recurrences, channel-vector loops with transposes,
+voices on the channel axis, and run-time constancy fallbacks.
+
+#### Passes
+
+Kept, with shape and rate updates:
+- import, folding, hash-consing and the rewriter (its "lower rate" rules use the new
+  4-rate order);
+- mergeDelays, consumers. The topological sort now ignores weighted edges, so it orders
+  the graph with its delay edges cut;
+- type inference with widening (keep [[synthdef-widen-on-conflict]]);
+- default types; delay length calculation.
+
+New or rewritten:
+
+0. **Delay edges:** the importer converts delay writer and reader pairs into weighted
+   edges, and checks for zero-weight cycles. Interval analysis bounds `vread` indices.
+1. **Shape inference:** the lcm rule, and views (take, drop, stride, transpose, reshape,
+   rotate, join) become index maps resolved to per-channel source tables, not loop index
+   arithmetic.
+   - **1a. Per-channel provenance and folding.** After resolution, each channel of each
+     value is either a compile-time constant or a channel of a computed node.
+     Elementwise ops fold **per channel**: a channel whose inputs are all constants
+     becomes a constant, and identities (`x*0`, `x*1`, `x+0`) simplify per channel.
+   - Structure is exploited automatically. A matmul by a matrix with an audio diagonal
+     and zeroes elsewhere keeps only the diagonal multiplies, and a `sum` over partly
+     constant channels adds only the live ones plus one folded constant.
+   - Only channels that remain non-constant generate loop work.
+   - Each channel also records its **run-time source set**: the inlet channels it
+     depends on, computed through the same maps. Parameter groups (§4.5) use it.
+2. **Placement (rate) inference:** schedule-early over
+   `const < init < reset < block < audio`. Inlets are nominally `block`.
+3. **Parameter groups:** the `block`-placed regions, keyed by their source sets. They
+   replace iso-groups (§4.5).
+4. **Feedback cycles:** the SCCs of the weighted graph.
+   - A cycle with total weight ≥ `kVecLen` is vector-feasible as it stands.
+   - A cycle with weight 1–3 is a recurrence.
+   - Each recurrence is cut down to its **minimal cycle**. Any node not on a path from
+     the cycle back to itself is moved out to ordinary elementwise code.
+5. **Recurrence classification** (§4.7): scan, affine block state space, affine scan, or
+   general.
+6. **Strategy assignment:** channel-vector, sample-vector or serial for every cycle, from its class,
+   its channel count, the stride of its coefficients, and a cost table (TU §10).
+   Elementwise ops have no strategy of their own; they follow a neighbour.
+   - **Channel grouping.** Channel groups need not be contiguous channels, since every
+     channel is reached through a pointer.
+   - The compiler forms groups of 4 from channels with the same work. These are
+     non-constant channels of the same op chain, preferring channels whose run-time
+     source sets coincide, so their strides tend to agree.
+   - Compile-time constant channels are never placed in a group. When a leftover group
+     must hold one, as a spare lane, it is a register splat blended into that lane.
+7. **Fusion (trees to loops)** is schedule-late placement within `audio`. Split loops at
+   a change of strategy, a non-absorbable channel remap (reduce, matmul), a serial
+   region, a weighted edge shorter than `kVecLen` read in its writer's loop, or a
+   register-budget overflow. Fan-out within a loop is a local variable.
+8. **Buffer arena:** interval colouring over loop order (TU §4, §12), with in-place reuse
+   rules. One arena per instance, `maxBlock` deep.
+   - Each inter-loop buffer gets a layout, planar or channel-interleaved,
+     chosen by its consumer's strategy (D4).
+   - A value with consumers of both strategies gets the layout that costs fewer
+     transposes, or both layouts when it is cheap.
+9. splitRates: `init`, `reset` and `block` (parameter group) loops, plus `audio` loops.
+
+### 4.3 Code shape
+
+```
+void NAME_process(NAME* p, i32 off, i32 n) {
+    // parameter groups (§4.5): recompute or reuse; results as {ptr, stride}
+    // loop A: channel-vector | sample-vector | serial; vector body over n & ~3, scalar tail over n & 3
+    // loop B: ...
+    // advance delay write heads by n
+}
+```
+
+- **Every loop has a scalar tail** that uses the serial form of each op, with the
+  same state layout (lane k of a group is channel k; TU §6.5). `n = 1` is just the tail.
+- **Channel-vector loops** transpose planar input blocks in and planar output blocks out
+  (`transpose4`). Channel-interleaved buffers need no transpose.
+  Spare lanes repeat channel 0 and drop their outputs.
+- **Element types:** every type has a 4-lane vector. Masks are widened at type changes,
+  integers wrap (`-fwrapv` or unsigned vectors), and float-to-int conversion is defined
+  with a clamp (TU §9).
+- **Compile flags:** keep `-O3 -ffast-math -fno-finite-math-only`, and add
+  `-Wdouble-promotion -Wnan-infinity-disabled` for generated code (TU §7, §11). There
+  must be no NaN sentinels in generated code or the support library.
+
+### 4.4 Delays, buffers, control flow, spectral
+
+**Delays**
+- Ring buffers sized to `bitCeil(maxDelay + maxBlock + headroom)`, so that a whole block
+  can be written before it is read.
+- `d(k)` with k ≥ 4 is read a vector at a time. Smaller k is a register shift when it is
+  feedforward, and a serial loop when it is feedback.
+- `d(0)` semantics are unchanged ([[synthdef-d0-write-semantics]]).
+
+**Buffers and banks**
+- Reads are sample vectors, wrapping at the true length ([[tzpl-wavetable-osc]]).
+- `bankLookup` stays at reset rate, and is now run by `resetVoice`.
+
+**Control flow**
+- `if_`, `switch_` and `for_` on an audio-rate condition run in serial loops.
+- On a parameter-group condition they branch once per block or segment, which is new and
+  cheap.
+- `select` and `select2` are elementwise and vectorize.
+
+**Spectral:** `spectralChain` already works on frames. Adapt it to read and write blocks.
+Its hop is independent of B.
+
+### 4.5 Parameter groups: change detection (replacing event rate and iso-groups)
+
+- A **parameter group** is a maximal region placed at the `block` level of the schedule
+  lattice (§4.2): nodes whose values depend only on inlets (and const, init or reset
+  values), not on audio-rate internal state or on any weighted edge.
+- **The decision is per output unit, not per group.** A unit is one channel when the
+  consumer is a sample-vector loop, or one channel group when it is a channel-vector loop
+  (D4).
+- Each unit has a static **source set**: the inlet channels it depends on, from §4.2
+  step 1a, including `notes` columns.
+- At the top of `process`, for each unit, there are three cases:
+  - **All sources `isConst`, and versions equal the cached ones:** skip. The cached
+    splat or lane vector is still valid (stride 0).
+  - **All sources `isConst`, but some version changed:** recompute that unit once and
+    cache (stride 0).
+  - **Otherwise:** compute that unit per sample into its arena buffer (stride 1).
+- Ramping one element of a control tensor therefore recomputes only the units that
+  depend on that element. The rest of the group stays cached.
+- **Checking cheaply.** Source sets are compile-time bitmasks over the inlet channels.
+  The engine keeps a per-input "changed or non-constant this block" bitmask, so a unit's
+  check is one AND and test. The check is made once per block, never per sample.
+- **Code size.** Each group's code is emitted once, over a unit index. The scalar
+  (stride 0) and vector (stride 1) evaluations are its two forms, as in TU's run and
+  run1. Units are dispatched by a small per-group loop over the units that need work.
+- Downstream loops read `{ptr, stride}` per unit. A recurrence whose coefficients come from a
+  group checks their stride and chooses a design-once path (block state space in a
+  sample-vector loop) or a design-every-sample path (TU §6.2, §4.7).
+- **Voiced synths:** a group whose sources include `notes` columns runs per voice, and
+  the cache is per voice.
+
+This regains the event-rate saving for the common case: knobs that sit still, and notes
+whose params are constant while they sound. It also lets the same synth be driven at
+audio rate with no recompile.
+
+### 4.6 Voicers
+
+- (voice, channel) is flattened into one axis and grouped in 4s. Channel-vector loops run 4
+  voices at once, and per-voice filters fuse as per-channel ones do (TU §13).
+- A group of 4 voices that are all idle is skipped. The engine-side voicer exposes an
+  active mask in `SynthData`.
+- `resetVoice(v)` zeroes voice v's state lanes and delay lanes, and runs the reset loops
+  for v.
+- **AoS mode** (control flow in the voice body) becomes a serial loop per voice in
+  the first version. Optimising it is a later item.
+- Keep the regression guards: non-power-of-two voice counts
+  ([[synthdef-nonpow2-voicer-mask-bug]]), the `VecAt` voice offset, the voice-steal
+  tiebreak, and the unused-noteParam sizing bug.
+
+### 4.7 Recurrence analysis
+
+Every cycle of weight 1–3 left after step 4 of §4.2 is a minimal recurrence
+`s' = F(s, x)`. Here s is the values carried on the cycle's weighted edges (its state),
+and x is the values that flow into the cycle from outside. synthc classifies F by walking the cycle body:
+
+- **Linear forms.** For each node, track a linear form over the state variables:
+  - a node that doesn't depend on s is a *coefficient* (an x);
+  - `+` and `-` of linear forms, and a linear form times a coefficient, stay linear;
+  - anything else is nonlinear.
+- **Wrap.** `frac` (and `wrap(lo, hi)`) applied to the result of a pure accumulation is
+  recognised as addition in a cyclic group.
+
+The classes, in order of preference:
+
+| Class | Condition | Sample-vector form | Channel-vector form |
+|---|---|---|---|
+| **Scan** | `s' = s ⊕ x`, with ⊕ associative: `+`, `+` then wrap, `max`, `min`, `xor` | lane prefix scan (`prefixSum` and its siblings), then wrap. Only the last lane carries over. This is how the phasor and its oscillators vectorize over samples, as in TU §6.3 | plain recurrence on transposed vectors |
+| **Affine, block-constant coefficients** | F affine in s, with every coefficient from a stride-0 parameter group (§4.5) | block state space `y = Ys s + Yx x`, `s' = Ss s + Sx x`. The matrices are built automatically by evaluating the cycle body on unit states and unit inputs when the group recomputes. State steps through Ss² two vectors at a time (TU §6.2) | plain recurrence |
+| **Affine, first order, varying coefficients** | `s' = a·s + b` with a and b at audio rate | scan over affine maps `(a, b)`, which compose associatively | plain recurrence |
+| **General** | higher-order affine with varying coefficients, or nonlinear (`select` state machines such as `adsr`, `lfnoise`-style wraps that draw) | everything outside the cycle stays in sample-vector loops; the cycle runs as a serial loop over pre-computed vectors. This is TU's audio-rate filter design: design is most of the cost, and it vectorizes | plain recurrence, the default when there are 4 or more channels or voices |
+
+**One cycle, two forms.** An affine cycle whose coefficients come from a parameter group
+gets both forms, the block-constant one and the varying one. The run-time stride check
+picks between them per block and per unit (D4): each channel of a sample-vector cycle,
+each channel group of a channel-vector cycle. So a filter bank whose cutoffs are constant except one channel
+ramping runs block state space on the steady channels and per-sample design on the
+ramping one.
+
+**Shared state layout.** The state layout is shared across forms, and with the scalar
+tail: lane k of a group is channel k (TU §6.5). A cycle can therefore switch forms
+between blocks, and segments of any length are exact continuations.
+
+**Accuracy contracts.** Block state space and scans round differently from the plain
+recurrence: about 1e-14 relative for f64 and 1e-5 for f32 (TU §7). The equivalence tests
+in M8 use these tolerances. A synth can ask for exact recurrence order with
+`defSynthX(..., strictRecurrences: true)`, for reference renders.
+
+**Diagnostics.** The analysis dump lists each cycle with its class, its chosen strategy,
+and, when the class is General, the node that made it general. A missed optimisation is
+then visible, not silent.
+
+---
+
+## 5. Runtime support library (`shared/tzpl_dsp/`)
+
+These are header-only pieces that generated code includes, adapted from tensor-ugens and
+generalised to the four element types (TU Part II). They are building blocks, not ugens:
+
+| File | Contents |
+|---|---|
+| `vec_types.hpp` | `i32x4`, `i64x4`, `f32x4`, `f64x4` and masks as clang `ext_vector_type`; `elem_t`, `bits_t` and `mask_t` traits; `transpose4`; portable min/max/select/reduce (TU §11 table) |
+| `vmath.hpp` | One interface. Apple backend: `<simd/simd.h>` math. Elsewhere: Sleef inline headers (`d4` on AVX2; 2×`d2` on NEON; `f4`). Libm lane fallback for gaps such as `tanpi = sinpi/cospi`, `logb`, `nearbyint` |
+| `scan.hpp` | Lane prefix scans for `+`, `max`, `min`, `xor`, and affine maps |
+| `state_space.hpp` | Builds `Ys, Yx, Ss, Sx` (and `Ss²`, `Sx2`) for an N-state affine cycle from a callable step; the stepping loop |
+| `random.hpp` | xoroshiro128++ `RandState<4>`, uniform floats with widths from the element type; independent lane streams for the sample-vector form of the existing random primitive |
+
+- This replaces `shared/tzpl_simd.hpp` for generated code. The engine and lang keep
+  using the old header until M10.
+
+**The tensor-ugens UGens are the reference implementations.** Phasors, the filter
+family, lags, decays, noises and lfnoise are kept as test oracles and benchmark
+baselines in `benchmarks/tensor_ugens_ref/`. For each one, a synth written in the
+notation (`common_ugens.x`) must:
+- match the reference within the TU tolerance contracts;
+- run within 1.25× of its ns/sample/channel (TU §8 table).
+
+**Support library tests** (`shared/tzpl_dsp/tests/`, a C++ executable added to CI):
+- scans against sequential sums;
+- state space against the step function, for N = 1, 2 and 4;
+- each element type;
+- tolerance contracts of 1e-12 for f64 and 1e-5 for f32.
+
+---
+
+## 6. Bridge, libraries, app (API consumers)
+
+The full inventory is in the survey notes in §11.
+
+| Area | Change |
+|---|---|
+| `bridge/src/tzpl_audio_engine_ffi.cpp`, `bridge/modules/audio_engine.x`, `bundles.x` | Remove `setControl` (×2). Add `setInput(node, port|name, value or [Float], region…, ramp)`, `setInputX`, `impulseInput`, element and slice forms. Notes remain under the same names (engine-side voicer). The rtOnly `playNote`/`releaseNote` call the engine voicer at the task's wake offset. `wireDef(shape)` and `gainDef(shape)`. `tapChans` becomes a shape. `resizeBuffer` and `fillBuffer` take any channel count. |
+| `lang/modules/music/score.x`, `play.x` | `Voice.names` become `notes` column names from `DefDesc`. `NoteCmd` keeps the same three cases, but `noteSetParams` gains an optional ramp. The silo `scorePlayer` can finally honour `noteSetParams`. |
+| `lang/modules/live/{proxy,plan,pattern}.x` | `ctlNames` become input names. `set(p, name, v)` and `<-(p, [String:Float])` call `setInput`. `opSetControl` becomes `opSetInput`. `chans` becomes `Shape`. Anchor and monitor defs are named by shape. Proxies can now patch one proxy into another's control inputs. |
+| `bridge/modules/ui.x`, `tzpl_ui_ffi.cpp`, `tzpl_ui_node_controls.cpp`, `tzpl_ui_state.hpp` | `bindControl` becomes `bindInput(node, port, element)`. `UIEngineTarget{nodeID, port, region, silo}`. Multichannel inputs use per-element sets, which removes the "no per-element setControl" limitation. |
+| App: `controls_dispatch.cpp`, `controls_panel.cpp`, `graph_model`, `graph_edits`, `graph_view`, `plugin_browser_*` | `setInput` replaces `setControl`. Ports show their shape (`2×3 f32`). The 'e' rate glyph goes. The Controls section becomes "Inputs" with specs. `canConnect` uses shape broadcastability. Keep the ImGui twin in parity ([[app-juce-port]]). |
+| `app/juce/juce_audio_backend.cpp`, RtAudio, `tzpl_nrt_render.cpp` | Unchanged calls; `processAudioBlock` chunks internally (D5). |
+| OSC `/engine/setControl`, NATS `engine.setControl` | Become `/engine/setInput` with name and region, plus `/engine/impulseInput`. Remove `setControl`. NATS gains `noteSetParams`. |
+| `lang/modules/instruments.x` (27 decls), `effects.x` (62), `common_ugens.x`, `filters.x`, `examples/*.x` | `control` becomes `inlet` with a spec (mostly mechanical, since `control(...)` syntax can stay). Ugen definitions keep their recurrence notation (D3). Change one only where its form defeats classification for no good reason, e.g. an accumulation written in a non-associative order. Check the effects library's power-of-two channel rule ([[tzpl-effects-library]]); it can go. |
+
+---
+
+## 7. Milestones
+
+Each milestone ends green on its own tests, with a commit series on `block-engine`.
+`main` stays releasable throughout; the branch is merged once, at M10.
+
+**M0: Baseline and scaffolding**
+- Decide D1–D9.
+- Capture a **reference render corpus** from `main`: every `integration-tests/run_*`
+  render, the `examples/` demos, the effects and instruments libraries (one note or
+  impulse each), and the cookbook sound examples. These are NRT WAVs at 48 kHz, plus a
+  manifest of which ones are expected to change by design (inter-node feedback,
+  which is refused until MF; anything driven by `setControl` timing).
+- Script: `tools/block_engine/render_corpus.sh`.
+
+**M1: Runtime support library (§5).**
+- Independent of everything else, so it can run in parallel with M2.
+- The vec types, vmath with both backends, scans, the state space builder and random.
+- Move the tensor-ugens UGens into `benchmarks/tensor_ugens_ref/` as oracles and
+  baselines.
+- Add the tests to CI on macOS arm64 and Linux x86-64.
+
+**M2: Engine core on ABI v3 (§3), with hand-written test plugins.**
+- Port buffers, the block loop, input stages, XFader nodes (block form, region-shaped,
+  sub-sample start), broadcasting, the mixer and narrow nodes,
+  event collection with offsets, node splitting, cycle refusal (D1 phase 1), device
+  chunking, NRT render, taps, the limiter and mixdown.
+- Port the clock and task scheduler ticks to block form.
+- Pass `test_block_engine`.
+- Run the `audio_engine_lib` ASan build (live-mode scripts, per [[asan-nrt-stack-overflow]]).
+
+**M3: synthc front end and IR.**
+- `Shape` and the new rates in `synthdef.x` and `ir.x`; shape and type inference; inlets
+  with specs; `notes` columns.
+- **Delay-weighted edges in the IR (§4.2):**
+  - the importer converts writer and reader pairs into weighted edges;
+  - zero-weight cycle check;
+  - interval bounds for `vread`;
+  - the topological sort ignores weighted edges;
+  - `addDelayAntecedents` is removed;
+  - the analysis dump prints cycles with their weights.
+- The `block` placement level and parameter group detection, analysis only. The M4
+  codegen doesn't use it yet.
+- Remove the event, control and `eventToAudio` paths. Remove `defSynth` and the
+  C++-oracle diff tests, and move the compile and link code (D9).
+- New analysis dump tests (golden text) for shapes and rates over the old diff corpus's
+  graphs.
+
+**M4: synthc serial-loop codegen.**
+- Correctness first. Emit `process(p, off, n)` with every loop serial: an outer sample
+  loop around today's one-sample loop bodies:
+  - channel-vector SIMD where `chans % 4 == 0`;
+  - non-power-of-two channel counts through per-channel tables;
+  - delays with block-aware ring sizes;
+  - voicers on the `notes` input plus `resetVoice`;
+  - buffers and banks; control flow; spectral.
+- There are no parameter groups yet: every inlet is read per sample.
+- This produces plugins that run on the M2 engine with the old semantics, so every later
+  layer has something real to integrate against.
+
+**M5: Consumers (§6).**
+- Port the bridge FFI, `bundles.x`, the music libs, live, ui, the app (JUCE and ImGui),
+  OSC and NATS, `instruments.x`, `effects.x` and the examples.
+- Port the integration scripts. The noteparam and eventToAudio tests are rewritten as
+  input-stage and voice-tensor tests.
+- **Gate:** the M0 corpus re-renders within tolerance (−100 dBFS max difference for f32
+  synths, except for the files on the expected-to-change manifest), and every
+  `run_*.sh` passes.
+
+**M6: Parameter groups and change detection (§4.5).**
+- Group detection, caching keyed on version, and `{ptr, stride}` plumbing.
+- Benchmark: CPU per node for an idle-knob synth versus `main`'s event-rate build. Target
+  at most 1.1×.
+
+**M7: Recurrence analysis (D3, §4.7).**
+- Minimal-cycle extraction, linear-form classification, wrap recognition.
+- Scan, block state space and affine-scan code generation. The general-class scalar
+  cycle with vectorized inputs.
+- Run every `common_ugens.x` and `filters.x` ugen against its tensor-ugens reference, for
+  accuracy and speed.
+- The corpus re-renders within the tolerance contracts.
+
+**M8: Strategy and fusion optimiser (§4.2 steps 6–8).**
+- Serial-loop isolation of short cycles, the cost table, loop formation of all three
+  kinds,
+  transposes, the buffer arena and in-place reuse.
+- **Equivalence-of-forms tests:** each synth compiled with every loop forced to serial,
+  forced to channel-vector, forced to sample-vector, and chosen automatically must agree
+  within tolerance, at block sizes 64, 1, and
+  odd chunks.
+- **Benchmark targets:** a mono `sinosc → lpf → out` at least 2× faster per sample than
+  `main`; 16-channel no slower than `main`.
+
+**M9: Voicer block form (§4.6), portability and performance.**
+- Channel-vector loops over voices, skipping idle groups, per-voice parameter caches.
+- An x86-64 Linux build with Sleef inline headers, FTZ and DAZ on audio and render
+  threads, and a per-ISA register budget in the cost table.
+- `benchmarks/`: a block-engine suite.
+
+**MF: Inter-node feedback (D1 phase 2).** Any time after M5, and not required for the
+merge.
+- SCC detection in `sortNodes`.
+- Sample-interleaved SCC execution, with input and output pointers offset per sample.
+- `feedbackMode = sample | block` per silo.
+- Lift the `errCycle` refusal.
+- Test against the old one-sample semantics, using a corpus file from M0 that has
+  inter-node feedback.
+
+**M10: Docs, cleanup, merge.**
+- Rewrite these docs:
+  - `Writing_SynthDefs.html` §2 (rates and shapes), §5 (vec ops as views), §7 (inputs
+    and specs replace Controls), §9 (delays and feedback in blocks), §12 (voicers);
+  - Cookbook `setControl` sections;
+  - `Live_Controls_and_Notebooks.html` §3.2 and §3.4;
+  - `FFI_Guide.html` §18.7–18.8 and the OSC/NATS tables;
+  - `Music_Libraries.html`;
+  - `engine/Architecture.md` and `engine/CLAUDE.md`;
+  - the root `CLAUDE.md` ("processes one sample at a time" and the synthdef-compiler
+    references).
+- Delete `synthdef-compiler/` and its CI steps, and delete `shared/tzpl_simd.hpp` if
+  nothing still uses it.
+- Add a NEWS.md entry (breaking: ABI v3, `setControl` removed).
+- Merge to `main`.
+
+**Dependencies:**
+
+```
+M0 ─┬─ M1 ───────────────────────────┐
+    └─ M2 ─ M3 ─ M4 ─ M5 ─┬─ M6 ─────┤
+                          ├──────────┴─ M7 ─ M8 ─ M9 ─ M10
+                          └─ MF (optional before merge)
+```
+
+---
+
+## 8. Testing strategy
+
+**Kept, adapted:**
+- the lang goldens (`lang/tests/run_tests.sh`) for the language;
+- `run_*.sh` render tests, with renders compared against the M0 corpus by tolerance,
+  not bit-exactly.
+
+**Retired:**
+- the byte-for-byte synthc ↔ C++ text diffs (`synthc_*_diff.x`, `test_synthdef_compiler_ffi`'s
+  oracle cases);
+- `run_synthc_render_ab.sh`, replaced by corpus comparison;
+- `synthdef-compiler --test`.
+
+**New:**
+1. Support library tests and tensor-ugens reference comparisons (M1, M7).
+2. `test_block_engine` (M2).
+3. synthc analysis dump goldens (M3).
+4. Corpus re-render comparison (M5 onward).
+5. Equivalence of forms per synth (M8): forced strategies × block sizes × odd chunks ×
+   channel counts {1, 2, 3, 4, 5, 8} × voice counts {1, 3, 12}.
+6. Benchmarks (M6, M8, M9).
+
+**Rules:**
+- **Silence assertions on every A/B.** Parity tests pass vacuously when both sides are
+  silent ([[synthdef-nonpow2-voicer-mask-bug]]).
+- **Tolerances everywhere.** Results are not bit-exact across ISAs under fast-math, so
+  events such as phase wraps are taken from the code under test (TU §7).
+- **CI:** add the support library tests, `test_block_engine` and the corpus check to
+  `.github/workflows/tests.yml` on macOS and Linux.
+
+---
+
+## 9. Risks
+
+| Risk | Mitigation |
+|---|---|
+| synthc rewrite size: about 9.8K LOC, with `codegen.x` alone 3.9K | M4 reuses the existing loop-body emitters inside a sample loop. Fusion (M8) is new code, but runs on a working system with equivalence tests. |
+| A sample-interleaved SCC costs per-call overhead × nodes × B (MF) | Only cyclic patches pay it. `block` mode exists. Measure in MF. |
+| Code size from scalar tails and the loop-kind variants | Tails are just the plain recurrence. Dual forms only for affine cycles fed by parameter groups. Measure dylib size and compile time in M8. Keep the PCH. |
+| Compile time of fused loops at `-O3` (defSynth latency in live coding) | Track per-synth compile time in the benchmarks. Offer `-O2` for live redefinitions. |
+| Recurrence classification misses a cycle that has a parallel form (written in an unexpected shape) | It falls back to the General class, which is still correct and still vectorizes everything outside the cycle. The analysis dump names the blocking node. Grow the recogniser from the ugen library and the tensor-ugens comparisons. |
+| Changing the voice model (D2) breaks the music and live libraries in subtle ways | It lands in M4 and M5 behind the corpus gate. Voicer tests ported first. |
+| Inter-node feedback semantics in `block` mode | The default `sample` mode keeps today's sound. |
+| `transpose4` cost on AVX2 | Fusion minimises transposes. Per-ISA cost table (TU §11). |
+| Long-lived branch drifting from main | Rebase or merge `main` into the branch at each milestone. Avoid unrelated refactors on the branch. |
+
+---
+
+## 10. Out of scope (possible follow-ups)
+
+- Retiming of the delay-weighted graph (Leiserson–Saxe): moving weight across nodes to
+  make a short cycle vector-feasible or to shorten a critical cycle.
+- Scans for higher-order affine recurrences with time-varying coefficients (a matrix
+  scan); these use the General class for now.
+- 8-lane f32 loops on AVX2 and AVX-512 builds.
+- Lazy subgraphs triggered a sample at a time (TU run1 use case 1).
+- The deferred Max/Pd event-system design ([[tzpl-event-system-deferred-design]]). It
+  assumed event rate and needs rethinking: node-ID-as-signal sinks still make sense, and
+  event wires may become impulse inputs.
+
+---
+
+## 11. Survey facts this plan relies on (as of 53f3c5f)
+
+**Engine**
+- Per-frame loop: `engine/src/tzpl_silo.cpp:174-279`. `runNodes`: `:158-172`.
+- One-frame port buffers: `tzpl_node.cpp:44-121`.
+- Zero-copy connect: `tzpl_silo.cpp:363`.
+- Power-of-two `ChanAdapt`: `tzpl_chanadapt.cpp:29`.
+- Cycles produce a one-sample delay through the sort's visiting state:
+  `tzpl_silo.cpp:521-565`.
+- XFader variants: `tzpl_xfader.cpp:139-221`.
+- ABI v2: `shared/tzpl_plugin_abi.h:72`. `SynthFuns`: `:216-240`.
+- The voicer is already in `shared/tzpl_voicer.hpp` and takes `now` from
+  `Silo::sampleTime_`.
+- The task scheduler and actors tick per sample: `bridge/src/tzpl_audio_engine_ffi.cpp:850-894`.
+
+**synthc** (9,828 LOC)
+- Per-sample `processAudio` with no frame count: `codegen.x:3492`.
+- `chans` rounded by `asChans` (`synthdef.x:107`) and `padPow2` (`ir.x:153`).
+- Mask broadcasting in `_indexWrap`: `codegen.x:180`.
+- SIMD only across channels, width 4 when `chans % 4 == 0`: `codegen.x:1945-1964`.
+- Iso-groups: `passes.x:1214`. They are the ancestor of parameter groups.
+- Ugens are Tzopilotl graph code over `delayVar` (`common_ugens.x:1093` phasor,
+  `:599-652` lags). Recurrence analysis (D3, §4.7) has to find their parallel forms.
+- Compile and link live in `synthdef-compiler/src/synthdef_compile_link.cpp` (D9).
+
+**Consumers**
+- 9 `.x` files set controls or notes. 12 integration scripts use `setControl`,
+  `noteSetParams` or proxy `set`.
+- App: `controls_dispatch.cpp:140-185`, `graph_view.cpp:94-110`, `plugin_browser_window.cpp:49-83`.
+- OSC: `tzpl_osc_engine_commands.cpp:315-397`. NATS: `tzpl_nats_engine_commands.cpp:280-386`.
+
+**Pre-existing oddities found** (fix or delete on the branch)
+- The legacy `sched_` / `streamTime_` path is unreachable.
+- `ClearSchedCmd` doesn't clear the TempoClock queues.
+- `Engine::noteOn` and `noteControl` are declared but never defined.
+- The second `sortNodes()` in `processFrames` is unexplained ("glitches without it").
+- `engine/Architecture.md` is stale in four places (scheduler bins, voicer location,
+  buffer API, load protocol).
