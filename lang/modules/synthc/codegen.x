@@ -4940,7 +4940,19 @@ fn _genRegion(ctx Ctx, region [Int], delays [DelayInfo]) String {
 -- A region on direct ports, 4 samples a step: its input ports transposed
 -- into 4 rows of channels, the body run for each row, its output rows
 -- transposed back; then the per-sample tail. "" if it uses no direct port.
+-- Cost table: only when every direct port it uses has a multiple of 4
+-- channels, so its loops run channel-vector; a narrower port (stereo) is
+-- read by scalar channel loops, for which the transposes are extra copies.
 fn _portRowsLoop(ctx Ctx, region [Int], delays [DelayInfo], body String) String {
+	for (x : ctx.inlets $ ctx.outlets) {
+		if (!(ctx _directPort(x))) { continue; }
+		let used = match (ctx.kind[x]) {
+			inletK(_, sn, _): _usesName(body, "r_in%^" fmt(sn));
+			outletK(_, sn): _usesName(body, "r_out%^" fmt(sn));
+			_: false;
+		};
+		if (used && ctx.chans[x] % 4 != 0) { return ""; }
+	}
 	var pre = "";
 	var post = "";
 	for (x : ctx.inlets) {
