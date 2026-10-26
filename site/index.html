@@ -55,6 +55,13 @@
   h1, h2, h3 { color: var(--heading-fg); line-height: 1.25; }
 
   .hero { text-align: center; padding: 1.5rem 0 2.5rem; }
+  .notice {
+    text-align: left; margin: 1.4rem auto 0; max-width: 40rem;
+    padding: 0.9rem 1.1rem; border-radius: 10px;
+    background: var(--card-bg); border: 1px solid var(--card-border);
+    border-left: 4px solid var(--accent); font-size: 0.95rem;
+  }
+  .notice code { font-size: 0.9em; }
   .hero .splash {
     width: 27rem; height: auto; max-width: 85%; border-radius: 18px;
     background: #000; border: 1px solid var(--card-border);
@@ -186,6 +193,14 @@ in the assembled site. Run <code>python3 site/build.py</code> and open
     compiler that turns synth definitions into native plugins, and a real-time engine
     that hot-loads them while the music plays.</p>
     <p class="runs-on">Runs natively on macOS and Linux.</p>
+    <div class="notice">
+      <strong>Breaking changes.</strong> The engine and synth compiler now process audio in
+      blocks, signals are tensors with a shape, and synth parameters are inputs:
+      <code>setControl</code> is now <code>setInput</code>, numbers given to shape
+      operations are axes (<code>sum(2)</code> no longer folds to stereo), and every synth
+      must be recompiled. <a href="Block_Engine_Migration.html">What changed and how to
+      update your code &rarr;</a>
+    </div>
     <div class="hero-actions">
       <a class="primary" href="Getting_Started.html">Get Started</a>
       <a class="secondary" href="https://github.com/lfnoise/tzpl/releases/latest">Download</a>
@@ -232,17 +247,19 @@ bubbles <span class="fnm">defSynthX</span>(<span class="str">"bubbles"</span>) <
       <div class="pillar">
         <h3>The synthdef compiler</h3>
         <p>Signal graphs written in Tzopilotl compile to optimized native
-        plugins: ~200 unit generators, a 14-pass analysis pipeline, an
-        algebraic rewrite engine, and SIMD C++ code generation.</p>
+        plugins: tensor-shaped signals, ~200 unit generators, an algebraic
+        rewrite engine, recurrences run as block-wide scans, and SIMD C++
+        code generation.</p>
         <p>Compilation is asynchronous — redefine a synth and anything you
         play once the new version loads uses it, while sounds already playing
         carry on undisturbed.</p>
       </div>
       <div class="pillar">
         <h3>The engine</h3>
-        <p>A real-time engine with dynamic graph patching, crossfaded
-        connection changes, lock-free RT/NRT communication, multi-core silo
-        parallelism, and sample-accurate scheduling.</p>
+        <p>A real-time block engine with dynamic graph patching (feedback
+        loops included), crossfaded connection changes, lock-free RT/NRT
+        communication, multi-core silo parallelism, and sample-accurate
+        scheduling.</p>
         <p>Polyphonic voicers, live controls, and notebook documents connect
         the language to sound in the desktop app.</p>
       </div>

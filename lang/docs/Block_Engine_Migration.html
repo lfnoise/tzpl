@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Migrating to the Block Engine</title>
+    <style>
+        :root {
+            --bg: #1a1b26;
+            --fg: #c9d1d9;
+            --container-bg: #21222c;
+            --accent: #58a6ff;
+            --heading-fg: #e6edf3;
+            --heading2-fg: #b0bec5;
+            --heading2-border: #30363d;
+            --intro-bg: #0d2137;
+            --intro-border: #58a6ff;
+            --intro-fg: #b0bec5;
+            --toc-bg: #1f2028;
+            --toc-border: #30363d;
+            --toc-hover: #2a2d3a;
+            --code-bg: #30363d;
+            --code-fg: #c9d1d9;
+            --pre-bg: #161b22;
+            --pre-fg: #e6edf3;
+            --pre-border: #58a6ff;
+            --table-th-bg: #2a2d3a;
+            --table-th-fg: #e6edf3;
+            --table-border: #30363d;
+            --table-hover: #1f2028;
+            --highlight-bg: #2d2308;
+            --highlight-border: #ffc107;
+            --note-bg: #0d2818;
+            --note-border: #27ae60;
+            --badge-bg: #58a6ff;
+            --badge-fg: #fff;
+            --shadow: rgba(0,0,0,0.3);
+            --syn-cmt: #6a737d;
+            --syn-num: #e5a537;
+            --syn-str: #4ec970;
+            --syn-kw: #c678dd;
+            --back-to-top: #58a6ff;
+        }
+
+        html.light {
+            --bg: #f5f5f5;
+            --fg: #333;
+            --container-bg: white;
+            --accent: #3498db;
+            --heading-fg: #2c3e50;
+            --heading2-fg: #34495e;
+            --heading2-border: #ecf0f1;
+            --intro-bg: #f8f9fa;
+            --intro-border: #3498db;
+            --intro-fg: #555;
+            --toc-bg: #f8f9fa;
+            --toc-border: #bdc3c7;
+            --toc-hover: #e8f4f8;
+            --code-bg: #ecf0f1;
+            --code-fg: #2c3e50;
+            --pre-bg: #2c3e50;
+            --pre-fg: #ecf0f1;
+            --pre-border: #3498db;
+            --table-th-bg: #34495e;
+            --table-th-fg: white;
+            --table-border: #ecf0f1;
+            --table-hover: #f8f9fa;
+            --highlight-bg: #fff3cd;
+            --highlight-border: #ffc107;
+            --note-bg: #e8f5e8;
+            --note-border: #27ae60;
+            --badge-bg: #3498db;
+            --badge-fg: white;
+            --shadow: rgba(0,0,0,0.1);
+            --syn-cmt: #95a5a6;
+            --syn-num: #e67e22;
+            --syn-str: #27ae60;
+            --syn-kw: #e74c3c;
+            --back-to-top: #3498db;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: var(--bg);
+            color: var(--fg);
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: var(--container-bg);
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px var(--shadow);
+        }
+
+        h1 {
+            color: var(--heading-fg);
+            border-bottom: 3px solid var(--accent);
+            padding-bottom: 10px;
+            margin-bottom: 30px;
+        }
+
+        h2 {
+            color: var(--heading2-fg);
+            border-bottom: 2px solid var(--heading2-border);
+            padding-bottom: 8px;
+            margin-top: 40px;
+            margin-bottom: 20px;
+        }
+
+        h3 {
+            color: var(--heading-fg);
+            margin-top: 30px;
+            margin-bottom: 15px;
+        }
+
+        h4 {
+            color: var(--heading-fg);
+            margin-top: 25px;
+            margin-bottom: 10px;
+        }
+
+        .intro {
+            font-size: 1.1em;
+            color: var(--intro-fg);
+            background-color: var(--intro-bg);
+            padding: 20px;
+            border-left: 4px solid var(--intro-border);
+            margin-bottom: 30px;
+        }
+
+        .toc {
+            background-color: var(--toc-bg);
+            padding: 20px;
+            border-radius: 5px;
+            margin-bottom: 30px;
+        }
+
+        .toc h2 {
+            margin-top: 0;
+            color: var(--heading-fg);
+            border-bottom: 1px solid var(--toc-border);
+        }
+
+        .toc ul {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .toc ul ul {
+            padding-left: 22px;
+        }
+
+        .toc li {
+            margin: 4px 0;
+        }
+
+        .toc a {
+            color: var(--accent);
+            text-decoration: none;
+            padding: 3px 10px;
+            display: block;
+            border-radius: 3px;
+            transition: background-color 0.2s;
+        }
+
+        .toc a:hover {
+            background-color: var(--toc-hover);
+        }
+
+        code {
+            background-color: var(--code-bg);
+            color: var(--code-fg);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Monaco', 'Consolas', 'Courier New', monospace;
+        }
+
+        pre {
+            background-color: var(--pre-bg);
+            color: var(--pre-fg);
+            padding: 20px;
+            border-radius: 5px;
+            overflow-x: auto;
+            margin: 15px 0;
+            border-left: 4px solid var(--pre-border);
+        }
+
+        pre code {
+            background-color: transparent;
+            color: inherit;
+            padding: 0;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0 25px 0;
+        }
+
+        th {
+            background-color: var(--table-th-bg);
+            color: var(--table-th-fg);
+            padding: 12px 15px;
+            text-align: left;
+            font-weight: 600;
+        }
+
+        td {
+            padding: 10px 15px;
+            border-bottom: 1px solid var(--table-border);
+            vertical-align: top;
+        }
+
+        tr:hover {
+            background-color: var(--table-hover);
+        }
+
+        td code {
+            font-size: 0.95em;
+        }
+
+        .section {
+            margin-bottom: 40px;
+        }
+
+        .highlight {
+            background-color: var(--highlight-bg);
+            padding: 15px;
+            border-left: 4px solid var(--highlight-border);
+            margin: 15px 0;
+            border-radius: 0 5px 5px 0;
+        }
+
+        .note {
+            background-color: var(--note-bg);
+            padding: 15px;
+            border-left: 4px solid var(--note-border);
+            margin: 15px 0;
+            border-radius: 0 5px 5px 0;
+        }
+
+        .back-to-top {
+            display: inline-block;
+            margin-top: 10px;
+            color: var(--back-to-top);
+            text-decoration: none;
+            font-size: 0.9em;
+        }
+
+        .back-to-top:hover {
+            text-decoration: underline;
+        }
+
+        /* Syntax highlight classes for code examples */
+        .cmt { color: var(--syn-cmt); }
+        .hl-num { color: var(--syn-num); }
+        .hl-str { color: var(--syn-str); }
+        .hl-kw { color: var(--syn-kw); }
+
+        /* Theme toggle */
+        .theme-toggle {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.4rem 0.75rem;
+            background: var(--container-bg);
+            border: 1px solid var(--table-border);
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1.1rem;
+            color: var(--fg);
+            box-shadow: 0 2px 6px var(--shadow);
+            transition: background 0.2s;
+        }
+        .theme-toggle:hover { background: var(--toc-hover); }
+
+        body, .container, pre, code, .note, .highlight, .intro, .toc, th, td {
+            transition: background-color 0.3s, color 0.3s, border-color 0.3s;
+        }
+    </style>
+    <script>
+    if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElement.classList.add('light');
+    </script>
+</head>
+<body>
+    <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
+        <span id="theme-icon">&#9790;</span>
+    </button>
+    <div class="container">
+        <h1 id="top">Migrating to the Block Engine</h1>
+
+        <div class="intro">
+            The audio engine and the synth compiler have been rebuilt. The engine now processes
+            audio in <strong>blocks</strong> (64 samples by default) instead of one sample at a
+            time, signals are <strong>tensors</strong> with a shape, and a synth's parameters are
+            ordinary <strong>inputs</strong>. Synths run 1.3 to 3.5 times faster, and timing is
+            still exact to the sample. This is a breaking change: most scripts that set controls,
+            mix multichannel signals down, or use the shape operations with a number need small
+            edits, and every compiled synth must be recompiled. This page lists what changed and
+            shows the code to change. The
+            <a href="Writing_SynthDefs.html">SynthDef guide</a> covers everything here in more
+            depth.
+        </div>
+
+        <div class="toc">
+            <h2>Contents</h2>
+            <ul>
+                <li><a href="#checklist">1. Checklist</a></li>
+                <li><a href="#architecture">2. What changed underneath</a></li>
+                <li><a href="#api">3. API changes at a glance</a></li>
+                <li><a href="#examples">4. Code that needs to change</a></li>
+                <li><a href="#tensors">5. Tensors: constants, shapes, broadcasting, axes</a></li>
+                <li><a href="#new">6. New things to know about</a></li>
+                <li><a href="#plugins">7. For authors of C plugins</a></li>
+            </ul>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="checklist">
+            <h2>1. Checklist</h2>
+            <ol>
+                <li><strong>Recompile every synth.</strong> Run your <code>defSynthX</code> calls
+                again. The engine refuses plugins built for the old engine. <code>defSynth</code>
+                (the old C++ compiler) is gone: use <code>defSynthX</code>.</li>
+                <li><strong>Replace <code>setControl</code></strong> with <code>setInput</code>
+                (<a href="#ex-controls">&sect;4.1</a>), and <code>bindControl</code> with
+                <code>bindInput</code>.</li>
+                <li><strong>Fix mixdowns</strong> written <code>sum(2)</code>, <code>sum(n)</code>,
+                <code>transpose(n)</code> or <code>mixTo</code>: a number given to a shape operation
+                is now an <em>axis</em> (<a href="#ex-mixdown">&sect;4.2</a>).</li>
+                <li><strong>Check channel counts.</strong> They are exact now (3 is 3, not 4), and
+                signals of different widths combine to the least common multiple
+                (<a href="#ex-widths">&sect;4.5</a>).</li>
+                <li><strong>Rename <code>Rate.event</code></strong> to <code>Rate.block</code>.</li>
+            </ol>
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="architecture">
+            <h2>2. What changed underneath</h2>
+
+            <table>
+                <tr><th></th><th>Before</th><th>Now</th></tr>
+                <tr><td>Processing</td><td>Every synth computed one sample per call.</td>
+                    <td>Every synth computes a block per call (64 samples by default; settable
+                    with <code>--block-size</code> or <code>blockSize</code> in the config).</td></tr>
+                <tr><td>Timing</td><td>Commands took effect at their sample.</td>
+                    <td>The same. A value change is written into the input at its sample; starting
+                    or freeing a node, or a new note, splits that node's block there.</td></tr>
+                <tr><td>Synth parameters</td><td>Controls: a separate list, set by number or name
+                    with <code>setControl</code>, recomputed through event-rate code.</td>
+                    <td>Inputs. <code>control(name, spec)</code> declares an input with a range and
+                    default. Set it (stepped, ramped or crossfaded) or connect a signal to it. Values
+                    that depend only on inputs are recomputed only when those inputs change.</td></tr>
+                <tr><td>Channels</td><td>A count, rounded up to a power of two. Widths combined to
+                    the larger.</td>
+                    <td>A shape of up to 4 dimensions, exact. Widths combine to the least common
+                    multiple, per dimension (<a href="#tensors">&sect;5</a>).</td></tr>
+                <tr><td>Recurrences (filters, phasors, envelopes)</td><td>Run sample by sample.</td>
+                    <td>Recognised by the compiler and run as block-wide scans or state-space forms
+                    where they can be, with the same results to within rounding.
+                    <code>defSynthXStrict</code> keeps the sample-by-sample order.</td></tr>
+                <tr><td>Voices</td><td>Allocated inside each compiled synth.</td>
+                    <td>Allocated by the engine, which writes each note's row of the synth's
+                    <code>notes</code> input. A released voice that has finished is skipped.</td></tr>
+                <tr><td>Feedback between nodes</td><td>A loop of connections had a one-sample
+                    delay.</td>
+                    <td>The same by default: the loop's nodes run a sample at a time. Or a
+                    one-block delay, cheaper, with <code>feedbackMode</code>.</td></tr>
+                <tr><td>Synth compiler</td><td>Two: a C++ compiler (<code>defSynth</code>) and
+                    synthc (<code>defSynthX</code>).</td>
+                    <td>synthc only, written in Tzopilotl (<code>lang/modules/synthc/</code>).</td></tr>
+                <tr><td>Plugin interface</td><td>ABI v2: per-sample calls.</td>
+                    <td>ABI v3 (<a href="#plugins">&sect;7</a>).</td></tr>
+            </table>
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="api">
+            <h2>3. API changes at a glance</h2>
+
+            <h3>Removed or renamed</h3>
+            <table>
+                <tr><th>Before</th><th>Now</th></tr>
+                <tr><td><code>setControl(node, id, value)</code><br><code>setControl(node, "name", value)</code></td>
+                    <td><code>setInput(node, port, value)</code> with a port number or an input name;
+                    <code>setInput(node, port, value, rampTime)</code> to glide;
+                    <code>setInputX(node, port, value, xfadeTime)</code> to crossfade a connected
+                    input to a value. Inside <code>begin()</code> &hellip; <code>go(0)</code> like
+                    other commands.</td></tr>
+                <tr><td><code>setInput(node, port, value)</code> (one value)</td>
+                    <td>The same name, now for any input and any number of values:
+                    <code>setInput(node, port, [v0, v1, &hellip;])</code>, plus
+                    <code>setInputAt</code> and <code>setInputBox</code> for part of an input.</td></tr>
+                <tr><td><code>bindControl(w, node, "name")</code></td><td><code>bindInput(w, node, "name")</code>, optionally one element: <code>bindInput(w, node, "name", element)</code>.</td></tr>
+                <tr><td><code>defSynth(f, "name")</code></td><td><code>defSynthX(f, "name")</code>.</td></tr>
+                <tr><td><code>Rate.event</code></td><td><code>Rate.block</code>. Usually you need neither: a value
+                    computed from controls is recomputed only when they change.</td></tr>
+                <tr><td><code>sum(n)</code>, <code>product(n)</code>, <code>minOf(n)</code>, <code>maxOf(n)</code> folding to n channels</td>
+                    <td><code>sum(axis)</code> reduces along an axis. Fold a flat row with
+                    <code>reshape</code> first: <code>x reshape([-1, 2]) sum(0)</code>.</td></tr>
+                <tr><td><code>transpose(n)</code></td><td><code>x reshape([-1, n]) transpose</code>;
+                    <code>transpose</code> with no argument reverses the axes.</td></tr>
+                <tr><td><code>mixTo(n)</code></td><td><code>reshape</code> and <code>sum(axis)</code>, as above.</td></tr>
+                <tr><td><code>take(n)</code>, <code>stride(n)</code>, &hellip; rounding up to a power of two</td>
+                    <td>Exact, along an axis (the last by default): <code>take(n, axis)</code>.</td></tr>
+                <tr><td><code>join(signals)</code></td><td><code>join(signals, axis = -1)</code>; <code>stack(signals, axis = 0)</code>
+                    makes a new axis.</td></tr>
+                <tr><td><code>rotate(a, amount)</code></td><td><code>rotate(a, amount, axis = -1)</code>: element
+                    <code>i</code> of the result is element <code>i + amount</code>.</td></tr>
+                <tr><td><code>tzpl_errCyclicConnection</code> on a connection loop</td><td>Loops are accepted
+                    (<code>feedbackMode</code>).</td></tr>
+            </table>
+
+            <h3>Added</h3>
+            <table>
+                <tr><th>What</th><th>Where</th></tr>
+                <tr><td>Shapes and tensor constants: <code>shape</code>, <code>row</code>, <code>matrix</code>,
+                    <code>cuboid</code>, the <code>AsShape</code> constraint, <code>tensor(shape, values)</code>,
+                    <code>tensor([[&hellip;], [&hellip;]])</code></td><td><a href="#tensors">&sect;5</a></td></tr>
+                <tr><td>Shape operations along an axis: <code>reshape</code>, <code>stack</code>, <code>scan</code>,
+                    <code>at</code>/<code>put</code> along an axis; axis names <code>cols</code>, <code>rows</code>,
+                    <code>planes</code></td><td><a href="#shapeops">&sect;5.5</a></td></tr>
+                <tr><td>Setting part of an input: <code>setInputAt</code>, <code>setInputBox</code>; one-sample
+                    values: <code>impulseInput</code></td><td><a href="#ex-controls">&sect;4.1</a></td></tr>
+                <tr><td>Gliding a sounding note's parameters: <code>noteSetParams(&hellip;, rampTime)</code></td><td><a href="#ex-voices">&sect;4.3</a></td></tr>
+                <tr><td>Skipping finished voices: <code>voicer(n, body, silence)</code>, <code>doneWhen</code></td><td><a href="#ex-voices">&sect;4.3</a></td></tr>
+                <tr><td><code>feedbackMode(silo, mode)</code>, <code>defSynthXStrict</code>, <code>--block-size</code></td><td><a href="#new">&sect;6</a></td></tr>
+            </table>
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="examples">
+            <h2>4. Code that needs to change</h2>
+
+            <p>The examples below use these imports:</p>
+<pre><code><span class="hl-kw">import</span> synthdef.*;
+<span class="hl-kw">import</span> synthc.compile.*;
+<span class="hl-kw">import</span> common_ugens.*;
+<span class="hl-kw">import</span> filters.*;
+<span class="hl-kw">import</span> audio_engine.*;</code></pre>
+
+            <h3 id="ex-controls">4.1 Setting controls</h3>
+
+            <p>Controls are declared as before, and they are now inputs: a <code>control</code> is
+            an input with a range and a default, numbered with the synth's other inputs in the order
+            the graph declares them. Set them with <code>setInput</code>, by name or number, inside a
+            bundle.</p>
+
+<pre><code><span class="cmt">-- Before</span>
+begin(); setControl(<span class="hl-num">100</span>, <span class="hl-str">"cutoff"</span>, <span class="hl-num">800.0</span>); go(<span class="hl-num">0</span>);
+begin(); setControl(<span class="hl-num">100</span>, <span class="hl-num">1</span>, <span class="hl-num">0.3</span>); go(<span class="hl-num">0</span>);         <span class="cmt">-- by control number</span></code></pre>
+
+<pre><code><span class="cmt">-- Now</span>
+<span class="hl-kw">fn</span> filtered() S {
+    <span class="hl-kw">let</span> cutoff = control(<span class="hl-str">"cutoff"</span>, ControlSpec { lo: <span class="hl-num">50.0</span>, hi: <span class="hl-num">8000.0</span>, init: <span class="hl-num">1200.0</span>, warp: ControlWarp.exponential });
+    <span class="hl-kw">let</span> amp = control(<span class="hl-str">"amp"</span>, ControlSpec { lo: <span class="hl-num">0.0</span>, hi: <span class="hl-num">1.0</span>, init: <span class="hl-num">0.1</span>, warp: ControlWarp.linear });
+    <span class="hl-num">110.0</span> lfsaw rlpf(cutoff, <span class="hl-num">0.3</span>) * amp |&amp;gt; outlet
+}
+filtered defSynthX(<span class="hl-str">"filtered"</span>) <span class="hl-kw">await</span>;
+begin(); newNode(<span class="hl-str">"filtered"</span>, <span class="hl-num">100</span>); connect(<span class="hl-num">100</span>, <span class="hl-num">0</span>, <span class="hl-num">0</span>, <span class="hl-num">0</span>); go(<span class="hl-num">0</span>);
+
+begin(); setInput(<span class="hl-num">100</span>, <span class="hl-str">"cutoff"</span>, <span class="hl-num">800.0</span>); go(<span class="hl-num">0</span>);         <span class="cmt">-- a step</span>
+begin(); setInput(<span class="hl-num">100</span>, <span class="hl-str">"cutoff"</span>, <span class="hl-num">3000.0</span>, <span class="hl-num">2.0</span>); go(<span class="hl-num">0</span>);   <span class="cmt">-- a 2-second glide</span>
+begin(); setInput(<span class="hl-num">100</span>, <span class="hl-num">1</span>, <span class="hl-num">0.3</span>); go(<span class="hl-num">0</span>);                  <span class="cmt">-- by input number</span></code></pre>
+
+            <p>A multichannel control takes several values, and part of it can be set on its own:</p>
+
+<pre><code><span class="hl-kw">fn</span> chord() S {
+    <span class="hl-kw">let</span> freqs = control(<span class="hl-str">"freqs"</span>, ControlSpec { lo: <span class="hl-num">50.0</span>, hi: <span class="hl-num">2000.0</span>, init: <span class="hl-num">220.0</span>, warp: ControlWarp.exponential }, <span class="hl-num">3</span>);
+    freqs sinosc sum * <span class="hl-num">0.05</span> |&amp;gt; outlet
+}
+chord defSynthX(<span class="hl-str">"chord"</span>) <span class="hl-kw">await</span>;
+begin(); newNode(<span class="hl-str">"chord"</span>, <span class="hl-num">101</span>); connect(<span class="hl-num">101</span>, <span class="hl-num">0</span>, <span class="hl-num">0</span>, <span class="hl-num">0</span>); go(<span class="hl-num">0</span>);
+begin(); setInput(<span class="hl-num">101</span>, <span class="hl-str">"freqs"</span>, [<span class="hl-num">220.0</span>, <span class="hl-num">277.2</span>, <span class="hl-num">329.6</span>]); go(<span class="hl-num">0</span>);
+begin(); setInputAt(<span class="hl-num">101</span>, <span class="hl-str">"freqs"</span>, <span class="hl-num">2</span>, <span class="hl-num">392.0</span>, <span class="hl-num">0.5</span>); go(<span class="hl-num">0</span>);   <span class="cmt">-- element 2 only, gliding</span></code></pre>
+
+            <p>Any input can instead be <strong>connected</strong> to another node's output with
+            <code>connect</code>; while it is connected, <code>setInput</code> sets the value it
+            returns to when disconnected. In the app, <code>bindControl(w, node, "cutoff")</code>
+            becomes <code>bindInput(w, node, "cutoff")</code>.</p>
+
+            <h3 id="ex-mixdown">4.2 Mixing down: numbers are now axes</h3>
+
+            <p>Every integer argument of a shape operation is now an <strong>axis</strong> (which
+            dimension to work along), never a channel count. <code>sum(2)</code> used to fold a row
+            into 2 channels; now it means "sum along axis 2", and on a row of 16 it is an error,
+            because a row has only one axis. To fold, first give the signal the dimensions you mean
+            with <code>reshape</code>, then sum along the one to remove.</p>
+
+<pre><code><span class="cmt">-- Before: 16 sines, folded to stereo (even channels left, odd right)</span>
+exprand(<span class="hl-num">200</span>, <span class="hl-num">2000</span>, <span class="hl-num">16</span>, Rate.init) sinosc sum(<span class="hl-num">2</span>) * <span class="hl-num">0.05</span> |&amp;gt; outlet</code></pre>
+
+<pre><code><span class="cmt">-- Now: 8 rows of (left, right), summed over the rows</span>
+<span class="hl-kw">fn</span> shimmer() S {
+    exprand(<span class="hl-num">200</span>, <span class="hl-num">2000</span>, <span class="hl-num">16</span>, Rate.init) reshape([<span class="hl-num">8</span>, <span class="hl-num">2</span>]) sinosc sum(<span class="hl-num">0</span>) * <span class="hl-num">0.05</span> |&amp;gt; outlet
+}
+shimmer defSynthX(<span class="hl-str">"shimmer"</span>) <span class="hl-kw">await</span>;</code></pre>
+
+            <p><code>reshape([8, 2])</code> keeps the channels in order and reads them as 8 rows of
+            2, so channel 0 goes left, 1 right, 2 left, and so on: exactly the old fold. One
+            dimension may be <code>-1</code>, meaning whatever is left: <code>reshape([-1, 2])</code>.
+            <code>sum</code> with no argument still mixes everything to one channel.</p>
+
+            <p>The old <code>transpose(n)</code> (read a row as n columns and transpose) is a reshape
+            and a transpose; flatten the result if you need a row again:</p>
+
+<pre><code><span class="cmt">-- Before</span>
+x transpose(<span class="hl-num">4</span>)</code></pre>
+<pre><code><span class="cmt">-- Now</span>
+x reshape([-<span class="hl-num">1</span>, <span class="hl-num">4</span>]) transpose reshape([-<span class="hl-num">1</span>])</code></pre>
+
+            <h3 id="ex-voices">4.3 Voicers</h3>
+
+            <p>A voicer's output has a leading voice axis: <code>voicer(8, body)</code> with a mono
+            body is 8 channels, and with a stereo body it is an 8&times;2 matrix. Mix voices
+            together with <code>sum(0)</code> (over the voices), or <code>sum</code> for mono.</p>
+
+<pre><code><span class="cmt">-- Before: stereo voices mixed with a fold</span>
+voicer(<span class="hl-num">8</span>, stereoVoice) sum(<span class="hl-num">2</span>) |&amp;gt; outlet</code></pre>
+
+<pre><code><span class="cmt">-- Now</span>
+<span class="hl-kw">fn</span> stereoPad() S {
+    voicer(<span class="hl-num">8</span>, <span class="hl-kw">fn</span>() S {
+        <span class="hl-kw">let</span> f = noteParam(<span class="hl-str">"freq"</span>, ControlSpec { lo: <span class="hl-num">20.0</span>, hi: <span class="hl-num">8000.0</span>, init: <span class="hl-num">440.0</span>, warp: ControlWarp.exponential });
+        <span class="hl-kw">let</span> env = gate() asr(<span class="hl-num">0.05</span>, <span class="hl-num">1.0</span>, <span class="hl-num">0.5</span>);
+        [f, f * <span class="hl-num">1.003</span>] stack sinosc * env * <span class="hl-num">0.1</span>     <span class="cmt">-- 2 channels per voice</span>
+    }) sum(<span class="hl-num">0</span>) |&amp;gt; outlet                             <span class="cmt">-- 8x2 summed over the voices</span>
+}
+stereoPad defSynthX(<span class="hl-str">"stereoPad"</span>) <span class="hl-kw">await</span>;
+begin(); newNode(<span class="hl-str">"stereoPad"</span>, <span class="hl-num">102</span>); connect(<span class="hl-num">102</span>, <span class="hl-num">0</span>, <span class="hl-num">0</span>, <span class="hl-num">0</span>); go(<span class="hl-num">0</span>);
+begin(); noteOn(<span class="hl-num">102</span>, <span class="hl-num">1</span>, [<span class="hl-num">220.0</span>]); go(<span class="hl-num">0</span>);
+begin(); noteSetParams(<span class="hl-num">102</span>, <span class="hl-num">1</span>, <span class="hl-num">0</span>, [<span class="hl-num">330.0</span>], <span class="hl-num">1.0</span>); go(<span class="hl-num">0</span>);   <span class="cmt">-- new: glide the note's freq over 1 s</span>
+begin(); noteOff(<span class="hl-num">102</span>, <span class="hl-num">1</span>); go(<span class="hl-num">0</span>);</code></pre>
+
+            <p>Mono voices that the old code spread across left and right with <code>sum(2)</code>
+            (voice 0 left, voice 1 right, &hellip;) keep that with a reshape:
+            <code>voicer(8, monoVoice) reshape([-1, 2]) sum(0)</code>.</p>
+
+            <p>Note functions (<code>noteOn</code>, <code>noteOff</code>,
+            <code>noteSetParams</code>) are unchanged except that <code>noteSetParams</code> can now
+            ramp. Voices are allocated by the engine: a new note takes the voice released longest
+            ago, else steals the one started longest ago. A released voice stops costing CPU once it
+            is finished: once its body's <code>doneWhen(cond)</code> holds, or once its output has
+            been below &minus;120 dB for the voicer's third argument, <code>silence</code>, in
+            seconds (default 0.2; <code>voicer(n, body, 0.0)</code> turns this off).</p>
+
+            <h3 id="ex-rates">4.4 Rates</h3>
+
+            <p><code>Rate.event</code> is now <code>Rate.block</code>. The compiler places work at the
+            slowest rate it can (constant, once at start, per note, when inputs change, per sample)
+            without being told, so most code never names a rate.</p>
+
+            <h3 id="ex-widths">4.5 Channel counts are exact</h3>
+
+            <p>Channel counts used to round up to a power of two, and two widths combined to the
+            larger. Now a 3-element array is exactly 3 channels, and widths combine to their least
+            common multiple, each side repeating:</p>
+
+<pre><code>[<span class="hl-num">1.0</span>, <span class="hl-num">2.0</span>, <span class="hl-num">3.0</span>] vec                <span class="cmt">-- before: 4 channels; now: 3</span>
+[<span class="hl-num">1.0</span>, <span class="hl-num">2.0</span>, <span class="hl-num">3.0</span>] vec * [<span class="hl-num">1.0</span>, <span class="hl-num">2.0</span>, <span class="hl-num">3.0</span>, <span class="hl-num">4.0</span>] vec
+                                   <span class="cmt">-- before: 4 channels; now: 12 (3 and 4 each repeated)</span></code></pre>
+
+            <p>If a synth suddenly has many more channels than you expected, look for two widths
+            that do not divide each other.</p>
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="tensors">
+            <h2>5. Tensors: constants, shapes, broadcasting, axes</h2>
+
+            <p>Every signal is a <strong>tensor</strong>: per sample, a block of numbers with a
+            <strong>shape</strong> of up to 4 dimensions. A mono signal is a scalar (rank 0), a
+            stereo signal a row of 2 (rank 1), a bank of 8 stereo oscillators an 8&times;2 matrix
+            (rank 2). Channels are numbered in row-major order: the last dimension varies fastest,
+            so in an 8&times;2 matrix, channel 0 is row 0 left, channel 1 row 0 right, channel 2
+            row 1 left.</p>
+
+            <h3 id="shapes">5.1 Shapes</h3>
+
+            <p>A shape is a <code>Shape</code> value, or anywhere a shape is expected, simply its
+            dimensions as an array, outermost first. The <code>AsShape</code> constraint accepts
+            both:</p>
+
+            <table>
+                <tr><th>Written</th><th>Shape</th><th>Rank</th></tr>
+                <tr><td><code>scalarShape()</code></td><td>one value</td><td>0</td></tr>
+                <tr><td><code>[4]</code> or <code>row(4)</code></td><td>a row of 4</td><td>1</td></tr>
+                <tr><td><code>[2, 3]</code> or <code>matrix(2, 3)</code></td><td>2 rows of 3</td><td>2</td></tr>
+                <tr><td><code>[2, 3, 4]</code> or <code>cuboid(2, 3, 4)</code></td><td>2 planes of 3 rows of 4</td><td>3</td></tr>
+                <tr><td><code>[2, 2, 3, 4]</code> or <code>shape([2, 2, 3, 4])</code></td><td>rank 4, the most</td><td>4</td></tr>
+            </table>
+
+            <p>The rank is part of the shape: <code>[1, 4]</code> (one row of 4) is a different
+            shape from <code>[4]</code>, though both have 4 channels. Functions that create signals
+            take an <code>AsShape</code>; the ones that took a channel count still do, and a count of
+            1 is a scalar:</p>
+
+<pre><code><span class="hl-kw">fn</span> shapes() S {
+    <span class="hl-kw">let</span> spec = ControlSpec { lo: <span class="hl-num">0.0</span>, hi: <span class="hl-num">1.0</span>, init: <span class="hl-num">0.5</span>, warp: ControlWarp.linear };
+    <span class="hl-kw">let</span> gains = control(<span class="hl-str">"gains"</span>, spec, [<span class="hl-num">4</span>, <span class="hl-num">2</span>]);     <span class="cmt">-- a 4x2 control (8 values)</span>
+    <span class="hl-kw">let</span> noise = urand([<span class="hl-num">4</span>, <span class="hl-num">2</span>]) * <span class="hl-num">2</span> - <span class="hl-num">1</span>;              <span class="cmt">-- 4x2 independent noise</span>
+    <span class="hl-kw">let</span> half = fill([<span class="hl-num">4</span>, <span class="hl-num">2</span>], <span class="hl-num">0.5</span>);                   <span class="cmt">-- a 4x2 constant</span>
+    noise * gains * half * <span class="hl-num">0.1</span> |&amp;gt; sum(<span class="hl-num">0</span>) outlet    <span class="cmt">-- mixed to 2 channels</span>
+}
+shapes defSynthX(<span class="hl-str">"shapes"</span>) <span class="hl-kw">await</span>;</code></pre>
+
+            <p>(The music libraries have an unrelated <code>Shape</code> type for note shapes; the
+            one meant here is <code>synthdef</code>'s.)</p>
+
+            <h3 id="constants">5.2 Tensor constants</h3>
+
+            <p>A number is a scalar constant and an array is a row: <code>0.5</code>,
+            <code>[220.0, 330.0]</code> (or <code>[220.0, 330.0] vec</code>). For more dimensions,
+            nest arrays, or give a shape and the values in row-major order:</p>
+
+<pre><code>tensor([[<span class="hl-num">1.0</span>, <span class="hl-num">2.0</span>, <span class="hl-num">3.0</span>],
+        [<span class="hl-num">4.0</span>, <span class="hl-num">5.0</span>, <span class="hl-num">6.0</span>]])                         <span class="cmt">-- 2x3, rows as written</span>
+tensor([<span class="hl-num">2</span>, <span class="hl-num">3</span>], [<span class="hl-num">1.0</span>, <span class="hl-num">2.0</span>, <span class="hl-num">3.0</span>, <span class="hl-num">4.0</span>, <span class="hl-num">5.0</span>, <span class="hl-num">6.0</span>])     <span class="cmt">-- the same tensor</span>
+tensor([<span class="hl-num">4</span>, <span class="hl-num">4</span>], [<span class="hl-num">1.0</span>, <span class="hl-num">0.0</span>])                         <span class="cmt">-- values repeat to fill: 1 0 1 0 ...</span></code></pre>
+
+            <p>A gain matrix that pans three tones, one row per output side:</p>
+
+<pre><code><span class="hl-kw">fn</span> panned() S {
+    <span class="hl-kw">let</span> gains = tensor([[<span class="hl-num">1.0</span>, <span class="hl-num">0.5</span>, <span class="hl-num">0.0</span>],         <span class="cmt">-- left:  tone 0 full, 1 half, 2 off</span>
+                        [<span class="hl-num">0.0</span>, <span class="hl-num">0.5</span>, <span class="hl-num">1.0</span>]]);       <span class="cmt">-- right: tone 0 off, 1 half, 2 full</span>
+    <span class="hl-kw">let</span> tones = [<span class="hl-num">220.0</span>, <span class="hl-num">277.2</span>, <span class="hl-num">329.6</span>] sinosc;   <span class="cmt">-- a row of 3</span>
+    tones * gains * <span class="hl-num">0.05</span> |&amp;gt; sum(cols) outlet     <span class="cmt">-- 2x3, each row summed: stereo</span>
+}
+panned defSynthX(<span class="hl-str">"panned"</span>) <span class="hl-kw">await</span>;</code></pre>
+
+            <p>Nested arrays may be up to 4 deep, and every row at a level must be the same length.
+            Integer values make integer constants that take the type of whatever they combine with.</p>
+
+            <h3 id="broadcast">5.3 Broadcasting</h3>
+
+            <p>When an operation combines two signals of different shapes, the shapes are lined up
+            from their <strong>last</strong> dimensions, and each dimension of the result is the
+            <strong>least common multiple</strong> of the two sizes. Each side repeats along a
+            dimension to fill it: index <code>i</code> of the result reads index
+            <code>i mod size</code> of the input.</p>
+
+            <table>
+                <tr><th>a</th><th>b</th><th>a op b</th><th>How</th></tr>
+                <tr><td>scalar</td><td>row of 2</td><td>row of 2</td><td>the scalar applies to both</td></tr>
+                <tr><td>row of 2</td><td>row of 8</td><td>row of 8</td><td>a repeats 4 times: a0 a1 a0 a1 &hellip;</td></tr>
+                <tr><td>row of 2</td><td>row of 3</td><td>row of 6</td><td>a repeats 3 times, b twice</td></tr>
+                <tr><td>row of 3</td><td>2&times;3 matrix</td><td>2&times;3</td><td>the row applies to each row</td></tr>
+                <tr><td>2&times;1 matrix</td><td>row of 3</td><td>2&times;3</td><td>a column against a row: an outer product</td></tr>
+                <tr><td>2&times;3</td><td>4&times;3</td><td>4&times;3</td><td>the 2 rows repeat twice</td></tr>
+            </table>
+
+            <p>This differs from NumPy, which requires each dimension to be equal or 1; here any
+            sizes combine, cycling. Broadcasting only widens; mix down with the reductions below.
+            Ugens are built from these operations, so they broadcast too: a 2&times;3 frequency into
+            <code>sinosc</code> is 6 oscillators with a 2&times;3 output.</p>
+
+<pre><code><span class="cmt">-- 3 pitches x 2 detunes: a column of 3 against a row of 2 makes 3x2</span>
+<span class="hl-kw">fn</span> detunedChord() S {
+    <span class="hl-kw">let</span> pitches = tensor([[<span class="hl-num">220.0</span>], [<span class="hl-num">277.2</span>], [<span class="hl-num">329.6</span>]]);   <span class="cmt">-- 3x1</span>
+    <span class="hl-kw">let</span> detune = [<span class="hl-num">1.0</span>, <span class="hl-num">1.004</span>];                            <span class="cmt">-- row of 2</span>
+    (pitches * detune) sinosc sum(<span class="hl-num">0</span>) * <span class="hl-num">0.05</span> |&amp;gt; outlet  <span class="cmt">-- 3x2, summed over the pitches: stereo</span>
+}
+detunedChord defSynthX(<span class="hl-str">"detunedChord"</span>) <span class="hl-kw">await</span>;</code></pre>
+
+            <h3 id="axes">5.4 Axes</h3>
+
+            <p>The dimensions of a signal are its <strong>axes</strong>. They are numbered from the
+            <strong>outermost</strong>, starting at 0, as in NumPy; negative numbers count from the
+            last, so <code>-1</code> is always the last axis whatever the rank. The constants
+            <code>cols</code> (&minus;1), <code>rows</code> (&minus;2) and <code>planes</code>
+            (&minus;3) name them. For a 2&times;3&times;4 signal:</p>
+
+            <table>
+                <tr><th>Axis</th><th>Also</th><th>Size</th><th>Moves between</th></tr>
+                <tr><td><code>0</code></td><td><code>-3</code>, <code>planes</code></td><td>2</td><td>planes</td></tr>
+                <tr><td><code>1</code></td><td><code>-2</code>, <code>rows</code></td><td>3</td><td>rows in a plane</td></tr>
+                <tr><td><code>2</code></td><td><code>-1</code>, <code>cols</code></td><td>4</td><td>elements in a row</td></tr>
+            </table>
+
+            <p>A shape operation works along one axis, the last by default, so on a row it simply
+            works on the channels in order. An axis the signal does not have is a compile error.</p>
+
+            <h3 id="shapeops">5.5 Shape operations</h3>
+
+            <table>
+                <tr><th>Operation</th><th>Result, for x of shape 2&times;3&times;4</th></tr>
+                <tr><td><code>x take(2, rows)</code></td><td>2&times;2&times;4: the first 2 rows of each plane (also <code>drop</code>, <code>stride</code>, <code>stutter</code>, <code>ncyc</code>, <code>slice</code>)</td></tr>
+                <tr><td><code>x reverse(0)</code></td><td>2&times;3&times;4, the planes swapped (also <code>rotate</code>)</td></tr>
+                <tr><td><code>x sum(cols)</code></td><td>2&times;3: each row summed; the axis goes away (also <code>product</code>, <code>minOf</code>, <code>maxOf</code>, <code>reduce</code>)</td></tr>
+                <tr><td><code>x sum</code></td><td>scalar: everything summed</td></tr>
+                <tr><td><code>x scan(BinaryOp.add, cols)</code></td><td>2&times;3&times;4: running sums along each row</td></tr>
+                <tr><td><code>x transpose</code></td><td>4&times;3&times;2: axes reversed (<code>transpose(perm)</code> permutes them)</td></tr>
+                <tr><td><code>x reshape([6, -1])</code></td><td>6&times;4: the same 24 channels in a new shape</td></tr>
+                <tr><td><code>[x, y] join(cols)</code></td><td>2&times;3&times;8 when y is 2&times;3&times;4: concatenated along an axis</td></tr>
+                <tr><td><code>[x, y] stack</code></td><td>2&times;2&times;3&times;4: a new outer axis</td></tr>
+                <tr><td><code>x at(1, rows)</code></td><td>2&times;4: row 1 of each plane (an index row picks several)</td></tr>
+                <tr><td><code>x put(0, z, rows)</code></td><td>2&times;3&times;4 with row 0 of each plane replaced by z</td></tr>
+            </table>
+
+            <p>The rearranging operations compute nothing: the compiler reads the source in the new
+            order. Result shapes and shape errors are found when the synth is compiled. The
+            <a href="Writing_SynthDefs.html#vecops">SynthDef guide &sect;5</a> has every operation
+            and its arguments.</p>
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="new">
+            <h2>6. New things to know about</h2>
+            <ul>
+                <li><strong>Feedback between nodes.</strong> Connecting outputs into inputs so they form
+                a loop works as before: the loop's nodes run a sample at a time, with a one-sample
+                delay. <code>feedbackMode(0, FeedbackMode.feedbackBlock)</code> makes silo 0 run loops a
+                block at a time instead, with a one-block delay, which costs much less.</li>
+                <li><strong>Exact recurrences.</strong> Filters and other feedback inside a synth may run
+                in block forms that round differently from a sample-by-sample loop (by about 2&times;10<sup>&minus;5</sup>
+                relative in <code>f32</code>). For a reference render, compile with
+                <code>defSynthXStrict(f, "name")</code>, or set <code>TZPL_STRICT_RECURRENCES=1</code>
+                for every synth.</li>
+                <li><strong>Block size.</strong> 64 samples by default; <code>--block-size n</code> or
+                <code>blockSize = n</code> in the project config (4 to 1024). Timing is sample-accurate at
+                any size.</li>
+                <li><strong>OSC and NATS</strong> carry the new commands: <code>/engine/setInput</code>,
+                <code>/engine/setInputAt</code>, <code>/engine/setInputRamp</code>,
+                <code>/engine/setInputX</code>, <code>/engine/impulseInput</code> and their NATS
+                <code>engine.*</code> forms (<a href="FFI_Guide.html">FFI guide</a>).
+                <code>/engine/setControl</code> is gone.</li>
+            </ul>
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+
+        <!-- ============================================================ -->
+        <div class="section" id="plugins">
+            <h2>7. For authors of C plugins</h2>
+
+            <p>Plugins built by hand against <code>shared/tzpl_plugin_abi.h</code> must be ported to
+            ABI v3 and export <code>tzpl_abi_version = 3</code>; the engine refuses older ones.</p>
+            <ul>
+                <li><code>process(synth, offset, n)</code> computes samples <code>offset</code> to
+                <code>offset + n - 1</code> of the block. <code>n</code> may be anything from 1 to the
+                block size: the engine splits a block at events, and a feedback loop calls one sample
+                at a time.</li>
+                <li>Every port channel is its own buffer (<code>ins[k].chans[c]</code>,
+                <code>outs[k].chans[c]</code>). Each input channel also has an
+                <code>isConst</code> flag (one value for the whole block) and a <code>version</code>
+                that changes when its value or connection does, so work that depends only on inputs
+                can be skipped.</li>
+                <li>Port types have a <code>tzpl_Shape</code> (dims and rank) and an element type.
+                Controls are inputs with a spec; there is no control table.</li>
+                <li>A voiced plugin has a <code>notes</code> input of shape
+                <code>{maxVoices, 1 + params}</code> (column 0 is the gate) and a
+                <code>resetVoice(synth, voice, offset)</code> function; the engine allocates voices.</li>
+            </ul>
+            <p><code>engine/Architecture.md</code> describes the engine in full.</p>
+            <a href="#top" class="back-to-top">&uarr; Back to top</a>
+        </div>
+    </div>
+
+<script>
+(function() {
+  var btn = document.getElementById('theme-toggle');
+  var icon = document.getElementById('theme-icon');
+  function update() {
+    var isLight = document.documentElement.classList.contains('light');
+    icon.innerHTML = isLight ? '☀' : '☾';
+  }
+  update();
+  btn.addEventListener('click', function() {
+    document.documentElement.classList.toggle('light');
+    localStorage.setItem('tzpl-docs-theme',
+      document.documentElement.classList.contains('light') ? 'light' : 'dark');
+    update();
+  });
+})();
+</script>
+</body>
+</html>

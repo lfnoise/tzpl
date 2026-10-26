@@ -155,10 +155,12 @@ fn quantClock(clock Int, silo Int = 0) Void {
 -- Creating proxies
 
 -- A silent placeholder proxy: no def, no nodes yet. Define it with `<-`.
--- A proxy carries one signal shape: `chans` channels (a row), or any Shape.
+-- A proxy carries one signal shape: `chans` channels (a row), or any shape
+-- (a Shape or its dims, as ndef([2, 2])).
 fn ndef(chans Int = 2, silo Int = 0) Proxy = ndef(row(chans max(1)), silo);
 
-fn ndef(sh Shape, silo Int = 0) Proxy {
+fn ndef(a AsShape, silo Int = 0) Proxy {
+    let sh = a asShape;
     var params [String: Float] = [:];
     let st = &ProxyState {
         shape: sh, anchor: 0, monitor: 0, src: 0,

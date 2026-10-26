@@ -319,12 +319,12 @@
             <h2>Table of Contents</h2>
             <ul>
                 <li><a href="#model">1. How SynthDefs Work</a></li>
-                <li><a href="#types">2. The Signal Type: Rate, Element Type, Channels</a>
+                <li><a href="#types">2. The Signal Type: Rate, Element Type, Shape</a>
                     <ul>
                         <li><a href="#rates">2.1 Signal rates</a></li>
                         <li><a href="#numtypes">2.2 Element types</a></li>
-                        <li><a href="#chans">2.3 Channel counts</a></li>
-                        <li><a href="#broadcast">2.4 Channel broadcasting</a></li>
+                        <li><a href="#chans">2.3 Shapes: signals are tensors</a></li>
+                        <li><a href="#broadcast">2.4 Broadcasting</a></li>
                     </ul></li>
                 <li><a href="#constants">3. Constants and Conversion to Signals</a></li>
                 <li><a href="#operators">4. Signal Operators</a></li>
@@ -429,7 +429,7 @@ beep defSynthX(<span class="hl-str">"beep"</span>) await;      <span class="cmt"
 
         <!-- ============================================================ -->
         <div class="section" id="types">
-            <h2>2. The Signal Type: Rate, Element Type, Channels</h2>
+            <h2>2. The Signal Type: Rate, Element Type, Shape</h2>
 
             <p>Every expression in the graph has a <strong>signal type</strong> with three components,
             inferred by the compiler &mdash; you rarely write any of them explicitly:</p>
@@ -558,67 +558,140 @@ beep defSynthX(<span class="hl-str">"beep"</span>) await;      <span class="cmt"
 <span class="cmt">-- Integer arithmetic: force a counter to integer before %.</span>
 c &lt;- (c1 + t) i32 % n;</code></pre>
 
-            <h3 id="chans">2.3 Channel counts</h3>
+            <h3 id="chans">2.3 Shapes: signals are tensors</h3>
 
-            <p>A signal carries <code>chans</code> parallel values per sample &mdash; its channels. A
-            plain oscillator is 1-channel; <code>[<span class="hl-num">330.0</span>, <span class="hl-num">331.0</span>] sinosc</code>
-            is a 2-channel signal (two sines computed in lockstep). Multichannel expansion is how you get
-            stereo, oscillator banks, and SIMD-friendly parallelism.</p>
+            <p>Every signal is a <strong>tensor</strong>: at each sample it is a block of values with
+            a <strong>shape</strong> of up to 4 dimensions. A plain oscillator is a scalar;
+            <code>[330.0, 331.0] sinosc</code> is a row of 2 (two sines computed in lockstep); a bank
+            of 8 stereo oscillators is an 8&times;2 matrix. The values are the signal's
+            <strong>channels</strong>, numbered in row-major order: the last dimension varies
+            fastest. In an 8&times;2 matrix, channel 0 is row 0's first value, channel 1 row 0's
+            second, channel 2 row 1's first, and so on. When a signal reaches an output port its
+            channels are the port's channels, in that order.</p>
 
-            <p>Channel counts are exact: a 3-element vector is a 3-channel signal. A signal may also
-            have a <strong>shape</strong> of up to 4 dimensions (a <code>Shape</code>, row-major, the
-            last dimension varying fastest); channel <code>c</code> is the row-major flattening, and a
-            plain channel count is a 1-dimensional shape. <code>shape([<span class="hl-num">2</span>, <span class="hl-num">3</span>])</code>
-            (or <code>matrix(<span class="hl-num">2</span>, <span class="hl-num">3</span>)</code>) is a 2&times;3
-            shape of 6 channels. The functions that create multichannel signals &mdash;
-            <code>inlet</code>, <code>control</code>, <code>fill</code>, &hellip; &mdash; take either an
-            <code>Int</code> channel count or a <code>Shape</code>; a count of 1 is a scalar.</p>
+            <p>A shape is written as a <code>Shape</code> value or, anywhere a shape is expected, as
+            its dimensions, outermost first. The constraint <code>AsShape</code>
+            (<code>Shape | [Int]</code>) accepts both, and <code>asShape</code> converts:</p>
 
-            <p>A shape has a <strong>rank</strong>, its number of dimensions: a scalar is rank 0,
-            <code>row(n)</code> rank 1, <code>matrix(r, c)</code> rank 2, <code>cuboid(p, r, c)</code>
-            rank 3. The rank is part of the shape, so <code>matrix(<span class="hl-num">1</span>, n)</code> (one row) and
-            <code>row(n)</code> have the same channels but are different shapes. The dimensions are the
-            signal's <strong>axes</strong>, numbered from the outermost, starting at 0, as in NumPy;
-            negative numbers count from the last axis, so <code>-<span class="hl-num">1</span></code> is always the
-            columns. The constants <code>cols</code> (&minus;1), <code>rows</code> (&minus;2) and
-            <code>planes</code> (&minus;3) name them at any rank. The shape operations of
-            <a href="#vecops">&sect;5</a> work along an axis.</p>
+            <table>
+                <tr><th>Written</th><th>Means</th><th>Rank</th><th>Channels</th></tr>
+                <tr><td><code>scalarShape()</code></td><td>one value</td><td>0</td><td>1</td></tr>
+                <tr><td><code>[4]</code>, <code>row(4)</code></td><td>a row of 4</td><td>1</td><td>4</td></tr>
+                <tr><td><code>[2, 3]</code>, <code>matrix(2, 3)</code></td><td>2 rows of 3</td><td>2</td><td>6</td></tr>
+                <tr><td><code>[2, 3, 4]</code>, <code>cuboid(2, 3, 4)</code></td><td>2 planes, each 3 rows of 4</td><td>3</td><td>24</td></tr>
+                <tr><td><code>[2, 2, 3, 4]</code>, <code>shape([2, 2, 3, 4])</code></td><td>rank 4, the most</td><td>4</td><td>48</td></tr>
+            </table>
 
-            <h3 id="broadcast">2.4 Channel broadcasting</h3>
+            <p>The <strong>rank</strong> (the number of dimensions) is part of the shape:
+            <code>[1, 4]</code>, one row of 4, has the same 4 channels as <code>[4]</code> but is a
+            different shape, with two axes instead of one. Sizes are exact: a 3-element array is 3
+            channels.</p>
 
-            <p>When a binary operation combines signals of different shapes, each dimension of the
-            result is the <strong>least common multiple</strong> of the inputs' sizes in that
-            dimension, and each input is <strong>repeated cyclically</strong> to fill it: along each
-            dimension, index <code>i</code> of the result reads index <code>i mod size</code> of the
-            input. A 2-channel signal against an 8-channel one repeats its pair four times; a
-            2-channel signal against a 3-channel one gives 6 channels, each input cycling. A
-            1&times;3 row against a 2&times;1 column gives a 2&times;3 matrix. Shapes of different
-            ranks line up from their last axes, so a row of 3 against a 2&times;3 matrix applies to
-            each of its rows.</p>
+            <p>Functions that make signals take an <code>AsShape</code>: <code>tensor</code>,
+            <code>fill</code>, <code>inlet</code>, <code>control</code>, <code>urand</code>,
+            <code>birand</code>, <code>rand64</code>, and <code>reshape</code>. Those that took a
+            channel count still do, and a count is a row (a count of 1 is a scalar):</p>
 
-<pre><code><span class="cmt">-- scalar against stereo: the scalar applies to both channels</span>
-[<span class="hl-num">330.0</span>, <span class="hl-num">331.0</span>] sinosc * <span class="hl-num">0.2</span>              <span class="cmt">-- 2 chans</span>
+<pre><code><span class="hl-kw">fn</span> gainsAndNoise() S {
+    <span class="hl-kw">let</span> spec = ControlSpec { lo: <span class="hl-num">0.0</span>, hi: <span class="hl-num">1.0</span>, init: <span class="hl-num">0.25</span>, warp: ControlWarp.linear };
+    <span class="hl-kw">let</span> gains = control(<span class="hl-str">"gains"</span>, spec, [<span class="hl-num">4</span>, <span class="hl-num">2</span>]);   <span class="cmt">-- a 4x2 control: 8 values</span>
+    <span class="hl-kw">let</span> noise = birand([<span class="hl-num">4</span>, <span class="hl-num">2</span>]);                   <span class="cmt">-- 4x2 independent noise</span>
+    <span class="hl-kw">let</span> level = control(<span class="hl-str">"level"</span>, spec, <span class="hl-num">2</span>);        <span class="cmt">-- a row of 2 (a count)</span>
+    (noise * gains) sum(<span class="hl-num">0</span>) * level * <span class="hl-num">0.1</span> |&gt; outlet  <span class="cmt">-- summed over the 4 rows: 2 channels</span>
+}
+gainsAndNoise defSynthX(<span class="hl-str">"gainsAndNoise"</span>) <span class="hl-kw">await</span>;</code></pre>
 
-<span class="cmt">-- stereo against 8 channels: the [-1, 1] detune alternates across all 8</span>
-<span class="hl-kw">let</span> detune = [-<span class="hl-num">1</span>, <span class="hl-num">1</span>] vec;                <span class="cmt">-- 2 chans</span>
-<span class="hl-kw">let</span> freqs = exprand(<span class="hl-num">100</span>, <span class="hl-num">600</span>, <span class="hl-num">8</span>, Rate.init) + detune;   <span class="cmt">-- 8 chans</span>
+            <h4 id="axes">Axes</h4>
 
-<span class="cmt">-- unary ops and ugens are per-channel: this filters both channels</span>
-[<span class="hl-num">200</span>, <span class="hl-num">300</span>] smoothSaw(<span class="hl-num">4</span>) lpf(<span class="hl-num">1200</span>)</code></pre>
+            <p>The dimensions of a signal are its <strong>axes</strong>, numbered from the
+            <strong>outermost</strong>, starting at 0, as in NumPy. Negative numbers count from the
+            last axis, so <code>-1</code> is always the last whatever the rank, and the constants
+            <code>cols</code> (&minus;1), <code>rows</code> (&minus;2) and <code>planes</code>
+            (&minus;3) name them. For a signal of shape 2&times;3&times;4:</p>
 
-            <p>Broadcasting composes with every ugen in the library, because ugens are built from these
-            same per-channel operators &mdash; feeding a 2-channel frequency into <code>sinosc</code>
-            gives a stereo oscillator whose internal phase accumulator is itself 2-channel. Delays
-            declared inside a ugen widen the same way, so <code>[<span class="hl-num">0.2</span>, <span class="hl-num">0.3</span>] vec</code>
-            of delay times gives two independent delay lines.</p>
+            <table>
+                <tr><th>Axis</th><th>Same axis</th><th>Size</th><th>Steps between</th></tr>
+                <tr><td><code>0</code></td><td><code>-3</code>, <code>planes</code></td><td>2</td><td>the two planes</td></tr>
+                <tr><td><code>1</code></td><td><code>-2</code>, <code>rows</code></td><td>3</td><td>the rows of a plane</td></tr>
+                <tr><td><code>2</code></td><td><code>-1</code>, <code>cols</code></td><td>4</td><td>the values of a row (adjacent channels)</td></tr>
+            </table>
+
+            <p>The shape operations of <a href="#vecops">&sect;5</a> work along one axis, the last
+            by default, so on a row they act on the channels in order. A scalar counts as a row of
+            one. An axis the signal does not have is a compile error. Every integer argument of a
+            shape operation is an axis, never a channel count: to fold a row of 16 into 8 pairs,
+            give it the dimensions first, <code>reshape([8, 2])</code>, then work along the axis you
+            mean.</p>
+
+            <p>A worked example, with the values of a 2&times;3 tensor <code>m</code> =
+            <code>[[1, 2, 3], [4, 5, 6]]</code>:</p>
+
+            <table>
+                <tr><th>Expression</th><th>Shape</th><th>Values</th></tr>
+                <tr><td><code>m sum(0)</code> (over the rows)</td><td>3</td><td><code>[5, 7, 9]</code></td></tr>
+                <tr><td><code>m sum(cols)</code> (along each row)</td><td>2</td><td><code>[6, 15]</code></td></tr>
+                <tr><td><code>m sum</code></td><td>scalar</td><td><code>21</code></td></tr>
+                <tr><td><code>m transpose</code></td><td>3&times;2</td><td><code>[[1, 4], [2, 5], [3, 6]]</code></td></tr>
+                <tr><td><code>m reshape([3, 2])</code></td><td>3&times;2</td><td><code>[[1, 2], [3, 4], [5, 6]]</code> (same channel order)</td></tr>
+                <tr><td><code>m reverse(cols)</code></td><td>2&times;3</td><td><code>[[3, 2, 1], [6, 5, 4]]</code></td></tr>
+                <tr><td><code>m reverse(0)</code></td><td>2&times;3</td><td><code>[[4, 5, 6], [1, 2, 3]]</code></td></tr>
+                <tr><td><code>m at(1, rows)</code></td><td>3</td><td><code>[4, 5, 6]</code></td></tr>
+                <tr><td><code>m at(2, cols)</code></td><td>2</td><td><code>[3, 6]</code></td></tr>
+                <tr><td><code>m scan(BinaryOp.add, cols)</code></td><td>2&times;3</td><td><code>[[1, 3, 6], [4, 9, 15]]</code></td></tr>
+            </table>
+
+            <p>Note the difference between <code>transpose</code> and <code>reshape</code>: a
+            transpose moves values to new positions; a reshape keeps the channels in order and only
+            reads them with new dimensions.</p>
+
+            <h3 id="broadcast">2.4 Broadcasting</h3>
+
+            <p>When an operation combines signals of different shapes, the shapes are lined up from
+            their <strong>last</strong> dimensions (a missing leading dimension counts as 1), and
+            each dimension of the result is the <strong>least common multiple</strong> of the two
+            sizes. Each operand repeats along a dimension to fill it: index <code>i</code> of the
+            result reads index <code>i mod size</code> of the operand. The rank of the result is
+            the larger rank.</p>
+
+            <table>
+                <tr><th>a</th><th>b</th><th>Result</th><th>How</th></tr>
+                <tr><td>scalar</td><td>row of 2</td><td>row of 2</td><td>the scalar applies to both</td></tr>
+                <tr><td>row of 2</td><td>row of 8</td><td>row of 8</td><td><code>a</code> repeats 4 times: a0 a1 a0 a1 &hellip;</td></tr>
+                <tr><td>row of 2</td><td>row of 3</td><td>row of 6</td><td><code>a</code> repeats 3 times, <code>b</code> twice</td></tr>
+                <tr><td>row of 3</td><td>2&times;3</td><td>2&times;3</td><td>the row applies to each row of <code>b</code></td></tr>
+                <tr><td>2&times;1</td><td>row of 3</td><td>2&times;3</td><td>a column against a row: every pairing (an outer product)</td></tr>
+                <tr><td>2&times;3</td><td>4&times;3</td><td>4&times;3</td><td>the 2 rows of <code>a</code> repeat twice</td></tr>
+                <tr><td>row of 4</td><td>2&times;2&times;4</td><td>2&times;2&times;4</td><td>the row applies to every row of every plane</td></tr>
+            </table>
+
+            <p>Unlike NumPy, which requires each pair of sizes to be equal or 1, any sizes combine
+            here, cycling. That is convenient (a stereo detune against 8 oscillators alternates
+            across them) but it can surprise: a 3-channel and a 4-channel signal make 12 channels.
+            If a synth has far more channels than expected, look for two sizes that do not divide
+            each other.</p>
+
+<pre><code><span class="hl-kw">fn</span> broadcasts() S {
+    <span class="hl-kw">let</span> pitches = tensor([[<span class="hl-num">220.0</span>], [<span class="hl-num">277.2</span>], [<span class="hl-num">329.6</span>]]);   <span class="cmt">-- 3x1: a column</span>
+    <span class="hl-kw">let</span> detune = [<span class="hl-num">1.0</span>, <span class="hl-num">1.004</span>];                            <span class="cmt">-- a row of 2</span>
+    <span class="hl-kw">let</span> osc = (pitches * detune) sinosc;                  <span class="cmt">-- 3x2: each pitch, each detune</span>
+    <span class="hl-kw">let</span> pan = [<span class="hl-num">0.8</span>, <span class="hl-num">0.2</span>];                                 <span class="cmt">-- applies to each row</span>
+    osc * pan * <span class="hl-num">0.05</span> |&gt; sum(<span class="hl-num">0</span>) outlet                    <span class="cmt">-- summed over the pitches: stereo</span>
+}
+broadcasts defSynthX(<span class="hl-str">"broadcasts"</span>) <span class="hl-kw">await</span>;</code></pre>
+
+            <p>Unary operations and ugens are per channel, and the ugens are built from these same
+            operators, so they broadcast too: feeding a 2&times;3 frequency into
+            <code>sinosc</code> gives 6 oscillators with a 2&times;3 output, its internal phase
+            accumulator itself 2&times;3. Delays declared inside a ugen widen the same way, so
+            <code>[0.2, 0.3]</code> as delay times gives two independent delay lines.</p>
 
             <div class="note">
-                <strong>Reducing width back down.</strong> Broadcasting only ever widens. To mix
-                channels down, use the reductions in <a href="#vecops">&sect;5</a>:
-                <code>sum</code> mixes everything to 1 channel, and <code>sum(axis)</code> mixes along
-                one axis. Give a bank the shape of its output to mix it to stereo: a bank of
-                n&times;2 oscillators, <code>sum(<span class="hl-num">0</span>)</code>, is a stereo pair, and so is a
-                voicer of stereo voices (voices&times;2).
+                <strong>Reducing width back down.</strong> Broadcasting only widens. To mix down, use
+                the reductions in <a href="#vecops">&sect;5</a>: <code>sum</code> mixes everything to
+                one channel, and <code>sum(axis)</code> mixes along one axis, which goes away. Give a
+                bank the shape of its output to mix it to stereo: n&times;2 oscillators,
+                <code>sum(0)</code>, are a stereo pair, and so is a voicer of stereo voices
+                (voices&times;2, <a href="#voicer">&sect;12</a>).
             </div>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
@@ -639,6 +712,9 @@ c &lt;- (c1 + t) i32 % n;</code></pre>
                     <td>Scalars or arrays of them (arrays become multichannel constants)</td></tr>
                 <tr><td><code>AsSignal</code></td><td><code>SignalExpr | AsConstantSignal</code></td>
                     <td>Anything usable as a signal input</td></tr>
+                <tr><td><code>AsShape</code></td><td><code>Shape | [Int]</code></td>
+                    <td>A shape, or its dimensions outermost first (<a href="#chans">&sect;2.3</a>);
+                    <code>asShape</code> converts</td></tr>
             </table>
 
             <p>All the operators in <a href="#operators">&sect;4</a> have overloads accepting
@@ -652,9 +728,15 @@ c &lt;- (c1 + t) i32 % n;</code></pre>
                 <tr><th>Function</th><th>Description</th></tr>
                 <tr><td><code>asSignal(x)</code></td><td>Convert a scalar, array, or signal to <code>S</code>. Identity on signals.</td></tr>
                 <tr><td><code>scalar(x)</code></td><td>1-channel constant from a <code>Bool</code>/<code>Int</code>/<code>Fraction</code>/<code>Float</code>.</td></tr>
-                <tr><td><code>vec(v)</code></td><td>Multichannel constant from an array; width = <code>v length</code>.</td></tr>
-                <tr><td><code>fill(chans, x)</code><br><code>fill(shape, x)</code></td><td>Constant with <code>x</code> replicated across <code>chans</code> channels, or across a <code>Shape</code>.</td></tr>
+                <tr><td><code>vec(v)</code></td><td>A row constant from an array; width = <code>v length</code>. A plain array used as a signal is the same.</td></tr>
+                <tr><td><code>fill(chans, x)</code><br><code>fill(shape, x)</code></td><td>Constant with <code>x</code> in every channel of a row of <code>chans</code>, or of any shape (an <code>AsShape</code>: <code>fill([2, 3], 0.5)</code>).</td></tr>
+                <tr><td><code>tensor(shape, values)</code></td><td>A constant of any shape, the values in row-major order (the last dimension fastest), repeating to fill: <code>tensor([2, 3], [1.0, 2.0, 3.0, 4.0, 5.0, 6.0])</code>; <code>tensor([4, 4], [1.0, 0.0])</code> alternates 1 and 0.</td></tr>
+                <tr><td><code>tensor(nested)</code></td><td>A constant written as nested arrays, whose nesting is the shape: <code>tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])</code> is 2&times;3. Up to 4 levels; every row at a level must have the same length.</td></tr>
             </table>
+
+            <p>Integer values make integer constants, which take the element type of whatever they
+            combine with (<a href="#numtypes">&sect;2.2</a>). A constant matrix is handy for
+            routing: one row per output, one column per source.</p>
 
             <p><code>Fraction</code> literals (e.g. <code>3/2</code> in contexts where the language
             keeps them exact) convert via <code>toFloat</code>; integer-valued constants stay

@@ -138,6 +138,16 @@ fn pow2Compat(n Int) Int = (pow2CompatOn() && n > 0) ? n bitCeil : n;
 fn matrix(rows Int, cols Int) Shape = shape([rows, cols]);
 fn cuboid(planes Int, rows Int, cols Int) Shape = shape([planes, rows, cols]);
 
+-- Anything that names a shape: a Shape, or its dimensions outermost first
+-- ([2, 3] is 2 rows of 3; [] is a scalar). Every function taking a shape
+-- takes an AsShape: tensor([2, 3], values), control("gains", spec, [4, 2]).
+constraint AsShape = Shape | [Int];
+fn asShape(s Shape) Shape = s;
+fn asShape(dims [Int]) Shape = shape(dims);
+-- The channel count of a shape, for the AsShape templates (a caller's local
+-- named `chans` would capture the name inside them).
+fn _shapeChans(s Shape) Int = s chans;
+
 fn chans(s Shape) Int = s.dims[0] * s.dims[1] * s.dims[2] * s.dims[3];
 
 -- The dimensions in use, outermost first ([] for a scalar).
@@ -405,14 +415,17 @@ fn fill(chans Int, x Int) S = fill(chansShape(chans max(1)), x);
 fn fill(chans Int, x Fraction) S = fill(chansShape(chans max(1)), x);
 fn fill(chans Int, x Float) S = fill(chansShape(chans max(1)), x);
 
-fn fill(sh Shape, x Int) S {
-	SignalExprKind.int(x repeat(sh chans), ANY_NUM, sh) _newSignalExpr
+fn fill(a AsShape, x Int) S {
+	let sh = a asShape;
+	SignalExprKind.int(x repeat(_shapeChans(sh)), ANY_NUM, sh) _newSignalExpr
 }
-fn fill(sh Shape, x Fraction) S {
-	SignalExprKind.float(x toFloat repeat(sh chans), ANY_NUM, sh) _newSignalExpr
+fn fill(a AsShape, x Fraction) S {
+	let sh = a asShape;
+	SignalExprKind.float(x toFloat repeat(_shapeChans(sh)), ANY_NUM, sh) _newSignalExpr
 }
-fn fill(sh Shape, x Float) S {
-	SignalExprKind.float(x repeat(sh chans), x numType, sh) _newSignalExpr
+fn fill(a AsShape, x Float) S {
+	let sh = a asShape;
+	SignalExprKind.float(x repeat(_shapeChans(sh)), x numType, sh) _newSignalExpr
 }
 
 fn vec(v [Bool]) S {
@@ -430,18 +443,65 @@ fn vec(v [Float]) S {
 }
 
 -- A constant tensor of the given shape; values fill it cyclically in
--- row-major order.
-fn tensor(sh Shape, v [Int]) S {
+-- row-major order (the last dimension varies fastest).
+fn tensor(a AsShape, v [Int]) S {
+	let sh = a asShape;
 	var out [Int] = [];
 	var i = 0;
-	while (i < sh chans) { out push!(v[i % v length]); i = i + 1; }
+	while (i < _shapeChans(sh)) { out push!(v[i % v length]); i = i + 1; }
 	SignalExprKind.int(out, ANY_NUM, sh) _newSignalExpr
 }
-fn tensor(sh Shape, v [Float]) S {
+fn tensor(a AsShape, v [Float]) S {
+	let sh = a asShape;
 	var out [Float] = [];
 	var i = 0;
-	while (i < sh chans) { out push!(v[i % v length]); i = i + 1; }
+	while (i < _shapeChans(sh)) { out push!(v[i % v length]); i = i + 1; }
 	SignalExprKind.float(out, ANY_FLOAT, sh) _newSignalExpr
+}
+
+-- A constant tensor written as nested arrays: the nesting is the shape.
+-- tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]) is 2 rows of 3. Every row
+-- at a level must have the same length.
+fn tensor(v [[Float]]) S = tensor(_nestDims2(v), _flat2(v));
+fn tensor(v [[[Float]]]) S = tensor(_nestDims3(v), _flat3(v));
+fn tensor(v [[[[Float]]]]) S = tensor(_nestDims4(v), _flat4(v));
+fn tensor(v [[Int]]) S = tensor(_nestDims2(v), _flat2(v));
+fn tensor(v [[[Int]]]) S = tensor(_nestDims3(v), _flat3(v));
+fn tensor(v [[[[Int]]]]) S = tensor(_nestDims4(v), _flat4(v));
+
+fn _sameLengths<T>(rows [[T]], what String) Int {
+	if (rows isEmpty) { panic("tensor: an empty level in a nested array"); }
+	let n = rows[0] length;
+	for (r : rows) {
+		if (r length != n) { panic("tensor: ragged nested array (%^ rows of different lengths)" fmt(what)); }
+	}
+	n
+}
+fn _nestDims2<T>(v [[T]]) [Int] = [v length, _sameLengths(v, "inner")];
+fn _nestDims3<T>(v [[[T]]]) [Int] {
+	let inner = _nestDims2(v[0]);
+	for (m : v) { if (_nestDims2(m) != inner) { panic("tensor: ragged nested array (planes of different shapes)"); } }
+	[v length] $ inner
+}
+fn _nestDims4<T>(v [[[[T]]]]) [Int] {
+	let inner = _nestDims3(v[0]);
+	for (c : v) { if (_nestDims3(c) != inner) { panic("tensor: ragged nested array (cuboids of different shapes)"); } }
+	[v length] $ inner
+}
+fn _flat2<T>(v [[T]]) [T] {
+	var out [T] = [];
+	for (r : v) { out append!(r); }
+	out
+}
+fn _flat3<T>(v [[[T]]]) [T] {
+	var out [T] = [];
+	for (m : v) { out append!(_flat2(m)); }
+	out
+}
+fn _flat4<T>(v [[[[T]]]]) [T] {
+	var out [T] = [];
+	for (c : v) { out append!(_flat3(c)); }
+	out
 }
 
 fn asSignal(x S) S = x;
@@ -707,8 +767,8 @@ fn sharedIn(slot Int, rate Rate = Rate.audio) S {
 -- the engine at run time (a connection, or a value set on it).
 fn inlet(typ NumType, chans Int = 1, name String = "in") S = inlet(typ, chansShape(chans max(1)), name);
 
-fn inlet(typ NumType, sh Shape, name String) S {
-    SignalExprKind.inlet(typ, sh, name, Option<InletSpec>.none) _newSignalExpr
+fn inlet(typ NumType, sh AsShape, name String) S {
+    SignalExprKind.inlet(typ, sh asShape, name, Option<InletSpec>.none) _newSignalExpr
 }
 
 fn outlet(a S, name String = "out") S {
@@ -725,8 +785,8 @@ fn _specInlet(name String, spec ControlSpec, kind ControlKind, sh Shape) S {
 
 fn control(name String, spec ControlSpec, chans Int = 1) S =
     _specInlet(name, spec, ControlKind.continuous, chansShape(chans max(1)));
-fn control(name String, spec ControlSpec, sh Shape) S =
-    _specInlet(name, spec, ControlKind.continuous, sh);
+fn control(name String, spec ControlSpec, sh AsShape) S =
+    _specInlet(name, spec, ControlKind.continuous, sh asShape);
 
 -- Momentary control (0..1, init 0): set with an impulse, so a nonzero value
 -- lasts one sample (retrigger an envelope, reset a phase). UIs render a button.
@@ -811,14 +871,14 @@ fn irand(lo Int, hi Int, chans Int = 1, rate Rate = Rate.audio) S =
 fn urand(chans Int = 1, rate Rate = Rate.audio) S = urand(chansShape(chans max(1)), rate);
 fn birand(chans Int = 1, rate Rate = Rate.audio) S = birand(chansShape(chans max(1)), rate);
 fn rand64(chans Int = 1, rate Rate = Rate.audio) S = rand64(chansShape(chans max(1)), rate);
-fn urand(sh Shape, rate Rate) S {
-    SignalExprKind.random(RandOp.unipolar, rate, sh) _newSignalExpr
+fn urand(sh AsShape, rate Rate = Rate.audio) S {
+    SignalExprKind.random(RandOp.unipolar, rate, sh asShape) _newSignalExpr
 }
-fn birand(sh Shape, rate Rate) S {
-    SignalExprKind.random(RandOp.bipolar, rate, sh) _newSignalExpr
+fn birand(sh AsShape, rate Rate = Rate.audio) S {
+    SignalExprKind.random(RandOp.bipolar, rate, sh asShape) _newSignalExpr
 }
-fn rand64(sh Shape, rate Rate) S {
-    SignalExprKind.random(RandOp.bits, rate, sh) _newSignalExpr
+fn rand64(sh AsShape, rate Rate = Rate.audio) S {
+    SignalExprKind.random(RandOp.bits, rate, sh asShape) _newSignalExpr
 }
 
 ---------------------------------------------------------------------------

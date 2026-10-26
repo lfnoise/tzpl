@@ -238,6 +238,20 @@ axisCases("r2", x34, d34);
 axisCases("r3", x234, d234);
 
 add("sum_all", fn() S { live(x234, d234) sum }, (iota(1, 300.0), [Int]()));
+
+-- Constants and shapes: nested-array literals and AsShape dims ([Int]) give
+-- the same tensors as tensor(Shape, flat values).
+fn one() S = control("one", lspec(0.0, 2.0, 1.0)) * (1.0 + sinosc(0.0));
+add("lit_nest2", fn() S { tensor([[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0], [9.0, 10.0, 11.0, 12.0]]) * one() },
+	(x34, d34));
+add("lit_nest3", fn() S { tensor([[[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]], [[7.0, 8.0], [9.0, 10.0], [11.0, 12.0]]]) * one() },
+	(iota(12, 1.0), [2, 3, 2]));
+add("lit_nest2i", fn() S { tensor([[1, 2], [3, 4]]) * one() }, (iota(4, 1.0), [2, 2]));
+add("lit_dims", fn() S { tensor([3, 4], x34) * one() }, (x34, d34));
+add("lit_cyclic", fn() S { tensor([2, 3], [1.0, 2.0]) * one() }, ([1.0, 2.0, 1.0, 2.0, 1.0, 2.0], [2, 3]));
+add("fill_dims", fn() S { fill([2, 2], 0.5) * one() }, ([0.5, 0.5, 0.5, 0.5], [2, 2]));
+add("ctl_dims", fn() S { control("g", lspec(0.0, 1.0, 0.25), [2, 3]) * one() },
+	([0.25, 0.25, 0.25, 0.25, 0.25, 0.25], [2, 3]));
 add("transpose_r2", fn() S { live(x34, d34) transpose }, refPermute(x34, d34, [1, 0]));
 add("transpose_r3", fn() S { live(x234, d234) transpose }, refPermute(x234, d234, [2, 1, 0]));
 add("permute_r3", fn() S { live(x234, d234) transpose([1, 2, 0]) }, refPermute(x234, d234, [1, 2, 0]));

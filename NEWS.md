@@ -13,7 +13,8 @@ sample at a time. Synths and effects use 1.3x to 3.5x less CPU (an echo
 3.5x, a 12-voice plucked string 2.5x, a chorus 1.9x;
 `benchmarks/block_engine/`), and timing stays sample-accurate.
 
-**Breaking**
+**Breaking** -- see [Migrating to the Block Engine](https://lfnoise.github.io/tzpl/Block_Engine_Migration.html)
+for what changed and the code to change.
 
 - Plugin ABI v3: synths compiled before this release must be recompiled
   (`defSynthX` does it; the engine refuses old plugins). The ABI's
@@ -42,6 +43,10 @@ sample at a time. Synths and effects use 1.3x to 3.5x less CPU (an echo
   `voicer(n, body, silence)` seconds (default 0.2; 0 turns skipping off).
 - Notes are a `notes` input on the voiced synth; `noteSetParams` can ramp a
   sounding note's parameters.
+- Shapes and tensor constants: a shape is a `Shape` or its dims (`AsShape`),
+  so `control("gains", spec, [4, 2])` and `urand([3, 2])` work; constants
+  of any shape are `tensor([2, 3], values)` or nested arrays,
+  `tensor([[1.0, 2.0], [3.0, 4.0]])`.
 - Shape operations along any axis: `take`, `drop`, `stride`, `slice`,
   `rotate`, `reverse`, `transpose`, `reshape`, `join`, `stack`, `reduce`,
   `scan`, `sum` and kin, `at` and `put`.
