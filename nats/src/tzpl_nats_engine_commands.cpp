@@ -225,6 +225,36 @@ static void handleDisconnectInput(const char*, const char* data, int len, const 
     engine::go(0);
 }
 
+// engine.disconnectInputX "node port xfadeTime curve" (curve optional, linear)
+static void handleDisconnectInputX(const char*, const char* data, int len, const char*,
+                                     NatsDispatcher& d) {
+    auto args = splitArgs(data, len);
+    if (args.size() < 3) return;
+    engine::PortAddr dst{static_cast<engine::i64>(argInt(args, 0)), argInt(args, 1)};
+    float xfade = argFloat(args, 2);
+    auto curve = static_cast<engine::FadeCurve>(argInt(args, 3));
+
+    engine::begin(d.engine());
+    engine::disconnectInput(dst, xfade, curve);
+    engine::go(0);
+}
+
+// engine.reconnectOutput "oldNode oldPort newNode newPort xfadeTime curve"
+// (xfadeTime and curve optional: an immediate switch, linear)
+static void handleReconnectOutput(const char*, const char* data, int len, const char*,
+                                    NatsDispatcher& d) {
+    auto args = splitArgs(data, len);
+    if (args.size() < 4) return;
+    engine::PortAddr oldSrc{static_cast<engine::i64>(argInt(args, 0)), argInt(args, 1)};
+    engine::PortAddr newSrc{static_cast<engine::i64>(argInt(args, 2)), argInt(args, 3)};
+    float xfade = args.size() > 4 ? argFloat(args, 4) : 0.f;
+    auto curve = static_cast<engine::FadeCurve>(argInt(args, 5));
+
+    engine::begin(d.engine());
+    engine::reconnectOutput(oldSrc, newSrc, xfade, curve);
+    engine::go(0);
+}
+
 static void handleDisconnectOutput(const char*, const char* data, int len, const char*,
                                      NatsDispatcher& d) {
     auto args = splitArgs(data, len);
@@ -268,7 +298,7 @@ static void handleReplaceNode(const char*, const char* data, int len, const char
 //   engine.setInput       "node port value..."
 //   engine.setInputAt     "node port first value..."
 //   engine.setInputRamp   "node port rampTime curve value..."
-//   engine.setInputX      "node port value xfadeTime curve"
+//   engine.setInputX      "node port value xfadeTime [curve]" (curve: linear)
 //   engine.impulseInput   "node port value..."
 //   engine.impulseInputAt "node port first value..."
 
@@ -470,6 +500,8 @@ void registerEngineHandlers(NatsDispatcher& dispatcher,
     reg("engine.connect",          wrap(handleConnect));
     reg("engine.connectX",         wrap(handleConnectX));
     reg("engine.disconnectInput",  wrap(handleDisconnectInput));
+    reg("engine.disconnectInputX", wrap(handleDisconnectInputX));
+    reg("engine.reconnectOutput",  wrap(handleReconnectOutput));
     reg("engine.disconnectOutput", wrap(handleDisconnectOutput));
     reg("engine.disconnectNode",   wrap(handleDisconnectNode));
     reg("engine.replaceNode",      wrap(handleReplaceNode));

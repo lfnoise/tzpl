@@ -1084,10 +1084,10 @@ freqs fsinosc * (amps reshape([<span class="hl-num">4</span>, <span class="hl-nu
             relative in <code>f32</code> and 10<sup>&minus;14</sup> in <code>f64</code>. That is inaudible,
             but where a fed-back value drives a decision (a gate threshold, a sequencer step, a
             quantizer, a delay time, a very resonant filter) the difference can grow. To compile
-            every loop in plain sample order &mdash; for a reference render to compare against
-            &mdash; start the app with the environment variable
-            <code>TZPL_STRICT_RECURRENCES=1</code>; it applies to every synth compiled while it is
-            set. To see which form each loop got, print the graph's analysis: each
+            every loop of one synth in plain sample order &mdash; for a reference render to compare
+            against &mdash; compile it with <code>defSynthXStrict(synthFun, name)</code> instead of
+            <code>defSynthX</code>. To do that for every synth, start the app with the environment
+            variable <code>TZPL_STRICT_RECURRENCES=1</code>. To see which form each loop got, print the graph's analysis: each
             <code>CYCLE</code> line is followed by its <code>CLASS</code> and
             <code>STRATEGY</code>.</p>
 

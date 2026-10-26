@@ -1934,14 +1934,18 @@ Progress (2026-10-26):
   §3.4, Music Libraries, FFI_Guide (§9.9, §12 rewritten around synthc, §18.1-§18.14),
   engine/Architecture.md (scheduler, load protocol, buffers, commands). The site builds
   with no broken links. `Err` gains `errRegionOutOfRange` (code 28).
-- Found and left open (code, not docs):
-  - OSC bundles with a real NTP timetag never fire: the timetag's seconds are passed
-    as a beat on clock slot 0.
-  - NATS `engine.setInputX` takes the curve as an optional fifth argument and has no
-    `disconnectInputX` (OSC has it).
-  - There is no `strictRecurrences` option to `defSynthX`, only the environment
-    variable `TZPL_STRICT_RECURRENCES=1` (§4.7 named an option).
-  - The `--nrt` command line cannot set the engine block size.
+- Code bugs the review found, fixed:
+  - OSC timetags are NTP wall-clock time again: a bundle lands on clock slot 0 at the
+    beat that time falls on (`osc::ntpTimetagToBeat`, tested in `test_osc`); it used
+    to read the seconds since 1900 as a beat, so it never fired. A nested bundle is
+    submitted after its outer one (it used to steal the thread's open bundle).
+  - NATS gains `engine.disconnectInputX` and `engine.reconnectOutput` (OSC had them);
+    `engine.setInputX`'s curve stays optional (linear), now documented.
+  - `defSynthXStrict(synthFun, name)` compiles one synth with strict recurrences
+    (a dynamic variable read by `blockFormOf`); the environment variable still does
+    it for every compile.
+  - `--block-size` and the `blockSize` config key set the engine block size, for live
+    engines and NRT renders (script-driven renders inherit the live engine's).
 
 **Dependencies:**
 

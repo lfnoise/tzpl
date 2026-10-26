@@ -24,10 +24,20 @@
 #include "tzpl_osc.hpp"
 #include "osc/OscReceivedElements.h"
 #include "tzpl_client_interface.hpp"
+#include <chrono>
 #include <print>
 #include <cstring>
+#include <vector>
 
 namespace osc {
+
+double ntpTimetagToBeat(std::uint64_t timetag, double unixNow, double beatNow, double bpm) {
+    constexpr double kNtpToUnix = 2208988800.0;   // 1900-01-01 to 1970-01-01
+    double ntp = static_cast<double>(timetag >> 32) +
+                 static_cast<double>(timetag & 0xFFFFFFFFu) / 4294967296.0;
+    double ahead = (ntp - kNtpToUnix) - unixNow;
+    return beatNow + ahead * bpm / 60.0;
+}
 
 void OscDispatcher::addHandler(const std::string& address, OscHandler handler) {
     std::lock_guard lock(handlersMutex_);
@@ -99,11 +109,13 @@ void OscDispatcher::dispatchBundle(const char* data, int size, const SenderInfo&
         bool wasBundled = tInsideBundle;
         tInsideBundle = true;
 
-        // Dispatch all messages in the bundle
+        // Dispatch all messages in the bundle. A nested bundle has its own
+        // timetag and its own begin/sched pair; the engine keeps one open
+        // bundle per thread, so nested bundles run after this one is sent.
+        std::vector<std::pair<const char*, int>> nested;
         for (auto elemIt = bundle.ElementsBegin(); elemIt != bundle.ElementsEnd(); ++elemIt) {
             if (elemIt->IsBundle()) {
-                // Nested bundle -- recurse (gets its own begin/sched pair)
-                dispatchBundle(elemIt->Contents(), static_cast<int>(elemIt->Size()), sender);
+                nested.emplace_back(elemIt->Contents(), static_cast<int>(elemIt->Size()));
             } else {
                 // Skip the /engine/silo message we already processed
                 if (hasSiloOverride && elemIt == bundle.ElementsBegin()) continue;
@@ -128,16 +140,17 @@ void OscDispatcher::dispatchBundle(const char* data, int size, const SenderInfo&
             if (immediate) {
                 engine::go(silo);
             } else {
-                // Convert NTP timetag to seconds since epoch, then to engine stream time.
-                // NTP epoch is 1900-01-01, Unix epoch is 1970-01-01.
-                // For now, treat the timetag as raw seconds offset from engine start.
-                // A proper implementation would anchor NTP time to engine time at
-                // startup and map it onto a TempoClock beat.
-                double seconds = static_cast<double>(timetag >> 32) +
-                                 static_cast<double>(timetag & 0xFFFFFFFF) / 4294967296.0;
-                engine::sched(silo, 0, seconds);
+                // The timetag is wall-clock time: its distance from now, as
+                // beats of clock slot 0 from the clock's current beat.
+                double unixNow = std::chrono::duration<double>(
+                    std::chrono::system_clock::now().time_since_epoch()).count();
+                double beat = ntpTimetagToBeat(timetag, unixNow,
+                                               engine::clockBeats(engine_, 0),
+                                               engine::clockTempoBPM(engine_, 0));
+                engine::sched(silo, 0, beat);
             }
         }
+        for (auto const& [data, size] : nested) dispatchBundle(data, size, sender);
     } catch (::osc::Exception const& e) {
         std::print(stderr, "OSC bundle error: {}\n", e.what());
     }

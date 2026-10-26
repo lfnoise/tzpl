@@ -56,6 +56,7 @@ constexpr KeyRef kKeys[] = {
     {"bufferFrames",      &AppConfig::bufferFrames, nullptr, nullptr},
     {"silos",             &AppConfig::numSilos, nullptr, nullptr},
     {"tempoClocks",       &AppConfig::numTempoClocks, nullptr, nullptr},
+    {"blockSize",         &AppConfig::blockSize, nullptr, nullptr},
     {"oscPort",           &AppConfig::oscPort, nullptr, nullptr},
     {"natsUrl",           nullptr, nullptr, &AppConfig::natsUrl},
     {"engineName",        nullptr, nullptr, &AppConfig::engineName},

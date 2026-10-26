@@ -586,6 +586,7 @@ inputChannels = 2</code></pre>
   <tr><td><code>firstInputChannel</code></td><td><code>0</code></td><td>First input channel on the device.</td></tr>
   <tr><td><code>silos</code></td><td><code>4</code></td><td>Number of parallel audio processing units (silos). Each runs its own graph and scheduler.</td></tr>
   <tr><td><code>tempoClocks</code></td><td><code>1</code></td><td>Number of tempo-clock slots per silo.</td></tr>
+  <tr><td><code>blockSize</code></td><td><code>64</code></td><td>Samples a synth computes per call (4 to 1024, rounded up to a multiple of 4). Larger blocks use a little less CPU; a feedback loop between nodes in block mode is one block long. Timing stays sample-accurate at any size. Command line: <code>--block-size</code>.</td></tr>
   <tr><td><code>oscPort</code></td><td><code>0</code> (off)</td><td>UDP port for the OSC server, in builds with OSC support.</td></tr>
   <tr><td><code>natsUrl</code></td><td>off</td><td>NATS server URL (e.g. <code>"nats://127.0.0.1:4222"</code>), in builds with NATS support.</td></tr>
   <tr><td><code>engineName</code></td><td>none</td><td>Engine name for namespaced NATS subjects when several engines share a server.</td></tr>

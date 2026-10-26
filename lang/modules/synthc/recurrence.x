@@ -205,10 +205,15 @@ fn formsOff(name String) Bool = match (getEnv("TZPL_FORMS")) {
 	none: false;
 };
 
+-- True while compiling with defSynthXStrict (plan 4.7).
+var `scStrictRecurrences Bool = false;
+
 fn blockFormOf(ctx Ctx, cy CycleInfo, c RecClass) String {
-	-- TZPL_STRICT_RECURRENCES=1: every recurrence in its own order (plain
-	-- recurrences, exact against the serial code), for reference renders.
-	let strict = match (getEnv("TZPL_STRICT_RECURRENCES")) { some(v): v == "1"; none: false; };
+	-- Strict recurrences (defSynthXStrict, or TZPL_STRICT_RECURRENCES=1 for
+	-- every compile): every recurrence in its own order (plain recurrences,
+	-- exact against the serial code), for reference renders.
+	let strict = `scStrictRecurrences
+		|| match (getEnv("TZPL_STRICT_RECURRENCES")) { some(v): v == "1"; none: false; };
 	if (strict || serialForms()) { return ""; }
 	let kind = match (c) {
 		scan(op):           (op == "+" || op == "+wrap") ? "scan" $ op : "";

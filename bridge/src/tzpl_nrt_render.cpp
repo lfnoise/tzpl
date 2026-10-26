@@ -291,6 +291,7 @@ int64_t renderNRTAsync(RenderJobOpts const& opts,
     engine::EngineConfig cfg;
     cfg.numSilos = opts.numSilos;
     cfg.numTempoClocks = opts.numTempoClocks;
+    cfg.blockSize = opts.blockSize;
     job->eng.reset(engine::newEngineNRT(cfg, asp));
 
     // Register the same built-in node defs / loaded plugins on the per-render
@@ -517,7 +518,10 @@ static void ffi_renderNRT_open(ts::VM& vm, u16 dst, u16, u16 argBase) {
     opts.path = regString(vm, argBase);
     // Inherit the live engine's tempo-clock slot count so script-driven renders
     // can schedule on the same clocks as the live engine.
-    if (ctx && ctx->engine) opts.numTempoClocks = ctx->engine->numTempoClocks_;
+    if (ctx && ctx->engine) {
+        opts.numTempoClocks = ctx->engine->numTempoClocks_;
+        opts.blockSize = ctx->engine->blockSize_;
+    }
     // Setup runs on the render thread under the NRTVM lock (async wrapper)
     // so it doesn't clobber the caller's running VM state.
     auto setup = makeAsyncCallable(vm, vm.reg(argBase + 1).o);
@@ -531,7 +535,10 @@ static void ffi_renderNRT_dur(ts::VM& vm, u16 dst, u16, u16 argBase) {
     RenderJobOpts opts;
     opts.path = regString(vm, argBase);
     opts.durationSeconds = vm.reg(argBase + 1).f;
-    if (ctx && ctx->engine) opts.numTempoClocks = ctx->engine->numTempoClocks_;
+    if (ctx && ctx->engine) {
+        opts.numTempoClocks = ctx->engine->numTempoClocks_;
+        opts.blockSize = ctx->engine->blockSize_;
+    }
     auto setup = makeAsyncCallable(vm, vm.reg(argBase + 2).o);
     int64_t h = renderNRTAsync(opts, ctx, std::move(setup));
     vm.reg(dst).i = static_cast<i64>(h);

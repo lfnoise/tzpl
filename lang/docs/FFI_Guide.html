@@ -2056,7 +2056,7 @@ osc.<span class="fn">removeHandler</span>(<span class="str">"/trigger"</span>);<
 
 <ul>
   <li><strong>Timetag &le; 1</strong> (including the "immediately" timetag): execute all messages immediately via <code>begin()/go(silo)</code>.</li>
-  <li><strong>Timetag &gt; 1</strong>: the bundle is submitted with <code>sched(silo, 0, t)</code>, where <code>t</code> is the timetag read as seconds (the NTP seconds field plus its fraction), used directly as a <em>beat</em> on engine TempoClock slot 0. The timetag is not yet mapped from wall-clock time to engine time, so a real NTP time (seconds since 1900) names a beat billions of beats ahead and the bundle never fires. Only a client that sends small timetags meaning &ldquo;slot-0 beat&rdquo; gets scheduled bundles today; otherwise send immediate bundles.</li>
+  <li><strong>Timetag &gt; 1</strong>: the timetag is wall-clock time (NTP: seconds since 1900). The bundle is scheduled on engine TempoClock slot 0 at the beat that time falls on, from the clock's beat and tempo when the bundle arrives: a timetag 0.5 s ahead at 120 BPM lands one beat later. A timetag already past runs at once. Keep the sender's clock in sync with the engine machine's (NTP) for tight timing.</li>
 </ul>
 
 <h4>Silo selection</h4>
@@ -2074,7 +2074,7 @@ osc.<span class="fn">removeHandler</span>(<span class="str">"/trigger"</span>);<
 <p>Graph manipulation commands sent as standalone messages (outside a bundle) are automatically wrapped in a <code>begin()/go(0)</code> transaction so they execute atomically. Inside a bundle, this auto-wrapping is suppressed and the bundle provides the transaction boundary; the <code>/engine/silo</code> element selects the silo passed at submit.</p>
 
 <div class="note">
-  <strong>Note:</strong> Do not nest bundles that carry engine commands. A nested bundle is dispatched as its own <code>begin()</code>/<code>go()</code> (or <code>sched()</code>), but each thread has only one open engine bundle: the inner submit also sends whatever the outer bundle recorded before it, and the outer bundle's messages after it find no open bundle and are dropped.
+  <strong>Note:</strong> A nested bundle is its own transaction with its own timetag: it is submitted after the bundle that contains it.
 </div>
 
 <!-- ================================================================ -->
@@ -2298,12 +2298,14 @@ nats.<span class="fn">removeHandler</span>(<span class="str">"trigger"</span>);<
   <tr><td><code>engine.connect</code></td><td><code>srcNode srcPort dstNode dstPort</code></td><td>Connect two nodes.</td></tr>
   <tr><td><code>engine.connectX</code></td><td><code>srcNode srcPort dstNode dstPort xfade curve</code></td><td>Connect with crossfade and curve.</td></tr>
   <tr><td><code>engine.disconnectInput</code></td><td><code>nodeID port</code></td><td>Disconnect an input.</td></tr>
+  <tr><td><code>engine.disconnectInputX</code></td><td><code>nodeID port xfadeTime [curve]</code></td><td>Disconnect an input with a crossfade to its held value (curve defaults to linear).</td></tr>
+  <tr><td><code>engine.reconnectOutput</code></td><td><code>oldNode oldPort newNode newPort [xfadeTime [curve]]</code></td><td>Move every connection from one output to another, crossfading over <code>xfadeTime</code> seconds (default: at once).</td></tr>
   <tr><td><code>engine.disconnectOutput</code></td><td><code>nodeID port</code></td><td>Disconnect an output.</td></tr>
   <tr><td><code>engine.disconnectNode</code></td><td><code>nodeID</code></td><td>Disconnect all connections of a node.</td></tr>
   <tr><td><code>engine.setInput</code></td><td><code>nodeID port|name value...</code></td><td>Set an input to a value (one or more numbers, repeated cyclically over the input's channels).</td></tr>
   <tr><td><code>engine.setInputAt</code></td><td><code>nodeID port|name first value...</code></td><td>Set channels <code>first</code> .. <code>first+n-1</code> of an input.</td></tr>
   <tr><td><code>engine.setInputRamp</code></td><td><code>nodeID port|name rampTime curve value...</code></td><td>Ramp an input from its current value over <code>rampTime</code> seconds.</td></tr>
-  <tr><td><code>engine.setInputX</code></td><td><code>nodeID port|name value xfadeTime curve</code></td><td>Crossfade an input to a value.</td></tr>
+  <tr><td><code>engine.setInputX</code></td><td><code>nodeID port|name value xfadeTime [curve]</code></td><td>Crossfade an input to a value (curve defaults to linear).</td></tr>
   <tr><td><code>engine.impulseInput</code></td><td><code>nodeID port|name value...</code></td><td>Set an input to a value for one sample, then back (a trigger).</td></tr>
   <tr><td><code>engine.impulseInputAt</code></td><td><code>nodeID port|name first value...</code></td><td>Impulse on channels <code>first</code> .. <code>first+n-1</code> only.</td></tr>
 </table>
@@ -2977,7 +2979,8 @@ mySine <span class="fn">defSynthX</span>(<span class="str">"mySine"</span>) <spa
     <tr><td><code>--tail</code></td><td><code>&lt;seconds&gt;</code></td><td>Default tail rendered after the stop signal (default <code>1.0</code>).</td></tr>
     <tr><td><code>--nrt-safety-cap</code></td><td><code>&lt;seconds&gt;</code></td><td>Upper bound (default <code>3600</code>). Render aborts with a stderr warning if exceeded.</td></tr>
     <tr><td><code>--sample-rate</code></td><td><code>&lt;hz&gt;</code></td><td>Engine sample rate.</td></tr>
-    <tr><td><code>--buffer-frames</code></td><td><code>&lt;n&gt;</code></td><td>Frames rendered per engine call (the device buffer size of a live engine). The engine processes each in blocks of up to 64 samples. The NRT tempo scheduler is advanced once per call, so immediate commands from script handlers land on these boundaries.</td></tr>
+    <tr><td><code>--buffer-frames</code></td><td><code>&lt;n&gt;</code></td><td>Frames rendered per engine call (the device buffer size of a live engine). The engine processes each in blocks of up to <code>--block-size</code> samples. The NRT tempo scheduler is advanced once per call, so immediate commands from script handlers land on these boundaries.</td></tr>
+    <tr><td><code>--block-size</code></td><td><code>&lt;n&gt;</code></td><td>Samples a synth processes per call (default 64; 4 to 1024, rounded up to a multiple of 4).</td></tr>
     <tr><td><code>--channels</code></td><td><code>&lt;n&gt;</code></td><td>Output channel count.</td></tr>
   </tbody>
 </table>

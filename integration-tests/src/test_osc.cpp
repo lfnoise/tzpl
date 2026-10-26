@@ -32,6 +32,7 @@
 #include "module_compiler.hpp"
 #include "tzpl_client_interface.hpp"
 #include "tzpl_test_plugins.hpp"
+#include <cmath>
 #include <print>
 #include <thread>
 #include <chrono>
@@ -176,6 +177,26 @@ static void test_local_dispatch() {
     check(customHandled.load(), "custom handler invoked via local dispatch");
 
     engine::freeEngine(eng);
+}
+
+// An OSC timetag is NTP wall-clock time; a bundle lands on the beat of clock
+// slot 0 that time falls on (it used to read the timetag's seconds since
+// 1900 as a beat, so a real timetag never fired).
+static void test_timetag_to_beat() {
+    std::print("Test: OSC timetags map onto clock beats\n");
+    constexpr double kNtpToUnix = 2208988800.0;
+    auto tag = [&](double unixSecs) {
+        double ntp = unixSecs + kNtpToUnix;
+        double whole = std::floor(ntp);
+        return (std::uint64_t(whole) << 32) | std::uint64_t((ntp - whole) * 4294967296.0);
+    };
+    double now = 1.8e9;   // some wall-clock time
+    check(std::fabs(osc::ntpTimetagToBeat(tag(now + 2.0), now, 10.0, 120.0) - 14.0) < 1e-6,
+          "2 s ahead at 120 BPM is 4 beats on");
+    check(std::fabs(osc::ntpTimetagToBeat(tag(now - 0.5), now, 10.0, 60.0) - 9.5) < 1e-6,
+          "a past timetag is a past beat (runs at once)");
+    check(std::fabs(osc::ntpTimetagToBeat(tag(now + 0.25), now, 0.0, 60.0) - 0.25) < 1e-6,
+          "the fraction bits count");
 }
 
 static void test_setinput_by_name_dispatch() {
@@ -631,6 +652,7 @@ int main() {
     test_client_send();
     test_engine_commands();
     test_local_dispatch();
+    test_timetag_to_beat();
     test_setinput_by_name_dispatch();
     test_ffi_registration();
 

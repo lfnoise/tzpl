@@ -197,6 +197,9 @@ static void test_engine_commands() {
     client.publish("engine.setInputAt", "700 0 0 330");
     client.publish("engine.setInputRamp", "700 0 0.1 0 220");
     client.publish("engine.setInputX", "700 0 110 0.1 0");
+    client.publish("engine.setInputX", "700 0 110 0.1");        // curve optional
+    client.publish("engine.disconnectInputX", "700 0 0.1");
+    client.publish("engine.reconnectOutput", "700 0 700 0 0.05 0");
     client.publish("engine.impulseInput", "700 nosuch 1");
     client.publish("engine.noteSetParams", "700 1 0 0.5");
     client.publish("engine.noteSetParamsRamp", "700 1 0 0.2 0.5");

@@ -47,8 +47,9 @@ sample at a time. Synths and effects use 1.3x to 3.5x less CPU (an echo
   `scan`, `sum` and kin, `at` and `put`.
 - Values computed from inputs (filter coefficients, pitches) are recomputed
   only when the inputs change, and recurrences such as filters and phasors
-  run as block-wide scans or state-space forms; `TZPL_STRICT_RECURRENCES=1`
-  keeps every recurrence in its plain sample order for reference renders.
+  run as block-wide scans or state-space forms; `defSynthXStrict` (or
+  `TZPL_STRICT_RECURRENCES=1` for every synth) keeps every recurrence in its
+  plain sample order for reference renders.
 
 **Fixed**
 

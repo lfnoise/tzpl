@@ -63,6 +63,8 @@ struct RenderJobOpts {
     int    numSilos = 4;
     // Number of beat-based TempoClock slots per silo (engine clocks).
     int    numTempoClocks = 1;
+    // Samples a synth processes per call (engine::EngineConfig::blockSize).
+    int    blockSize = 64;
 };
 
 // Per-thread context describing the render currently being driven on this

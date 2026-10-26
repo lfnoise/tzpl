@@ -109,6 +109,19 @@ async fn defSynthX(synthFun GraphFn, synthName String, tags [String]) String {
 	}
 }
 
+-- defSynthX with strict recurrences: every recurrence (filters, phasors,
+-- envelopes) runs in its plain sample order instead of a block form, so the
+-- synth matches its per-sample definition exactly rather than within
+-- rounding. For reference renders; slower. TZPL_STRICT_RECURRENCES=1 does
+-- the same for every compile.
+fn defSynthXStrict(synthFun GraphFn, synthName String) Future<String> =
+	defSynthXStrict(synthFun, synthName, [String]());
+
+async fn defSynthXStrict(synthFun GraphFn, synthName String, tags [String]) String {
+	var `scStrictRecurrences Bool = true;
+	defSynthX(synthFun, synthName, tags) await
+}
+
 -- Fallible form of defSynthX: ok(generated C++ source) on success,
 -- err(message) on a failed analysis, compile, or load. Never halts and
 -- prints nothing.

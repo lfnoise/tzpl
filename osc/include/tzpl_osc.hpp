@@ -78,6 +78,13 @@ struct SenderInfo {
 using OscHandler = std::function<void(const char* address, const void* argData,
                                        int argSize, const SenderInfo& sender)>;
 
+// The beat on a clock that an OSC timetag (NTP time: seconds since 1900 in
+// the upper 32 bits, the fraction in the lower) falls on, given the wall
+// clock now (seconds since 1970) and the clock's beat and tempo now. A
+// timetag in the past gives a past beat, which a better-late-than-never
+// bundle runs at once.
+double ntpTimetagToBeat(std::uint64_t timetag, double unixNow, double beatNow, double bpm);
+
 class OscDispatcher {
 public:
     // Register a handler for an OSC address pattern.

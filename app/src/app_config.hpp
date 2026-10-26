@@ -53,6 +53,7 @@ struct AppConfig {
     double sampleRate = 48000.0;
     int numSilos = 4;
     int numTempoClocks = 1;
+    int blockSize = 64;   // samples a synth processes per call (4..1024, a multiple of 4)
     int oscPort = 0;      // 0 = disabled
     std::string natsUrl;  // empty = disabled
     std::string engineName;  // empty = single-instance mode

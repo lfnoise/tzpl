@@ -480,6 +480,7 @@ static engine::Engine* createEngine(const Config& config, bool nrt = false,
     engine::EngineConfig engineConfig;
     engineConfig.numSilos = config.numSilos;
     engineConfig.numTempoClocks = config.numTempoClocks;
+    engineConfig.blockSize = config.blockSize;
 
     // --no-audio: never open or probe an audio device -- the session is
     // deviceless (offline rendering still works via the NRT path). Matters
@@ -549,6 +550,8 @@ static void printHelp() {
         "  --tempo-clocks <n>      Number of tempo-clock slots per silo (default: 1)\n"
         "  --sample-rate <hz>      Sample rate (default: 48000)\n"
         "  --buffer-frames <n>     Audio buffer size in frames (default: 512)\n"
+        "  --block-size <n>        Samples a synth processes per call: 4 to 1024,\n"
+        "                          rounded up to a multiple of 4 (default: 64)\n"
         "  --channels <n>          Output channels (default: 2)\n"
         "  --first-channel <n>     First output channel (default: 0)\n"
         "  --input-channels <n>    Input channels (default: 0, disabled)\n"
@@ -630,7 +633,8 @@ int main(int argc, const char* argv[]) {
 #endif
 
         // CLI overrides -- collected during parsing, applied after config file
-        std::optional<int> cliSilos, cliTempoClocks, cliChannels, cliFirstChannel, cliBufferFrames;
+        std::optional<int> cliSilos, cliTempoClocks, cliChannels, cliFirstChannel, cliBufferFrames,
+                           cliBlockSize;
         std::optional<int> cliInputChannels, cliFirstInputChannel;
         std::optional<double> cliSampleRate;
         std::optional<std::string> cliDevice, cliInputDevice;
@@ -663,6 +667,8 @@ int main(int argc, const char* argv[]) {
                 cliSampleRate = std::stod(argv[++i]);
             } else if (arg == "--buffer-frames" && i + 1 < argc) {
                 cliBufferFrames = std::stoi(argv[++i]);
+            } else if (arg == "--block-size" && i + 1 < argc) {
+                cliBlockSize = std::stoi(argv[++i]);
             } else if (arg == "--channels" && i + 1 < argc) {
                 cliChannels = std::stoi(argv[++i]);
             } else if (arg == "--first-channel" && i + 1 < argc) {
@@ -724,6 +730,7 @@ int main(int argc, const char* argv[]) {
         if (cliTempoClocks)  config.numTempoClocks = *cliTempoClocks;
         if (cliSampleRate)   config.sampleRate = *cliSampleRate;
         if (cliBufferFrames) config.bufferFrames = *cliBufferFrames;
+        if (cliBlockSize)    config.blockSize = *cliBlockSize;
         if (cliChannels)     config.channels = *cliChannels;
         if (cliFirstChannel) config.firstChannel = *cliFirstChannel;
         if (cliDevice)            config.deviceName = *cliDevice;
@@ -1020,6 +1027,7 @@ int main(int argc, const char* argv[]) {
                         opts.bufferFrames = config.bufferFrames;
                         opts.numSilos    = config.numSilos;
                         opts.numTempoClocks = config.numTempoClocks;
+                        opts.blockSize      = config.blockSize;
                         opts.durationSeconds  = nrtDuration;
                         opts.tailSeconds      = nrtTailSeconds;
                         opts.safetyCapSeconds = nrtSafetyCapSeconds;
