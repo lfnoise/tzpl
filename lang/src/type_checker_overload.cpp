@@ -1277,6 +1277,11 @@ FuncInfo* TypeChecker::monomorphize(FuncInfo& templateFI,
     if (templateFI.sourceModule) {
         scopeGuard = std::make_unique<ImportedModuleScopeGuard>(*this, templateFI.sourceModule);
     }
+    // The body is checked here, at the first call, which may be inside
+    // another function: hide that caller's scopes (a local template keeps
+    // its enclosing ones).
+    std::optional<CallerScopeIsolation> isolation;
+    if (decl->resolvedFuncGlobalIndex != -1) isolation.emplace(*this);
 
     // Save typeParamBindings_
     auto savedBindings = typeParamBindings_;

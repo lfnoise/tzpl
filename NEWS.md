@@ -58,6 +58,12 @@ for what changed and the code to change.
 
 **Fixed**
 
+- A template function, or a function without a declared return type, is
+  type-checked when it is first called -- and it was checked seeing the
+  caller's local variables. A caller with a parameter named like a
+  function the body calls (`chans`, `size`, ...) broke the body with a
+  confusing "No matching overload for 'call'"; a body first used inside a
+  loop accepted a stray `break`. Such bodies now see only their own scope.
 - A top-level `var` is now one variable everywhere. Top-level code used to
   read and write a private copy, so a function's `count = count + 1` was
   invisible at top level, a top-level assignment was invisible to functions,

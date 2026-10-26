@@ -144,9 +144,6 @@ fn cuboid(planes Int, rows Int, cols Int) Shape = shape([planes, rows, cols]);
 constraint AsShape = Shape | [Int];
 fn asShape(s Shape) Shape = s;
 fn asShape(dims [Int]) Shape = shape(dims);
--- The channel count of a shape, for the AsShape templates (a caller's local
--- named `chans` would capture the name inside them).
-fn _shapeChans(s Shape) Int = s chans;
 
 fn chans(s Shape) Int = s.dims[0] * s.dims[1] * s.dims[2] * s.dims[3];
 
@@ -417,15 +414,15 @@ fn fill(chans Int, x Float) S = fill(chansShape(chans max(1)), x);
 
 fn fill(a AsShape, x Int) S {
 	let sh = a asShape;
-	SignalExprKind.int(x repeat(_shapeChans(sh)), ANY_NUM, sh) _newSignalExpr
+	SignalExprKind.int(x repeat(sh chans), ANY_NUM, sh) _newSignalExpr
 }
 fn fill(a AsShape, x Fraction) S {
 	let sh = a asShape;
-	SignalExprKind.float(x toFloat repeat(_shapeChans(sh)), ANY_NUM, sh) _newSignalExpr
+	SignalExprKind.float(x toFloat repeat(sh chans), ANY_NUM, sh) _newSignalExpr
 }
 fn fill(a AsShape, x Float) S {
 	let sh = a asShape;
-	SignalExprKind.float(x repeat(_shapeChans(sh)), x numType, sh) _newSignalExpr
+	SignalExprKind.float(x repeat(sh chans), x numType, sh) _newSignalExpr
 }
 
 fn vec(v [Bool]) S {
@@ -448,14 +445,14 @@ fn tensor(a AsShape, v [Int]) S {
 	let sh = a asShape;
 	var out [Int] = [];
 	var i = 0;
-	while (i < _shapeChans(sh)) { out push!(v[i % v length]); i = i + 1; }
+	while (i < sh chans) { out push!(v[i % v length]); i = i + 1; }
 	SignalExprKind.int(out, ANY_NUM, sh) _newSignalExpr
 }
 fn tensor(a AsShape, v [Float]) S {
 	let sh = a asShape;
 	var out [Float] = [];
 	var i = 0;
-	while (i < _shapeChans(sh)) { out push!(v[i % v length]); i = i + 1; }
+	while (i < sh chans) { out push!(v[i % v length]); i = i + 1; }
 	SignalExprKind.float(out, ANY_FLOAT, sh) _newSignalExpr
 }
 

@@ -24,6 +24,7 @@
 #ifndef type_checker_hpp
 #define type_checker_hpp
 
+#include <optional>
 #include "ast.hpp"
 #include "compiler.hpp"
 #include "type_system.hpp"
@@ -286,6 +287,36 @@ public:
 
         ImportedModuleScopeGuard(TypeChecker& tc, ModuleInfo* mod);
         ~ImportedModuleScopeGuard();
+    };
+    // Checks a module-level function's body on demand -- a template
+    // instantiated, or a return type inferred, at its first call, which may
+    // be inside another function, loop or lambda. The body must see only its
+    // own scopes: the caller's locals would otherwise resolve names in it (a
+    // caller's parameter `chans` turned `sh chans` into a call of an Int), its
+    // loops would admit a stray `break`, and its lambda would record the
+    // body's variables as captures. Hides all three until destroyed.
+    struct CallerScopeIsolation {
+        TypeChecker& tc;
+        std::vector<std::unordered_map<std::string, VarInfo>> scopes;
+        int lambdaBoundary;
+        std::vector<LambdaExprNode::CapturedVar>* captures;
+        int loopDepth;
+        explicit CallerScopeIsolation(TypeChecker& t)
+            : tc(t), scopes(std::move(t.scopes_)), lambdaBoundary(t.lambdaBoundary_),
+              captures(t.currentCaptures_), loopDepth(t.loopDepth_) {
+            t.scopes_.clear();
+            t.lambdaBoundary_ = -1;
+            t.currentCaptures_ = nullptr;
+            t.loopDepth_ = 0;
+        }
+        ~CallerScopeIsolation() {
+            tc.scopes_ = std::move(scopes);
+            tc.lambdaBoundary_ = lambdaBoundary;
+            tc.currentCaptures_ = captures;
+            tc.loopDepth_ = loopDepth;
+        }
+        CallerScopeIsolation(CallerScopeIsolation const&) = delete;
+        CallerScopeIsolation& operator=(CallerScopeIsolation const&) = delete;
     };
     void recheckTemplateLambdaBody(LambdaExprNode* expr, LambdaType* lambdaType,
                                    TemplateLambdaType* tmplType);

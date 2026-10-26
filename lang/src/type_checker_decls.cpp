@@ -650,6 +650,12 @@ void TypeChecker::inferFunctionReturnType(FnDeclNode* fn, FuncInfo* fi, bool isL
     // Copy param types before body check (fi contents may be modified)
     std::vector<Type*> paramTypes = fi->paramTypes;
 
+    // A module-level function's body is inferred on demand, at its first
+    // call, which may be inside another function: hide that caller's scopes.
+    // A local function sees its enclosing ones (they are its captures).
+    std::optional<CallerScopeIsolation> isolation;
+    if (!isLocal) isolation.emplace(*this);
+
     // Set up capture tracking for local functions
     int savedBoundary = lambdaBoundary_;
     auto* savedCaptures = currentCaptures_;
