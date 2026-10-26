@@ -156,13 +156,21 @@ inline TzplSincCoeffs tzpl_sinc_coeffs(double frac) {
 // Used by non-SIMD codegen and by the SIMD splat path.
 // ===========================================================================
 
+// A delay time as read: never negative (a delay line cannot read ahead of
+// its write head), and 0 for NaN. Converting a negative float to uint64_t is
+// undefined: arm64 saturates to 0, x86-64 yields a huge value, whose
+// fractional part then indexed the sinc table out of bounds.
+template<typename D>
+inline D tzpl_delay_time(D delay) { return delay >= D(0) ? delay : D(0); }
+
 template<typename T>
 inline T tzpl_delay_none(T const* buf, uint64_t wrpos, uint64_t mask, T delay) {
-    return buf[(wrpos - uint64_t(delay)) & mask];
+    return buf[(wrpos - uint64_t(tzpl_delay_time(delay))) & mask];
 }
 
 template<typename T>
 inline T tzpl_delay_linear(T const* buf, uint64_t wrpos, uint64_t mask, T delay) {
+    delay = tzpl_delay_time(delay);
     uint64_t di = uint64_t(delay);
     T s0 = buf[(wrpos - di) & mask];
     T s1 = buf[(wrpos - di - 1) & mask];
@@ -171,6 +179,7 @@ inline T tzpl_delay_linear(T const* buf, uint64_t wrpos, uint64_t mask, T delay)
 
 template<typename T>
 inline T tzpl_delay_cubic(T const* buf, uint64_t wrpos, uint64_t mask, T delay) {
+    delay = tzpl_delay_time(delay);
     uint64_t di = uint64_t(delay);
     T ym1 = buf[(wrpos - di + 1) & mask];
     T y0  = buf[(wrpos - di) & mask];
@@ -181,6 +190,7 @@ inline T tzpl_delay_cubic(T const* buf, uint64_t wrpos, uint64_t mask, T delay) 
 
 template<typename T>
 inline T tzpl_delay_lagrange(T const* buf, uint64_t wrpos, uint64_t mask, T delay) {
+    delay = tzpl_delay_time(delay);
     uint64_t di = uint64_t(delay);
     T s0 = buf[(wrpos - di + 3) & mask];
     T s1 = buf[(wrpos - di + 2) & mask];
@@ -195,6 +205,7 @@ inline T tzpl_delay_lagrange(T const* buf, uint64_t wrpos, uint64_t mask, T dela
 
 template<typename T>
 inline T tzpl_delay_sinc(T const* buf, uint64_t wrpos, uint64_t mask, T delay) {
+    delay = tzpl_delay_time(delay);
     uint64_t di = uint64_t(delay);
     T s0 = buf[(wrpos - di + 3) & mask];
     T s1 = buf[(wrpos - di + 2) & mask];
@@ -224,6 +235,7 @@ inline T tzpl_delay_sinc(T const* buf, uint64_t wrpos, uint64_t mask, T delay) {
 // u64() only, so its type need not match the buffer's element type.
 template<typename T, typename D>
 inline T tzpl_delay_none_z(T const* buf, uint64_t wrpos, uint64_t mask, D delay) {
+    delay = tzpl_delay_time(delay);
     uint64_t di = uint64_t(delay);
     if (wrpos < di) return T(0);
     return buf[(wrpos - di) & mask];
@@ -231,6 +243,7 @@ inline T tzpl_delay_none_z(T const* buf, uint64_t wrpos, uint64_t mask, D delay)
 
 template<typename T>
 inline T tzpl_delay_linear_z(T const* buf, uint64_t wrpos, uint64_t mask, T delay) {
+    delay = tzpl_delay_time(delay);
     uint64_t di = uint64_t(delay);
     if (wrpos < di + 1) return T(0);
     return tzpl_delay_linear(buf, wrpos, mask, delay);
@@ -238,6 +251,7 @@ inline T tzpl_delay_linear_z(T const* buf, uint64_t wrpos, uint64_t mask, T dela
 
 template<typename T>
 inline T tzpl_delay_cubic_z(T const* buf, uint64_t wrpos, uint64_t mask, T delay) {
+    delay = tzpl_delay_time(delay);
     uint64_t di = uint64_t(delay);
     if (wrpos < di + 2) return T(0);
     return tzpl_delay_cubic(buf, wrpos, mask, delay);
@@ -245,6 +259,7 @@ inline T tzpl_delay_cubic_z(T const* buf, uint64_t wrpos, uint64_t mask, T delay
 
 template<typename T>
 inline T tzpl_delay_lagrange_z(T const* buf, uint64_t wrpos, uint64_t mask, T delay) {
+    delay = tzpl_delay_time(delay);
     uint64_t di = uint64_t(delay);
     if (wrpos < di + 4) return T(0);
     return tzpl_delay_lagrange(buf, wrpos, mask, delay);
@@ -252,6 +267,7 @@ inline T tzpl_delay_lagrange_z(T const* buf, uint64_t wrpos, uint64_t mask, T de
 
 template<typename T>
 inline T tzpl_delay_sinc_z(T const* buf, uint64_t wrpos, uint64_t mask, T delay) {
+    delay = tzpl_delay_time(delay);
     uint64_t di = uint64_t(delay);
     if (wrpos < di + 4) return T(0);
     return tzpl_delay_sinc(buf, wrpos, mask, delay);

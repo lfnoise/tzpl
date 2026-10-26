@@ -1081,7 +1081,7 @@ fn _genDelayOffScalar(ctx Ctx, e NIdx) String {
 -- (it can contain rand draws). Mirrors the C++ genRead.
 fn _delayVarGenRead(ip Interpolation, buf String, wrpos String, mask String, off String, zg Bool) String = match (ip) {
 	none: zg ? "tzpl_delay_none_z(%^, %^, %^, %^)" fmt(buf, wrpos, mask, off)
-	         : "%^[(%^ - u64(%^)) & %^]" fmt(buf, wrpos, off, mask);
+	         : "%^[(%^ - u64(tzpl_delay_time(%^))) & %^]" fmt(buf, wrpos, off, mask);
 	_:    "tzpl_delay_%^%^(%^, %^, %^, %^)" fmt(ip toLispString, zg ? "_z" : "", buf, wrpos, mask, off);
 };
 
@@ -1144,11 +1144,13 @@ fn _genSimdInterp(t NumType, w Int, ip Interpolation,
 	var r = "[&]() -> %^ { " fmt(vtype);
 	-- offset cache + per-lane integer delays
 	if (scalarOff) {
-		r = r $ "auto _off = %^; u64 _di = u64(_off); " fmt(offExpr);
+		r = r $ "auto _off = tzpl_delay_time(%^); u64 _di = u64(_off); " fmt(offExpr);
 	} else {
+		-- every lane's delay time clamped at 0 (tzpl_delay_time) before the
+		-- integer conversion, which is undefined for negative values
 		r = r $ "auto _off = %^; " fmt(offExpr);
 		var j = 0;
-		while (j < w) { r = r $ "u64 _di%^ = u64(_off[%^]); " fmt(j, j); j = j + 1; }
+		while (j < w) { r = r $ "_off[%^] = tzpl_delay_time(_off[%^]); u64 _di%^ = u64(_off[%^]); " fmt(j, j, j, j); j = j + 1; }
 	}
 	-- Zero-history guard (delays with no init values): a uniform write head
 	-- takes one early return; per-lane heads/offsets zero the invalid lanes
@@ -2702,9 +2704,17 @@ fn genAllocFun(ctx Ctx, name String) String {
 	let bufs = ctx _blockBuffers;
 	var k = 0;
 	while (k < bufs.names length) {
-		s = s $ "\tp->%^ = (%^*)calloc((size_t)maxBlock * %^%^, sizeof(%^));\n"
-			fmt(bufs.names[k], bufs.types[k], bufs.elems[k],
-			    bufs.pad[k] > 0 ? " + %^" fmt(bufs.pad[k]) : "", bufs.types[k]);
+		if (bufs.alias[k] length == 0) {
+			s = s $ "\tp->%^ = (%^*)calloc((size_t)maxBlock * %^%^, sizeof(%^));\n"
+				fmt(bufs.names[k], bufs.types[k], bufs.elems[k],
+				    bufs.pad[k] > 0 ? " + %^" fmt(bufs.pad[k]) : "", bufs.types[k]);
+		}
+		k = k + 1;
+	}
+	-- arena: temps whose live ranges don't overlap share memory
+	k = 0;
+	while (k < bufs.names length) {
+		if (bufs.alias[k] length > 0) { s = s $ "\tp->%^ = p->%^;\n" fmt(bufs.names[k], bufs.alias[k]); }
 		k = k + 1;
 	}
 	s $ "\treturn p;\n}\n\n"
@@ -2717,17 +2727,19 @@ struct BlockBufs {
 	types [String],
 	elems [Int],
 	pad [Int],      -- extra leading elements (a scan's w holds the prior state at [-1])
+	alias [String], -- "" or the buffer whose memory this one reuses (arena)
 }
 
-fn _addBuf(b BlockBufs, name String, ty String, e Int, pad Int = 0) Void {
+fn _addBuf(b BlockBufs, name String, ty String, e Int, pad Int = 0, alias String = "") Void {
 	b.names push!(name);
 	b.types push!(ty);
 	b.elems push!(e);
 	b.pad push!(pad);
+	b.alias push!(alias);
 }
 
 fn _blockBuffers(ctx Ctx) BlockBufs {
-	let out = BlockBufs { names: [String](), types: [String](), elems: [Int](), pad: [Int]() };
+	let out = BlockBufs { names: [String](), types: [String](), elems: [Int](), pad: [Int](), alias: [String]() };
 	-- One-channel ports are read and written in place (planar is interleaved).
 	for (x : ctx.inlets) {
 		match (ctx.kind[x]) { inletK(_, sn, _): { if (ctx.chans[x] > 1 && !(ctx _directPort(x))) { out _addBuf("bin%^" fmt(sn), cppType(ctx.typ[x]), ctx _portElems(x)); } } _: {} }
@@ -2736,7 +2748,15 @@ fn _blockBuffers(ctx Ctx) BlockBufs {
 		match (ctx.kind[x]) { outletK(_, sn): { if (ctx.chans[x] > 1 && !(ctx _directPort(x))) { out _addBuf("bout%^" fmt(sn), cppType(ctx.typ[x]), ctx _portElems(x)); } } _: {} }
 	}
 	for (x : `cgRootBuf) { out _addBuf("bk%^" fmt(ctx.serial[x]), cppType(ctx.typ[x]), ctx _rowElems(x)); }
-	for (x : `cgBlockTemps) { out _addBuf("bt%^" fmt(ctx.serial[x]), cppType(ctx.typ[x]), ctx _rowElems(x)); }
+	let owners = ctx _blockTempArena;
+	var bi = 0;
+	while (bi < `cgBlockTemps length) {
+		let x = `cgBlockTemps[bi];
+		let o = owners[bi];
+		out _addBuf("bt%^" fmt(ctx.serial[x]), cppType(ctx.typ[x]), ctx _rowElems(x), 0,
+		            o == x ? "" : "bt%^" fmt(ctx.serial[o]));
+		bi = bi + 1;
+	}
 	for (k : ctx.blockCycles) {
 		let ty = ctx _blockCycleType(k);
 		for (part : ["x", "a", "b"]) { out _addBuf("rc%^_%^" fmt(k, part), ty, 1); }
@@ -2745,10 +2765,62 @@ fn _blockBuffers(ctx Ctx) BlockBufs {
 	out
 }
 
+-- The buffer arena (plan 4.2 step 8): a block temp lives from the region
+-- that writes it to the last region that reads it. One whose live range
+-- (closed, in region order) overlaps no other's of the same element type and
+-- row width reuses that buffer's memory. Overlapping temps never share, so
+-- the `__restrict` bases of a region stay distinct. Returns, parallel to
+-- `cgBlockTemps, the temp whose buffer each one uses (itself for an owner).
+fn _blockTempArena(ctx Ctx) [NIdx] {
+	let regions = ctx rootRegions;
+	let temps = `cgBlockTemps;
+	var lo [Int] = [];
+	var hi [Int] = [];
+	for (x : temps) {
+		var a = regions length;
+		var b = -1;
+		var members = ctx.consumers[x] copy;
+		members push!(x);
+		for (u : members) {
+			let li = ctx _rootLoopOfNode(u);
+			let r = li == NONE ? NONE : _regionOfLoop(regions, li);
+			if (r == NONE) { a = 0; b = regions length; } else { a = min(a, r); b = max(b, r); }
+		}
+		lo push!(a);
+		hi push!(b);
+	}
+	var owner [NIdx] = [];
+	var slotEnd [Int] = [];     -- per owner index into temps: the last region of its current tenant
+	var i = 0;
+	while (i < temps length) {
+		let x = temps[i];
+		var o = x;
+		var j = 0;
+		while (j < i) {
+			let y = temps[j];
+			if (owner[j] == y && slotEnd[j] < lo[i] && ctx.typ[y] == ctx.typ[x] && ctx _rowElems(y) == ctx _rowElems(x)) {
+				o = y;
+				slotEnd[j] = hi[i];
+				break;
+			}
+			j = j + 1;
+		}
+		owner push!(o);
+		slotEnd push!(hi[i]);
+		i = i + 1;
+	}
+	owner
+}
+
 fn genFreeFun(ctx Ctx, name String) String {
 	var s = "tzpl_SErr %^_free(%^* p) {\n\ttzpl_SErr %^_uninit(%^* p);\n\t%^_uninit(p);\n"
 		fmt(name, name, name, name, name);
-	for (nm : (ctx _blockBuffers).names) { s = s $ "\tfree(p->%^);\n" fmt(nm); }
+	let bufs = ctx _blockBuffers;
+	var k = 0;
+	while (k < bufs.names length) {
+		if (bufs.alias[k] length == 0) { s = s $ "\tfree(p->%^);\n" fmt(bufs.names[k]); }
+		k = k + 1;
+	}
 	s $ "\tfree(p);\n\treturn tzpl_errNone;\n}\n\n"
 }
 
@@ -3966,7 +4038,37 @@ fn rootRegions(ctx Ctx) [[Int]] {
 		regions push!(r);
 		i = end + 1;
 	}
-	regions
+	ctx _fuseRegions(regions)
+}
+
+-- Fusion (plan 4.2 step 7): consecutive plain regions run as one sample loop,
+-- so a value one computes and the next reads stays a local instead of going
+-- through a block buffer. Block-cycle regions stay apart, and so do regions
+-- of different forms: one-channel elementwise regions (sample-vector) merge
+-- only with each other.
+fn _fuseRegions(ctx Ctx, regions [[Int]]) [[Int]] {
+	if (serialForms()) { return regions; }
+	-- each region's kind: 0 block cycle, 1 sample-vector, 2 other plain
+	var kind [Int] = [];
+	for (r : regions) {
+		var block = false;
+		for (li : r) { if (ctx.loops[li].group <= -10) { block = true; } }
+		kind push!(block ? 0 : (ctx _sampleVecOK(r) ? 1 : 2));
+	}
+	var out [[Int]] = [];
+	var i = 0;
+	while (i < regions length) {
+		var merged [Int] = [];
+		merged append!(regions[i]);
+		var j = i + 1;
+		while (kind[i] != 0 && j < regions length && kind[j] == kind[i]) {
+			merged append!(regions[j]);
+			j = j + 1;
+		}
+		out push!(merged);
+		i = j;
+	}
+	out
 }
 
 -- Join the loops at positions `ps` into one span.
@@ -4514,13 +4616,26 @@ fn _genStateSpace(ctx Ctx, k Int, region [Int], delays [DelayInfo]) String {
 	let ty = ctx _blockCycleType(k);
 	let C = m.chans;
 	let serial = ctx _genRegion(region, delays);
-	-- each input and output: pointer, stride, and whether it has C channels
-	var xbufs [(String, Int)] = [];
-	for (e : m.inputs) { xbufs push!(ctx _ssBuf(e)); if (cppType(ctx.typ[e]) != ty) { return serial; } }
-	var ybufs [(String, Int)] = [];
-	for (o : m.outputs) { ybufs push!(ctx _ssBuf(o)); if (cppType(ctx.typ[o]) != ty) { return serial; } }
+	-- each input's and output's buffer pointer and row stride (parallel
+	-- arrays: arrays of tuples trip a VM GC bug, #19)
+	var xPtr [String] = [];
+	var xStr [Int] = [];
+	for (e : m.inputs) {
+		let (bp, bs) = ctx _ssBuf(e);
+		xPtr push!(bp);
+		xStr push!(bs);
+		if (cppType(ctx.typ[e]) != ty) { return serial; }
+	}
+	var yPtr [String] = [];
+	var yStr [Int] = [];
+	for (o : m.outputs) {
+		let (bp, bs) = ctx _ssBuf(o);
+		yPtr push!(bp);
+		yStr push!(bs);
+		if (cppType(ctx.typ[o]) != ty) { return serial; }
+	}
 	-- no block buffers to run over
-	for (b : xbufs $ ybufs) { if (b.0 length == 0) { return serial; } }
+	if ((xPtr $ yPtr) contains("")) { return serial; }
 	-- the region's other loops run around the block form (regionExtras),
 	-- each with the ring delays it owns
 	let g = -(10 + k);
@@ -4622,7 +4737,7 @@ fn _genStateSpace(ctx Ctx, k Int, region [Int], delays [DelayInfo]) String {
 	var incs [String] = [];
 	var i = 0;
 	while (i < ni) {
-		let b = xbufs[i];
+		let b = (xPtr[i], xStr[i]);
 		let e = m.inputs[i];
 		let portSn = match (ctx.kind[e]) { inletK(_, sn, _): sn; _: NONE; };
 		if (C > 1 && portSn != NONE && ctx.chans[e] > 1) {
@@ -4640,7 +4755,7 @@ fn _genStateSpace(ctx Ctx, k Int, region [Int], delays [DelayInfo]) String {
 	var yincs [String] = [];
 	o = 0;
 	while (o < no) {
-		let b = ybufs[o];
+		let b = (yPtr[o], yStr[o]);
 		ys push!("%^ + off * %^%^" fmt(b.0, b.1, C > 1 ? " + c" : ""));
 		yincs push!(b.1 toString);
 		o = o + 1;
@@ -4689,8 +4804,9 @@ fn _localizeDelays(ctx Ctx, texts [String], plain [Bool], rest String) Void {
 	let tail = "\t}\n";
 	var pre [String] = [];
 	var post [String] = [];
-	var subs [[(String, String)]] = [];
-	for (t : texts) { pre push!(""); post push!(""); subs push!([(String, String)]()); }
+	var subFrom [[String]] = [];   -- names to replace per text, and their locals
+	var subTo [[String]] = [];
+	for (t : texts) { pre push!(""); post push!(""); subFrom push!([String]()); subTo push!([String]()); }
 	for (d : ctx.delays) {
 		if (ctx _isVoiceGraphDeep(ctx _delayGraph(d))) { continue; }
 		let ring = d.allocSize >= 2 && d.allocSize <= 8 && d.chans <= 16;
@@ -4720,12 +4836,14 @@ fn _localizeDelays(ctx Ctx, texts [String], plain [Bool], rest String) Void {
 			          $ "\tu64 %^_wrpos = %^;\n" fmt(loc, wp);
 			post[at] = post[at] $ "\tstd::memcpy(%^, %^, sizeof %^);\n" fmt(nm, loc, loc)
 			           $ "\t%^ = %^_wrpos;\n" fmt(wp, loc);
-			subs[at] push!((wp, loc $ "_wrpos"));
+			subFrom[at] push!(wp);
+			subTo[at] push!(loc $ "_wrpos");
 		} else {
 			pre[at] = pre[at] $ "\t%^ %^ = %^;\n" fmt(ty, loc, nm);
 			post[at] = post[at] $ "\t%^ = %^;\n" fmt(nm, loc);
 		}
-		subs[at] push!((nm, loc));
+		subFrom[at] push!(nm);
+		subTo[at] push!(loc);
 	}
 	var i = 0;
 	while (i < texts length) {
@@ -4733,7 +4851,8 @@ fn _localizeDelays(ctx Ctx, texts [String], plain [Bool], rest String) Void {
 		-- A plain region is "\t{\n" ... "\t}\n\t}\n": the sample loop sits in a scope.
 		if (plain[i] && t startsWith(head) && t endsWith(tail)) {
 			var body = t substring(head length, t length - head length - tail length);
-			for (sub : subs[i]) { body = body _replaceName(sub.0, sub.1); }
+			var si = 0;
+			while (si < subFrom[i] length) { body = body _replaceName(subFrom[i][si], subTo[i][si]); si = si + 1; }
 			var loads = pre[i];
 			for (nm : _readOnlyValues(body)) {
 				let loc = "l_" $ nm substring(3, nm length - 3);

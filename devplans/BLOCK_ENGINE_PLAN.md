@@ -1593,11 +1593,30 @@ Progress (2026-10-25; M8 is in progress):
   form runs the tail. At 16 channels a one-pole went from 0.60 to 0.15 ns/sample (TU
   0.19–0.30), a biquad from 0.57 to 0.20 (TU 0.93); 16-channel `sinosc → lpf` is
   1.23× faster than `main` in the app (it was 1.15×), bank 1.28×.
+- **Fusion:** consecutive plain regions run as one sample loop (block-cycle regions
+  stay apart; sample-vector regions merge only with each other), so values pass
+  between them as locals instead of block buffers.
+- **Buffer arena:** a block temp's live range runs from the region that writes it to
+  the last region that reads it; temps whose ranges don't overlap, with the same
+  type and row width, share memory (`p->btB = p->btA` at alloc). Overlapping temps
+  never share, so a region's `__restrict` bases stay distinct. After fusion the dump
+  corpus has few temps to share (4 of 144); it matters for large synths.
+- **Delay times are clamped at 0** in every variable-time delay read
+  (`tzpl_delay_time`): converting a negative float to `uint64_t` is undefined; x86-64
+  produced a huge value whose fraction indexed the sinc table out of bounds (a crash
+  the equivalence test found on Linux).
+- **A lang GC bug, found by fusion:** a short-circuit `||`/`&&` left its right
+  operand's temporaries allocated and typed; on the skip path they held a previous
+  tenant's value, and a later stack map rooted it (`sc2_4` crashed the VM in
+  `step_root_frames` marking the Int 8). Fixed in lang codegen (`freeRegsTo` after
+  the right operand), with a test.
+- **The equivalence test's limit is −40 dB:** `fxMultiTap` measures −61 dB on arm64
+  and −47 dB on x86-64 (a 38400-sample delay time held to ~0.002 samples by f32 in any
+  form); a wrong form is +30 dB.
 - **Not done yet:**
-  - the buffer arena (interval colouring, in-place reuse) and planar block buffers
-    between loops;
-  - fusion and loop formation beyond the inherited tree-to-loop pass, and the rest
-    of the cost table (register budget, transposes).
+  - planar block buffers between loops (multichannel temps are still interleaved
+    rows; sample-vector consumers of multichannel temps would want planar);
+  - the rest of the cost table (register budget; when to transpose versus gather).
 
 **M9: Voicer block form (§4.6), portability and performance.**
 - Channel-vector loops over voices, skipping idle groups, per-voice parameter caches.

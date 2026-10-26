@@ -39,10 +39,12 @@ namespace {
 
 constexpr int kBlock = 64;
 constexpr int kBlocks = 150;
-// The worst synth measured -61 dB (fxMultiTap: a lagged delay time whose
-// block scan rounds differently, moving the read position by ~1e-3 samples);
-// most are below -80 dB. A wrong form is far above this (+30 dB).
-constexpr double kTolDb = -50;
+// The worst synth: fxMultiTap, -61 dB on arm64 and -47 dB on x86-64. Its
+// delay time (about 38400 samples) comes from a lagged control, and f32 holds
+// that to about 0.002 samples in any form, so a different rounding order moves
+// the read position by that much. Most synths are below -80 dB; a wrong form
+// is far above this limit (+30 dB).
+constexpr double kTolDb = -40;
 
 int elemSize(tzpl_ElemType t) { return t == tzpl_kI32 || t == tzpl_kF32 ? 4 : 8; }
 
