@@ -70,6 +70,26 @@ for what changed and the code to change.
   incremental collection could free a value still in use (`Ref` updates of
   structs, dynamic variables, resumed coroutines, lazy lists) were fixed at
   the same time.
+- `detachVM` left the silo running its tasks and actors on the VM being
+  deleted: a stopped silo melody could play one more note after
+  `allNotesOff`, which then hung, and the freed VM memory was written to (a
+  likely cause of rare app crashes). The silo's tasks now stop with the VM.
+- Engine, `ui` and synthdef errors -- a note sent to a node that does not
+  exist, `newNode` of a def that is not loaded, a silo compile error -- now
+  appear in the app's output pane. They went only to the terminal before,
+  so in the app such a mistake was silent.
+- Running a cell in a notebook you had not edited could mark it unsaved, so
+  opening another file asked to save. It happened when a notebook's saved
+  history lagged its cells; such a notebook now opens with its content
+  recorded in the history, and the shipped notebooks were re-saved.
+- The example notebooks are ported to the block engine, and each cookbook
+  chapter runs on its own: chapters 3 and 4 define the synths they play
+  (they were silent unless chapter 2 had run), and chapters 5 and 6 play on
+  their own nodes (501 and 600) instead of colliding with other chapters'.
+- Links in the body text of the migration guide, SynthDef guide, Builtin
+  Functions, Music Libraries and Standard Library pages use the page's
+  accent color instead of the browser's default dark blue, which was hard
+  to read on the dark theme.
 - Building a signal outside a synthdef graph (`let s = fill(...)` at top
   level) is now an error naming the problem instead of a crash.
 - Importing two modules that both define a type of the same name
