@@ -5654,10 +5654,10 @@ fn genSwapSampleBankFun(ctx Ctx, name String) String {
 	s
 }
 
--- A tzpl_SignalType initializer: {{dims}, elem, rate}.
+-- A tzpl_SignalType initializer: {{{dims}, rank}, elem, rate}.
 fn _sigType(sh Shape, t NumType, r Rate) String =
-	"{{{%^, %^, %^, %^}}, %^, %^}" fmt(sh.dims[0], sh.dims[1], sh.dims[2], sh.dims[3],
-		_typeTag(t), _rateCode(r));
+	"{{{%^, %^, %^, %^}, %^}, %^, %^}" fmt(sh.dims[0], sh.dims[1], sh.dims[2], sh.dims[3],
+		sh.rank, _typeTag(t), _rateCode(r));
 
 fn _portDef(ctx Ctx, n NIdx, fallback String, sn Int) String {
 	let nm = match (ctx.kind[n]) {
@@ -5765,7 +5765,7 @@ fn genLoadBufferDefs(ctx Ctx) String {
 	s = s $ "\tlist.buffers = (tzpl_BufferDef*)calloc(list.num_buffers, sizeof(tzpl_BufferDef));\n";
 	var i = 0;
 	for (ser : ctx.bufSerials) {
-		s = s $ "\tlist.buffers[%^] = {\"buf%^\", {{{1, 1, 1, %^}}, tzpl_kF64, tzpl_constRate}, %^};\n"
+		s = s $ "\tlist.buffers[%^] = {\"buf%^\", {{{1, 1, 1, %^}, 1}, tzpl_kF64, tzpl_constRate}, %^};\n"
 			fmt(i, ser, spans[i], ser);
 		i = i + 1;
 	}

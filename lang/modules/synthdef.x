@@ -107,10 +107,13 @@ fn numType(o Float) NumType = o isIntegerValued ? ANY_NUM : ANY_FLOAT;
 --
 -- A signal is a tensor of channels: up to 4 dimensions, row-major (the last
 -- dimension varies fastest), unused leading dimensions 1. Channel c is the
--- row-major flattening. Mirrors tzpl_Shape in the plugin ABI.
+-- row-major flattening. `rank` counts the dimensions in use from the last:
+-- a scalar is rank 0, row(n) rank 1, and matrix(1, n) rank 2 although its
+-- dims equal row(n)'s. Mirrors tzpl_Shape in the plugin ABI.
 
 struct Shape {
 	dims [Int],    -- always 4 entries
+	rank Int,      -- 0 .. MAX_RANK
 }
 
 const MAX_RANK = 4;
@@ -120,10 +123,12 @@ fn shape(dims [Int]) Shape {
 	var k = dims length;
 	while (k < MAX_RANK) { d push!(1); k = k + 1; }
 	for (x : dims) { d push!(x); }
-	Shape { dims: d }
+	Shape { dims: d, rank: dims length }
 }
-fn scalarShape() Shape = shape([1]);
+fn scalarShape() Shape = Shape { dims: [1, 1, 1, 1], rank: 0 };
 fn row(n Int) Shape = shape([n pow2Compat]);
+-- A signal of n channels given by count: a scalar for one, else a row.
+fn chansShape(n Int) Shape = n == 1 ? scalarShape() : row(n);
 
 -- Verification only: with TZPL_POW2_CHANS=1 channel counts round up to
 -- powers of two as they did before the block engine, so renders can be
@@ -135,18 +140,16 @@ fn cuboid(planes Int, rows Int, cols Int) Shape = shape([planes, rows, cols]);
 
 fn chans(s Shape) Int = s.dims[0] * s.dims[1] * s.dims[2] * s.dims[3];
 
--- Number of dimensions after the leading 1s (a scalar has rank 0).
-fn rank(s Shape) Int {
-	var d = 0;
-	while (d < MAX_RANK) {
-		if (s.dims[d] != 1) { return MAX_RANK - d; }
-		d = d + 1;
-	}
-	0
+-- The dimensions in use, outermost first ([] for a scalar).
+fn dimsInUse(s Shape) [Int] {
+	var out [Int] = [];
+	var d = MAX_RANK - s.rank;
+	while (d < MAX_RANK) { out push!(s.dims[d]); d = d + 1; }
+	out
 }
 
 fn ==(a Shape, b Shape) Bool =
-	a.dims[0] == b.dims[0] && a.dims[1] == b.dims[1]
+	a.rank == b.rank && a.dims[0] == b.dims[0] && a.dims[1] == b.dims[1]
 	&& a.dims[2] == b.dims[2] && a.dims[3] == b.dims[3];
 fn !=(a Shape, b Shape) Bool = !(a == b);
 
@@ -154,13 +157,14 @@ fn _gcd(a Int, b Int) Int = b == 0 ? a : _gcd(b, a % b);
 fn _lcm(a Int, b Int) Int = (a == 0 || b == 0) ? max(a, b) : a // _gcd(a, b) * b;
 
 -- Each dimension is the least common multiple of a's and b's, so a 2-channel
--- signal times a 3-channel one is 6 channels, cycling each. A shape with 0
--- channels (not yet known) is the identity.
+-- signal times a 3-channel one is 6 channels, cycling each. The rank is the
+-- larger. A shape with 0 channels (not yet known) is the identity.
 fn broadcast(a Shape, b Shape) Shape {
 	if (a chans == 0) { return b; }
 	if (b chans == 0) { return a; }
 	Shape { dims: [_lcm(a.dims[0], b.dims[0]), _lcm(a.dims[1], b.dims[1]),
-	               _lcm(a.dims[2], b.dims[2]), _lcm(a.dims[3], b.dims[3])] }
+	               _lcm(a.dims[2], b.dims[2]), _lcm(a.dims[3], b.dims[3])],
+	        rank: max(a.rank, b.rank) }
 }
 
 -- Row-major strides: the last dimension has stride 1.
@@ -183,9 +187,9 @@ fn broadcastChannel(src Shape, out Shape, w Int) Int {
 	p
 }
 
--- "6", "2x3": the dimensions after the leading 1s.
+-- "6", "2x3": the dimensions in use.
 fn toString(s Shape) String {
-	let r = s rank;
+	let r = s.rank;
 	if (r == 0) { return "1"; }
 	var parts [String] = [];
 	var d = MAX_RANK - r;
@@ -196,11 +200,11 @@ fn toString(s Shape) String {
 -- A leading voice dimension: n copies of s (for voicers). A rank-4 shape
 -- folds the new dimension into its first.
 fn prependDim(s Shape, n Int) Shape {
-	let r = s rank;
+	let r = s.rank;
 	var dims = s.dims copy;
 	if (r < MAX_RANK) { dims[MAX_RANK - 1 - r] = n; }
 	else { dims[0] = n * dims[0]; }
-	Shape { dims: dims }
+	Shape { dims: dims, rank: min(r + 1, MAX_RANK) }
 }
 
 ---------------------------------------------------------------------------
@@ -365,9 +369,9 @@ fn scalar(x Float) S {
 	SignalExprKind.float([x], x numType, scalarShape()) _newSignalExpr
 }
 
-fn fill(chans Int, x Int) S = fill(row(chans max(1)), x);
-fn fill(chans Int, x Fraction) S = fill(row(chans max(1)), x);
-fn fill(chans Int, x Float) S = fill(row(chans max(1)), x);
+fn fill(chans Int, x Int) S = fill(chansShape(chans max(1)), x);
+fn fill(chans Int, x Fraction) S = fill(chansShape(chans max(1)), x);
+fn fill(chans Int, x Float) S = fill(chansShape(chans max(1)), x);
 
 fn fill(sh Shape, x Int) S {
 	SignalExprKind.int(x repeat(sh chans), ANY_NUM, sh) _newSignalExpr
@@ -663,7 +667,7 @@ fn sharedIn(slot Int, rate Rate = Rate.audio) S {
 
 -- An input port. Shape and element type are fixed; what feeds it is up to
 -- the engine at run time (a connection, or a value set on it).
-fn inlet(typ NumType, chans Int = 1, name String = "in") S = inlet(typ, row(chans max(1)), name);
+fn inlet(typ NumType, chans Int = 1, name String = "in") S = inlet(typ, chansShape(chans max(1)), name);
 
 fn inlet(typ NumType, sh Shape, name String) S {
     SignalExprKind.inlet(typ, sh, name, Option<InletSpec>.none) _newSignalExpr
@@ -682,7 +686,7 @@ fn _specInlet(name String, spec ControlSpec, kind ControlKind, sh Shape) S {
 }
 
 fn control(name String, spec ControlSpec, chans Int = 1) S =
-    _specInlet(name, spec, ControlKind.continuous, row(chans max(1)));
+    _specInlet(name, spec, ControlKind.continuous, chansShape(chans max(1)));
 fn control(name String, spec ControlSpec, sh Shape) S =
     _specInlet(name, spec, ControlKind.continuous, sh);
 
@@ -690,19 +694,19 @@ fn control(name String, spec ControlSpec, sh Shape) S =
 -- lasts one sample (retrigger an envelope, reset a phase). UIs render a button.
 fn trigger(name String, chans Int = 1) S =
     _specInlet(name, ControlSpec { lo: 0.0, hi: 1.0, init: 0.0, warp: ControlWarp.linear },
-               ControlKind.trigger, row(chans max(1)));
+               ControlKind.trigger, chansShape(chans max(1)));
 
 -- Latched on/off control (0 or 1). UIs render a toggle.
 fn toggle(name String, init Float = 0.0, chans Int = 1) S =
     _specInlet(name, ControlSpec { lo: 0.0, hi: 1.0, init: init, warp: ControlWarp.linear },
-               ControlKind.boolean, row(chans max(1)));
+               ControlKind.boolean, chansShape(chans max(1)));
 
 -- Integer choice control: 0 .. numChoices-1 in unit steps. UIs render a
 -- number box.
 fn choice(name String, numChoices Int, init Int = 0, chans Int = 1) S =
     _specInlet(name, ControlSpec { lo: 0.0, hi: (numChoices - 1) toFloat, init: init toFloat,
                                    warp: ControlWarp.step(1.0) },
-               ControlKind.select, row(chans max(1)));
+               ControlKind.select, chansShape(chans max(1)));
 
 -- A note parameter of the enclosing voicer: `chans` columns of its voiced
 -- synth's `notes` input (gate is column 0; the others follow in the order
@@ -750,9 +754,9 @@ fn frand(lo Float, hi Float, chans Int = 1, rate Rate = Rate.audio) S =
 -- the min() guards the one-in-2^24 f32 case where u*(n) rounds up to n.
 fn irand(lo Int, hi Int, chans Int = 1, rate Rate = Rate.audio) S =
     (lo + min(hi - lo, (urand(chans, rate) * (hi - lo + 1)) floor)) i32;
-fn urand(chans Int = 1, rate Rate = Rate.audio) S = urand(row(chans max(1)), rate);
-fn birand(chans Int = 1, rate Rate = Rate.audio) S = birand(row(chans max(1)), rate);
-fn rand64(chans Int = 1, rate Rate = Rate.audio) S = rand64(row(chans max(1)), rate);
+fn urand(chans Int = 1, rate Rate = Rate.audio) S = urand(chansShape(chans max(1)), rate);
+fn birand(chans Int = 1, rate Rate = Rate.audio) S = birand(chansShape(chans max(1)), rate);
+fn rand64(chans Int = 1, rate Rate = Rate.audio) S = rand64(chansShape(chans max(1)), rate);
 fn urand(sh Shape, rate Rate) S {
     SignalExprKind.random(RandOp.unipolar, rate, sh) _newSignalExpr
 }

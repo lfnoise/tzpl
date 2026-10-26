@@ -157,6 +157,25 @@ void setAll(i64 id, int port, std::vector<f64> const& v, f64 ramp = 0.,
 
 // ---------------------------------------------------------------------------
 
+// tzpl_Shape carries its rank: a 1 x 3 matrix and a row of 3 share dims but
+// are different shapes.
+void testShapes() {
+    gCase = "shapes";
+    check(tzpl::rank(tzpl::shapeScalar()) == 0, "scalar rank 0");
+    check(tzpl::rank(tzpl::shapeRow(3)) == 1, "row rank 1");
+    check(tzpl::rank(tzpl::shapeMatrix(1, 3)) == 2, "1x3 matrix rank 2");
+    check(tzpl::rank(tzpl::shapeCuboid(2, 1, 1)) == 3, "cuboid rank 3");
+    check(!(tzpl::shapeMatrix(1, 3) == tzpl::shapeRow(3)), "1x3 matrix != row 3");
+    check(!(tzpl::shapeRow(1) == tzpl::shapeScalar()), "row 1 != scalar");
+    check(tzpl::shapeChans(1) == tzpl::shapeScalar(), "one channel by count is a scalar");
+    check(tzpl::broadcast(tzpl::shapeRow(3), tzpl::shapeMatrix(2, 1)) == tzpl::shapeMatrix(2, 3),
+          "broadcast takes the larger rank");
+    check(tzpl::shapeString(tzpl::shapeMatrix(1, 3)) == "1x3", "1x3 spelled at its rank");
+    check(tzpl::validShape(tzpl::shapeMatrix(2, 3)), "2x3 valid");
+    check(!tzpl::validShape(tzpl_Shape{{1, 1, 2, 3}, 1}), "dim outside the rank refused");
+    check(!tzpl::validShape(tzpl_Shape{{1, 1, 1, 1}, 5}), "rank over the maximum refused");
+}
+
 void testBlockSizes() {
     for (int block : {1, 4, 64, 256}) {
         for (int dev : {37, 64, 100}) {
@@ -535,6 +554,7 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i)
         if (std::strcmp(argv[i], "--verbose") == 0) gVerbose = true;
 
+    testShapes();
     testBlockSizes();
     testStartFree();
     testStages();

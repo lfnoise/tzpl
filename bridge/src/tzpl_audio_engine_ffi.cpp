@@ -224,13 +224,13 @@ static void ffi_wireDef(ts::VM& vm, u16 dst, u16, u16 argBase) {
     vm.reg(dst).o = new ts::StringObj(name);
 }
 
-// fn wireDef(shape [Int]) -> String     (dims, row-major: [2, 3] = 2x3)
-// fn gainDef(shape [Int]) -> String
+// fn wireDef(shape [Int]) -> String     (dims in use, row-major: [2, 3] = 2x3;
+// fn gainDef(shape [Int]) -> String      the rank is their count, [] a scalar)
 static bool regShape(ts::VM& vm, u16 r, tzpl_Shape& out) {
     auto* arr = vm.reg(r).o;
     usize n = ts::arraySize(arr);
-    if (n < 1 || n > TZPL_MAX_RANK) return false;
-    out = tzpl_Shape{{1, 1, 1, 1}};
+    if (n > TZPL_MAX_RANK) return false;
+    out = tzpl_Shape{{1, 1, 1, 1}, (u32)n};
     i64 total = 1;
     for (usize i = 0; i < n; ++i) {
         i64 d = ts::arrayGetInt(arr, i);
@@ -1615,7 +1615,7 @@ static void ffi_tapShape(ts::VM& vm, u16 dst, u16, u16 argBase) {
     tzpl_Shape sh = e ? engine::tapShape(e, tapID) : tzpl_Shape{{0, 0, 0, 0}};
     std::vector<i64> dims;
     if (sh.dims[0] != 0) {
-        int r = std::max(1, tzpl::rank(sh));
+        int r = std::max(1, tzpl::rank(sh));  // a scalar reads as [1]
         for (int d = TZPL_MAX_RANK - r; d < TZPL_MAX_RANK; ++d) dims.push_back(sh.dims[d]);
     }
     auto* arr = new ts::PodArray<i64>(vm.arrayType(vm.intType()));

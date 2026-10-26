@@ -142,11 +142,11 @@ char const* ensureDef(Engine* e, char const* prefix, tzpl_Shape shape, bool gain
 } // namespace
 
 char const* ensureWireDef(Engine* e, int chans) {
-    return ensureDef(e, "_wire", tzpl::shapeRow(chans), /*gain=*/false);
+    return ensureDef(e, "_wire", tzpl::shapeChans(chans), /*gain=*/false);
 }
 
 char const* ensureGainDef(Engine* e, int chans) {
-    return ensureDef(e, "_gain", tzpl::shapeRow(chans), /*gain=*/true);
+    return ensureDef(e, "_gain", tzpl::shapeChans(chans), /*gain=*/true);
 }
 
 char const* ensureWireDef(Engine* e, tzpl_Shape shape) {

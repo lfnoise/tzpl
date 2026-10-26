@@ -61,10 +61,10 @@ fn _vecNarrowType(ctx Ctx, n NIdx, vop VecOp, ins [Int]) NumType = match (vop) {
 -- at = the index vector's chans; put = the source array's chans; join = the
 -- sum of all inputs; the single-input reorders use vecOutChans.
 fn _vecShapeOf(ctx Ctx, vop VecOp, ins [Int]) Shape = match (vop) {
-	at:   row(ctx.chans[ins[1]]);
-	put:  row(ctx.chans[ins[0]]);
-	join: { var raw = 0; for (x : ins) { raw = raw + ctx.chans[x]; } row(raw pow2Compat) }
-	_:    row(vecOutChans(ctx.chans[ins[0]], vop));
+	at:   chansShape(ctx.chans[ins[1]]);
+	put:  chansShape(ctx.chans[ins[0]]);
+	join: { var raw = 0; for (x : ins) { raw = raw + ctx.chans[x]; } chansShape(raw pow2Compat) }
+	_:    chansShape(vecOutChans(ctx.chans[ins[0]], vop));
 };
 
 -- The recomputed shape of node n from its inputs. Elementwise ops broadcast
@@ -83,7 +83,7 @@ fn calcShapeOf(ctx Ctx, n NIdx) Shape {
 		binopK(_):           broadcast(ctx.shape[ins[0]], ctx.shape[ins[1]]);
 		compareopK(_):       broadcast(ctx.shape[ins[0]], ctx.shape[ins[1]]);
 		castopK(_):          ctx.shape[ins[0]];
-		reduceK(_, cols):    row(cols);
+		reduceK(_, cols):    chansShape(cols);
 		vecK(vop):           _vecShapeOf(ctx, vop, ins);
 		selectK:             _selectShape(ctx, n);
 		urandK(_):           ctx.shape[n];      -- fixed at import
@@ -94,13 +94,13 @@ fn calcShapeOf(ctx Ctx, n NIdx) Shape {
 		delayFixReadK(d, _): ctx.delays[d].shape;
 		delayVarReadK(d, _): ctx.delays[d].shape;
 		delayWriteK(_):      ctx.shape[ins[0]];
-		bufFixReadK(_, _, readChans, _): row(readChans);
-		bufVarReadK(_, _, readChans, _): row(readChans);
+		bufFixReadK(_, _, readChans, _): chansShape(readChans);
+		bufVarReadK(_, _, readChans, _): chansShape(readChans);
 		bufWriteK(_, _, _):  ctx.shape[ins[0]];
 		bufLengthK(_):       scalarShape();
 		bankLookupK(_):      scalarShape();
-		bankFixReadK(_, readChans, _): row(readChans);
-		bankVarReadK(_, readChans, _): row(readChans);
+		bankFixReadK(_, readChans, _): chansShape(readChans);
+		bankVarReadK(_, readChans, _): chansShape(readChans);
 		bankRootKeyK:        scalarShape();
 		bankSampleRateK:     scalarShape();
 		bankLengthK:         scalarShape();

@@ -291,7 +291,7 @@ fn _compatPad(v ConstVal) ConstVal {
 		floats(a): { var o = a copy; while (o length < m) { o push!(0.0); } ConstVal.floats(o) }
 	}
 }
-fn _compatShape(v ConstVal, sh Shape) Shape = (v constSize == sh chans) ? sh : row(v constSize);
+fn _compatShape(v ConstVal, sh Shape) Shape = (v constSize == sh chans) ? sh : chansShape(v constSize);
 
 -- A shape not known yet (0 channels): the identity of broadcast.
 fn noShape() Shape = shape([0]);
@@ -612,9 +612,9 @@ fn _buildRHS(p Pat, subs [Int]) Int = match (p) {
 fn _makeReduce(ctx Ctx, ins [Int], op BinaryOp, cols Int) Int {
 	if (ctx.kind[ins[0]] isConstantKind) {
 		let r = foldReduce(_constValOf(ctx, ins[0]), cols, op);
-		return _addConstantNode(NodeKind.constant(r, r _foldInitType), row(r constSize));
+		return _addConstantNode(NodeKind.constant(r, r _foldInitType), chansShape(r constSize));
 	}
-	_addExprNode(NodeKind.reduceK(op, cols), ins, ctx.nrate[ins[0]], ctx.typ[ins[0]], row(cols))
+	_addExprNode(NodeKind.reduceK(op, cols), ins, ctx.nrate[ins[0]], ctx.typ[ins[0]], chansShape(cols))
 }
 
 -- Output channel count of a vec op over flattened channels. at = the index
@@ -648,7 +648,7 @@ fn _importVecOp(e SignalExpr, vop VecOp) Void {
 			-- take/drop/stride/stutter/ncyc/rotate/reverse/transpose/at/put/join:
 			-- no folding, initial type = any (narrowed to the input type by inference).
 			_mapId(e.id, _addExprNode(NodeKind.vecK(vop), ins,
-				ctx _vecRate(vop, ins), ANY_NUM, row(ctx _vecChans(vop, ins))));
+				ctx _vecRate(vop, ins), ANY_NUM, chansShape(ctx _vecChans(vop, ins))));
 		}
 	}
 }
@@ -698,7 +698,7 @@ fn _importExpr(e SignalExpr) Void {
 				`scNoteCol = col + chans;
 			}
 			_mapId(e.id, _addExprNode(NodeKind.noteParamK(spec, name, col), [Int](),
-				Rate.block, FLOAT32, row(chans)));
+				Rate.block, FLOAT32, chansShape(chans)));
 		}
 		inlet(typ, sh, name, spec): {
 			-- An input port. One with a spec (a control) is nominally block
@@ -831,12 +831,12 @@ fn _importExpr(e SignalExpr) Void {
 			match (op) {
 				fixRead(index, readChans, startChan): {
 					_mapId(e.id, _addExprNode(NodeKind.bufFixReadK(bi, index, readChans, startChan), [Int](),
-						Rate.audio, FLOAT64, row(readChans)));
+						Rate.audio, FLOAT64, chansShape(readChans)));
 				}
 				vread(interp, readChans, startChan): {
 					let ins = e _resolveIns;
 					_mapId(e.id, _addExprNode(NodeKind.bufVarReadK(bi, interp, readChans, startChan), ins,
-						Rate.audio, FLOAT64, row(readChans)));
+						Rate.audio, FLOAT64, chansShape(readChans)));
 				}
 				write(writeChans, startChan): {
 					let ins = e _resolveIns;
@@ -869,12 +869,12 @@ fn _importExpr(e SignalExpr) Void {
 				fixRead(index, readChans, startChan): {
 					let ins = e _resolveIns;
 					_mapId(e.id, _addExprNode(NodeKind.bankFixReadK(index, readChans, startChan), ins,
-						Rate.audio, FLOAT64, row(readChans)));
+						Rate.audio, FLOAT64, chansShape(readChans)));
 				}
 				vread(interp, readChans, startChan): {
 					let ins = e _resolveIns;
 					_mapId(e.id, _addExprNode(NodeKind.bankVarReadK(interp, readChans, startChan), ins,
-						Rate.audio, FLOAT64, row(readChans)));
+						Rate.audio, FLOAT64, chansShape(readChans)));
 				}
 				rootKey: {
 					let ins = e _resolveIns;

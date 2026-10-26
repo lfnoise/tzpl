@@ -148,11 +148,14 @@ typedef enum tzpl_ElemType {
 } tzpl_ElemType;
 
 /* Tensor shape, row-major: dims[3] varies fastest. Unused leading dims are 1,
- * so a scalar is {1,1,1,1}, n channels {1,1,1,n}, a rows x cols matrix
- * {1,1,rows,cols}. Channel c of a port is the row-major flattening. */
+ * so a scalar is {1,1,1,1} rank 0, n channels {1,1,1,n} rank 1, a rows x cols
+ * matrix {1,1,rows,cols} rank 2. `rank` counts the dims in use from the last,
+ * so a 1 x n matrix (rank 2) and n channels (rank 1) are different shapes with
+ * the same dims. Channel c of a port is the row-major flattening. */
 #define TZPL_MAX_RANK 4
 typedef struct tzpl_Shape {
     uint32_t dims[TZPL_MAX_RANK];
+    uint32_t rank;
 } tzpl_Shape;
 
 /* Signal type descriptor */

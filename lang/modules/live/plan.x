@@ -29,7 +29,7 @@ fn monitorDefName(sh Shape) String = "_gain" $ shapeTag(sh);
 -- How the engine's native defs name a shape: a row (or scalar) by its width
 -- ("_wire4"), a higher-rank shape by its dims ("_wire2x3").
 fn shapeTag(sh Shape) String {
-	let r = sh rank;
+	let r = sh.rank;
 	if (r <= 1) { return sh chans toString; }
 	var out = "";
 	var d = MAX_RANK - r;

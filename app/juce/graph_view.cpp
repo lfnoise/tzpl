@@ -98,7 +98,7 @@ static juce::Font portFont() {
 static juce::String portLabel(graph::PortVM const& p) {
     juce::String s(p.name);
     int rank = tzpl::rank(p.shape);
-    if (rank == 1) s << " ×" << p.chans;
+    if (rank == 1 && p.chans > 1) s << " ×" << p.chans;
     else if (rank > 1) s << " " << juce::String::fromUTF8(tzpl::shapeString(p.shape, "×").c_str());
     if (p.elem != tzpl_kF32 || p.rate != tzpl_audioRate) {
         char const* elem = p.elem == tzpl_kI32 ? "i32"

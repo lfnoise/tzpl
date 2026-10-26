@@ -662,7 +662,7 @@ fn dump(silo Int = 0) String {
 -- asked for. Only the user's own definition ever goes through clang.
 -- These fail only when there is no engine at all.
 fn _ensureAnchorDef(sh Shape) Bool {
-    if (wireDef(sh.dims) == "") {
+    if (wireDef(sh dimsInUse) == "") {
         println("live: no engine for anchor def (" $ shapeTag(sh) $ ")");
         return false;
     }
@@ -670,7 +670,7 @@ fn _ensureAnchorDef(sh Shape) Bool {
 }
 
 fn _ensureMonDef(sh Shape) Bool {
-    if (gainDef(sh.dims) == "") {
+    if (gainDef(sh dimsInUse) == "") {
         println("live: no engine for monitor def (" $ shapeTag(sh) $ ")");
         return false;
     }
