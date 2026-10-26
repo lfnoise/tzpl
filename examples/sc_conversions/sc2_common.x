@@ -68,10 +68,10 @@ fn linrandv(lo, hi, chans Int, rate Rate) S =
 
 -- One Ringz per mode, driven by the same excitation: `freqs`, `amps` and
 -- `ringTimes` are per-mode vectors (amps may be a plain 1). Returns the
--- per-mode vector so the caller chooses the reduction: `sum` for a mono
--- bank, `sum(2)` when the modes are two independent iid banks interleaved
--- per channel, `transpose(p) sum(2)` when they are block-ordered (bank 0
--- in channels [0,p), bank 1 in [p,2p)). Modes above Nyquist are muted.
+-- per-mode tensor so the caller chooses the reduction: `sum` for a mono
+-- bank; for stereo, give the modes a channel axis (e.g. freqs shaped
+-- [p, 2], or two banks stacked as [2, p]) and sum the mode axis. Modes
+-- above Nyquist are muted.
 fn klankModes(exc S, freqs S, amps AsSignal, ringTimes AsSignal) S {
 	let lim = 0.45 * fs();
 	let audible = freqs < lim;

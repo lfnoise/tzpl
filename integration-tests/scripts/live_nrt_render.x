@@ -38,7 +38,7 @@ coro fn session() Float {
     play(bright);
     define(drone, fn() S {
         let f = control("freq", espec(40.0, 800.0, 110.0));
-        (sinosc([1.0, 1.5, 2.01, 3.0] * f) sum(2)) * 0.12
+        (sinosc(tensor(matrix(2, 2), [1.0, 1.5, 2.01, 3.0]) * f) sum(0)) * 0.12
     });
     drone set("freq", 165.0);
     yield 2.0;

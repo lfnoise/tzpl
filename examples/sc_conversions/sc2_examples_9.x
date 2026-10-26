@@ -75,7 +75,7 @@ fn deepTripVoice() S {
 	(s + (s comb(dt1, 0.5, 20, Interpolation.none)) + (s comb(dt2, 0.5, 20, Interpolation.none))) * xenv(kTripTrans)
 }
 
-fn deepTrip() S = voicer(kTripVoices, deepTripVoice) sum(2) gainOutlet;
+fn deepTrip() S = voicer(kTripVoices, deepTripVoice) sum(0) gainOutlet;
 
 deepTrip defSynthX("deepTrip", tags) await;
 
@@ -176,13 +176,13 @@ fn sawedCymbalsVoice() S {
 	let p = 15;
 	let f1 = 500 + urand(1, Rate.reset) * 2000;
 	let f2 = urand(1, Rate.reset) * 8000;
-	let freqs = f1 + urand(2 * p, Rate.reset) * f2;
-	let rings = 2 + urand(2 * p, Rate.reset) * 4;
+	let freqs = f1 + urand(2 * p, Rate.reset) reshape([p, 2]) * f2;
+	let rings = 2 + urand(2 * p, Rate.reset) reshape([p, 2]) * 4;
 	let exc = (xline(1 + urand(1, Rate.reset) * 599, 1 + urand(1, Rate.reset) * 599, 12) lfsaw) * 0.0005;
-	(klankModes(exc, freqs, 1, rings) sum(2)) * xenv(kCymTrans)
+	(klankModes(exc, freqs, 1, rings) sum(0)) * xenv(kCymTrans)
 }
 
-fn sawedCymbals() S = voicer(kCymVoices, sawedCymbalsVoice) sum(2) gainOutlet;
+fn sawedCymbals() S = voicer(kCymVoices, sawedCymbalsVoice) sum(0) gainOutlet;
 
 sawedCymbals defSynthX("sawedCymbals", tags) await;
 
@@ -195,17 +195,17 @@ sawedCymbals defSynthX("sawedCymbals", tags) await;
 
 fn siderealVoice() S {
 	let p = 15;
-	let freqs = exprand(100, 6000, 2 * p, Rate.reset);
-	let rings = 2 + urand(2 * p, Rate.reset) * 4;
+	let freqs = exprand(100, 6000, 2 * p, Rate.reset) reshape([p, 2]);
+	let rings = 2 + urand(2 * p, Rate.reset) reshape([p, 2]) * 4;
 	let f3 = xline(exprand(40, 300, 1, Rate.reset), exprand(40, 300, 1, Rate.reset), 12);
 	let amp = 0.002 * ((((urand(1, Rate.reset) * 8) lfnoise3(1))) max(0));
 	let in = (f3 lfupulse(0.1 + urand(1, Rate.reset) * 0.8)) * amp;
-	let out = ((klankModes(in, freqs, 1, rings) sum(2)) distort) * 0.1;
+	let out = ((klankModes(in, freqs, 1, rings) sum(0)) distort) * 0.1;
 	let dt = 0.1 + urand(1, Rate.reset) * 0.5;
 	((out comb(dt, 0.6, 8, Interpolation.none)) + (out reverse)) * xenv(kCymTrans)
 }
 
-fn siderealTime() S = voicer(kCymVoices, siderealVoice) sum(2) gainOutlet;
+fn siderealTime() S = voicer(kCymVoices, siderealVoice) sum(0) gainOutlet;
 
 siderealTime defSynthX("siderealTime", tags) await;
 
@@ -235,7 +235,7 @@ fn pentatonicPipesVoice() S {
 }
 
 fn pentatonicPipes() S {
-	let out = voicer(kPipesVoices, pentatonicPipesVoice) sum(2);
+	let out = voicer(kPipesVoices, pentatonicPipesVoice) sum(0);
 	let pulsed = out * select2(mouseX(0, 1) > 0.5, max(0, 5 sinosc), 1);
 	((pulsed combn(0.3, 8)) + (pulsed reverse)) gainOutlet
 }
@@ -290,7 +290,7 @@ fn ostinoodlesVoice() S {
 	(((f lftri) * env) * xenv(kOstTrans)) pan(birand(1, Rate.reset)) join
 }
 
-fn ostinoodles() S = allpassChain6(voicer(kOstVoices, ostinoodlesVoice) sum(2)) gainOutlet;
+fn ostinoodles() S = allpassChain6(voicer(kOstVoices, ostinoodlesVoice) sum(0)) gainOutlet;
 
 ostinoodles defSynthX("ostinoodles", tags) await;
 
@@ -346,7 +346,7 @@ fn garageSpringsVoice() S {
 	(sig * xenv(kSpringTrans)) pan((urand(1, Rate.reset)) lfnoise1(1)) join
 }
 
-fn garageSprings() S = allpassChain6(voicer(kSpringVoices, garageSpringsVoice) sum(2)) gainOutlet;
+fn garageSprings() S = allpassChain6(voicer(kSpringVoices, garageSpringsVoice) sum(0)) gainOutlet;
 
 garageSprings defSynthX("garageSprings", tags) await;
 
@@ -366,7 +366,7 @@ fn contaminationVoice() S {
 	((sig * level) * xenv(kSpringTrans)) pan((urand(1, Rate.reset)) lfnoise1(1)) join
 }
 
-fn contaminationZone() S = allpassChain6(voicer(kSpringVoices, contaminationVoice) sum(2)) gainOutlet;
+fn contaminationZone() S = allpassChain6(voicer(kSpringVoices, contaminationVoice) sum(0)) gainOutlet;
 
 contaminationZone defSynthX("contaminationZone", tags) await;
 
@@ -387,18 +387,18 @@ const kArrVoices = 2;
 fn arrayVoice() S {
 	let a = ((urand(2, Rate.reset) * 2000) fsinosc) * ((lfimp(urand(2, Rate.reset) * 8) decay2(0.01, 0.3)) * 0.1);
 	let b = resonz(gray(2) * ((((urand(2, Rate.reset) * 4) lfnoise3(2)) * 2) max(0)), urand(2, Rate.reset) * 2000, 0.05);
-	let cf = 80 + urand(16, Rate.reset) * 2920;
-	let cr = 0.2 + urand(16, Rate.reset) * 1.8;
-	let c = klankModes(dust(2, 2) * 0.1, cf, 1, cr) sum(2);
+	let cf = 80 + urand(16, Rate.reset) reshape([8, 2]) * 2920;
+	let cr = 0.2 + urand(16, Rate.reset) reshape([8, 2]) * 1.8;
+	let c = klankModes(dust(2, 2) * 0.1, cf, 1, cr) sum(0);
 	let all = ([a, b, c] join) rotate(irand(0, 5, 1, Rate.reset));
 	let d = all take(3);
 	let e = (all drop(3)) abs;
 	let dEcho = (d comb(0.1 + urand(3, Rate.reset) * 0.2, 0.3, 4, Interpolation.none)) + d;
 	let f = ([dEcho, e] join) rotate(irand(0, 5, 1, Rate.reset));
-	(f sum(2)) * xenv(kArrTrans)
+	(f reshape([3, 2]) sum(0)) * xenv(kArrTrans)
 }
 
-fn arrayManipulation() S = voicer(kArrVoices, arrayVoice) sum(2) gainOutlet;
+fn arrayManipulation() S = voicer(kArrVoices, arrayVoice) sum(0) gainOutlet;
 
 arrayManipulation defSynthX("arrayManipulation", tags) await;
 

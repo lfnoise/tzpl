@@ -114,7 +114,7 @@ fn itdVoice() S {
 }
 
 fn itdPanning() S {
-	let exc = voicer(kItdVoices, itdVoice) sum(5);
+	let exc = voicer(kItdVoices, itdVoice) sum(0);
 	let taps = ([0.003, 0.0035, 0.004, 0.0045, 0.005] vec) * fs();
 	let out = stringNetwork(exc, taps, 0.01, 2000) sum;
 	let left = out delayl(mouseX(0, 0.002), 0.002);
@@ -145,7 +145,7 @@ fn aleatoricQuartet() S {
 	let note = ((rate lfnoise0(n)) * 7 + center) round(1);
 	let freq = (note lag(0.2)) nnhz;
 	let strings = exc combl(1 / freq, 0.02, 3);
-	var sig = (strings pan(birand(n, Rate.init)) join) transpose(n) sum(2);
+	var sig = (strings pan(birand(n, Rate.init)) stack) sum(cols);
 	for (i : (1..5)) {
 		sig = sig alpasn(urand(2, Rate.init) * 0.05, 1);
 	}
@@ -179,12 +179,12 @@ fn ritualHymnVoice() S {
 	let base = (24 + urand(n, Rate.reset) * 60) nnhz;
 	let p = (base ncyc(3)) + birand(3 * n, Rate.reset) * d * firstCopyMask(n, 3);
 	let q = (base ncyc(3)) + birand(3 * n, Rate.reset) * d;
-	let freqs = [p, q] join;
-	let phases = urand(6 * n, Rate.reset);
-	(((freqs fsinxosc(phases)) * (0.1 / n)) transpose(3 * n) sum(2)) * xenv(kXf44Trans)
+	let freqs = [p, q] stack;                     -- 2 x 3n: sides x partials
+	let phases = urand(6 * n, Rate.reset) reshape([2, 3 * n]);
+	(((freqs fsinxosc(phases)) * (0.1 / n)) sum(cols)) * xenv(kXf44Trans)
 }
 
-fn ritualHymn() S = voicer(kXfVoices, ritualHymnVoice) sum(2) gainOutlet;
+fn ritualHymn() S = voicer(kXfVoices, ritualHymnVoice) sum(0) gainOutlet;
 
 ritualHymn defSynthX("ritualHymn", tags) await;
 
@@ -212,12 +212,12 @@ fn churchVoice() S {
 	let core = base * harms;
 	let p = core + birand(m * n, Rate.reset) * d;
 	let q = core + birand(m * n, Rate.reset) * d;
-	let freqs = [p, q] join;
-	let phases = urand(2 * m * n, Rate.reset);
-	(((freqs fsinxosc(phases)) * (0.1 / n)) transpose(m * n) sum(2)) * xenv(kXf63Trans)
+	let freqs = [p, q] stack;                     -- 2 x mn: sides x partials
+	let phases = urand(2 * m * n, Rate.reset) reshape([2, m * n]);
+	(((freqs fsinxosc(phases)) * (0.1 / n)) sum(cols)) * xenv(kXf63Trans)
 }
 
-fn churchOfChance() S = voicer(kXfVoices, churchVoice) sum(2) gainOutlet;
+fn churchOfChance() S = voicer(kXfVoices, churchVoice) sum(0) gainOutlet;
 
 churchOfChance defSynthX("churchOfChance", tags) await;
 
@@ -314,8 +314,9 @@ berlinBass defSynthX("berlinBass", tags) await;
 -- Two instruments, the second playing half time (0.2 s) with its melody
 -- regenerated twice as often (every 72 notes); each has 10 strings (taps
 -- 1.5..6 ms) modelled twice, as stereo pairs -- a pluck is a stereo pair of
--- independent LFNoise2 bursts into lines 2m and 2m+1. Coin 0.6 on the walk.
--- Each network's 20 taps mix down to stereo by pairs (sum(2)).
+-- independent LFNoise2 bursts into row m of a 10 x 2 network (strings x
+-- sides). Coin 0.6 on the walk. Each network mixes down to stereo by summing
+-- its strings (`sum(0)`).
 
 const kDuetVoices = 3;
 
@@ -324,14 +325,14 @@ fn duetVoice() S {
 	let string = pString(9.0);
 	let amp = pAmp();
 	let burst = percEnv(g rising, 0.01, 0.2, -2.0) * (mouseY(10, 10000) lfnoise3(2)) * amp;
-	let pairIdx = [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9] vec;
-	burst * (pairIdx == string)
+	let strIdx = tensor(matrix(10, 1), [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
+	burst * (strIdx == string)                     -- 10 x 2
 }
 
 fn duetInstrument() S {
-	let exc = voicer(kDuetVoices, duetVoice) sum(20);
-	let taps = (([0.0015, 0.002, 0.0025, 0.003, 0.0035, 0.004, 0.0045, 0.005, 0.0055, 0.006] vec) stutter(2)) * fs();
-	stringNetwork(exc, taps, 0.01, mouseX(10, 10000)) sum(2)
+	let exc = voicer(kDuetVoices, duetVoice) sum(0);
+	let taps = tensor(matrix(10, 1), [0.0015, 0.002, 0.0025, 0.003, 0.0035, 0.004, 0.0045, 0.005, 0.0055, 0.006]) * fs();
+	stringNetwork(exc, taps, 0.01, mouseX(10, 10000)) sum(0)
 }
 
 -- One instrument per node: the driver plays two nodes of this def, each
@@ -361,7 +362,7 @@ fn tappingTools() S {
 		let exc = (lfimp(impRate) * 0.03) decay(0.001);
 		(klank(exc, freqs, 1, rings) * linen(g, 1, 1)) pan(birand(1, Rate.reset)) join
 	};
-	var sound = voicer(kTapVoices, voice) sum(2);
+	var sound = voicer(kTapVoices, voice) sum(0);
 	for (i : (1..3)) {
 		sound = sound alpasn(urand(2, Rate.init) * 0.05, 2);
 	}

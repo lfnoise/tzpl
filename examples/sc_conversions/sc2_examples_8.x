@@ -119,7 +119,7 @@ fn wolfTones() S {
 	let lagTime = (newDur * 0.5) sampleAndHold(expired);
 	let freq = ((200 + urand(n) * 600) sampleAndHold(expired)) lag(lagTime);
 	let voices = resonz(pink(n) * 4, freq, 0.002);
-	let mix = (voices pan(birand(n, Rate.init)) join) transpose(n) sum(2);
+	let mix = (voices pan(birand(n, Rate.init)) stack) sum(cols);
 	(0.5 * (mix comb([0.09, 0.08] vec, 0.1, 1.0, Interpolation.none)) + mix) gainOutlet
 }
 
@@ -129,9 +129,9 @@ wolfTones defSynthX("wolfTones", tags) await;
 -- 4. Landon Rose Klank spawn (examples-8.txt:106-133)
 -- Spawn every 2 s; instance i uses spec i mod 5 (four modes each, ring 3 s)
 -- excited by stereo PinkNoise * 0.001 under Env.sine(4): a 4 s half-sine
--- window. The two channels are independent banks: modes are listed twice,
--- interleaved, so the even/odd channels take pink L / pink R and sum(2)
--- folds them per side.
+-- window. The two channels are independent banks: the four modes are a
+-- 4 x 1 column, so the stereo exciter makes a 4 x 2 bank (modes x sides)
+-- and `sum(0)` sums the modes per side.
 
 const kLrHold = 4.0;
 const kLrInterval = 2.0;
@@ -141,18 +141,18 @@ fn klankSpawnVoice() S {
 	let g = gate();
 	let idx = noteParam("spec", ControlSpec{0.0, 4.0, 0.0, ControlWarp.linear}) i32;
 	let specs = [
-		([32, 32, 43, 43, 54, 54, 89, 89] vec) nnhz,
-		([10, 10, 34, 34, 80, 80, 120, 120] vec) nnhz,
-		([67, 67, 88, 88, 90, 90, 100, 100] vec) nnhz,
-		([14, 14, 23, 23, 34, 34, 45, 45] vec) nnhz,
-		([76, 76, 88, 88, 99, 99, 124, 124] vec) nnhz
+		tensor(matrix(4, 1), [32, 43, 54, 89]) nnhz,
+		tensor(matrix(4, 1), [10, 34, 80, 120]) nnhz,
+		tensor(matrix(4, 1), [67, 88, 90, 100]) nnhz,
+		tensor(matrix(4, 1), [14, 23, 34, 45]) nnhz,
+		tensor(matrix(4, 1), [76, 88, 99, 124]) nnhz
 	];
 	let freqs = select(idx, specs);
 	let env = ((g rising) oneshot(4)) sinpi;
-	(klankModes(pink(2) * 0.001, freqs, 1, 3.0) sum(2)) * env
+	(klankModes(pink(2) * 0.001, freqs, 1, 3.0) sum(0)) * env
 }
 
-fn klankSpawn() S = voicer(kLrVoices, klankSpawnVoice) sum(2) gainOutlet;
+fn klankSpawn() S = voicer(kLrVoices, klankSpawnVoice) sum(0) gainOutlet;
 
 klankSpawn defSynthX("klankSpawn", tags) await;
 
@@ -228,7 +228,7 @@ fn phaseModAdsrVoice() S {
 	(((f2 sinosc(a * (1.0 / twopi))) * 0.1) * env) * xenv(kPmTrans)
 }
 
-fn phaseModAdsr() S = voicer(kPmVoices, phaseModAdsrVoice) sum(2) gainOutlet;
+fn phaseModAdsr() S = voicer(kPmVoices, phaseModAdsrVoice) sum(0) gainOutlet;
 
 phaseModAdsr defSynthX("phaseModAdsr", tags) await;
 

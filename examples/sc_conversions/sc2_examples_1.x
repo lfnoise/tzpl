@@ -92,11 +92,11 @@ fn hellIsBusyVoice() S {
 	((freq fsinosc) * pulse * env) pan(panPos) join
 }
 
--- voicer() returns one channel PER VOICE (voice-major: v0L, v0R, v1L, ...),
--- so a stereo voice body needs `sum(2)` -- whose cyclic grouping yields
--- all-L / all-R -- and a mono body needs `sum`. Forgetting this leaves an
--- N*chans-channel outlet of which only the first two are ever heard.
-fn hellIsBusy() S = voicer(kHellVoices, hellIsBusyVoice) sum(2) gainOutlet;
+-- voicer() adds a leading voice axis: a stereo voice body gives a
+-- voices x 2 matrix, so `sum(0)` (over the voices) is the stereo mix, and a
+-- mono body needs `sum`. Forgetting this leaves an N*chans-channel outlet of
+-- which only the first two are ever heard.
+fn hellIsBusy() S = voicer(kHellVoices, hellIsBusyVoice) sum(0) gainOutlet;
 
 hellIsBusy defSynthX("hellIsBusy", tags) await;
 
@@ -133,7 +133,7 @@ fn pondLifeVoice() S {
 	((carrierFreq sinosc) * amp * env) pan(panPos) join
 }
 
-fn pondLife() S = voicer(kPondVoices, pondLifeVoice) sum(2) gainOutlet;
+fn pondLife() S = voicer(kPondVoices, pondLifeVoice) sum(0) gainOutlet;
 
 pondLife defSynthX("pondLife", tags) await;
 
@@ -238,7 +238,7 @@ fn randomSineWavesVoice() S {
 	((freq fsinosc) * env) pan(panPos) join
 }
 
-fn randomSineWaves() S = voicer(kSineVoices, randomSineWavesVoice) sum(2) gainOutlet;
+fn randomSineWaves() S = voicer(kSineVoices, randomSineWavesVoice) sum(0) gainOutlet;
 
 randomSineWaves defSynthX("randomSineWaves", tags) await;
 
@@ -282,7 +282,7 @@ fn randomPulsationsVoice() S {
 	(carrier amclip(modulator)) pan(panPos) join
 }
 
-fn randomPulsations() S = voicer(kPulseVoices, randomPulsationsVoice) sum(2) gainOutlet;
+fn randomPulsations() S = voicer(kPulseVoices, randomPulsationsVoice) sum(0) gainOutlet;
 
 randomPulsations defSynthX("randomPulsations", tags) await;
 
@@ -334,7 +334,7 @@ scratchy defSynthX("scratchy", tags) await;
 -- [r,r,r,r], not 4 independent ones) -- built here as a single lfnoise3
 -- channel that broadcasts across the 4-channel partial bank, same cyclic
 -- broadcast used for #13/#14's freqs. Panning is genuinely 4 independent
--- draws, combined via the same block-order transpose(4)/sum(2) reduction.
+-- draws: pan's [left, right] stacked is 2 x 4, summed along the partials.
 -- CombN wraps the whole texture's summed output, not each instance, so it's
 -- applied outside the voicer.
 
@@ -354,12 +354,12 @@ fn tremulateVoice() S {
 	let ampEnv = ((r lfnoise3(1)) * 0.1) max(0);
 	let partials = (freqs fsinosc) * ampEnv;
 	let panPos = birand(4, Rate.reset);
-	let stereo = (partials pan(panPos) join) transpose(4) sum(2);
+	let stereo = (partials pan(panPos) stack) sum(cols);
 	let env = linen(g, kTremTrans, kTremTrans) rpanfun;
 	stereo * env
 }
 
-fn tremulate() S = voicer(kTremVoices, tremulateVoice) sum(2) combn(0.1, 1) gainOutlet;
+fn tremulate() S = voicer(kTremVoices, tremulateVoice) sum(0) combn(0.1, 1) gainOutlet;
 
 tremulate defSynthX("tremulate", tags) await;
 
@@ -459,13 +459,10 @@ sprinklerMouse defSynthX("sprinklerMouse", tags) await;
 -- literally), this builds ONE n-channel oscillator and reduces it with
 -- `sum` -- cheaper for the compiled graph, and the idiom `apverbTest` (in
 -- example_synthdefs.x) already uses for the same "many independent partials"
--- shape. The `transpose(n) sum(2)` pairing follows that same example: the
--- per-partial-per-side envelope is built in *block* order (channels
--- [0,n) = left, [n,2n) = right) so it lines up with the n-channel oscillator
--- bank via cyclic broadcast (channel i uses freqs[i % n]); `transpose(n)`
--- then reshapes block order into the interleaved order `sum(2)` reduces
--- (output[c] = sum of input channels c, c+2, c+4, ... -- see ReduceExpr /
--- reduce_rows in synthdef_cpp_codegen.cpp).
+-- shape. The per-partial-per-side envelope is a 2 x n matrix (row 0 left,
+-- row 1 right), so the n-channel oscillator bank broadcasts along its
+-- columns (one frequency per partial, both sides), and `sum(cols)` sums the
+-- partials of each side.
 -- Per-partial modulation rate `[4.0.rand2, 4.0.rand2]` is chosen once per
 -- partial when this graph is built -- the Rate.init analog, since each SC
 -- `{}.play` evaluation instantiates a fresh graph with fresh choices baked
@@ -478,9 +475,10 @@ fn harmonicSwimming() S {
 	var idx [Int] = [];
 	for (i : (1..n)) { idx push!(i); }
 	let freqs = f * (idx vec);
-	let rate = 6 + birand(2 * n, Rate.init) * 4;
-	let ampEnv = ((rate lfnoise1(2 * n)) * 0.02 + offset) max(0);
-	(freqs fsinosc) * ampEnv |> transpose(n) sum(2) gainOutlet
+	-- One independent noise per partial per side: rows left, right.
+	let noise = fn() S { (6 + birand(n, Rate.init) * 4) lfnoise1(n) };
+	let ampEnv = ([noise(), noise()] stack * 0.02 + offset) max(0);
+	(freqs fsinosc) * ampEnv |> sum(cols) gainOutlet
 }
 
 harmonicSwimming defSynthX("harmonicSwimming", tags) await;
@@ -489,12 +487,12 @@ harmonicSwimming defSynthX("harmonicSwimming", tags) await;
 -- 14. harmonic tumbling (examples-1.txt:206-229)
 -- SC: 10 partials, same additive daisy-chain structure as #13, each gated
 -- by a Dust-triggered Decay2 grain envelope; vectorized the same way as #13
--- (one n-channel oscillator + transpose/sum, not 10 separate nodes). Each
--- partial's own Dust instance is independent (dust(trig, 2n) draws 2n
--- independent impulse trains sharing the trig density), but its decay time
--- (`0.5.rand`, chosen once per partial in SC) is shared by both channels of
--- that partial, so decayTimes is only n-wide and broadcasts cyclically over
--- the 2n-wide dust/decay2 signal the same way freqs does.
+-- (one n-channel oscillator + a 2 x n envelope summed along its columns,
+-- not 10 separate nodes). Each partial's own Dust instance is independent
+-- (dust(trig, 2n) draws 2n independent impulse trains sharing the trig
+-- density, shaped 2 x n), but its decay time (`0.5.rand`, chosen once per
+-- partial in SC) is shared by both channels of that partial, so decayTimes
+-- is only n-wide and broadcasts along the columns the same way freqs does.
 
 fn harmonicTumbling() S {
 	let n = 10;
@@ -504,8 +502,8 @@ fn harmonicTumbling() S {
 	for (i : (1..n)) { idx push!(i); }
 	let freqs = f * (idx vec);
 	let decayTimes = urand(n, Rate.init) * 0.5;
-	let grain = (dust(trig, 2 * n) * 0.02) decay2(0.005, decayTimes);
-	(freqs fsinosc) * grain |> transpose(n) sum(2) gainOutlet
+	let grain = (dust(trig, 2 * n) reshape([2, n]) * 0.02) decay2(0.005, decayTimes);
+	(freqs fsinosc) * grain |> sum(cols) gainOutlet
 }
 
 harmonicTumbling defSynthX("harmonicTumbling", tags) await;

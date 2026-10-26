@@ -5,11 +5,11 @@
 --
 -- This file is mostly Klank (a summed bank of Ringz = `ring`) and Klang
 -- (a bank of fsinxosc) driven by textures. Per-instance random banks are
--- Rate.reset vectors; stereo banks (`Array.fill(2, {spec})`) are 2p
--- channels. When the modes are iid the two banks are simply the odd/even
--- channels and `sum(2)` reduces them (it groups channel i into output
--- i % 2); when a bank derives from a p-channel base (#8, #9, #12, #16) the
--- 2p channels are block-ordered and need `transpose(p) sum(2)`.
+-- Rate.reset vectors; stereo banks (`Array.fill(2, {spec})`) are p x 2
+-- matrices (modes x sides) summed over the modes with `sum(0)`; when a bank
+-- derives from a p-channel base (#8, #9, #12, #16) it is 2 x p instead
+-- (sides x modes), so the base broadcasts along the columns, and `sum(cols)`
+-- sums the modes.
 --
 -- Status (examples-2.txt numbering):
 --   1  rocks on rails           -- DONE (rocksOnRails)
@@ -70,7 +70,7 @@ fn rocksVoice() S {
 	(bank * xenv(kRocksTrans)) pan(panPos) join
 }
 
-fn rocksOnRails() S = voicer(kRocksVoices, rocksVoice) sum(2) gainOutlet;
+fn rocksOnRails() S = voicer(kRocksVoices, rocksVoice) sum(0) gainOutlet;
 
 rocksOnRails defSynthX("rocksOnRails", tags) await;
 
@@ -96,7 +96,7 @@ fn bouncingVoice() S {
 	(klank(exc, freqs, amps, rings) * env) pan(birand(1, Rate.reset)) join
 }
 
-fn bouncing() S = voicer(kBounceVoices, bouncingVoice) sum(2) gainOutlet;
+fn bouncing() S = voicer(kBounceVoices, bouncingVoice) sum(0) gainOutlet;
 
 bouncing defSynthX("bouncing", tags) await;
 
@@ -112,11 +112,11 @@ const kXfVoices = 2;
 
 fn klangSinesVoice() S {
 	let n = 60;
-	let freqs = linrandv(40, 10040, 2 * n, Rate.reset);
-	(klangModes(freqs, 0.1 / n) sum(2)) * xenv(kXf44Trans)
+	let freqs = linrandv(40, 10040, 2 * n, Rate.reset) reshape([n, 2]);
+	(klangModes(freqs, 0.1 / n) sum(0)) * xenv(kXf44Trans)
 }
 
-fn klangSines() S = voicer(kXfVoices, klangSinesVoice) sum(2) gainOutlet;
+fn klangSines() S = voicer(kXfVoices, klangSinesVoice) sum(0) gainOutlet;
 
 klangSines defSynthX("klangSines", tags) await;
 
@@ -128,11 +128,11 @@ klangSines defSynthX("klangSines", tags) await;
 fn clusteredSinesVoice() S {
 	let n = 80;
 	let f1 = 100 + urand(1, Rate.reset) * 1000;
-	let freqs = f1 + urand(2 * n, Rate.reset) * (4.0 * f1);
-	(klangModes(freqs, (f1 / freqs) * (0.3 / n)) sum(2)) * xenv(kXf44Trans)
+	let freqs = f1 + urand(2 * n, Rate.reset) reshape([n, 2]) * (4.0 * f1);
+	(klangModes(freqs, (f1 / freqs) * (0.3 / n)) sum(0)) * xenv(kXf44Trans)
 }
 
-fn clusteredSines() S = voicer(kXfVoices, clusteredSinesVoice) sum(2) gainOutlet;
+fn clusteredSines() S = voicer(kXfVoices, clusteredSinesVoice) sum(0) gainOutlet;
 
 clusteredSines defSynthX("clusteredSines", tags) await;
 
@@ -155,7 +155,7 @@ fn klankImpulsesVoice() S {
 	(bank * xenv(kK5Trans)) pan(birand(1, Rate.reset)) join
 }
 
-fn klankImpulses() S = voicer(kK5Voices, klankImpulsesVoice) sum(2) gainOutlet;
+fn klankImpulses() S = voicer(kK5Voices, klankImpulsesVoice) sum(0) gainOutlet;
 
 klankImpulses defSynthX("klankImpulses", tags) await;
 
@@ -171,13 +171,13 @@ const kK6Voices = 8;             -- ceil(life 24 / 3.2)
 
 fn klankBurstsVoice() S {
 	let p = 8;
-	let freqs = linrandv(80, 10080, 2 * p, Rate.reset);
-	let rings = 0.2 + urand(2 * p, Rate.reset) * 4;
+	let freqs = linrandv(80, 10080, 2 * p, Rate.reset) reshape([p, 2]);
+	let rings = 0.2 + urand(2 * p, Rate.reset) reshape([p, 2]) * 4;
 	let exc = ((dust(0.6) * 0.001) decay(3.1)) * white();
-	(klankModes(exc, freqs, 1, rings) sum(2)) * xenv(kK6Trans)
+	(klankModes(exc, freqs, 1, rings) sum(0)) * xenv(kK6Trans)
 }
 
-fn klankBursts() S = voicer(kK6Voices, klankBurstsVoice) sum(2) gainOutlet;
+fn klankBursts() S = voicer(kK6Voices, klankBurstsVoice) sum(0) gainOutlet;
 
 klankBursts defSynthX("klankBursts", tags) await;
 
@@ -192,13 +192,13 @@ const kXf66Interval = 12.0;
 
 fn brownResonatorsVoice() S {
 	let p = 32;
-	let freqs = linrandv(80, 10080, 2 * p, Rate.reset);
-	let amps = birand(2 * p, Rate.reset);
-	let rings = 0.5 + urand(2 * p, Rate.reset) * 2;
-	(klankModes(red(1) * 0.001, freqs, amps, rings) sum(2)) * xenv(kXf66Trans)
+	let freqs = linrandv(80, 10080, 2 * p, Rate.reset) reshape([p, 2]);
+	let amps = birand(2 * p, Rate.reset) reshape([p, 2]);
+	let rings = 0.5 + urand(2 * p, Rate.reset) reshape([p, 2]) * 2;
+	(klankModes(red(1) * 0.001, freqs, amps, rings) sum(0)) * xenv(kXf66Trans)
 }
 
-fn brownResonators() S = voicer(kXfVoices, brownResonatorsVoice) sum(2) gainOutlet;
+fn brownResonators() S = voicer(kXfVoices, brownResonatorsVoice) sum(0) gainOutlet;
 
 brownResonators defSynthX("brownResonators", tags) await;
 
@@ -207,8 +207,8 @@ brownResonators defSynthX("brownResonators", tags) await;
 -- XFadeTexture(.., 1, 7, 2): sustain 1, transition 7. One of 15 just ratios
 -- is chosen per instance (times 120 Hz); each bank's 12 modes sit at
 -- freq * (1..12) + rand2 0.5, amplitude 1/n, ring 0.5 + rand 4, excited by
--- BrownNoise * 0.001. The p-channel series broadcasts over the 2p-channel
--- random offsets, so the banks come out block-ordered: transpose(p) sum(2).
+-- BrownNoise * 0.001. The p-channel series broadcasts along the columns of
+-- the 2 x p random offsets (sides x modes); `sum(cols)` sums the modes.
 
 const kJustTrans = 7.0;
 const kJustHold = 8.0;
@@ -230,12 +230,12 @@ fn justResonatorsVoice() S {
 	let p = 12;
 	let idx = harmonicIdx(p) vec;
 	let freq = justRatio();
-	let freqs = idx * freq + birand(2 * p, Rate.reset) * 0.5;
-	let rings = 0.5 + urand(2 * p, Rate.reset) * 4;
-	(klankModes(red(1) * 0.001, freqs, 1 / idx, rings) transpose(p) sum(2)) * xenv(kJustTrans)
+	let freqs = idx * freq + birand(2 * p, Rate.reset) reshape([2, p]) * 0.5;
+	let rings = 0.5 + urand(2 * p, Rate.reset) reshape([2, p]) * 4;
+	(klankModes(red(1) * 0.001, freqs, 1 / idx, rings) sum(cols)) * xenv(kJustTrans)
 }
 
-fn justResonators() S = voicer(kXfVoices, justResonatorsVoice) sum(2) gainOutlet;
+fn justResonators() S = voicer(kXfVoices, justResonatorsVoice) sum(0) gainOutlet;
 
 justResonators defSynthX("justResonators", tags) await;
 
@@ -248,13 +248,13 @@ fn oddResonatorsVoice() S {
 	let p = 12;
 	let idx = harmonicIdx(p) vec;
 	let freq = justRatio();
-	let freqs = (idx * 2 - 1) * freq + birand(2 * p, Rate.reset) * 0.5;
-	let rings = 0.2 + urand(2 * p, Rate.reset) * 0.8;
+	let freqs = (idx * 2 - 1) * freq + birand(2 * p, Rate.reset) reshape([2, p]) * 0.5;
+	let rings = 0.2 + urand(2 * p, Rate.reset) reshape([2, p]) * 0.8;
 	let exc = ((8000 asSignal) lfnoise3(1)) * 0.004;
-	(klankModes(exc, freqs, 1 / idx, rings) transpose(p) sum(2)) * xenv(kJustTrans)
+	(klankModes(exc, freqs, 1 / idx, rings) sum(cols)) * xenv(kJustTrans)
 }
 
-fn oddResonators() S = voicer(kXfVoices, oddResonatorsVoice) sum(2) gainOutlet;
+fn oddResonators() S = voicer(kXfVoices, oddResonatorsVoice) sum(0) gainOutlet;
 
 oddResonators defSynthX("oddResonators", tags) await;
 
@@ -273,12 +273,12 @@ fn sweptResonatorsVoice() S {
 	let lfo = ((0.1 + urand(1, Rate.reset) * 0.2) fsinosc) * (12 + birand(1, Rate.reset) * 12)
 		+ (60 + birand(1, Rate.reset) * 24);
 	let sweep = resonz(white() * 0.007, lfo nnhz, 0.1);
-	let freqs = linrandv(80, 10080, 2 * p, Rate.reset);
-	let rings = 0.5 + urand(2 * p, Rate.reset) * 2;
-	(klankModes(sweep, freqs, 1, rings) sum(2)) * xenv(kSweptTrans)
+	let freqs = linrandv(80, 10080, 2 * p, Rate.reset) reshape([p, 2]);
+	let rings = 0.5 + urand(2 * p, Rate.reset) reshape([p, 2]) * 2;
+	(klankModes(sweep, freqs, 1, rings) sum(0)) * xenv(kSweptTrans)
 }
 
-fn sweptResonators() S = voicer(kSweptVoices, sweptResonatorsVoice) sum(2) gainOutlet;
+fn sweptResonators() S = voicer(kSweptVoices, sweptResonatorsVoice) sum(0) gainOutlet;
 
 sweptResonators defSynthX("sweptResonators", tags) await;
 
@@ -286,17 +286,16 @@ sweptResonators defSynthX("sweptResonators", tags) await;
 -- 11. coolant (examples-2.txt:258-275)
 -- XFadeTexture(.., 4, 4, 2): two 10-mode banks (40 + rand 2000, default ring)
 -- excited by OnePole(BrownNoise [0.002, 0.002], 0.95) -- a stereo exciter,
--- channel i of the 2p bank taking exciter i % 2, which is exactly the
--- odd/even split sum(2) reduces.
+-- the p x 2 bank (modes x sides) taking the exciter of its side.
 
 fn coolantVoice() S {
 	let p = 10;
-	let freqs = 40 + urand(2 * p, Rate.reset) * 2000;
+	let freqs = 40 + urand(2 * p, Rate.reset) reshape([p, 2]) * 2000;
 	let exc = (red(2) * 0.002) onepole(0.95);
-	(klankModes(exc, freqs, 1, 1.0) sum(2)) * xenv(kXf44Trans)
+	(klankModes(exc, freqs, 1, 1.0) sum(0)) * xenv(kXf44Trans)
 }
 
-fn coolant() S = voicer(kXfVoices, coolantVoice) sum(2) gainOutlet;
+fn coolant() S = voicer(kXfVoices, coolantVoice) sum(0) gainOutlet;
 
 coolant defSynthX("coolant", tags) await;
 
@@ -316,7 +315,7 @@ fn pulsingBottles() S {
 	let sig = resonz(white(n) * gateAmp, rf, 0.01);
 	let panF = 0.1 + urand(n, Rate.init) * 0.4;
 	let panPh = urand(n, Rate.init) * twopi;
-	(sig pan(panF sinosc(panPh)) join) transpose(n) sum(2) gainOutlet
+	(sig pan(panF sinosc(panPh)) stack) sum(cols) gainOutlet
 }
 
 pulsingBottles defSynthX("pulsingBottles", tags) await;
@@ -337,10 +336,11 @@ fn whatWasIThinking() S {
 	let cutoff = ((0.2 asSignal) lfnoise1(1)) * 2000 + 2400;
 	let z = ((freq lfbpulse(width)) * 0.04) rlpf(cutoff, 0.2);
 	let y = z * 0.6;
-	let rates = urand(4, Rate.init) * 0.3;
-	let dts = (rates lfnoise1(4)) * 0.025 + 0.035;
+	-- Two taps per side: a 2 x 2 matrix of delay times (rows left, right).
+	let wander = fn() S { (urand(2, Rate.init) * 0.3) lfnoise1(2) };
+	let dts = [wander(), wander()] stack * 0.025 + 0.035;
 	let combs = y combl(dts, 0.06, 1);
-	(z + (combs transpose(2) sum(2))) gainOutlet
+	(z + (combs sum(cols))) gainOutlet
 }
 
 whatWasIThinking defSynthX("whatWasIThinking", tags) await;
@@ -363,7 +363,7 @@ fn crackleBandVoice() S {
 	(sig * linen(g, 2, 2)) pan(birand(1, Rate.reset)) join
 }
 
-fn crackleBand() S = voicer(kSpawnLinenVoices, crackleBandVoice) sum(2) gainOutlet;
+fn crackleBand() S = voicer(kSpawnLinenVoices, crackleBandVoice) sum(0) gainOutlet;
 
 crackleBand defSynthX("crackleBand", tags) await;
 
@@ -379,7 +379,7 @@ fn resonantDustVoice() S {
 	(sig * linen(g, 2, 2)) pan(birand(1, Rate.reset)) join
 }
 
-fn resonantDust() S = voicer(kSpawnLinenVoices, resonantDustVoice) sum(2) gainOutlet;
+fn resonantDust() S = voicer(kSpawnLinenVoices, resonantDustVoice) sum(0) gainOutlet;
 
 resonantDust defSynthX("resonantDust", tags) await;
 
@@ -398,7 +398,7 @@ fn policeState() S {
 	let center = 1000 + birand(n, Rate.init) * 300;
 	let freq = (lfoF sinosc(lfoPh)) * depth + center;
 	let ampNoise = ((100 + birand(n, Rate.init) * 20) lfnoise3(n)) * 0.1;
-	let sirens = (((freq sinosc) * ampNoise) pan(birand(n, Rate.init)) join) transpose(n) sum(2);
+	let sirens = (((freq sinosc) * ampNoise) pan(birand(n, Rate.init)) stack) sum(cols);
 	let nf = (([0.4, 0.4] vec) lfnoise3(2)) * 90 + 620;
 	let na = (([0.3, 0.3] vec) lfnoise3(2)) * 0.15 + 0.18;
 	let noise = (nf lfnoise3(2)) * na;
@@ -430,7 +430,7 @@ fn uplinkVoice() S {
 	(((freq lfupulse(0.5)) * 0.04) * xenv(kUplinkTrans)) pan(birand(1, Rate.reset) * 0.8) join
 }
 
-fn uplink() S = voicer(kUplinkVoices, uplinkVoice) sum(2) gainOutlet;
+fn uplink() S = voicer(kUplinkVoices, uplinkVoice) sum(0) gainOutlet;
 
 uplink defSynthX("uplink", tags) await;
 
@@ -454,7 +454,7 @@ fn dataSpaceVoice() S {
 	sig * xenv(kDataTrans)
 }
 
-fn dataSpace() S = voicer(kDataVoices, dataSpaceVoice) sum(2) gainOutlet;
+fn dataSpace() S = voicer(kDataVoices, dataSpaceVoice) sum(0) gainOutlet;
 
 dataSpace defSynthX("dataSpace", tags) await;
 
@@ -468,15 +468,15 @@ fn cymbalVoice(impulseRate S) S {
 	let p = 15;
 	let f1 = 500 + urand(1, Rate.reset) * 2000;
 	let f2 = urand(1, Rate.reset) * 8000;
-	let freqs = f1 + urand(2 * p, Rate.reset) * f2;
-	let rings = 1 + urand(2 * p, Rate.reset) * 4;
+	let freqs = f1 + urand(2 * p, Rate.reset) reshape([p, 2]) * f2;
+	let rings = 1 + urand(2 * p, Rate.reset) reshape([p, 2]) * 4;
 	let exc = ((lfimp(impulseRate)) decay(0.004)) * white() * 0.03;
-	(klankModes(exc, freqs, 1, rings) sum(2)) * xenv(kXf44Trans)
+	(klankModes(exc, freqs, 1, rings) sum(0)) * xenv(kXf44Trans)
 }
 
 fn cymbalismVoice() S = cymbalVoice(0.5 + urand(1, Rate.reset) * 3);
 
-fn cymbalism() S = voicer(kXfVoices, cymbalismVoice) sum(2) gainOutlet;
+fn cymbalism() S = voicer(kXfVoices, cymbalismVoice) sum(0) gainOutlet;
 
 cymbalism defSynthX("cymbalism", tags) await;
 
@@ -487,7 +487,7 @@ cymbalism defSynthX("cymbalism", tags) await;
 fn cymbalismAccelVoice() S =
 	cymbalVoice(xline(linrandv(0.5, 4.5, 1, Rate.reset), 0.5 + urand(1, Rate.reset) * 35, 12));
 
-fn cymbalismAccel() S = voicer(kXfVoices, cymbalismAccelVoice) sum(2) gainOutlet;
+fn cymbalismAccel() S = voicer(kXfVoices, cymbalismAccelVoice) sum(0) gainOutlet;
 
 cymbalismAccel defSynthX("cymbalismAccel", tags) await;
 
@@ -511,7 +511,7 @@ fn ringModKlankVoice() S {
 	(((modF sinosc) * a) * xenv(kRmTrans)) pan(birand(1, Rate.reset)) join
 }
 
-fn ringModKlank() S = voicer(kRmVoices, ringModKlankVoice) sum(2) gainOutlet;
+fn ringModKlank() S = voicer(kRmVoices, ringModKlankVoice) sum(0) gainOutlet;
 
 ringModKlank defSynthX("ringModKlank", tags) await;
 

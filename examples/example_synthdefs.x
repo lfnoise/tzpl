@@ -19,7 +19,7 @@ fn init_urand_test() S {
 	let ampFreqs = exprand(0.1, 0.5, chans, Rate.init);
 	let amps = ampFreqs fsinosc(ampPhases) uni;
 	let oscs = freqs fsinosc cb * amps;
-	oscs sum(2) * 0.1 |> outlet
+	oscs reshape([-1, 2]) sum(0) * 0.1 |> outlet
 }
 
 init_urand_test defSynthX("init_urand_test", tags) await;
@@ -117,7 +117,7 @@ dustone defSynthX("dustone", tags) await;
 fn apverbTest() S {
 	let chans = 16;
 	let freqs = exprand(100, 5000, chans, Rate.init);
-	(3/chans) pandust(chans) decay2(0.004, 0.2) * freqs sinosc |> transpose(chans) sum(2) apverb(0.02, 6, 8) gainOutlet
+	(3/chans) pandust(chans) decay2(0.004, 0.2) * freqs sinosc |> sum(cols) apverb(0.02, 6, 8) gainOutlet
 }
 
 apverbTest defSynthX("apverbTest", tags) await;

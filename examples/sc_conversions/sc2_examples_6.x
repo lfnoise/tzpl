@@ -154,7 +154,7 @@ fn stringWanderVoice() S {
 	(((white() * 0.008) combc(delay, 0.02, delay * 1000)) * xenv(kWanderTrans)) pan(birand(1, Rate.reset)) join
 }
 
-fn stringWander() S = voicer(kWanderVoices, stringWanderVoice) sum(2) gainOutlet;
+fn stringWander() S = voicer(kWanderVoices, stringWanderVoice) sum(0) gainOutlet;
 
 stringWander defSynthX("stringWander", tags) await;
 
@@ -172,7 +172,7 @@ fn stringWanderVibratoVoice() S {
 	(((white() * 0.008) combc(delay, 0.02, decayTime)) * xenv(kWanderTrans)) pan(birand(1, Rate.reset)) join
 }
 
-fn stringWanderVibrato() S = voicer(kWanderVoices, stringWanderVibratoVoice) sum(2) gainOutlet;
+fn stringWanderVibrato() S = voicer(kWanderVoices, stringWanderVibratoVoice) sum(0) gainOutlet;
 
 stringWanderVibrato defSynthX("stringWanderVibrato", tags) await;
 
@@ -188,7 +188,7 @@ fn pipeWanderVoice() S {
 	((combNeg(lpz2(white() * 0.01), delay, 0.02, 0.4)) * xenv(kWanderTrans)) pan(birand(1, Rate.reset)) join
 }
 
-fn pipeWander() S = voicer(kWanderVoices, pipeWanderVoice) sum(2) gainOutlet;
+fn pipeWander() S = voicer(kWanderVoices, pipeWanderVoice) sum(0) gainOutlet;
 
 pipeWander defSynthX("pipeWander", tags) await;
 
@@ -207,7 +207,7 @@ fn combSweepsVoice() S {
 	(((white() * 0.005) combc(delay, 0.02, decayTime)) * xenv(kWanderTrans)) pan(birand(1, Rate.reset)) join
 }
 
-fn combSweeps() S = voicer(kWanderVoices, combSweepsVoice) sum(2) gainOutlet;
+fn combSweeps() S = voicer(kWanderVoices, combSweepsVoice) sum(0) gainOutlet;
 
 combSweeps defSynthX("combSweeps", tags) await;
 
@@ -227,12 +227,12 @@ fn harmonicKlankVoice() S {
 	let s = ((dust(0.8) * 0.01) decay(3.4)) * (linrandv(0, 40, 1, Rate.reset) lfsaw);
 	let fundamentals = [400, 500, 600, 700, 800, 900, 1000, 1200, 1400, 1500, 1600] @ asSignal;
 	let f = select(irand(0, 10, 1, Rate.reset), fundamentals);
-	let freqs = f * (irand(1, 12, 2 * p, Rate.reset) f32);
-	let rings = 0.4 + urand(2 * p, Rate.reset) * 3;
-	(klankModes(s, freqs, 1, rings) sum(2)) * xenv(kHkTrans)
+	let freqs = f * (irand(1, 12, 2 * p, Rate.reset) f32 reshape([p, 2]));
+	let rings = 0.4 + urand(2 * p, Rate.reset) reshape([p, 2]) * 3;
+	(klankModes(s, freqs, 1, rings) sum(0)) * xenv(kHkTrans)
 }
 
-fn harmonicKlank() S = voicer(kHkVoices, harmonicKlankVoice) sum(2) gainOutlet;
+fn harmonicKlank() S = voicer(kHkVoices, harmonicKlankVoice) sum(0) gainOutlet;
 
 harmonicKlank defSynthX("harmonicKlank", tags) await;
 
@@ -249,12 +249,12 @@ const kIkVoices = 6;            -- ceil(life 24 / 4)
 fn inharmonicKlankVoice() S {
 	let p = 8;
 	let s = ((dust(0.8) * 0.004) decay(3.4)) * (linrandv(0, 40, 1, Rate.reset) lfsaw);
-	let freqs = linrandv(80, 10080, 2 * p, Rate.reset);
-	let rings = 0.4 + urand(2 * p, Rate.reset) * 4;
-	(klankModes(s, freqs, 1, rings) sum(2)) * xenv(kIkTrans)
+	let freqs = linrandv(80, 10080, 2 * p, Rate.reset) reshape([p, 2]);
+	let rings = 0.4 + urand(2 * p, Rate.reset) reshape([p, 2]) * 4;
+	(klankModes(s, freqs, 1, rings) sum(0)) * xenv(kIkTrans)
 }
 
-fn inharmonicKlank() S = voicer(kIkVoices, inharmonicKlankVoice) sum(2) gainOutlet;
+fn inharmonicKlank() S = voicer(kIkVoices, inharmonicKlankVoice) sum(0) gainOutlet;
 
 inharmonicKlank defSynthX("inharmonicKlank", tags) await;
 
@@ -293,7 +293,7 @@ fn saucerVoice() S {
 	(((m2 sinosc) * 0.1) * xenv(kSaucerTrans)) pan(birand(1, Rate.reset)) join
 }
 
-fn saucerBase() S = voicer(kSaucerVoices, saucerVoice) sum(2) gainOutlet;
+fn saucerBase() S = voicer(kSaucerVoices, saucerVoice) sum(0) gainOutlet;
 
 saucerBase defSynthX("saucerBase", tags) await;
 
@@ -314,7 +314,7 @@ fn meadowVoice() S {
 	(((freq sinosc) * amp) * xenv(kSaucerTrans)) pan(birand(1, Rate.reset)) join
 }
 
-fn alienMeadow() S = voicer(kMeadowVoices, meadowVoice) sum(2) gainOutlet;
+fn alienMeadow() S = voicer(kMeadowVoices, meadowVoice) sum(0) gainOutlet;
 
 alienMeadow defSynthX("alienMeadow", tags) await;
 
@@ -340,7 +340,7 @@ fn fastLfoVoice() S {
 	((freq sinosc) * amp) * xenv(kFastTrans)
 }
 
-fn fastLfoBeats() S = voicer(kFastVoices, fastLfoVoice) sum(2) gainOutlet;
+fn fastLfoBeats() S = voicer(kFastVoices, fastLfoVoice) sum(0) gainOutlet;
 
 fastLfoBeats defSynthX("fastLfoBeats", tags) await;
 
@@ -365,7 +365,7 @@ fn birdiesVoice() S {
 	(((freq sinosc) * amp) * xenv(kBirdTrans)) pan(birand(1, Rate.reset)) join
 }
 
-fn birdies() S = voicer(kBirdVoices, birdiesVoice) sum(2) gainOutlet;
+fn birdies() S = voicer(kBirdVoices, birdiesVoice) sum(0) gainOutlet;
 
 birdies defSynthX("birdies", tags) await;
 
@@ -397,7 +397,7 @@ fn phaseModVoice() S {
 	((f2 sinosc(a * (1.0 / twopi))) * 0.1) * xenv(kPmTrans)
 }
 
-fn phaseModBeats() S = voicer(kPmVoices, phaseModVoice) sum(2) gainOutlet;
+fn phaseModBeats() S = voicer(kPmVoices, phaseModVoice) sum(0) gainOutlet;
 
 phaseModBeats defSynthX("phaseModBeats", tags) await;
 
@@ -438,7 +438,7 @@ fn hardSyncVoice() S {
 }
 
 fn hardSyncSaw() S {
-	let a = voicer(kSyncVoices, hardSyncVoice) sum(2);
+	let a = voicer(kSyncVoices, hardSyncVoice) sum(0);
 	((a combn(0.3, 4)) + (a reverse)) gainOutlet
 }
 
@@ -458,7 +458,7 @@ fn noiseModSinesVoice() S {
 }
 
 fn noiseModSines() S {
-	let a = voicer(kSyncVoices, noiseModSinesVoice) sum(2);
+	let a = voicer(kSyncVoices, noiseModSinesVoice) sum(0);
 	((a combn(0.3, 4)) + (a reverse)) gainOutlet
 }
 
@@ -476,7 +476,7 @@ fn noiseModSawsVoice() S {
 }
 
 fn noiseModSaws() S {
-	let a = voicer(kSyncVoices, noiseModSawsVoice) sum(2);
+	let a = voicer(kSyncVoices, noiseModSawsVoice) sum(0);
 	((a combn(0.5, 4)) + (a reverse)) gainOutlet
 }
 

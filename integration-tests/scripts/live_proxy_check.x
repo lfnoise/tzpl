@@ -47,7 +47,7 @@ assertNear(get((*drone.state).params, "freq", 0.0), 120.0, 0.0001,
 -- redefine: fresh source node, stored param re-applied (freq exists)
 okOr(define(drone, fn() S {
     let f = control("freq", espec(40.0, 800.0, 220.0));
-    sinosc([1.0, 1.5] * f) sum(2) * 0.1
+    sinosc([1.0, 1.5] * f) * 0.1
 }) await, "redefine compiles and swaps");
 let src2 = (*drone.state).src;
 assertTrue(src2 != 0 && src2 != src1, "redefine made a fresh source node");

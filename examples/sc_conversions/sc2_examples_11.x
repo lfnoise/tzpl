@@ -6,7 +6,7 @@
 -- 0.75); HPZ1.kr(mousex > point).abs is an impulse when the mouse crosses it
 -- (HPZ1 is half the first difference, so the impulse is 0.5). The instruments
 -- are vectorized across their strings (one n-channel graph, panned per
--- string, then transpose(n) sum(2)). Headless there is no mouse, so the
+-- string as a 2 x n matrix, then sum(cols)). Headless there is no mouse, so the
 -- driver strums by sweeping shared-input slot 0 back and forth (`strum`).
 -- Note: in every source example `LPF.ar(out, 12000)` is a statement whose
 -- result is discarded (the returned value is LeakDC.ar(out) / the allpass
@@ -52,16 +52,13 @@ fn idxVec(n Int) S {
 	v vec
 }
 
--- Mode-major mode-index vector for `strings` strings x `modes` modes: channel
--- k = j * strings + i holds the harmonic number j + 1, so that the string
--- index is k % strings -- which is exactly how a `strings`-channel exciter
--- broadcasts over the bank and how sum(strings) folds it back per string.
-fn harmonicVec(strings Int, modes Int) S {
+-- The harmonic numbers 1..modes as a modes x 1 column: times a per-string
+-- row it makes a modes x strings bank, which a `strings`-channel exciter
+-- broadcasts over (along the columns) and `sum(0)` folds back per string.
+fn harmonicVec(modes Int) S {
 	var v [Float] = [];
-	for (j : (1..modes)) {
-		for (i : (1..strings)) { v push!(j toFloat); }
-	}
-	v vec
+	for (j : (1..modes)) { v push!(j toFloat); }
+	tensor(matrix(modes, 1), v)
 }
 
 -- The strum impulses for n strings with trigger points at `first + i*spacing`.
@@ -94,7 +91,7 @@ fn strummableGuitar() S {
 	let pluck = pink(n) * (trigger decay(0.05));
 	let period = 1 / (pitches nnhz);
 	let strings = pluck combl(period, 0.02, 4);
-	(((strings pan(stringPans(n, 0.2, -0.5)) join) transpose(n) sum(2)) leakdc(0.995)) gainOutlet
+	(((strings pan(stringPans(n, 0.2, -0.5)) stack) sum(cols)) leakdc(0.995)) gainOutlet
 }
 
 strummableGuitar defSynthX("strummableGuitar", tags) await;
@@ -112,7 +109,7 @@ fn twelveString() S {
 	let trigger2 = strumTriggers(n, 0.265, 0.1) abs;
 	let string1 = (pink(n) * (trigger1 decay(0.05))) combl(period, 0.02, 4);
 	let string2 = (pink(n) * (trigger2 decay(0.05))) combl(period * 0.5, 0.02, 4);
-	((((string1 + string2) pan(stringPans(n, 0.2, -0.5)) join) transpose(n) sum(2)) leakdc(0.995)) gainOutlet
+	((((string1 + string2) pan(stringPans(n, 0.2, -0.5)) stack) sum(cols)) leakdc(0.995)) gainOutlet
 }
 
 twelveString defSynthX("twelveString", tags) await;
@@ -132,7 +129,7 @@ fn bidirectionalGuitar() S {
 	let pluck2 = red(n) * (((0 - trigger) max(0)) decay(0.05));
 	let string1 = pluck1 combl(1 / (pitches1 nnhz), 0.02, 4);
 	let string2 = combNeg(pluck2, 1 / (pitches2 nnhz), 0.02, 4);
-	((((string1 + string2) pan(stringPans(n, 0.2, -0.5)) join) transpose(n) sum(2)) leakdc(0.995)) gainOutlet
+	((((string1 + string2) pan(stringPans(n, 0.2, -0.5)) stack) sum(cols)) leakdc(0.995)) gainOutlet
 }
 
 bidirectionalGuitar defSynthX("bidirectionalGuitar", tags) await;
@@ -148,7 +145,7 @@ fn harmonicZither() S {
 	let trigger = strumTriggers(n, 0.25, 0.5 / 11.0) abs;
 	let pluck = pink(n) * (trigger decay(0.05));
 	let strings = pluck combl(1 / (pitches nnhz), 0.02, 8);
-	(((strings pan(stringPans(n, 1.5 / 11.0, -0.75)) join) transpose(n) sum(2)) leakdc(0.995)) gainOutlet
+	(((strings pan(stringPans(n, 1.5 / 11.0, -0.75)) stack) sum(cols)) leakdc(0.995)) gainOutlet
 }
 
 harmonicZither defSynthX("harmonicZither", tags) await;
@@ -157,8 +154,8 @@ harmonicZither defSynthX("harmonicZither", tags) await;
 -- 5. strummable metals (examples-11.txt:118-142)
 -- Eight "strings" (trigger points 0.25 + 0.07 i), each a 15-mode Klank at
 -- 300 i + linrand 8000 Hz, ring 1 + rand 4, plucked by PinkNoise under
--- Decay(0.05) * 0.04. The 8 x 15 modes are laid out mode-major so the
--- 8-channel pluck broadcasts to its own string's modes and sum(8) folds
+-- Decay(0.05) * 0.04. The modes are a 15 x 8 matrix (modes x strings), so
+-- the 8-channel pluck broadcasts to its own string's modes and sum(0) folds
 -- the modes back per string.
 
 fn strummableMetals() S {
@@ -166,10 +163,10 @@ fn strummableMetals() S {
 	let modes = 15;
 	let trigger = strumTriggers(n, 0.25, 0.07) abs;
 	let pluck = pink(n) * (trigger decay(0.05)) * 0.04;
-	let freqs = (idxVec(n) * 300) + linrandv(0, 8000, n * modes, Rate.init);
-	let rings = 1 + urand(n * modes, Rate.init) * 4;
-	let metal = klankModes(pluck, freqs, 1, rings) sum(n);
-	(((metal pan(stringPans(n, 0.2, -0.5)) join) transpose(n) sum(2)) leakdc(0.995)) gainOutlet
+	let freqs = (idxVec(n) * 300) + linrandv(0, 8000, n * modes, Rate.init) reshape([modes, n]);
+	let rings = 1 + urand(n * modes, Rate.init) reshape([modes, n]) * 4;
+	let metal = klankModes(pluck, freqs, 1, rings) sum(0);
+	(((metal pan(stringPans(n, 0.2, -0.5)) stack) sum(cols)) leakdc(0.995)) gainOutlet
 }
 
 strummableMetals defSynthX("strummableMetals", tags) await;
@@ -186,10 +183,10 @@ fn pipesLike(scale S, ringLo Float, ringHi Float, pluckFn fn(S) S) S {
 	let modes = 15;
 	let trigger = strumTriggers(n, 0.25, 0.07) abs;
 	let pluck = pluckFn(trigger);
-	let freqs = harmonicVec(n, modes) * ((scale + 60) nnhz);
-	let rings = ringLo + urand(n * modes, Rate.init) * (ringHi - ringLo);
-	let metal = klankModes(pluck, freqs, 1, rings) sum(n);
-	let out = ((metal pan(stringPans(n, 0.2, -0.5)) join) transpose(n) sum(2)) leakdc(0.995);
+	let freqs = harmonicVec(modes) * ((scale + 60) nnhz);
+	let rings = ringLo + urand(n * modes, Rate.init) reshape([modes, n]) * (ringHi - ringLo);
+	let metal = klankModes(pluck, freqs, 1, rings) sum(0);
+	let out = ((metal pan(stringPans(n, 0.2, -0.5)) stack) sum(cols)) leakdc(0.995);
 	(sixAllpasses(out)) gainOutlet
 }
 

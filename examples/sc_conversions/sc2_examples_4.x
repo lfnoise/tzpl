@@ -90,7 +90,7 @@ metalPlate defSynthX("metalPlate", tags) await;
 -- the melody and sends noteOn(string, amp) to a 3-voice exciter voicer
 -- inside the synth (3 covers a 0.21 s life at 0.1 s spacing); each voice
 -- emits its burst on the 5-channel exciter bus at its string's index, and
--- `sum(5)` folds the voices onto the bus per string.
+-- `sum(0)` sums the voices (3 x 5) onto the bus per string.
 
 const kGriotStrings = 5;
 const kGriotVoices = 3;
@@ -108,7 +108,7 @@ fn griotVoice() S {
 }
 
 fn griot() S {
-	let exc = voicer(kGriotVoices, griotVoice) sum(kGriotStrings);
+	let exc = voicer(kGriotVoices, griotVoice) sum(0);
 	let taps = ([0.003, 0.0035, 0.004, 0.0045, 0.005] vec) * fs();
 	let d = delayVar(0.01 * fs());
 	let tapped = d(taps, Interpolation.none);
@@ -194,11 +194,11 @@ fn randomPanningVoice() S {
 	let freqs = linrandv(80, 2080, n, Rate.reset);
 	let amps = ((0.4 + urand(n, Rate.reset) * 0.8) lfnoise1(n)) * 0.4 + 0.5;
 	let pans = (0.4 + urand(n, Rate.reset) * 0.8) lfnoise1(n);
-	let mix = (((freqs fsinosc) * amps) pan(pans) join) transpose(n) sum(2);
+	let mix = (((freqs fsinosc) * amps) pan(pans) stack) sum(cols);
 	mix * (0.4 / n) * xenv(kRpTrans)
 }
 
-fn randomPanningSines() S = voicer(kRpVoices, randomPanningVoice) sum(2) gainOutlet;
+fn randomPanningSines() S = voicer(kRpVoices, randomPanningVoice) sum(0) gainOutlet;
 
 randomPanningSines defSynthX("randomPanningSines", tags) await;
 

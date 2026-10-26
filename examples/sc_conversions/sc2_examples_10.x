@@ -72,12 +72,12 @@ fn mixSweepersVoice() S {
 	let lfo = ((0.1 + urand(1, Rate.reset) * 0.2) fsinosc) * (12 + birand(1, Rate.reset) * 12)
 		+ (60 + birand(1, Rate.reset) * 24);
 	let sweep = resonz(white() * (urand(1, Rate.reset) * 0.003), lfo nnhz, 0.1);
-	let freqs = linrandv(80, 10080, 2 * p, Rate.reset);
-	let rings = 0.5 + urand(2 * p, Rate.reset) * 2;
-	(klankModes(sweep, freqs, 1, rings) sum(2)) * xenv(kSwTrans)
+	let freqs = linrandv(80, 10080, 2 * p, Rate.reset) reshape([p, 2]);
+	let rings = 0.5 + urand(2 * p, Rate.reset) reshape([p, 2]) * 2;
+	(klankModes(sweep, freqs, 1, rings) sum(0)) * xenv(kSwTrans)
 }
 
-fn mixSweepers() S = voicer(kSwVoices, mixSweepersVoice) sum(2) gainOutlet;
+fn mixSweepers() S = voicer(kSwVoices, mixSweepersVoice) sum(0) gainOutlet;
 
 mixSweepers defSynthX("mixSweepers", tags) await;
 
@@ -96,7 +96,7 @@ fn mixRingKlanksVoice() S {
 	(((modF sinosc) * a) * xenv(kRkTrans)) pan(birand(1, Rate.reset)) join
 }
 
-fn mixRingKlanks() S = voicer(kRkVoices, mixRingKlanksVoice) sum(2) gainOutlet;
+fn mixRingKlanks() S = voicer(kRkVoices, mixRingKlanksVoice) sum(0) gainOutlet;
 
 mixRingKlanks defSynthX("mixRingKlanks", tags) await;
 
@@ -114,7 +114,7 @@ fn mixBottlesVoice() S {
 	(sig * xenv(kBtTrans)) pan(panPos) join
 }
 
-fn mixBottles() S = voicer(kBtVoices, mixBottlesVoice) sum(2) gainOutlet;
+fn mixBottles() S = voicer(kBtVoices, mixBottlesVoice) sum(0) gainOutlet;
 
 mixBottles defSynthX("mixBottles", tags) await;
 
@@ -143,19 +143,19 @@ fn pentatonicVoice() S {
 	-- pipes
 	let pipeF = (degreeToKey(irand(0, 19, 5, Rate.reset), kPentMode, 5) + root) nnhz;
 	let amp = (linen(g, 0.2, 1) rpanfun) * 20;
-	let pipes = ((resonz(red(5) * amp, pipeF, 0.002) * 4) distort * 0.04) pan(birand(5, Rate.reset)) join;
-	let pipesLR = pipes transpose(5) sum(2);
+	let pipes = ((resonz(red(5) * amp, pipeF, 0.002) * 4) distort * 0.04) pan(birand(5, Rate.reset)) stack;
+	let pipesLR = pipes sum(cols);
 	-- bells
 	let bellF = (degreeToKey(irand(0, 9, 4, Rate.reset), kPentMode, 5) + root + 36) nnhz;
 	let strike = lfimp(urand(4, Rate.reset) * 2);
 	let bellEnv = strike decay2(0.01, 2);
 	let bell = bellEnv * ((bellF fsinosc) + ((bellF + birand(4, Rate.reset) * 2) fsinosc));
-	let bellsLR = ((bell pan(birand(4, Rate.reset)) join) transpose(4) sum(2)) * 0.05;
+	let bellsLR = ((bell pan(birand(4, Rate.reset)) stack) sum(cols)) * 0.05;
 	[pipesLR, bellsLR] join
 }
 
 fn pentatonic() S {
-	let chans = voicer(kPentVoices, pentatonicVoice) sum(4);
+	let chans = voicer(kPentVoices, pentatonicVoice) sum(0);
 	let mix1 = chans take(2);
 	let mix2 = chans drop(2);
 	let m1 = (mix1 combn(0.3, 8)) + (mix1 reverse)
@@ -226,7 +226,7 @@ fn allpassTail6(z S, decayTime Float) S {
 	y
 }
 
-fn tarmacA() S = allpassTail6(voicer(kTarAVoices, tarmacAVoice) sum(2), 16) gainOutlet;
+fn tarmacA() S = allpassTail6(voicer(kTarAVoices, tarmacAVoice) sum(0), 16) gainOutlet;
 
 tarmacA defSynthX("tarmacA", tags) await;
 
@@ -237,7 +237,7 @@ fn tarmacBVoice() S {
 	((bank * level) * xenv(kTarBTrans)) pan((urand(1, Rate.reset) lfnoise1(1))) join
 }
 
-fn tarmacB() S = allpassTail6(voicer(kTarBVoices, tarmacBVoice) sum(2), 16) gainOutlet;
+fn tarmacB() S = allpassTail6(voicer(kTarBVoices, tarmacBVoice) sum(0), 16) gainOutlet;
 
 tarmacB defSynthX("tarmacB", tags) await;
 
@@ -288,7 +288,7 @@ fn dancingShadowsVoice() S {
 	let pulse = iseq(trig, choosePattern(dancingPatterns()), 16) * ((6.324555 * 6) / (n * (freq sqrt)));
 	let env = pulse decay2(0.005, 6 / rate);
 	let amp = ((urand(n, Rate.reset) * 0.5) lfnoise1(n)) * env;
-	let sines = (((freq sinosc) * amp) pan(birand(n, Rate.reset)) join) transpose(n) sum(2);
+	let sines = (((freq sinosc) * amp) pan(birand(n, Rate.reset)) stack) sum(cols);
 	-- melody: a folded random walk of the degree, stepped on the clock
 	let deg = delayVar() init(1, irand(0, 7, 1, Rate.reset) f32);
 	let step = select2(urand() < 0.3, irand(-2, 2, 1) f32, 0);
@@ -299,7 +299,7 @@ fn dancingShadowsVoice() S {
 	(sines + melody) * xenv(kDsTrans)
 }
 
-fn dancingShadows() S = voicer(kDsVoices, dancingShadowsVoice) sum(2) gainOutlet;
+fn dancingShadows() S = voicer(kDsVoices, dancingShadowsVoice) sum(0) gainOutlet;
 
 dancingShadows defSynthX("dancingShadows", tags) await;
 
@@ -329,7 +329,7 @@ fn choipVoice() S {
 }
 
 fn choip() S {
-	var z = voicer(kChVoices, choipVoice) sum(2);
+	var z = voicer(kChVoices, choipVoice) sum(0);
 	for (i : (1..4)) {
 		z = z alpasn(urand(2, Rate.init) * 0.05, 4);
 	}

@@ -17,7 +17,7 @@ fn sineCloud() S {
     let ampFreqs = exprand(0.1, 0.5, chans, Rate.init);
     let amps = ampFreqs fsinosc(ampPhases) uni;
     let oscs = freqs fsinosc cb * amps;
-    oscs sum(2) * 0.1 |> outlet
+    oscs reshape([-1, 2]) sum(0) * 0.1 |> outlet
 }
 -- gallery-excerpt-end
 

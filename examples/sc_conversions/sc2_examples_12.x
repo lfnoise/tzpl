@@ -62,12 +62,11 @@ fn degreeToKey(d S, scale [S]) S {
 }
 
 -- Mix.arFill(n, { CombN.ar(sig, 0.3, [rrand(0.1,0.3), rrand(0.1,0.3)], decay) }):
--- n stereo combs on a stereo signal with 2n random delays (cyclic broadcast
--- pairs channel i of the delays with signal channel i % 2), summed back to
--- stereo.
+-- n stereo combs on a stereo signal with an n x 2 matrix of random delays
+-- (the signal broadcasts along its columns), summed back to stereo.
 fn combCloud(sig S, n Int, decayTime Float) S {
-	let dts = 0.1 + urand(2 * n, Rate.init) * 0.2;
-	(sig comb(dts, 0.3, decayTime, Interpolation.none)) sum(2)
+	let dts = 0.1 + urand(2 * n, Rate.init) reshape([n, 2]) * 0.2;
+	(sig comb(dts, 0.3, decayTime, Interpolation.none)) sum(0)
 }
 
 -- k AllpassN/AllpassL stages with random stereo delays (maxDelay, decay).
@@ -145,7 +144,7 @@ fn arachnidVoice() S {
 }
 
 fn arachnidEspresso() S {
-	let sig = voicer(kArachVoices, arachnidVoice) sum(2);
+	let sig = voicer(kArachVoices, arachnidVoice) sum(0);
 	allpassChain(sig, 6, 0.03, 3.0) gainOutlet
 }
 
@@ -169,7 +168,7 @@ fn warbulenceCore(f S, r S, gains S, ampOffset Float) S {
 	let g = 1 + urand(n, Rate.reset) * 12;
 	let lfo = ((r * (0.9 + urand(n, Rate.reset) * 0.2)) sinosc(urand(n, Rate.reset))) * 0.08 + ampOffset;
 	let sig = ((f * g) fsinosc) * (lfo max(0)) * (2 / g) * gains;
-	(sig pan(birand(n, Rate.reset)) join) transpose(n) sum(2)
+	(sig pan(birand(n, Rate.reset)) stack) sum(cols)
 }
 
 fn inharmonicWarbulenceVoice() S {
@@ -180,7 +179,7 @@ fn inharmonicWarbulenceVoice() S {
 }
 
 fn inharmonicWarbulence() S {
-	let sig = voicer(kWarbVoices, inharmonicWarbulenceVoice) sum(2);
+	let sig = voicer(kWarbVoices, inharmonicWarbulenceVoice) sum(0);
 	(combCloud(sig, 5, 8.0) * 0.3) gainOutlet
 }
 
@@ -199,11 +198,11 @@ fn clippedWarbulenceVoice() S {
 	let g = 1 + urand(n, Rate.reset) * 12;
 	let lfo = ((r * (0.9 + urand(n, Rate.reset) * 0.2)) sinosc(urand(n, Rate.reset))) * 0.08 - 0.04;
 	let sig = ((((f * g) fsinosc) * (lfo max(0))) max(0)) * (2 / g);
-	((a * ((sig pan(birand(n, Rate.reset)) join) transpose(n) sum(2))) * xenv(kWarbTrans))
+	((a * ((sig pan(birand(n, Rate.reset)) stack) sum(cols))) * xenv(kWarbTrans))
 }
 
 fn clippedWarbulence() S {
-	let sig = (voicer(kWarbVoices, clippedWarbulenceVoice) sum(2)) leakdc(0.995);
+	let sig = (voicer(kWarbVoices, clippedWarbulenceVoice) sum(0)) leakdc(0.995);
 	(combCloud(sig, 8, 20.0) * 0.3) gainOutlet
 }
 
@@ -223,13 +222,13 @@ fn pulseWarbulenceVoice() S {
 	let harm = idx vec;
 	let lfo = ((r * (0.9 + urand(n, Rate.reset) * 0.2)) sinosc(urand(n, Rate.reset))) * 0.1 - 0.05;
 	let sig = ((f * harm) fsinosc) * (lfo max(0)) * (1 / harm);
-	let mix = (sig pan(birand(n, Rate.reset)) join) transpose(n) sum(2);
+	let mix = (sig pan(birand(n, Rate.reset)) stack) sum(cols);
 	let chop = exprand(0.2, 1.2, 1, Rate.reset) lfupulse(0.1 + urand(1, Rate.reset) * 0.1);
 	(mix * chop) * xenv(kWarbTrans)
 }
 
 fn pulseWarbulence() S {
-	let sig = voicer(kWarbVoices, pulseWarbulenceVoice) sum(2);
+	let sig = voicer(kWarbVoices, pulseWarbulenceVoice) sum(0);
 	(combCloud(sig, 5, 8.0) * 0.5) gainOutlet
 }
 
@@ -267,7 +266,7 @@ fn droneVoice() S {
 }
 
 fn drone() S {
-	let a = voicer(kDroneVoices, droneVoice) sum(2);
+	let a = voicer(kDroneVoices, droneVoice) sum(0);
 	((a combn(0.5, 6)) + (a reverse)) gainOutlet
 }
 
@@ -288,7 +287,7 @@ fn droneChordVoice() S {
 	(a combn(0.5, 6)) + (a reverse)
 }
 
-fn droneChords() S = voicer(kChordVoices, droneChordVoice) sum(2) gainOutlet;
+fn droneChords() S = voicer(kChordVoices, droneChordVoice) sum(0) gainOutlet;
 
 droneChords defSynthX("droneChords", tags) await;
 
@@ -311,7 +310,7 @@ fn droneRhythmVoice() S {
 	(a combn(0.5, 6)) + (a reverse)
 }
 
-fn droneRhythm() S = voicer(kRhyVoices, droneRhythmVoice) sum(2) gainOutlet;
+fn droneRhythm() S = voicer(kRhyVoices, droneRhythmVoice) sum(0) gainOutlet;
 
 droneRhythm defSynthX("droneRhythm", tags) await;
 
@@ -338,11 +337,11 @@ fn kOctaves() [S] = [21, 33, 45, 57, 69, 81, 93] @ asSignal;
 
 fn spaceSawGraph() S {
 	let f = (select(irand(0, 6, 1, Rate.reset), kMajor()) + select(irand(0, 6, 1, Rate.reset), kOctaves())) nnhz;
-	let vib = (exprand(4, 6, 10, Rate.reset) sinosc) * 0.008 + 1;
-	let ff = f * vib;                                        -- 10 channels
-	let detune = 0.99 + urand(20, Rate.reset) * 0.02;        -- 10 stereo pairs
-	let saws = ((ff * detune) lfsaw) * 0.01;                 -- cyclic: pairs share ff
-	let x = lpz2(lpz2(saws sum(2)));
+	let vib = (exprand(4, 6, 10, Rate.reset) reshape([10, 1]) sinosc) * 0.008 + 1;
+	let ff = f * vib;                                        -- 10 x 1
+	let detune = 0.99 + urand(20, Rate.reset) reshape([10, 2]) * 0.02;  -- 10 stereo pairs
+	let saws = ((ff * detune) lfsaw) * 0.01;                 -- 10 x 2: pairs share ff
+	let x = lpz2(lpz2(saws sum(0)));
 	let useFilter = (urand(1, Rate.reset) < 0.3) * (f < 1400);
 	let cutoff = ((0.3 + urand(1, Rate.reset) * 0.5) sinosc) * (f * (0.5 + urand(1, Rate.reset) * 2.5))
 		+ f * (4 + urand(1, Rate.reset) * 8);
@@ -368,7 +367,7 @@ fn spaceMusic1Voice() S {
 }
 
 fn spaceMusic1() S {
-	let a = voicer(kSpace1Voices, spaceMusic1Voice) sum(2);
+	let a = voicer(kSpace1Voices, spaceMusic1Voice) sum(0);
 	((a comb([0.5, 0.47] vec, 0.5, 7, Interpolation.none)) + (a reverse)) gainOutlet
 }
 
@@ -424,7 +423,7 @@ fn s2PulseWarb() S {
 	let harm = idx vec;
 	let lfo = ((r * (0.9 + urand(n, Rate.reset) * 0.2)) sinosc(urand(n, Rate.reset))) * 0.1 - 0.05;
 	let sig = ((f * harm) fsinosc) * (lfo max(0)) * (1 / harm);
-	let mix = (sig pan(birand(n, Rate.reset)) join) transpose(n) sum(2);
+	let mix = (sig pan(birand(n, Rate.reset)) stack) sum(cols);
 	mix * (exprand(0.2, 1.2, 1, Rate.reset) lfupulse(0.1 + urand(1, Rate.reset) * 0.1))
 }
 
@@ -445,12 +444,12 @@ fn s2NoisePitch() S {
 
 fn s2Klank() S {
 	let p = 15;
-	let freqs = exprand(100, 6000, 2 * p, Rate.reset);
-	let rings = 2 + urand(2 * p, Rate.reset) * 4;
+	let freqs = exprand(100, 6000, 2 * p, Rate.reset) reshape([p, 2]);
+	let rings = 2 + urand(2 * p, Rate.reset) reshape([p, 2]) * 4;
 	let f3 = xline(exprand(40, 300, 1, Rate.reset), exprand(40, 300, 1, Rate.reset), 10);
 	let gateN = (((urand(1, Rate.reset) * 8) lfnoise3(1)) max(0)) * 0.002;
 	let in = (f3 lfupulse(0.1 + urand(1, Rate.reset) * 0.8)) * gateN;
-	((klankModes(in, freqs, 1, rings) sum(2)) distort) * 0.3
+	((klankModes(in, freqs, 1, rings) sum(0)) distort) * 0.3
 }
 
 fn spaceMusic2Voice() S {
@@ -460,7 +459,7 @@ fn spaceMusic2Voice() S {
 }
 
 fn spaceMusic2() S {
-	let sig = voicer(kSpace2Voices, spaceMusic2Voice) sum(2);
+	let sig = voicer(kSpace2Voices, spaceMusic2Voice) sum(0);
 	(combCloud(sig, 5, 8.0) * 0.3) gainOutlet
 }
 
@@ -496,7 +495,7 @@ fn hocketVoice() S {
 }
 
 fn hocketuplets() S {
-	let z = voicer(kHockVoices, hocketVoice) sum(2);
+	let z = voicer(kHockVoices, hocketVoice) sum(0);
 	allpassChain(z, 6, 0.04, 4.0) gainOutlet
 }
 

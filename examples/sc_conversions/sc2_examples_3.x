@@ -94,7 +94,7 @@ fn nativeVoice() S {
 	(klank(exc, freqs, 1, rings) * xenv(kNativeTrans)) pan(birand(1, Rate.reset)) join
 }
 
-fn nativeAlgorhythms() S = voicer(kNativeVoices, nativeVoice) sum(2) gainOutlet;
+fn nativeAlgorhythms() S = voicer(kNativeVoices, nativeVoice) sum(0) gainOutlet;
 
 nativeAlgorhythms defSynthX("nativeAlgorhythms", tags) await;
 
@@ -121,7 +121,7 @@ fn syntheticPiano() S {
 		strings = strings + (hammer combl(delayTime, 0.02, 6));
 	}
 	let panPos = (pitch - 36) / 27.0 - 1;
-	(strings pan(panPos) join) transpose(n) sum(2) gainOutlet
+	(strings pan(panPos) stack) sum(cols) gainOutlet
 }
 
 syntheticPiano defSynthX("syntheticPiano", tags) await;
