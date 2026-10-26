@@ -1851,7 +1851,13 @@ Progress (2026-10-26):
 - **Test gap closed:** the forms-equivalence run played only voice 0, so voice-group
   indexing past the first group went unchecked (a precedence bug was found by hand).
   Every voice now plays, row r with its parameters scaled by 1 + 0.07 r.
-- Not done yet: the x86-64 Linux build items, the benchmarks suite.
+- **Flush to zero** (`shared/tzpl_denormals.hpp`): FTZ and DAZ on x86-64, FPCR.FZ on
+  arm64, set by every silo worker thread and on each `processAudioBlock` call (the
+  device's callback thread and the NRT renderer). Plugins are dylibs, so
+  `-ffast-math`'s startup FTZ never reached them. `test_block_engine` checks a
+  subnormal product flushes on the rendering thread.
+- Not done yet: Sleef inline headers and a per-ISA register budget (both need
+  x86-64 measurements; this machine is arm64), the benchmarks suite.
   - An idle voice's output is 0; its loops, block groups and draws are skipped. A
     group of 4 SIMD lanes is skipped when every voice in it is idle. `resetVoice`
     (a new note) wakes it.

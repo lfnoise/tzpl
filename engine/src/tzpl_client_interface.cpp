@@ -26,6 +26,7 @@
 #include "tzpl_node.hpp"
 #include "tzpl_audio_backend_rtaudio.hpp"
 #include "tzpl_hash.hpp"
+#include "tzpl_denormals.hpp"
 #include "tzpl_command_subclasses.hpp"
 #include "tzpl_sample_bank.hpp"
 #include <algorithm>
@@ -359,6 +360,9 @@ bool safetyLimiterEnabled(Engine* e) {
 // the backend RT callbacks and the NRT renderer.
 void processAudioBlock(Engine* e, f32 const* in, f32* out,
                        unsigned int numFrames, f64 streamTime) {
+    // the calling thread is the device's (or the NRT renderer's): set it
+    // every call, it costs a few cycles
+    tzpl::flushDenormals();
     bool timing = e->statsEnabled_.load(std::memory_order_relaxed);
     auto t0 = timing ? std::chrono::steady_clock::now()
                      : std::chrono::steady_clock::time_point{};

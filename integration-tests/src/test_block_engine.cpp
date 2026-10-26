@@ -176,6 +176,17 @@ void testShapes() {
     check(!tzpl::validShape(tzpl_Shape{{1, 1, 1, 1}, 5}), "rank over the maximum refused");
 }
 
+// Every audio thread flushes subnormals to zero (M9): here the NRT renderer,
+// which runs silo 0 on the calling thread.
+void testDenormals() {
+    gCase = "denormals";
+    volatile float a = 1e-30f, b = 1e-10f;
+    check(a * b != 0.f, "subnormal results before any block (default FP mode)");
+    Rig r(64, 64);
+    r.renderTo(64);
+    check(a * b == 0.f, "subnormal results flush to zero on an audio thread");
+}
+
 void testBlockSizes() {
     for (int block : {1, 4, 64, 256}) {
         for (int dev : {37, 64, 100}) {
@@ -555,6 +566,7 @@ int main(int argc, char** argv) {
         if (std::strcmp(argv[i], "--verbose") == 0) gVerbose = true;
 
     testShapes();
+    testDenormals();
     testBlockSizes();
     testStartFree();
     testStages();

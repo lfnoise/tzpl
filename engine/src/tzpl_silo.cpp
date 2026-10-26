@@ -28,6 +28,7 @@
 #include "tzpl_mixer.hpp"
 #include "tzpl_xfader.hpp"
 #include "tzpl_note_voicer.hpp"
+#include "tzpl_denormals.hpp"
 #include <chrono>
 #include <cmath>
 #ifndef __APPLE__
@@ -437,6 +438,7 @@ void Silo::workLoop(Silo* s) {
     if (!e->nrtMode_) {
         make_this_thread_realtime();
     }
+    tzpl::flushDenormals();
     while (e->runSilos_) {
         s->start_sem_.wait();
         if (!e->runSilos_) break;
