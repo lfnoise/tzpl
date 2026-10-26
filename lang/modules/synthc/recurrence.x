@@ -195,7 +195,15 @@ fn recClassStr(ctx Ctx, c RecClass) String = match (c) {
 -- TZPL_FORMS=serial: every loop in its plain serial form (no block forms,
 -- no channel- or sample-vector loops), the reference for the
 -- equivalence-of-forms test (block engine plan M8).
-fn serialForms() Bool = match (getEnv("TZPL_FORMS")) { some(v): v == "serial"; none: false; };
+fn serialForms() Bool = formsOff("serial");
+
+-- TZPL_FORMS may also list strategies to turn off, comma-separated, for
+-- measuring the cost table (block engine plan M8): nofuse, noportrows, nosv
+-- (sample-vector), noss (state space), noblockdelay.
+fn formsOff(name String) Bool = match (getEnv("TZPL_FORMS")) {
+	some(v): (v split(",")) contains(name);
+	none: false;
+};
 
 fn blockFormOf(ctx Ctx, cy CycleInfo, c RecClass) String {
 	-- TZPL_STRICT_RECURRENCES=1: every recurrence in its own order (plain
@@ -212,7 +220,7 @@ fn blockFormOf(ctx Ctx, cy CycleInfo, c RecClass) String {
 	-- Block-rate coefficients (any order): the state space, which checks per
 	-- block whether its coefficient groups vary (codegen: then the first-order
 	-- scan when firstOrderScanOK, else the plain recurrence).
-	let ss = match (c) { affineBlock(_): ctx stateSpaceModel(cy).ok; _: false; };
+	let ss = !formsOff("noss") && match (c) { affineBlock(_): ctx stateSpaceModel(cy).ok; _: false; };
 	if (ss) { return "statespace"; }
 	if (kind == "statespace") { return ""; }
 	-- Scans and audio-rate first-order affine maps: the two-pass scan.

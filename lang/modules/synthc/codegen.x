@@ -4146,13 +4146,23 @@ fn rootRegions(ctx Ctx) [[Int]] {
 -- of different forms: one-channel elementwise regions (sample-vector) merge
 -- only with each other.
 fn _fuseRegions(ctx Ctx, regions [[Int]]) [[Int]] {
-	if (serialForms()) { return regions; }
+	if (serialForms() || formsOff("nofuse")) { return regions; }
 	-- each region's kind: 0 block cycle, 1 sample-vector, 2 other plain
+	-- kind 0 stays alone: a block cycle, or a region that owns a delay line
+	-- (its block-wise forms need the delay's written value computed outside
+	-- it; fusing that in measured 1.3x slower, fxRotary)
 	var kind [Int] = [];
 	for (r : regions) {
-		var block = false;
-		for (li : r) { if (ctx.loops[li].group <= -10) { block = true; } }
-		kind push!(block ? 0 : (ctx _sampleVecOK(r) ? 1 : 2));
+		var alone = false;
+		for (li : r) {
+			if (ctx.loops[li].group <= -10) { alone = true; }
+			for (t : ctx.loops[li].trees) {
+				for (e : ctx.trees[t].exprs) {
+					match (ctx.kind[e]) { delayWriteK(_): { alone = true; } delayVarReadK(_, _): { alone = true; } _: {} }
+				}
+			}
+		}
+		kind push!(alone ? 0 : (ctx _sampleVecOK(r) ? 1 : 2));
 	}
 	var out [[Int]] = [];
 	var i = 0;
@@ -4965,6 +4975,10 @@ fn _genRegionWithBlockDelays(ctx Ctx, region [Int], delays [DelayInfo]) String {
 	}
 	if (bd length == 0 && fb length == 0) { return ctx _genRegion(region, delays); }
 	var body = ctx _genRegion(region, delays);
+	-- writing a delay first pays only if the region then vectorizes
+	if (bd length > 0 && !(body contains("bi + 4 <= off + n"))) {
+		return ctx _genRegionPlain(region, delays);
+	}
 	if (fb length > 0) {
 		let vbody = ctx _genRegionVecDelays(region, delays, fb);
 		if (vbody != body) {
@@ -4972,6 +4986,11 @@ fn _genRegionWithBlockDelays(ctx Ctx, region [Int], delays [DelayInfo]) String {
 		}
 	}
 	"\t{\n" $ pre $ body $ "\t}\n"
+}
+
+fn _genRegionPlain(ctx Ctx, region [Int], delays [DelayInfo]) String {
+	var `cgSuppressDelays [Int] = [];
+	ctx _genRegion(region, delays)
 }
 
 fn _genRegionVecDelays(ctx Ctx, region [Int], delays [DelayInfo], fb [Int]) String {
@@ -4986,8 +5005,9 @@ fn _genRegionVecDelays(ctx Ctx, region [Int], delays [DelayInfo], fb [Int]) Stri
 -- block's minimum time, computed first; any other needs a static lower bound.
 fn _feedbackBlockGuard(ctx Ctx, d Int, region [Int]) (Bool, String, String) {
 	let di = ctx.delays[d];
-	if (serialForms() || di.allocSize != 0 || di.maxDelay == NONE || di.writer == NONE) { return (false, "", ""); }
+	if (serialForms() || formsOff("noblockdelay") || di.allocSize != 0 || di.maxDelay == NONE || di.writer == NONE) { return (false, "", ""); }
 	if (di.fixReaders length > 0 || di.varReaders length == 0 || ctx.graphOf[di.writer] != 0) { return (false, "", ""); }
+	if (!(ctx _someReadInterpolates(di))) { return (false, "", ""); }
 	var terms [String] = [];
 	var chk = "";
 	for (r : di.varReaders) {
@@ -5029,15 +5049,27 @@ fn _delayIndexOfSerial(ctx Ctx, ser Int) Int {
 	NONE
 }
 
+-- Cost table: vectorizing a delay line's reads pays only for a kernel of 4
+-- or more taps (cubic, lagrange, sinc), whose arithmetic the lanes share.
+-- Uninterpolated reads measured 1.5x slower (fxDiffuser), linear ones even
+-- (fxEcho); cubic 1.5x faster (fxChorus).
+fn _someReadInterpolates(ctx Ctx, di DelayInfo) Bool {
+	for (r : di.varReaders) {
+		match (ctx.kind[r]) { delayVarReadK(_, ip): { if (_interpTaps(ip) length >= 4) { return true; } } _: {} }
+	}
+	false
+}
+
 -- The newest tap an interpolation kernel reads, relative to floor(delay).
 fn _interpFwd(ip Interpolation) Int = match (ip) { cubic: 1; lagrange: 3; sinc: 3; _: 0; };
 
 fn _blockDelayOK(ctx Ctx, d Int, region [Int]) Bool {
-	if (serialForms()) { return false; }
+	if (serialForms() || formsOff("noblockdelay")) { return false; }
 	let di = ctx.delays[d];
 	if (di.allocSize != 0 || di.maxDelay == NONE || di.writer == NONE) { return false; }
 	if (di.fixReaders length > 0 || di.varReaders length == 0) { return false; }
 	if (ctx.graphOf[di.writer] != 0) { return false; }
+	if (!(ctx _someReadInterpolates(di))) { return false; }
 	for (r : di.varReaders) {
 		if (ctx.graphOf[r] != 0) { return false; }
 		let ip = match (ctx.kind[r]) { delayVarReadK(_, i): i; _: Interpolation.none; };
@@ -5251,6 +5283,14 @@ fn _genRegion(ctx Ctx, region [Int], delays [DelayInfo]) String {
 -- channels, so its loops run channel-vector; a narrower port (stereo) is
 -- read by scalar channel loops, for which the transposes are extra copies.
 fn _portRowsLoop(ctx Ctx, region [Int], delays [DelayInfo], body String) String {
+	if (formsOff("noportrows")) { return ""; }
+	-- nor where variable-time delay reads dominate: their per-lane gathers
+	-- gain nothing from rows, and the transposes cost 10-15% (vg, vl)
+	for (li : region) {
+		for (t : ctx.loops[li].trees) {
+			for (e : ctx.trees[t].exprs) { match (ctx.kind[e]) { delayVarReadK(_, _): { return ""; } _: {} } }
+		}
+	}
 	for (x : ctx.inlets $ ctx.outlets) {
 		if (!(ctx _directPort(x))) { continue; }
 		let used = match (ctx.kind[x]) {
@@ -5316,6 +5356,49 @@ fn _nodeSampleVecOK(ctx Ctx, e NIdx) Bool = match (ctx.kind[e]) {
 	_: true;
 };
 
+-- Cost table for sample-vector (measured over the dump corpus, plan M8):
+-- clang vectorizes a plain sample loop of cheap elementwise ops by itself,
+-- often better (one_pole, fxLimiter: 1.2-1.3x), so sample-vector is chosen
+-- only for work it cannot: a math function (sin, exp, pow, ...), or reads
+-- of a feedforward block-wise delay through a kernel of 4+ taps. Type
+-- conversions (if3) and feedback delay reads (vdelay_ctrl) don't pay for it. And not
+-- when a multichannel value in the region is an interleaved temp or port:
+-- each vector would be a scatter or gather (fxBooster).
+fn _regionVecOK(ctx Ctx, region [Int], subRead NIdx) Bool {
+	-- a block scan's passes are copies and adds clang vectorizes itself
+	-- (if3, bwr: 1.2x slower as sample-vector); they go sample-vector only
+	-- alongside real work
+	var worth = false;
+	for (li : region) {
+		for (t : ctx.loops[li].trees) {
+			for (e : ctx.trees[t].exprs) {
+				match (ctx.kind[e]) {
+					unopK(op): { match (op) {
+						abs: {} neg: {} not: {} bitNot: {} sign: {} floor: {} ceil: {} trunc: {} round: {} sqrt: {}
+						_: { worth = true; }
+					} }
+					binopK(op): { match (op) { pow: { worth = true; } atan2: { worth = true; } hypot: { worth = true; } mod: { worth = true; } _: {} } }
+					-- reads of a delay written first (feedforward), through a
+					-- kernel of 4+ taps: the lanes share its arithmetic (fxChorus
+					-- 1.5x). A feedback delay's vector form also scatters its
+					-- writes, which ate that gain (vdelay_ctrl).
+					delayVarReadK(dd, ip): { if (`cgSuppressDelays contains(dd) && _interpTaps(ip) length >= 4) { worth = true; } }
+					_: {}
+				}
+				let refs = ctx.ins[e] $ [e];
+				for (x : refs) {
+					if (ctx.chans[x] > 1 && ctx.nrate[x] == Rate.audio) {
+						let interleaved = (ctx _isBlockTemp(x) && !(ctx _planarTemp(x))) || ctx _isRootBuf(x)
+							|| (match (ctx.kind[x]) { inletK(_, _, _): !(ctx _directPort(x)); outletK(_, _): !(ctx _directPort(x)); _: false; });
+						if (interleaved) { return false; }
+					}
+				}
+			}
+		}
+	}
+	worth
+}
+
 -- A region's loops in sample-vector form, and the rows they use.
 fn _sampleVecBody(ctx Ctx, region [Int], delays [DelayInfo] = [DelayInfo]()) (String, String) {
 	var `cgSampleVec Bool = true;
@@ -5330,6 +5413,8 @@ fn _sampleVecBody(ctx Ctx, region [Int], delays [DelayInfo] = [DelayInfo]()) (St
 -- buffers), control flow or channel ops: every node is elementwise over
 -- samples.
 fn _sampleVecOK(ctx Ctx, region [Int], subRead NIdx = NONE, subDelay Int = NONE) Bool {
+	if (formsOff("nosv")) { return false; }
+	if (!(ctx _regionVecOK(region, subRead))) { return false; }
 	for (li : region) {
 		let loop = ctx.loops[li];
 		-- 1 channel, or 2-3 run one channel at a time (4 or more run

@@ -752,6 +752,46 @@ then visible, not silent.
 
 ---
 
+### 4.8 Tensor shape operations (axis arguments)
+
+Today the shape operations (`VecOp` in `synthdef.x`: `take`, `drop`, `stride`, `stutter`,
+`ncyc`, `rotate`, `reverse`, `transpose`, `join`, `reduce`, `at`, `put`) act on a
+signal's row-major flattening and produce rows. With tensor signals they need an
+**axis**:
+
+- **Operations:** `take(n, axis)`, `drop(n, axis)`, `stride(k, axis)`,
+  `stutter(k, axis)`, `slice(offset, length, axis)`, `reverse(axis)`,
+  `rotate(amount, axis)`, `reduce(op, axis)`, `scan(op, axis)`; `join(axis)` concatenates
+  along an axis, and `transpose` generalizes to a permutation of axes. `at`/`put` index
+  along an axis.
+- **Default axis:** the last one (`dims[3]`, the columns). A one-dimensional signal is
+  a row, so every existing use keeps its meaning.
+- **Shape inference** gives each result's shape from the operand's shape, the axis and
+  the constant arguments (`take` shortens that axis to n, `reduce` removes it, ...).
+
+**Static operations** (every one listed above except the two below) are resolved at
+compile time:
+- The rearranging ones (`take`, `drop`, `stride`, `stutter`, `slice` with a constant
+  offset, `reverse`, `rotate` by a constant, `join`, `transpose`) are **index maps**:
+  each output element is one source element. They emit no code. They fold into their
+  consumers' per-channel source tables (§4.2 step 1), so a consumer reads the source
+  channel directly, through its channel pointer.
+- `reduce` and `scan` along an axis become elementwise op trees over that axis's
+  elements (a scan as running partial results), folded per channel like any
+  elementwise op (§4.2 step 1a: constant elements fold away).
+
+**Dynamic operations:** `slice` with a varying offset (fixed length) and `rotate` with
+a varying amount. Output element i reads source element `(offset + i) mod n` along the
+axis.
+- **Offset at block rate** (a parameter group): the consumer's per-channel source table
+  becomes a table of channel pointers rebuilt when the group changes, and consumers read
+  through it with no copy (D4: every channel is reached through a pointer).
+- **Offset at audio rate:** a per-sample gather, in the serial form or as 4-lane gathers.
+
+**Tests:** shape-inference goldens; each operation against a reference on the
+flattened layout (axis = last) and on explicit tensors (axis 0..3); the corpus
+unchanged, since existing uses act on rows.
+
 ## 5. Runtime support library (`shared/tzpl_dsp/`)
 
 These are header-only pieces that generated code includes, adapted from tensor-ugens and
@@ -1547,7 +1587,7 @@ Reference-ugen comparison (2026-10-25), `benchmarks/ugen_compare/`:
 - **Benchmark targets:** a mono `sinosc → lpf → out` at least 2× faster per sample than
   `main`; 16-channel no slower than `main`.
 
-Progress (2026-10-25; M8 is in progress):
+Progress (2026-10-26; M8 is done; §4.8 tensor shape operations follow as M8b):
 - **Sample-vector loops:** a region whose loops are all one channel, audio rate and
   elementwise (no delays, random draws, buffers, control flow or channel ops) runs 4
   samples a step, then a scalar tail. It reuses the channel-vector emitter: the lanes
@@ -1634,14 +1674,50 @@ Progress (2026-10-25; M8 is in progress):
   channel by channel and read only elementwise, is stored planar (channel c at
   `base + c·maxBlock`); a sample-vector loop reads it contiguously, and so does a
   state space per channel. Channel-vector temps keep interleaved rows (D4).
+- **Block-wise feedback delays:** a runtime-sized delay line whose reads, this call,
+  all stay `n` samples (plus the kernel's newest tap) behind the write head runs its
+  region sample-vector even with feedback: each lane reads older samples and writes its
+  own slot. A guard picks the form per call: a static lower bound of the delay time,
+  or the block's minimum delay time when it is computable before the region (echo's
+  lagged time control). Otherwise the plain form runs.
+- **Fix:** the vector interpolation kernel had no case for `Interpolation.none` and
+  returned the fraction (a C++ comma expression).
+- **The cost table, measured.** `TZPL_FORMS` takes strategies to turn off (`nofuse`,
+  `noportrows`, `nosv`, `noss`, `noblockdelay`), and `forms_equiv --time` times every
+  dump-corpus synth. Each rule below comes from a synth where the previous rule lost:
+  - *Sample-vector* only for work clang can't vectorize from the plain sample loop: a
+    math function (`sin`, `exp`, `pow`, ...), or reads through a kernel of 4+ taps of
+    a feedforward delay written first. Plain arithmetic, type conversions, and block
+    scans' passes are left to clang (one_pole, fxLimiter, if3, bwr: 1.2–1.3× better
+    scalar). Not where a multichannel value is an interleaved temp or port (fxBooster:
+    each vector became a scatter).
+  - *Block-wise delays* only for kernels of 4+ taps (fxDiffuser's uninterpolated reads
+    were 1.5× slower vectorized; echo's linear ones even; chorus's cubic ones 1.5×
+    faster). A write-first pass is kept only if its region then vectorizes.
+  - *Fusion* leaves regions that own a delay line alone: fusing in the delay's written
+    value made it unavailable before the region (fxRotary, fxGranulator: 1.3×).
+  - *Port rows* only for ports a multiple of 4 channels wide, and not in regions of
+    variable-time delay reads (vg, vl: per-lane gathers, 1.1–1.15×).
+  - Result over the corpus, each strategy against turning it off: fusion helps 18 synths
+    and hurts 1, sample-vector 21 and 2, state space 5 and 1, port rows 11 and 1,
+    block-wise delays 3 and 1; the remaining "hurts" are timing noise (the same synth
+    under every variant) or under 0.2 ns/sample (d4, tiny).
 - **Benchmarks against `main`** (ms of CPU per node-second, `main` → now, side by
-  side): mono `sinosc → lpf` 0.282 → 0.123 (2.3×); 16-channel 0.943 → 0.775 (1.22×);
-  knobs 0.242 → 0.231; chorus 1.122 → 0.596 (1.88×); bank 3.137 → 2.251 (1.39×).
-- **Not done yet:**
-  - block-wise feedback delays whose minimum delay is at least a block (read the block
-    first, then write);
-  - the rest of the cost table (a register budget; costs that weigh transposes
-    against gathers instead of fixed rules).
+  side): mono `sinosc → lpf` 0.341 → 0.132 (2.6×); 16-channel 0.921 → 0.771 (1.19×);
+  knobs 0.252 → 0.226 (1.11×); chorus 1.144 → 0.618 (1.85×); bank 3.076 → 2.206
+  (1.39×); echo 0.555 → 0.220 (2.52×); ping-pong 0.527 → 0.245 (2.15×).
+- **Not done:** a register budget (no synth in the corpus showed spills from fused
+  regions; the per-ISA budget is M9's). Fixed rules rather than a cost function: the
+  measured cases separate cleanly, so a weighted model was not needed yet.
+
+**M8b: Tensor shape operations (§4.8).**
+- Axis arguments for the shape operations in `synthdef.x` and the importer, with shape
+  inference.
+- Static operations as compile-time index maps folded into consumers' channel tables;
+  `reduce` and `scan` per axis as folded op trees.
+- `slice` with a varying offset and `rotate` with a varying amount: pointer tables
+  rebuilt per parameter-group change at block rate, gathers at audio rate.
+- Docs (`Writing_SynthDefs.html` §5) and tests per §4.8.
 
 **M9: Voicer block form (§4.6), portability and performance.**
 - Channel-vector loops over voices, skipping idle groups, per-voice parameter caches.

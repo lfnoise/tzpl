@@ -18,6 +18,9 @@
 // Random draws are seeded (TZPL_RNG_SEED), so both builds draw alike.
 //
 // Usage: forms_equiv AUTO_BUILD_DIR SERIAL_BUILD_DIR [name-substring]
+//        forms_equiv --time BUILD_DIR [name-substring]
+//   --time: ns per sample of each synth in whole blocks (best of 5), for
+//   measuring the code generator's cost table against variant builds.
 
 #include <dlfcn.h>
 
@@ -26,9 +29,11 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <chrono>
 #include <map>
 #include <print>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "tzpl_plugin_abi.h"
@@ -195,7 +200,30 @@ std::vector<std::vector<double>> run(Instance& in, std::vector<int> const& chunk
 
 }  // namespace
 
+// --time: ns per sample of each synth's process, whole blocks, best of 5.
+int timeAll(char const* dir, char const* filter) {
+    for (auto& [name, path] : plugins(dir)) {
+        if (filter && name.find(filter) == std::string::npos) continue;
+        Instance in;
+        std::string err;
+        if (!in.open(path, err)) { std::println("TIME {} error {}", name, err); continue; }
+        if (in.def.voiced && in.def.funs.resetVoice) { fillInputs(in, 0); in.def.funs.resetVoice(in.p, 0, 0); }
+        fillInputs(in, 0);
+        for (int b = 0; b < 200; ++b) in.def.funs.process(in.p, 0, kBlock);
+        double best = 1e30;
+        for (int r = 0; r < 5; ++r) {
+            auto t0 = std::chrono::steady_clock::now();
+            for (int b = 0; b < 2000; ++b) in.def.funs.process(in.p, 0, kBlock);
+            auto t1 = std::chrono::steady_clock::now();
+            best = std::min(best, std::chrono::duration<double, std::nano>(t1 - t0).count() / (2000.0 * kBlock));
+        }
+        std::println("TIME {} {:.3f}", name, best);
+    }
+    return 0;
+}
+
 int main(int argc, char** argv) {
+    if (argc >= 3 && std::string_view(argv[1]) == "--time") return timeAll(argv[2], argc > 3 ? argv[3] : nullptr);
     if (argc < 3) {
         std::println(stderr, "usage: forms_equiv AUTO_BUILD_DIR SERIAL_BUILD_DIR [name-substring]");
         return 2;
