@@ -5875,6 +5875,13 @@ fn genCpp(ctx Ctx, name String, simdWidth Int = 0) String {
 	for (v : ctx _voicerNodes) {
 		if (!(ctx _voicerChansForGraph(ctx _voicerBodyGraph(v)) hasSingleBit)) { flatV = false; }
 	}
+	-- ...and for every value in a voice body: a flat loop over voices x
+	-- channels splits its index with `i >> log2(chans)` and `i & (chans - 1)`,
+	-- which for 6 channels (six resonator modes) read the wrong channels and
+	-- voices, and past the end of per-voice arrays.
+	for (n : ctx.sorted) {
+		if (ctx _isVoiceGraphDeep(ctx.graphOf[n]) && ctx.chans[n] > 1 && !(ctx.chans[n] hasSingleBit)) { flatV = false; }
+	}
 	var `cgFlatVoice Bool = flatV;
 	-- The voicer's `notes` input: its port serial and row width.
 	var `cgNotesSn Int = 0;

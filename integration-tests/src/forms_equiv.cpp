@@ -17,7 +17,7 @@
 // time are amplified by the input's slope, and noise's is the largest.
 // Random draws are seeded (TZPL_RNG_SEED), so both builds draw alike.
 //
-// Usage: forms_equiv AUTO_BUILD_DIR SERIAL_BUILD_DIR [name-substring]
+// Usage: forms_equiv AUTO_BUILD_DIR SERIAL_BUILD_DIR [name-substring | =name]
 //        forms_equiv --time BUILD_DIR [name-substring]
 //   --time: ns per sample of each synth in whole blocks (best of 5), for
 //   measuring the code generator's cost table against variant builds.
@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <chrono>
@@ -77,6 +78,8 @@ std::map<std::string, fs::path> plugins(std::string const& dir) {
     std::map<std::string, std::pair<long, fs::path>> best;
     std::error_code ec;
     for (auto const& e : fs::directory_iterator(fs::path(dir) / "dylib", ec)) {
+        auto ext = e.path().extension().string();
+        if (!e.is_regular_file() || (ext != ".dylib" && ext != ".so")) continue;
         std::string stem = e.path().stem().string();
         auto r = stem.rfind("_synth_r");
         if (r == std::string::npos || !stem.starts_with("corpus_")) continue;
@@ -137,7 +140,9 @@ struct Instance {
     }
     ~Instance() {
         if (p) def.funs.free(p);
-        if (lib) dlclose(lib);
+        // FORMS_NO_DLCLOSE: keep plugins loaded (AddressSanitizer mistracks
+        // the globals of a library unloaded and loaded again)
+        if (lib && !std::getenv("FORMS_NO_DLCLOSE")) dlclose(lib);
     }
 };
 
@@ -234,7 +239,7 @@ int main(int argc, char** argv) {
         {"64", {64}}, {"1", {1}}, {"odd", {7, 13, 1, 30, 5, 3, 64}}};
     int failures = 0, checked = 0;
     for (auto& [name, apath] : autoP) {
-        if (filter && name.find(filter) == std::string::npos) continue;
+        if (filter && (filter[0] == '=' ? name != filter + 1 : name.find(filter) == std::string::npos)) continue;
         auto sit = serialP.find(name);
         if (sit == serialP.end()) {
             std::println("FAIL {}: no serial build", name);

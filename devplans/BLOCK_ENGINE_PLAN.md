@@ -1706,6 +1706,14 @@ Progress (2026-10-26; M8 is done; §4.8 tensor shape operations follow as M8b):
   side): mono `sinosc → lpf` 0.341 → 0.132 (2.6×); 16-channel 0.921 → 0.771 (1.19×);
   knobs 0.252 → 0.226 (1.11×); chorus 1.144 → 0.618 (1.85×); bank 3.076 → 2.206
   (1.39×); echo 0.555 → 0.220 (2.52×); ping-pong 0.527 → 0.245 (2.15×).
+- **Fix (older bug, both builds):** flat voice mode required a power-of-two channel
+  count only of the voicer's output, but its loops split their index with shifts and
+  masks for every per-voice value. A voice with 6 resonator modes (`ring_synth`) read
+  the wrong channels and voices, and past a per-voice array (non-finite output on the
+  macOS CI runner). Flat mode now requires every voice-body value's channel count to
+  be a power of two; otherwise voices run AoS. An AddressSanitizer + UBSan sweep of
+  every corpus plugin, both builds, through `forms_equiv` (`FORMS_NO_DLCLOSE=1`) is
+  clean.
 - **Not done:** a register budget (no synth in the corpus showed spills from fused
   regions; the per-ISA budget is M9's). Fixed rules rather than a cost function: the
   measured cases separate cleanly, so a weighted model was not needed yet.
