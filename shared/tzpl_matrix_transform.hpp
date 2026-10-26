@@ -27,6 +27,7 @@
 #include <cstring>
 #include "tzpl_simd.hpp"
 #include <bit>
+#include <type_traits>
 
 namespace synthdef {
 
@@ -115,6 +116,64 @@ TZPL_BITOPS_VEC(u64x8, 8)
 template <typename T, usize N>
 T sel(usize n, std::array<T,N> const& a) {
     return a[mod(n, N)];
+}
+
+// SIMD forms of compare and select (lane k is the scalar form on lane k).
+// A compare's lanes (all ones or 0) as 1 or 0 of type T.
+template <typename T, typename M>
+inline auto cmp01(M m) { return simd::convert<T>(-m); }
+
+// A lane mask (all ones or 0) with E's width, for the vector ?: in the
+// helpers below.
+template <typename E, int N>
+using lane_mask = std::conditional_t<sizeof(E) == 8, long, int> __attribute__((ext_vector_type(N)));
+
+// A voicer output value as it is written (idle voices, plan M9): 0 where
+// the voice is idle (live[k] == 0), and, while some voice is released and
+// still awake (track), each lane's magnitude kept in its peak (silence
+// detection). The peak is a chain through memory from sample to sample, so
+// it is only kept when it can matter.
+template <typename T>
+inline T live_peak1(bool track, f32 live, f32& peak, T x) {
+    T y = live != 0.0f ? x : T(0);
+    if (track) peak = std::max(peak, f32(std::fabs(y)));
+    return y;
+}
+
+template <typename V>
+inline V live_peak(bool track, f32 const* live, f32* peak, V x) {
+    using E = std::remove_cvref_t<decltype(x[0])>;
+    constexpr int N = sizeof(V) / sizeof(E);
+    using F = f32 __attribute__((ext_vector_type(N)));
+    F l;
+    std::memcpy(&l, live, sizeof l);
+    V r = __builtin_convertvector(l != 0.0f, lane_mask<E, N>) ? x : V(0);
+    if (track) {
+        F pk;
+        std::memcpy(&pk, peak, sizeof pk);
+        pk = __builtin_elementwise_max(pk, __builtin_convertvector(__builtin_elementwise_abs(r), F));
+        std::memcpy(peak, &pk, sizeof pk);
+    }
+    return r;
+}
+
+// c ? a : b per lane, for any numeric condition c (one blend).
+template <typename V, typename C>
+inline V vsel(C c, V a, V b) {
+    using E = std::remove_cvref_t<decltype(a[0])>;
+    return __builtin_convertvector(c != 0, lane_mask<E, sizeof(V) / sizeof(E)>) ? a : b;
+}
+
+// sel per lane: lane k of a[idx[k] mod N], as N - 1 blends.
+template <typename V, typename I, usize N>
+inline V vseln(I idx, std::array<V,N> const& a) {
+    using E = std::remove_cvref_t<decltype(a[0][0])>;
+    using M = lane_mask<E, sizeof(V) / sizeof(E)>;
+    M ix = __builtin_convertvector(idx, M) % M(N);
+    ix = ix < 0 ? ix + M(N) : ix;
+    V r = a[0];
+    for (usize j = 1; j < N; ++j) r = ix == M(j) ? a[j] : r;
+    return r;
 }
 
 template <typename T, usize Size>
@@ -502,6 +561,15 @@ T scan_at(usize base, usize count, T const* in, F f) {
         z = f(z, inp[k * Stride]);
     }
     return z;
+}
+
+// Idle-voice flags (one u8 per voice, 0 or 1): are all of n consecutive
+// voices idle? A group of SIMD lanes is skipped when it is.
+template <usize N>
+inline bool all_idle(u8 const* f) {
+    u8 a = 1;
+    for (usize k = 0; k < N; ++k) a &= f[k];
+    return a != 0;
 }
 
 template <typename T, usize Rows, usize Middle, usize Cols>

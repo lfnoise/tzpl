@@ -103,7 +103,7 @@ fn countNestedRefs(g SignalGraph) Int {
     var n = 0;
     for (e : g.exprs) {
         match (e.kind) {
-            voicer(v, sub): n = n + sub _countRefsAnywhere;
+            voicer(v, sub, sil): n = n + sub _countRefsAnywhere;
             if_(a, b): n = n + a _countRefsAnywhere + b _countRefsAnywhere;
             for_(c, sub): n = n + sub _countRefsAnywhere;
             switch_(gs): for (sg : gs) { n = n + sg _countRefsAnywhere; }
@@ -119,7 +119,7 @@ fn _countRefsAnywhere(g SignalGraph) Int {
     for (e : g.exprs) {
         match (e.kind) {
             inlet(typ, sh, nm, sp): if (nm isPxRefName) { n = n + 1; }
-            voicer(v, sub): n = n + sub _countRefsAnywhere;
+            voicer(v, sub, sil): n = n + sub _countRefsAnywhere;
             if_(a, b): n = n + a _countRefsAnywhere + b _countRefsAnywhere;
             for_(c, sub): n = n + sub _countRefsAnywhere;
             switch_(gs): for (sg : gs) { n = n + sg _countRefsAnywhere; }
@@ -144,7 +144,7 @@ fn _scanControlsInto(g SignalGraph, out [String]) Void {
     for (e : g.exprs) {
         match (e.kind) {
             inlet(typ, sh, nm, sp): match (sp) { some(_): out push!(nm); none: 0; };
-            voicer(v, sub): sub _scanControlsInto(out);
+            voicer(v, sub, sil): sub _scanControlsInto(out);
             if_(a, b): { a _scanControlsInto(out); b _scanControlsInto(out); }
             for_(c, sub): sub _scanControlsInto(out);
             switch_(gs): for (sg : gs) { sg _scanControlsInto(out); }
@@ -175,7 +175,7 @@ fn _scanNoteParamsInto(g SignalGraph, names [Symbol], defaults [Float]) Void {
                     defaults push!(spec.init);
                 }
             }
-            voicer(v, sub): sub _scanNoteParamsInto(names, defaults);
+            voicer(v, sub, sil): sub _scanNoteParamsInto(names, defaults);
             if_(a, b): {
                 a _scanNoteParamsInto(names, defaults);
                 b _scanNoteParamsInto(names, defaults);

@@ -670,7 +670,9 @@ enum SignalExprKind {
 	select,
 	select2,
 	varexpr String,
-	voicer(Int, SignalGraph),
+	voicer(Int, SignalGraph, Float),   -- maxVoices, body, silence seconds
+	-- In a voice body: the voice is done when this is nonzero after release.
+	voiceDone,
 	spectralChain(Int, Int, SignalGraph),
 	spectralFrame Int,
 
@@ -755,9 +757,25 @@ fn gate() S {
     noteParam("gate", ControlSpec { lo: 0.0, hi: 1.0, init: 0.0, warp: ControlWarp.linear })
 }
 
-fn voicer(maxVoices Int, voiceFn GraphFn) S {
+-- `maxVoices` copies of the voice body, one per sounding note. A released
+-- voice is skipped once it is done: when its body declares `doneWhen`, once
+-- that condition holds; otherwise once its output has stayed below -120 dB
+-- for `silence` seconds (the default is longer than the period of any
+-- audible pitch, so a slow tremolo's dips do not end a voice). `silence` 0
+-- turns skipping off entirely, `doneWhen` included: with 4 or 8 cheap
+-- voices the checks can cost more than skipping saves.
+fn voicer(maxVoices Int, voiceFn GraphFn, silence Float = 0.2) S {
     let bodyGraph = voiceFn _makeSubGraph;
-    SignalExprKind.voicer(maxVoices, bodyGraph) _newSignalExpr
+    SignalExprKind.voicer(maxVoices, bodyGraph, silence max(0.0)) _newSignalExpr
+}
+
+-- In a voice body: declare the voice done once its gate is off and `cond`
+-- is nonzero (for example its envelope has finished). Returns `x`, so it
+-- can sit in a chain: `osc * env doneWhen(env <= 0.0)`. A done voice
+-- outputs 0 and costs nothing until its next note.
+fn doneWhen(x S, cond S) S {
+    SignalExprKind.voiceDone _newSignalExpr([cond]);
+    x
 }
 
 fn spectralChain(input S, fftSize Int, hopSize Int, bodyFn GraphFn1) S {

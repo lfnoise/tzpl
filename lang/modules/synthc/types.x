@@ -322,6 +322,7 @@ fn calcShapeOf(ctx Ctx, n NIdx) Shape {
 		phiK(t):             _phiShape(ctx, n, t);
 		varK(_):             ctx.shape[n];   -- unset: broadcasts to its use
 		debugK(_, _, _, _):  scalarShape();
+		voiceDoneK:          scalarShape();
 	}
 }
 
@@ -433,6 +434,7 @@ fn updateTypeOf(ctx Ctx, n NIdx, wl WorkList) Void {
 	match (ctx.kind[n]) {
 		outletK(_, _):       { ctx.typ[n] = ctx.typ[ins[0]]; }
 		debugK(_, _, _, _):  { ctx.typ[n] = ctx.typ[ins[0]]; }
+		voiceDoneK:          { ctx.typ[n] = ctx.typ[ins[0]]; }
 		unopK(_):            { _narrow(ctx, n, ctx.typ[n] & ctx.typ[ins[0]], wl); }
 		binopK(_):           {
 			-- Widening: the result is no narrower than either operand.

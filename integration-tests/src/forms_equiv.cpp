@@ -20,11 +20,16 @@
 // Usage: forms_equiv AUTO_BUILD_DIR SERIAL_BUILD_DIR [name-substring | =name]
 //        forms_equiv --time BUILD_DIR [name-substring]
 //        forms_equiv --zero BUILD_DIR [name-substring]
+//        forms_equiv --idle BUILD_DIR NOIDLE_BUILD_DIR
 //   --time: ns per sample of each synth in whole blocks (best of 5), for
 //   measuring the code generator's cost table against variant builds.
 //   --zero: every output sample of every synth is 0 (within 1e-4), in whole
 //   blocks and odd chunks: for tests whose synths output (result - expected),
 //   such as run_shape_ops_test.sh.
+//   --idle: idle voices (plan M9, run_idle_voices_test.sh). Voice 1 plays
+//   from 0 s, is released at 0.5 s and plays again at 1.5 s. Prints when each
+//   synth's output becomes exactly 0 for good before 1.5 s, and its largest
+//   difference from the TZPL_FORMS=noidle build (no voice skipping).
 
 #include <dlfcn.h>
 
@@ -259,7 +264,65 @@ int zeroAll(char const* dir, char const* filter) {
     return failures ? 1 : 0;
 }
 
+// --idle: see the header.
+namespace {
+std::vector<double> runIdle(Instance& in) {
+    constexpr int kOn = 0, kOff = 375, kAgain = 1125, kEnd = 1500;   // blocks of 64 at 48 kHz
+    std::vector<double> y;
+    int notes = -1;
+    for (int k = 0; k < in.def.num_ins; ++k)
+        if (!std::strcmp(in.def.ins[k].name, "notes")) notes = k;
+    for (int b = 0; b < kEnd; ++b) {
+        fillInputs(in, 0);
+        if (notes >= 0) {
+            tzpl_PortDef const& pd = in.def.ins[notes];
+            int cols = int(pd.type.shape.dims[3]);
+            int n = int(in.inBuf[notes].size());
+            bool on = b < kOff || b >= kAgain;
+            for (int c = 0; c < n; ++c) {
+                if (c % cols != 0) continue;
+                float g = (c / cols == 1 && on) ? 1.0f : 0.0f;
+                for (int i = 0; i < kBlock; ++i) ((float*)in.inBuf[notes][c].data())[i] = g;
+                in.inVer[notes][c] = (b < kOff ? 1 : b < kAgain ? 2 : 3);
+            }
+        }
+        if ((b == kOn || b == kAgain) && in.def.funs.resetVoice) in.def.funs.resetVoice(in.p, 1, 0);
+        in.def.funs.process(in.p, 0, kBlock);
+        auto& ch0 = in.outBuf[0][0];
+        for (int i = 0; i < kBlock; ++i) y.push_back(readElem(ch0.data(), in.def.outs[0].type.elem, i));
+    }
+    return y;
+}
+}  // namespace
+
+int idleAll(char const* dir, char const* noidleDir) {
+    auto noidle = plugins(noidleDir);
+    int checked = 0;
+    for (auto& [name, path] : plugins(dir)) {
+        if (!noidle.count(name)) continue;
+        Instance a, b;
+        std::string err;
+        if (!a.open(path, err) || !b.open(noidle[name], err)) { std::println("IDLE {} error {}", name, err); continue; }
+        auto ya = runIdle(a), yb = runIdle(b);
+        constexpr size_t kAgainAt = 1125 * kBlock;
+        size_t last = 0;
+        bool any = false;
+        for (size_t i = 0; i < kAgainAt; ++i) if (ya[i] != 0.0) { last = i; any = true; }
+        double zeroFrom = any ? (last + 1 == kAgainAt ? -1.0 : double(last + 1) / 48000.0) : 0.0;
+        double diff = 0, after = 0;
+        for (size_t i = 0; i < ya.size(); ++i) {
+            double d = std::fabs(ya[i] - yb[i]);
+            diff = std::isfinite(d) ? std::max(diff, d) : INFINITY;
+            if (i >= kAgainAt) after = std::max(after, std::fabs(ya[i]));
+        }
+        std::println("IDLE {} zero_from {:.4f} max_diff {:.3g} after {:.3g}", name, zeroFrom, diff, after);
+        ++checked;
+    }
+    return checked ? 0 : 1;
+}
+
 int main(int argc, char** argv) {
+    if (argc >= 4 && std::string_view(argv[1]) == "--idle") return idleAll(argv[2], argv[3]);
     if (argc >= 3 && std::string_view(argv[1]) == "--time") return timeAll(argv[2], argc > 3 ? argv[3] : nullptr);
     if (argc >= 3 && std::string_view(argv[1]) == "--zero") return zeroAll(argv[2], argc > 3 ? argv[3] : nullptr);
     if (argc < 3) {

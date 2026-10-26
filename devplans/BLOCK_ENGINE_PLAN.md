@@ -1804,6 +1804,45 @@ Progress (2026-10-26):
   threads, and a per-ISA register budget in the cost table.
 - `benchmarks/`: a block-engine suite.
 
+Decisions (2026-10-26):
+- **When a voice is idle (user decision: both forms).** The engine knows only the gate,
+  and a released voice rings until it is stolen, so idleness is decided in the plugin:
+  - *Declared:* `x doneWhen(cond)` in a voice body. The voice is done when its gate
+    is off and `cond` is nonzero at the end of a block.
+  - *Detected,* when the body declares nothing: the gate is off and the voice's output
+    alone (not its state: a filter can hold large state under a closed envelope) has
+    stayed below −120 dB for `voicer(n, body, silence)` seconds, default 0.2 (longer
+    than any audible period, so a fast tremolo does not end a voice).
+  - *Off:* `silence` 0 turns skipping off entirely, `doneWhen` included (user
+    request: with 4 or 8 cheap voices the checks can cost more than they save).
+
+Progress (2026-10-26):
+- **Idle voices** as decided above. Per call, `process` copies the idle flags to
+  locals; the body's output write zeroes idle lanes and (only while some voice is
+  released and awake) keeps per-lane peaks; skipped SIMD groups store one zero vector.
+  `run_idle_voices_test.sh` (in CI): each case's output becomes exactly 0 at the
+  predicted time (0.7507 s detected, 0.5507 s declared, 1.0507 s with silence 0.5,
+  never for a tremolo or silence 0) and stays within 1e-6 of a `TZPL_FORMS=noidle`
+  build, before and after the next note. Flat SIMD, flat scalar, stereo voices and
+  AoS are covered.
+- **Vector compares, selects and random draws** (`cmp01`, `vsel`, `vseln`, one scalar
+  draw per lane in lane order, so the streams are the scalar loop's). They make a loop
+  vector only alongside work clang can't vectorize itself (a math function, an
+  interpolating delay or buffer read): alone, a phase wrap through a select ran 2.7x
+  slower as vectors (`w_issue10_neoSmpl`) and per-voice noise 1.5x. Root loops gain too
+  (`fxFormant` 42 → 24 ns/sample, `w_select` 4.6 → 3.0).
+- **Fix:** a mono per-voice offset of a buffer read in a flat SIMD loop was read as a
+  scalar from voice 0 (never compiled before: the loop was scalar).
+- **Timings** (`forms_equiv --time`, ns/sample, best of 3; voice 0 held, the others
+  released): `additive` 113 → 17, `resonBank` 44 → 15, `ksPluck12` 36 → 12, `wtLead`
+  86 → 25, `sine_voice` 29 → 9. Trivial voicers pay for the checks (`tiny8` 1.8 →
+  2.7, `gateonly` 0.4 → 1.0); `silence` 0 removes them.
+- Not done yet: loops over voice groups with state in registers, the x86-64 Linux
+  build items, the benchmarks suite.
+  - An idle voice's output is 0; its loops, block groups and draws are skipped. A
+    group of 4 SIMD lanes is skipped when every voice in it is idle. `resetVoice`
+    (a new note) wakes it.
+
 **MF: Inter-node feedback (D1 phase 2).** Any time after M5, and not required for the
 merge.
 - SCC detection in `sortNodes`.

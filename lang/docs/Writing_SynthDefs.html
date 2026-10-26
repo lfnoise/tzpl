@@ -1224,6 +1224,25 @@ noteOff(<span class="hl-num">100</span>, <span class="hl-num">1</span>);</code><
                 voicer-based instruments (FM bell, pluck, modal bell, kick, snare, &hellip;).
             </div>
 
+            <h3>Finished voices cost nothing</h3>
+
+            <p>A released voice keeps sounding until its sound dies away, and the synth
+            stops computing it once it is finished. Until its next note it outputs 0, and its
+            filters, oscillators and random draws are not run. A voice is finished when its gate
+            is off and:</p>
+            <ul>
+                <li>the condition it declares with <code>doneWhen</code> holds &mdash;
+                <code>x doneWhen(cond)</code> returns <code>x</code> unchanged, so it can end a chain:
+                <code>osc * env doneWhen(env &lt;= 0)</code>; or</li>
+                <li>when it declares none, its output has stayed below &minus;120 dB for the
+                voicer's third argument, <code>silence</code>, in seconds (default 0.2: longer than
+                the period of any audible pitch, so the dips of a tremolo don't end a voice):
+                <code>voicer(8, organVoice, 0.5)</code>.</li>
+            </ul>
+            <p><code>voicer(n, body, 0.0)</code> turns this off entirely, <code>doneWhen</code>
+            included. With a few cheap voices, the per-sample checks can cost more than
+            skipping saves.</p>
+
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
 

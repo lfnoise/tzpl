@@ -226,6 +226,7 @@ enum NodeKind {
 	varK(String),                        -- loop/branch variable name
 
 	debugK(String, Int, Int, Int),       -- label, period, consecutive, serial
+	voiceDoneK,                          -- voice body sink: done once released and nonzero (M9)
 }
 
 -- Is this node a sink (graph root for tree cutting)?
@@ -237,6 +238,7 @@ fn isSinkKind(k NodeKind) Bool = match (k) {
 	bufWriteK(_, _, _):  true;
 	bankLookupK(_):      true;
 	debugK(_, _, _, _):  true;
+	voiceDoneK:          true;
 	_:                   false;
 };
 
@@ -305,6 +307,7 @@ fn shouldHashCons(k NodeKind) Bool = match (k) {
 	outletK(_, _):          false;
 	noteParamK(_, _, _):    false;
 	debugK(_, _, _, _):     false;
+	voiceDoneK:             false;
 	phiK(_):                false;   -- PhiNodeExpr::should_hash_cons
 	ifK:                    false;   -- branches live in subs, not the cons key,
 	switchK(_):             false;   -- so distinct control-flow nodes never merge
@@ -506,6 +509,7 @@ struct Ctx {
 	noteParams [NIdx],
 	notesInlets [NIdx],       -- per voicer: its `notes` input {maxVoices, cols}
 	voicerNotes [NIdx],       -- parallel: the voicer node
+	voicerSilence [Float],    -- parallel: seconds of output silence that end a released voice (0 = never)
 
 	delays [DelayInfo],
 	dsrc [NIdx],              -- per node: for a delay reader, the value its
@@ -564,6 +568,7 @@ fn newCtx(name String) Ctx {
 		noteParams: [NIdx](),
 		notesInlets: [NIdx](),
 		voicerNotes: [NIdx](),
+		voicerSilence: [Float](),
 		delays: [DelayInfo](),
 		dsrc: [NIdx](),
 		dweight: [Int](),
@@ -805,6 +810,7 @@ fn nodeStr(ctx Ctx, n NIdx) String {
 		phiK(_):             "PhiNode";
 		varK(name):          name;
 		debugK(label, _, _, _): "debug(\"%^\")" fmt(label);
+		voiceDoneK:          "doneWhen";
 	}
 }
 

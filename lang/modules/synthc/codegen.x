@@ -587,6 +587,21 @@ fn _rngStateRef(ctx Ctx, n NIdx, cel String) String {
 	"p->rgen%^" fmt(g)
 }
 
+-- A random draw (`form` has %^ for the generator state). In SIMD, one
+-- scalar draw per lane, in lane order: the draws, and their order per
+-- generator, are the scalar loop's.
+fn _rngDraw(ctx Ctx, n NIdx, cel String, form String) String {
+	if (`cgSimdW == 0) { return form fmt(_rngStateRef(ctx, n, cel)); }
+	var parts [String] = [];
+	var j = 0;
+	while (j < `cgSimdW) {
+		let lane = cel == "0" ? j toString : (j == 0 ? cel : "(%^ + %^)" fmt(cel, j));
+		parts push!(form fmt(_rngStateRef(ctx, n, lane)));
+		j = j + 1;
+	}
+	"%^{%^}" fmt(_simdType(ctx.typ[n], `cgSimdW), parts join(", "))
+}
+
 fn _inlineExpr(ctx Ctx, n NIdx, cel String) String {
 	let ins = ctx.ins[n];
 	match (ctx.kind[n]) {
@@ -648,18 +663,28 @@ fn _inlineExpr(ctx Ctx, n NIdx, cel String) String {
 			_simdWiden(ctx.typ[n], ct,
 			    genBinopStr(op, ctx.typ[n] _isF32, a, b, `cgSimdW > 0))
 		}
-		compareopK(op): genCompareStr(op, genExpr(ctx, ins[0], cel), genExpr(ctx, ins[1], cel));
+		compareopK(op): {
+			if (`cgSimdW > 0) {
+				-- lanes of all ones or 0, as 1 or 0 of the node's type
+				let ct = commonType(ctx.typ[ins[0]], ctx.typ[ins[1]]);
+				"cmp01<%^>%^" fmt(cppType(ctx.typ[n]),
+					genCompareStr(op, _simdWiden(ct, ctx.typ[ins[0]], genExpr(ctx, ins[0], cel)),
+					                  _simdWiden(ct, ctx.typ[ins[1]], genExpr(ctx, ins[1], cel))))
+			} else {
+				genCompareStr(op, genExpr(ctx, ins[0], cel), genExpr(ctx, ins[1], cel))
+			}
+		}
 		castopK(ct):    (`cgSimdW > 0)
 			? "convert<%^>(%^)" fmt(cppType(ct), genExpr(ctx, ins[0], cel))
 			: "%^(%^)" fmt(cppType(ct), genExpr(ctx, ins[0], cel));
 		selectK:        _inlineSelect(ctx, n, cel);
 		reduceK(op, cols): _genReduce(ctx, n, op, cols, cel);
 		vecK(vop):      _genVec(ctx, n, vop, cel);
-		urandK(_):      "urand%^(%^)" fmt(ctx.typ[n] _isF32 ? "f" : "", _rngStateRef(ctx, n, cel));
-		birandK(_):     "birand%^(%^)" fmt(ctx.typ[n] _isF32 ? "f" : "", _rngStateRef(ctx, n, cel));
+		urandK(_):      ctx _rngDraw(n, cel, "urand%^(%^)" fmt(ctx.typ[n] _isF32 ? "f" : "", "%^"));
+		birandK(_):     ctx _rngDraw(n, cel, "birand%^(%^)" fmt(ctx.typ[n] _isF32 ? "f" : "", "%^"));
 		-- runtime rand64() returns u64; cast to the node's signed type so an
 		-- inlined draw cannot turn an additive chain into unsigned arithmetic
-		rand64K(_):     "i64(rand64(%^))" fmt(_rngStateRef(ctx, n, cel));
+		rand64K(_):     ctx _rngDraw(n, cel, "i64(rand64(%^))");
 		bufFixReadK(bi, index, rc, sc): _bufFixReadExpr(ctx, n, bi, index, rc, sc, cel);
 		bufVarReadK(bi, ip, rc, sc):    _bufVarReadExpr(ctx, n, bi, ip, rc, sc, cel);
 		bufLengthK(bi):                 _bufLengthExpr(ctx, n, bi);
@@ -1115,6 +1140,24 @@ fn _genVecJoin(ctx Ctx, root NIdx) String {
 
 fn _inlineSelect(ctx Ctx, n NIdx, cel String) String {
 	let ins = ctx.ins[n];
+	let constSel = match (ctx.kind[ins[0]]) { constant(v, _): v constSize == 1; _: false; };
+	if (`cgSimdW > 0) {
+		-- per lane; the values widened to the node's type (a constant
+		-- selector picks one vector)
+		let t = ctx.typ[n];
+		let w0 = `cgSimdW;
+		var vals [String] = [];
+		var i = 1;
+		while (i < ins length) { vals push!(_simdWiden(t, ctx.typ[ins[i]], genExpr(ctx, ins[i], cel))); i = i + 1; }
+		var `cgSimdW Int = constSel ? 0 : `cgSimdW;
+		let c = genExpr(ctx, ins[0], cel);
+		if (constSel) {
+			if (ins length == 3) { return "(%^ ? %^ : %^)" fmt(c, vals[1], vals[0]); }
+			return "sel(%^, std::array<%^, %^>{%^})" fmt(c, _simdType(t, w0), vals length, vals join(", "));
+		}
+		if (ins length == 3) { return "vsel(%^, %^, %^)" fmt(c, vals[1], vals[0]); }
+		return "vseln(%^, std::array<%^, %^>{%^})" fmt(c, _simdType(t, w0), vals length, vals join(", "));
+	}
 	if (ins length == 3) {
 		"(%^ ? %^ : %^)" fmt(genExpr(ctx, ins[0], cel), genExpr(ctx, ins[2], cel), genExpr(ctx, ins[1], cel))
 	} else {
@@ -1766,7 +1809,8 @@ fn _bufVarReadExpr(ctx Ctx, n NIdx, bi Int, interp Interpolation, readChans Int,
 		let t = ctx.typ[n];
 		let lc = `cgLoopChans;
 		let offNode = ctx.ins[n][0];
-		let scalarOff = ctx.chans[offNode] == 1;
+		-- a mono voice value is per lane in a flat voice loop, not scalar
+		let scalarOff = ctx.chans[offNode] == 1 && !(`cgVoiceCount > 0 && ctx.graphOf[offNode] == `cgVoiceGraph);
 		let offExpr = scalarOff ? _genDelayOffScalar(ctx, offNode) : genExpr(ctx, offNode, cel);
 		if (readChans == 1 && scalarOff) {
 			return _simdSplat(t, w, _bufGenRead(interp, bp, startChan toString, offExpr));
@@ -1985,17 +2029,160 @@ fn _numUserParams(ctx Ctx, bg Int) Int {
 	k
 }
 
+---------------------------------------------------------------------------
+-- Idle voices (block engine M9). A released voice is idle once its body's
+-- doneWhen condition holds, or, when it declares none, once its output has
+-- stayed below -120 dB for the voicer's silence time. Idle voices output 0
+-- and their loops, block groups and draws are skipped until resetVoice.
+
+-- The body's doneWhen sink, or NONE.
+fn _voiceDoneNode(ctx Ctx) NIdx {
+	var d = NONE;
+	for (x : ctx.sorted) { match (ctx.kind[x]) { voiceDoneK: { d = x; } _: {} } }
+	d
+}
+
+fn _voicerSilence(ctx Ctx, v NIdx) Float {
+	var k = 0;
+	while (k < ctx.voicerNotes length) {
+		if (ctx.voicerNotes[k] == v) { return ctx.voicerSilence[k]; }
+		k = k + 1;
+	}
+	0.0
+}
+
+-- Does this synth skip idle voices? A silence time of 0 turns skipping off
+-- entirely, doneWhen included: with few voices the checks can cost more
+-- than they save. TZPL_FORMS=noidle turns it off too (for timing them).
+fn _voiceIdleOn(ctx Ctx) Bool {
+	if (ctx _voicerNodes length == 0 || formsOff("noidle")) { return false; }
+	ctx _voicerSilence(ctx _voicerNodes[0]) > 0.0
+}
+
+-- Are all voices behind the w SIMD lanes starting at flat index `cel` idle?
+fn _lanesIdle(cel String, w Int) String {
+	let shift = `cgFlatChanShift;
+	if (`cgLoopChans >= w) { return "vidle[(%^) >> %^]" fmt(cel, shift); }
+	let first = shift == 0 ? cel : "(%^) >> %^" fmt(cel, shift);
+	"all_idle<%^>(&vidle[%^])" fmt(w // max(1, `cgLoopChans), first)
+}
+
+-- The voice body's output value at output lane `lane`, as the voicer's
+-- output is written: 0 for an idle voice (a SIMD group with an awake voice
+-- still runs its idle lanes), and its magnitude kept in the lane's peak
+-- (silence detection). In the same statement, so the value stays in a
+-- register.
+fn _voicerOutValue(ctx Ctx, target NIdx, phi NIdx, lane String, cel String) String {
+	let val = genExpr(ctx, ctx.ins[phi][0], cel);
+	if (!`cgVoiceSkip) { return val; }
+	if (`cgSimdW > 0) {
+		"live_peak(vtrack, &vlive[%^], &vpeak[%^], %^)" fmt(lane, lane, val)
+	} else {
+		let l = lane substring(0, 1) == "(" ? lane : "(%^)" fmt(lane);
+		"live_peak1(vtrack, vlive[%^], vpeak[%^], %^)" fmt(l, l, val)
+	}
+}
+
+-- A skipped SIMD group's output lanes: 0.
+fn _skipZero(ctx Ctx, loop Loop, cel String) String {
+	var target = NONE;
+	for (t : loop.trees) {
+		match (ctx.kind[ctx.trees[t].root]) {
+			phiK(tg): { match (ctx.kind[tg]) { voicerK(_): { target = tg; } _: {} } }
+			_: {}
+		}
+	}
+	if (target == NONE) { return ""; }
+	-- one store of the group's width: lane stores followed by the voices'
+	-- sum's vector load stall store forwarding (tiny8: 1.8 -> 4.7 ns)
+	if (`cgSimdW > 0) {
+		return " %^ = %^(0);" fmt(_varRef(ctx, target, cel), _simdType(ctx.typ[target], `cgSimdW));
+	}
+	" %^ = 0;" fmt(_varRef(ctx, target, cel))
+}
+
+-- Struct members for idle voices.
+fn _voiceIdleDecls(ctx Ctx) String {
+	if (!(ctx _voiceIdleOn)) { return ""; }
+	let mv = ctx _voicerMaxVoices(ctx _voicerNodes[0]);
+	let mvp = (mv + 3) // 4 * 4;
+	"\t// idle voices: skipped until their next note\n"
+		$ "\tu8 vidle[%^];\n\ti64 vsilent[%^];\n\tf32 vdone[%^];\n\n" fmt(mvp, mv, mv)
+}
+
+-- At the top of process: is any voice idle?
+fn _voiceIdleAny(ctx Ctx) String {
+	if (!(ctx _voiceIdleOn)) { return ""; }
+	let v0 = ctx _voicerNodes[0];
+	let mv = ctx _voicerMaxVoices(v0);
+	let C = ctx _voicerChansForGraph(ctx _voicerBodyGraph(v0));
+	let mvp = (mv + 3) // 4 * 4;
+	var s = "\t// idle voices (copied: resetVoice runs between calls)\n";
+	s = s $ "\tu8 vidle[%^];\n\tstd::memcpy(vidle, p->vidle, sizeof vidle);\n" fmt(mvp);
+	s = s $ "\tf32 vlive[%^];\n\tfor (int k = 0; k < %^; ++k) vlive[k] = vidle[k / %^] ? 0.0f : 1.0f;\n" fmt(mv * C, mv * C, C);
+	-- the gate is off for the whole call (constant and 0)
+	let sn = `cgNotesSn;
+	s = s $ "\tu8 vgoff[%^];\n\tfor (int v = 0; v < %^; ++v) vgoff[v] = p->ins[%^].isConst[v * %^] && ((const f32*)p->ins[%^].chans[v * %^])[off + n - 1] <= 0.0f;\n"
+		fmt(mv, mv, sn, `cgNotesCols, sn, `cgNotesCols);
+	-- peaks matter only while some voice is released and still awake
+	s = s $ "\tbool vtrack = false;\n";
+	if (ctx _voiceDoneNode == NONE) {
+		s = s $ "\tfor (int v = 0; v < %^; ++v) vtrack |= vgoff[v] && !vidle[v];\n" fmt(mv);
+	}
+	s $ "\tf32 vpeak[%^] = {};\n" fmt(mv * C)
+}
+
+-- At the end of process: decide which voices are idle now. A voice whose
+-- gate is on, or not constant this call (vgoff), is awake.
+fn _voiceIdleUpdate(ctx Ctx) String {
+	if (!(ctx _voiceIdleOn)) { return ""; }
+	let v0 = ctx _voicerNodes[0];
+	let mv = ctx _voicerMaxVoices(v0);
+	var s = "\t// idle voices: the gate is off, and the voice is done or has been silent long enough\n";
+	s = s $ "\tfor (int v = 0; v < %^; ++v) {\n" fmt(mv);
+	s = s $ "\t\tif (!vgoff[v]) {\n";
+	if (ctx _pgActive) { s = s $ "\t\t\tif (p->vidle[v]) p->pg_vforce[v] = 1;\n"; }
+	s = s $ "\t\t\tp->vidle[v] = 0; p->vsilent[v] = 0;\n\t\t\tcontinue;\n\t\t}\n";
+	s = s $ "\t\tif (p->vidle[v]) continue;\n";
+	if (ctx _voiceDoneNode != NONE) {
+		s = s $ "\t\tif (p->vdone[v] != 0.0f) p->vidle[v] = 1;\n";
+	} else {
+		let C = ctx _voicerChansForGraph(ctx _voicerBodyGraph(v0));
+		s = s $ "\t\tf32 pk = 0.0f;\n\t\tfor (int c = 0; c < %^; ++c) pk = std::max(pk, vpeak[v * %^ + c]);\n" fmt(C, C);
+		s = s $ "\t\tif (pk < 1e-6f) {\n";
+		s = s $ "\t\t\tp->vsilent[v] += n;\n";
+		s = s $ "\t\t\tif (p->vsilent[v] >= (i64)(%^ * p->fs)) p->vidle[v] = 1;\n" fmt(ctx _voicerSilence(v0));
+		s = s $ "\t\t} else {\n\t\t\tp->vsilent[v] = 0;\n\t\t}\n";
+	}
+	s $ "\t}\n"
+}
+
 -- Emit the voicer's body loops in flat voice mode. The leading _tabs sits where
 -- a control-flow statement would (matching the C++ control-flow block prefix);
 -- the first body LOOP's own leading newline then closes the blank line.
 fn _genVoicer(ctx Ctx, root NIdx, mv Int) String {
 	let bg = ctx _voicerBodyGraph(root);
+	let skip = ctx _voiceIdleOn;
+	-- The body's output write zeroes idle lanes and tracks the peaks
+	-- (_voicerOutValue); a skipped group zeroes its lanes.
+	var `cgVoiceSkip Bool = skip;
+	ctx _genVoicerBody(root, mv, bg)
+}
+
+fn _genVoicerBody(ctx Ctx, root NIdx, mv Int, bg Int) String {
 	if (!`cgFlatVoice) {
 		-- AoS (non-flat): a per-voice loop; the body loops emit plain scalar
 		-- code whose voice state resolves to vs. members. Mirrors the C++
 		-- VoicerExpr visitor's AoS branch.
 		var s = _tabs(`cgIndent) $ "for (int v = 0; v < %^; ++v) {\n" fmt(mv);
 		var `cgIndent Int = `cgIndent + 1;
+		if (`cgVoiceSkip) {
+			let C = ctx.chans[ctx.ins[ctx.subs[root][0]][0]];
+			var z = "";
+			var c = 0;
+			while (c < C) { z = z $ " %^ = 0;" fmt(_varRef(ctx, root, "v * %^ + %^" fmt(C, c))); c = c + 1; }
+			s = s $ _tabs(`cgIndent) $ "if (vidle[v]) {%^ continue; }\n" fmt(z);
+		}
 		s = s $ _tabs(`cgIndent) $ "f32* vparams = &in%^[v * %^];\n" fmt(`cgNotesSn, `cgNotesCols);
 		s = s $ _tabs(`cgIndent) $ "auto& vs = p->voice_state[v];\n";
 		var `cgInVoiceLoop Bool = true;
@@ -2204,9 +2391,10 @@ fn genTree(ctx Ctx, treeIdx Int, cel String) String {
 				let vChans = ctx.chans[ctx.ins[root][0]];
 				let voiceCel = vChans == 1 ? `cgVoiceIdx
 					: "(%^ * %^ + (%^))" fmt(`cgVoiceIdx, vChans, cel);
-				return _tabs(`cgIndent) $ "%^ = %^;\n" fmt(_varRef(ctx, target, voiceCel), genExpr(ctx, ctx.ins[root][0], cel));
+				return _tabs(`cgIndent) $ "%^ = %^;\n" fmt(_varRef(ctx, target, voiceCel), ctx _voicerOutValue(target, root, voiceCel, cel));
 			}
-			return _tabs(`cgIndent) $ "%^ = %^;\n" fmt(_varRef(ctx, target, cel), genExpr(ctx, ctx.ins[root][0], cel));
+			let val = isVoicerTarget ? ctx _voicerOutValue(target, root, cel, cel) : genExpr(ctx, ctx.ins[root][0], cel);
+			return _tabs(`cgIndent) $ "%^ = %^;\n" fmt(_varRef(ctx, target, cel), val);
 		}
 		-- put/join build their output array in a block (gets_own_loop); at is a
 		-- normal inline gather and falls through.
@@ -2306,8 +2494,23 @@ fn _sinkStmt(ctx Ctx, n NIdx, cel String) String = match (ctx.kind[n]) {
 		}
 	}
 	debugK(_, _, _, _): "/* FIXME debug */";
+	voiceDoneK: {
+		let val = genExpr(ctx, ctx.ins[n][0], cel);
+		if (!(ctx _voiceIdleOn)) {
+			"(void)0"
+		} else if (`cgSimdW > 0) {
+			let vt = _simdType(FLOAT32, `cgSimdW);
+			let cv = ctx.typ[n] == FLOAT32 ? val : "__builtin_convertvector(%^, %^)" fmt(val, vt);
+			"*(%^*)&p->vdone[%^] = %^" fmt(vt, cel, cv)
+		} else {
+			let vi = `cgInVoiceLoop ? `cgVoiceIdx : _unbracket(_flatVoiceIdx(ctx, 1, cel));
+			"p->vdone[%^] = (f32)(%^)" fmt(vi, val)
+		}
+	}
 	_: genExpr(ctx, n, cel);
 };
+
+fn _unbracket(s String) String = s substring(1, s length - 2);
 
 ---------------------------------------------------------------------------
 -- Loop emission (scalar + channel loop; no SIMD)
@@ -2442,15 +2645,11 @@ fn _rowAxis(ctx Ctx, n NIdx, ax Int) Bool {
 -- scalar for those loops until their SIMD paths land.
 fn _exprSimdDisqualified(ctx Ctx, e NIdx) Bool = match (ctx.kind[e]) {
 	vecK(vop):            ctx _vecSimdDisqualified(e, vop);
-	compareopK(_):        true;
-	selectK:              true;
 	reduceK(_, _):        true;
 	spectralChainK(_, _): true;
 	spectralFrameK(_):    true;
-	urandK(_):            true;
-	birandK(_):           true;
-	rand64K(_):           true;
 	debugK(_, _, _, _):   true;
+	voiceDoneK:           false;
 	delayFixReadK(_, _):  false;                           -- 1-sample + ring (M5.2)
 	delayVarReadK(_, _):  false;                           -- interpolation (M5.2)
 	delayWriteK(_):       false;                           -- 1-sample + ring (M5.2)
@@ -2469,6 +2668,37 @@ fn _exprSimdDisqualified(ctx Ctx, e NIdx) Bool = match (ctx.kind[e]) {
 	bankHasLoopK:         true;
 	_:                    false;
 };
+
+-- Compares, selects and random draws have vector forms (M9), but they
+-- pay only alongside work clang cannot vectorize from the scalar loop. On
+-- their own, a recurrence through a select (a sample player's phase wrap:
+-- compare, 0/1, multiply, mask, blend in series) ran 2.7x slower as
+-- vectors, and per-voice noise 1.5x (w_issue10_neoSmpl, noise_synth).
+fn _vecOnlyWithWork(k NodeKind) Bool = match (k) {
+	compareopK(_): true; selectK: true; urandK(_): true; birandK(_): true; rand64K(_): true;
+	_: false;
+};
+
+-- Work worth vectors (the cost table's measure, as for sample-vector): a
+-- math function, or an interpolating delay or buffer read.
+fn _loopVecWorth(ctx Ctx, loop Loop) Bool {
+	for (t : loop.trees) {
+		for (e : ctx.trees[t].exprs) {
+			let w = match (ctx.kind[e]) {
+				unopK(op): match (op) {
+					abs: false; neg: false; not: false; bitNot: false; sign: false; floor: false;
+					ceil: false; trunc: false; round: false; sqrt: false; _: true;
+				};
+				binopK(op): match (op) { pow: true; atan2: true; hypot: true; mod: true; _: false; };
+				delayVarReadK(_, ip): _interpTaps(ip) length >= 2;
+				bufVarReadK(_, ip, _, _): _interpTaps(ip) length >= 2;
+				_: false;
+			};
+			if (w) { return true; }
+		}
+	}
+	false
+}
 
 -- Is graph g the body subgraph of a spectral chain? Loops inside a spectral frame
 -- body must stay scalar: the C++ SIMD-vectorizes the per-bin frame loop into an
@@ -2490,9 +2720,11 @@ fn _isSpectralBodyGraph(ctx Ctx, g Int) Bool {
 -- frame body. Shared by the scalar and flat-voice width decisions.
 fn _loopHasSimdDisqualifier(ctx Ctx, loop Loop) Bool {
 	if (ctx _isSpectralBodyGraph(ctx.graphOf[ctx.trees[loop.trees[0]].root])) { return true; }
+	let worth = ctx _loopVecWorth(loop);
 	for (t : loop.trees) {
 		for (e : ctx.trees[t].exprs) {
 			if (ctx _exprSimdDisqualified(e)) { return true; }
+			if (!worth && _vecOnlyWithWork(ctx.kind[e])) { return true; }
 			-- The SIMD forms index with power-of-two masks: any other channel
 			-- count (an exact tensor shape) runs the scalar loop.
 			if (!(ctx _pow2Chans(e))) { return true; }
@@ -2654,6 +2886,7 @@ fn genLoop(ctx Ctx, loopIdx Int) String {
 			code = code $ _tabs(`cgIndent) $ "{ int i = vi;\n";
 		} else {
 			code = code $ _tabs(`cgIndent) $ "for (int i = 0; i < %^; ++i) {\n" fmt(`cgVoiceCount);
+			if (`cgVoiceSkip) { code = code $ _tabs(`cgIndent + 1) $ "if (vidle[i]) continue;\n"; }
 		}
 		var `cgIndent Int = `cgIndent + 1;
 		var `cgFlatOwnLoop Bool = true;
@@ -2670,10 +2903,18 @@ fn genLoop(ctx Ctx, loopIdx Int) String {
 			var `cgSimdW Int = simdW;
 			if (trip == simdW) {
 				-- Case A: trip == width -> a single vector op, no loop (cel = 0).
+				if (`cgVoiceSkip) { code = code $ _tabs(`cgIndent) $ "if (!%^) {\n" fmt(_lanesIdle("0", simdW)); }
 				for (t : loop.trees) { code = code $ genTree(ctx, t, "0"); }
+				if (`cgVoiceSkip) {
+					let z = ctx _skipZero(loop, "0");
+					code = code $ _tabs(`cgIndent) $ (z length == 0 ? "}\n" : "} else {%^ }\n" fmt(z));
+				}
 			} else {
 				code = code $ _tabs(`cgIndent) $ "for (usize i = 0; i < %^; i += %^) {\n" fmt(trip, simdW);
 				var `cgIndent Int = `cgIndent + 1;
+				if (`cgVoiceSkip) {
+					code = code $ _tabs(`cgIndent) $ "if (%^) {%^ continue; }\n" fmt(_lanesIdle("i", simdW), ctx _skipZero(loop, "i"));
+				}
 				for (t : loop.trees) { code = code $ genTree(ctx, t, "i"); }
 				code = code $ _tabs(`cgIndent - 1) $ "}\n";
 			}
@@ -2688,6 +2929,10 @@ fn genLoop(ctx Ctx, loopIdx Int) String {
 				}
 			} else {
 				code = code $ _tabs(`cgIndent) $ "for (int i = 0; i < %^; ++i) {\n" fmt(trip);
+				if (`cgVoiceSkip) {
+					code = code $ _tabs(`cgIndent + 1) $ "if (vidle[%^]) {%^ continue; }\n"
+						fmt(`cgFlatChanShift == 0 ? "i" : "i >> %^" fmt(`cgFlatChanShift), ctx _skipZero(loop, "i"));
+				}
 			}
 			var `cgIndent Int = `cgIndent + 1;
 			for (t : loop.trees) { code = code $ genTree(ctx, t, "i"); }
@@ -2942,7 +3187,7 @@ fn genVoicerDecls(ctx Ctx) String {
 			s = s $ "\tVoiceState voice_state[%^];\n" fmt(mv);
 		}
 		if (s length > 0) { s = s $ "\n"; }
-		return s;
+		return s $ ctx _voiceIdleDecls;
 	}
 	for (v : ctx _voicerNodes) {
 		let mv = ctx _voicerMaxVoices(v);
@@ -2977,7 +3222,7 @@ fn genVoicerDecls(ctx Ctx) String {
 		}
 	}
 	if (s length > 0) { s = s $ "\n"; }
-	s
+	s $ ctx _voiceIdleDecls
 }
 
 -- Sample buffer pointers (one per SampleBuf), emitted after the delay decls to
@@ -3614,6 +3859,9 @@ fn genVoicerNoteFuns(ctx Ctx, name String) String {
 	}
 	-- The voice's parameter-group values are recomputed for the new note.
 	if (ctx _pgActive) { s = s $ "\tp->pg_vforce[vi] = 1;\n"; }
+	if (ctx _voiceIdleOn) {
+		s = s $ "\tp->vidle[vi] = 0; p->vsilent[vi] = 0; p->vdone[vi] = 0.0f;\n";
+	}
 	if (!`cgFlatVoice) {
 		-- AoS: per-field reset (p->voice_state[vi]. members), preserving
 		-- init-rate state. Mirrors the C++ genNoteFuns AoS branch.
@@ -4281,7 +4529,8 @@ fn _guardedVoiceLoop(ctx Ctx, li Int) String {
 	var `cgSingleVoice Bool = true;
 	let code = ctx _pgLoopCode(li);
 	if (code length == 0) { return ""; }
-	head $ _tabs(`cgIndent) $ "if (!%^) continue;\n" fmt(_pgDue("pg%^[vi]" fmt(g)))
+	let idle = `cgVoiceSkip ? " || vidle[vi]" : "";
+	head $ _tabs(`cgIndent) $ "if (!%^%^) continue;\n" fmt(_pgDue("pg%^[vi]" fmt(g)), idle)
 		$ code $ _tabs(`cgIndent - 1) $ "}\n"
 }
 
@@ -5691,6 +5940,7 @@ fn genTickFun(ctx Ctx, name String) String {
 	var s = "void %^_process(%^* p, i32 off, i32 n) {\n" fmt(name, name);
 	-- planar block temps: channel c of a temp at [c * mb]
 	s = s $ "\tconst i32 mb = p->maxBlock; (void)mb;\n";
+	s = s $ ctx _voiceIdleAny;
 	s = s $ ctx genParamGroupModes;
 	var g = 0;
 	while (ctx _pgActive && g < ctx.paramGroups length) {
@@ -5733,6 +5983,7 @@ fn genTickFun(ctx Ctx, name String) String {
 	}
 	ctx _localizeDelays(texts, plain, s);
 	for (t : texts) { s = s $ t; }
+	s = s $ ctx _voiceIdleUpdate;
 	s = s $ "\t%^_scatter(p, off, n);\n" fmt(name);
 	if (ctx _pgActive) {
 		s = s $ "\tp->pg_first = 0;\n";
@@ -6148,6 +6399,9 @@ fn genCpp(ctx Ctx, name String, simdWidth Int = 0) String {
 	`cgBlockTemps = ctx blockTempNodes;
 	var `cgInVoiceLoop Bool = false;
 	var `cgVoiceIdx String = "v";
+	-- True while emitting the voicer's per-sample body in process: its voice
+	-- loops skip idle voices (M9).
+	var `cgVoiceSkip Bool = false;
 
 	var s = "\n";
 	s = s $ "#include \"tzpl_plugin_abi.h\"\n";

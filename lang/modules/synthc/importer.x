@@ -188,6 +188,7 @@ fn _kindKey(kind NodeKind) String = match (kind) {
 	phiK(t):              "PHI|" $ t toString;
 	varK(name):           "VAR|" $ name;
 	debugK(_, _, _, sn):  "DBG|" $ sn toString;
+	voiceDoneK:           "VDONE";
 };
 
 -- Hash-consing is per-graph (each C++ Graph has its own hashConsSet), so the
@@ -830,6 +831,12 @@ fn _importExpr(e SignalExpr) Void {
 			_mapId(e.id, _addExprNode(NodeKind.debugK(label, period, consecutive, sn), ins,
 				ctx.nrate[ins[0]], ANY_NUM, scalarShape()));
 		}
+		voiceDone: {
+			-- One per voice body (a second declaration replaces the first in
+			-- codegen's scan); a sink, so it survives the sink-rooted walk.
+			let ins = e _resolveIns;
+			_mapId(e.id, _addExprNode(NodeKind.voiceDoneK, ins, ctx.nrate[ins[0]], ANY_NUM, scalarShape()));
+		}
 		vecop(vop): { _importVecOp(e, vop); }
 		buffer(bv, op): {
 			let bi = bv.id _bufIdxFor;
@@ -959,7 +966,7 @@ fn _importExpr(e SignalExpr) Void {
 			-- Hash-consed by name via the VAR| cons key.
 			_mapId(e.id, _addExprNode(NodeKind.varK(name), [Int](), Rate.audio, ANY_INT, noShape()));
 		}
-		voicer(maxVoices, bodySg): {
+		voicer(maxVoices, bodySg, silence): {
 			-- One subgraph (the voice body), its root wrapped in a PhiNode. The
 			-- voicer's shape is the body root's with a leading voice dimension,
 			-- computed from the root directly (not broadcast over the phi) to
@@ -985,6 +992,7 @@ fn _importExpr(e SignalExpr) Void {
 				Rate.block, FLOAT32, matrix(maxVoices, cols));
 			ctx.notesInlets push!(ni);
 			ctx.voicerNotes push!(vNode);
+			ctx.voicerSilence push!(silence);
 		}
 		spectralFrame(fftSize): {
 			-- The packed split-complex FFT frame: a source node (no inputs), type
