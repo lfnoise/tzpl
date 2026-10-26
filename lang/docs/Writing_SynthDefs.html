@@ -327,7 +327,7 @@
                     </ul></li>
                 <li><a href="#constants">3. Constants and Conversion to Signals</a></li>
                 <li><a href="#operators">4. Signal Operators</a></li>
-                <li><a href="#vecops">5. Channel (Vector) Operations</a></li>
+                <li><a href="#vecops">5. Shape Operations</a></li>
                 <li><a href="#units">6. Basic Units: fs, T, inlet, outlet, debug</a></li>
                 <li><a href="#controls">7. Controls</a></li>
                 <li><a href="#random">8. Random Signals</a></li>
@@ -555,7 +555,17 @@ c &lt;- (c1 + t) i32 % n;</code></pre>
             (or <code>matrix(<span class="hl-num">2</span>, <span class="hl-num">3</span>)</code>) is a 2&times;3
             shape of 6 channels. The functions that create multichannel signals &mdash;
             <code>inlet</code>, <code>control</code>, <code>fill</code>, &hellip; &mdash; take either an
-            <code>Int</code> channel count or a <code>Shape</code>.</p>
+            <code>Int</code> channel count or a <code>Shape</code>; a count of 1 is a scalar.</p>
+
+            <p>A shape has a <strong>rank</strong>, its number of dimensions: a scalar is rank 0,
+            <code>row(n)</code> rank 1, <code>matrix(r, c)</code> rank 2, <code>cuboid(p, r, c)</code>
+            rank 3. The rank is part of the shape, so <code>matrix(<span class="hl-num">1</span>, n)</code> (one row) and
+            <code>row(n)</code> have the same channels but are different shapes. The dimensions are the
+            signal's <strong>axes</strong>, numbered from the outermost, starting at 0, as in NumPy;
+            negative numbers count from the last axis, so <code>-<span class="hl-num">1</span></code> is always the
+            columns. The constants <code>cols</code> (&minus;1), <code>rows</code> (&minus;2) and
+            <code>planes</code> (&minus;3) name them at any rank. The shape operations of
+            <a href="#vecops">&sect;5</a> work along an axis.</p>
 
             <h3 id="broadcast">2.4 Channel broadcasting</h3>
 
@@ -565,7 +575,9 @@ c &lt;- (c1 + t) i32 % n;</code></pre>
             dimension, index <code>i</code> of the result reads index <code>i mod size</code> of the
             input. A 2-channel signal against an 8-channel one repeats its pair four times; a
             2-channel signal against a 3-channel one gives 6 channels, each input cycling. A
-            1&times;3 row against a 2&times;1 column gives a 2&times;3 matrix.</p>
+            1&times;3 row against a 2&times;1 column gives a 2&times;3 matrix. Shapes of different
+            ranks line up from their last axes, so a row of 3 against a 2&times;3 matrix applies to
+            each of its rows.</p>
 
 <pre><code><span class="cmt">-- scalar against stereo: the scalar applies to both channels</span>
 [<span class="hl-num">330.0</span>, <span class="hl-num">331.0</span>] sinosc * <span class="hl-num">0.2</span>              <span class="cmt">-- 2 chans</span>
@@ -586,11 +598,10 @@ c &lt;- (c1 + t) i32 % n;</code></pre>
             <div class="note">
                 <strong>Reducing width back down.</strong> Broadcasting only ever widens. To mix
                 channels down, use the reductions in <a href="#vecops">&sect;5</a>:
-                <code>sum</code> mixes to 1 channel, <code>sum(<span class="hl-num">2</span>)</code>
-                mixes to stereo by summing every other channel, and
-                <code>transpose(n)</code> reorders channels so related groups are adjacent first.
-                A typical bank-of-oscillators pattern is
-                <code>oscs sum(<span class="hl-num">2</span>) * <span class="hl-num">0.1</span> |&gt; outlet</code>.
+                <code>sum</code> mixes everything to 1 channel, and <code>sum(axis)</code> mixes along
+                one axis. Give a bank the shape of its output to mix it to stereo: a bank of
+                n&times;2 oscillators, <code>sum(<span class="hl-num">0</span>)</code>, is a stereo pair, and so is a
+                voicer of stereo voices (voices&times;2).
             </div>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
@@ -689,46 +700,62 @@ urand() &lt; prob          <span class="cmt">-- Bernoulli trigger (see coin)</sp
 
         <!-- ============================================================ -->
         <div class="section" id="vecops">
-            <h2>5. Channel (Vector) Operations</h2>
+            <h2>5. Shape Operations</h2>
 
-            <p>These operate on the channel dimension itself: indexing, rearranging, and reducing.
-            Indexing is cyclic (<code>index mod chans</code>), over the flattened channels of a
-            shaped signal.</p>
+            <p>These rearrange and reduce a signal's channels by its shape (<a href="#chans">&sect;2.3</a>).
+            Each works along one <strong>axis</strong>, the last by default, so on a 1-dimensional
+            signal they act on its channels in order. <code>axis</code> is 0 for the outermost,
+            negative from the last (<code>cols</code> = &minus;1, <code>rows</code> = &minus;2,
+            <code>planes</code> = &minus;3); an axis the signal does not have is a compile error. A
+            scalar counts as a row of one. Everything except a varying <code>slice</code> offset or
+            <code>rotate</code> amount is resolved when the synth is compiled: the rearranging
+            operations cost nothing at run time, their consumers read the source channels directly.</p>
 
             <table>
                 <tr><th>Function</th><th>Description</th></tr>
-                <tr><td><code>at(a, i)</code></td><td>Select channel <code>i</code> (a signal or constant; cyclic). 1-channel result per index channel.</td></tr>
+                <tr><td><code>take(a, n, axis = -1)</code></td><td>The first <code>n</code> elements along the axis (cycling when <code>n</code> exceeds its length).</td></tr>
+                <tr><td><code>drop(a, n, axis = -1)</code></td><td>All but the first <code>n</code>.</td></tr>
+                <tr><td><code>stride(a, n, axis = -1)</code></td><td>Every <code>n</code>th element: 0, n, 2n, &hellip;</td></tr>
+                <tr><td><code>stutter(a, n, axis = -1)</code></td><td>Each element <code>n</code> times: <code>[a b] stutter(2)</code> &rarr; <code>[a a b b]</code>.</td></tr>
+                <tr><td><code>ncyc(a, n, axis = -1)</code></td><td>The whole axis <code>n</code> times: <code>[a b] ncyc(2)</code> &rarr; <code>[a b a b]</code>.</td></tr>
+                <tr><td><code>slice(a, offset, n, axis = -1)</code></td><td><code>n</code> elements from <code>offset</code>, wrapping past the end. The offset may be an integer signal (the length stays fixed).</td></tr>
+                <tr><td><code>rotate(a, k, axis = -1)</code></td><td>Element <code>i</code> becomes element <code>i + k</code>, wrapping (<code>k</code> a constant or an integer signal).</td></tr>
+                <tr><td><code>reverse(a, axis = -1)</code></td><td>The axis in reverse order.</td></tr>
+                <tr><td><code>transpose(a)</code></td><td>The axes in reverse order: a matrix transposed.</td></tr>
+                <tr><td><code>transpose(a, perm)</code></td><td>The axes permuted: axis <code>k</code> of the result is axis <code>perm[k]</code> of <code>a</code>.</td></tr>
+                <tr><td><code>reshape(a, dims)</code></td><td>The same channels in a new shape; one dimension may be &minus;1 (whatever is left). <code>reshape(a, shape)</code> takes a <code>Shape</code>.</td></tr>
+                <tr><td><code>join([a, b, ...], axis = -1)</code></td><td>Concatenation along an axis; the other dimensions must agree.</td></tr>
+                <tr><td><code>stack([a, b, ...], axis = 0)</code></td><td>Signals of one shape along a new axis: <code>[l, r] stack</code> of two n-channel signals is a 2&times;n matrix.</td></tr>
+                <tr><td><code>at(a, i)</code></td><td>Channel <code>i</code> (a signal or constant; cyclic). 1-channel result per index channel.</td></tr>
                 <tr><td><code>put(a, i, v)</code></td><td>Replace channel <code>i</code> of <code>a</code> with <code>v</code>.</td></tr>
-                <tr><td><code>take(a, n)</code></td><td>First <code>n</code> channels (cyclic fill when <code>n</code> exceeds the width).</td></tr>
-                <tr><td><code>drop(a, n)</code></td><td>Drop the first <code>n</code> channels.</td></tr>
-                <tr><td><code>stride(a, n)</code></td><td>Every <code>n</code>th channel: channels 0, n, 2n, &hellip;</td></tr>
-                <tr><td><code>stutter(a, n)</code></td><td>Repeat each channel <code>n</code> times: <code>[a b] stutter(2)</code> &rarr; <code>[a a b b]</code>.</td></tr>
-                <tr><td><code>ncyc(a, n)</code></td><td>Cycle the whole channel array <code>n</code> times: <code>[a b] ncyc(2)</code> &rarr; <code>[a b a b]</code>.</td></tr>
-                <tr><td><code>rotate(a, k)</code></td><td>Rotate channels by <code>k</code> (a signal or constant).</td></tr>
-                <tr><td><code>reverse(a)</code></td><td>Reverse channel order.</td></tr>
-                <tr><td><code>transpose(a, n)</code></td><td>Treat the channels as an <code>n</code>-column matrix and transpose it &mdash; converts between interleaved and grouped channel layouts.</td></tr>
-                <tr><td><code>join([a, b, ...])</code></td><td>Concatenate an array of signals along the channel dimension.</td></tr>
-                <tr><td><code>reduce(a, op, chans = 1)</code></td><td>Fold the channels down to <code>chans</code> with a <code>BinaryOp</code>; channel <code>i</code> of the result combines input channels <code>i</code>, <code>i+chans</code>, <code>i+2&middot;chans</code>, &hellip;</td></tr>
-                <tr><td><code>sum(a, chans = 1)</code></td><td><code>reduce</code> with add &mdash; the standard mixdown. <code>sum(2)</code> mixes an even/odd split to stereo.</td></tr>
-                <tr><td><code>product(a, chans = 1)</code></td><td><code>reduce</code> with multiply.</td></tr>
-                <tr><td><code>minOf(a, chans = 1)</code> / <code>maxOf(a, chans = 1)</code></td><td><code>reduce</code> with min / max.</td></tr>
+                <tr><td><code>reduce(a, op)</code> / <code>reduce(a, op, axis)</code></td><td>Combine with a <code>BinaryOp</code>: every channel into one, or along an axis, which goes away (a 3&times;4 matrix reduced along axis 0 is a row of 4).</td></tr>
+                <tr><td><code>sum(a)</code> / <code>sum(a, axis)</code></td><td><code>reduce</code> with add &mdash; the mixdown.</td></tr>
+                <tr><td><code>product</code>, <code>minOf</code>, <code>maxOf</code></td><td><code>reduce</code> with multiply, min, max; the same two forms.</td></tr>
+                <tr><td><code>scan(a, op, axis = -1)</code></td><td>Running <code>reduce</code> along the axis: element <code>i</code> combines elements 0 to <code>i</code>.</td></tr>
             </table>
 
-<pre><code><span class="cmt">-- 16 random-frequency sines, mixed to stereo</span>
+<pre><code><span class="cmt">-- 16 random-frequency sines as 8 per side: an 8x2 bank, summed over</span>
+<span class="cmt">-- axis 0 (the 8) to stereo</span>
 <span class="hl-kw">fn</span> shimmer() S {
-    <span class="hl-kw">let</span> freqs = exprand(<span class="hl-num">200</span>, <span class="hl-num">2000</span>, <span class="hl-num">16</span>, Rate.init);
-    freqs sinosc sum(<span class="hl-num">2</span>) * <span class="hl-num">0.05</span> |&gt; outlet
+    <span class="hl-kw">let</span> freqs = exprand(<span class="hl-num">200</span>, <span class="hl-num">2000</span>, <span class="hl-num">16</span>, Rate.init) reshape([<span class="hl-num">8</span>, <span class="hl-num">2</span>]);
+    freqs sinosc sum(<span class="hl-num">0</span>) * <span class="hl-num">0.05</span> |&gt; outlet
 }
 
 <span class="cmt">-- 16 random sine plinks, each randomly panned, mixed to stereo.</span>
-<span class="cmt">-- pandust(density, 16) emits 32 chans grouped by side [L0..L15, R0..R15];</span>
-<span class="cmt">-- transpose(16) interleaves them to [L0 R0 L1 R1 ...], so sum(2) mixes</span>
-<span class="cmt">-- even channels to the left output and odd channels to the right.</span>
+<span class="cmt">-- pandust(density, 16) is a 2x16 matrix (row 0 left, row 1 right); the 16</span>
+<span class="cmt">-- frequencies line up with its columns, and sum(cols) mixes each side.</span>
 <span class="hl-kw">fn</span> dustCloud() S {
     <span class="hl-kw">let</span> freqs = exprand(<span class="hl-num">100</span>, <span class="hl-num">5000</span>, <span class="hl-num">16</span>, Rate.init);
     <span class="hl-kw">let</span> ticks = pandust(<span class="hl-num">3</span>/<span class="hl-num">16</span>, <span class="hl-num">16</span>) decay2(<span class="hl-num">0.004</span>, <span class="hl-num">0.2</span>);
-    ticks * freqs sinosc |&gt; transpose(<span class="hl-num">16</span>) sum(<span class="hl-num">2</span>) outlet
-}</code></pre>
+    ticks * freqs sinosc |&gt; sum(cols) outlet
+}
+
+<span class="cmt">-- Axes of a 2x3x4 tensor x:</span>
+x reverse(<span class="hl-num">0</span>)       <span class="cmt">-- the two 3x4 planes swapped</span>
+x take(<span class="hl-num">2</span>, rows)    <span class="cmt">-- 2x2x4: the first two rows of each plane</span>
+x sum(cols)          <span class="cmt">-- 2x3: each row's sum</span>
+x transpose          <span class="cmt">-- 4x3x2</span>
+x reshape([<span class="hl-num">6</span>, -<span class="hl-num">1</span>])  <span class="cmt">-- 6x4</span></code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
@@ -879,10 +906,11 @@ urand() &lt; prob          <span class="cmt">-- Bernoulli trigger (see coin)</sp
 
 <pre><code><span class="cmt">-- Eight oscillators at random frequencies, fixed per instance,</span>
 <span class="cmt">-- with slowly moving random amplitudes:</span>
-<span class="hl-kw">let</span> freqs    = exprand(<span class="hl-num">100</span>, <span class="hl-num">600</span>, <span class="hl-num">8</span>, Rate.init);
+<span class="hl-kw">let</span> freqs    = exprand(<span class="hl-num">100</span>, <span class="hl-num">600</span>, <span class="hl-num">8</span>, Rate.init) reshape([<span class="hl-num">4</span>, <span class="hl-num">2</span>]);
 <span class="hl-kw">let</span> ampFreqs = exprand(<span class="hl-num">0.1</span>, <span class="hl-num">0.5</span>, <span class="hl-num">8</span>, Rate.init);
 <span class="hl-kw">let</span> amps     = ampFreqs fsinosc(urand(<span class="hl-num">8</span>, Rate.init)) uni;
-freqs fsinosc * amps |&gt; sum(<span class="hl-num">2</span>) * <span class="hl-num">0.1</span> outlet</code></pre>
+<span class="cmt">-- as 4 per side: the 8 amplitudes take the frequencies' 4x2 shape</span>
+freqs fsinosc * (amps reshape([<span class="hl-num">4</span>, <span class="hl-num">2</span>])) |&gt; sum(<span class="hl-num">0</span>) * <span class="hl-num">0.1</span> outlet</code></pre>
 
             <p>For noise colors and random event generators built on these (pink, dust, velvet, &hellip;)
             see <a href="#ug-noise">&sect;15.8</a>.</p>
@@ -1062,7 +1090,7 @@ loadBuffer(<span class="hl-num">100</span>, <span class="hl-num">0</span>, <span
         <span class="hl-kw">let</span> pos = d read(<span class="hl-num">1</span>);
         (pos + rate) -&gt; d;
         h vread(pos, Interpolation.cubic) f32 * g
-    }) sum(<span class="hl-num">1</span>) outlet
+    }) sum outlet
 }
 sampler defSynthX(<span class="hl-str">"sampler"</span>) await;
 
@@ -1088,7 +1116,7 @@ loadSampleBank(<span class="hl-num">100</span>, <span class="hl-num">0</span>, [
         <span class="hl-kw">let</span> h = bank lookup(pitch, vel);
         <span class="hl-kw">let</span> rate = ((pitch f64 - (h rootKey) f64) / <span class="hl-num">12.0</span>) exp2 * (h sampleRate) * (T() f64);
         h vread(loopPhasor(h, rate, g), Interpolation.cubic) f32 * (g lag(<span class="hl-num">0.005</span>, <span class="hl-num">0.1</span>))
-    }) sum(<span class="hl-num">1</span>) outlet
+    }) sum outlet
 }</code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
@@ -1456,7 +1484,7 @@ noteOff(<span class="hl-num">100</span>, <span class="hl-num">1</span>);</code><
                 <tr><td><code>coin(prob, chans = 1)</code></td><td>1 with probability <code>prob</code> each sample, else 0.</td></tr>
                 <tr><td><code>velvet(density, chans = 1)</code></td><td>Velvet noise: on average <code>density</code> ones per second, else zero.</td></tr>
                 <tr><td><code>dust(density, chans = 1)</code> / <code>dust2(density, chans = 1)</code></td><td>Random-amplitude impulses at <code>density</code> per second; unipolar / bipolar amplitudes.</td></tr>
-                <tr><td><code>pandust(density, chans = 1)</code></td><td><code>chans</code> dust generators, each randomly panned to a stereo pair. Output is 2&middot;<code>chans</code> wide, grouped by side [all L, all R] &mdash; <code>transpose(chans) sum(2)</code> mixes it to stereo (see the example in <a href="#vecops">&sect;5</a>).</td></tr>
+                <tr><td><code>pandust(density, chans = 1)</code></td><td><code>chans</code> dust generators, each randomly panned to a stereo pair. Output is a 2&times;<code>chans</code> matrix, row 0 left and row 1 right &mdash; <code>sum(cols)</code> mixes it to stereo (see the example in <a href="#vecops">&sect;5</a>).</td></tr>
                 <tr><td><code>dustep(freq, chans = 1)</code></td><td>Stepped noise: white noise sampled-and-held at velvet-noise times, <code>freq</code> steps per second on average.</td></tr>
                 <tr><td><code>exprand(a, b, chans = 1, rate = Rate.audio)</code></td><td>Exponentially distributed random values in [a, b] (see <a href="#random">&sect;8</a>).</td></tr>
             </table>

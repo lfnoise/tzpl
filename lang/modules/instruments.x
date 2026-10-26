@@ -165,7 +165,7 @@ fn smpPerc(maxVoices Int = kMaxVoices) () S {
 			let h = bank lookup(pitch, vel);
 			let pos = h loopPhasor(bankRate(h, pitch), 0.0);
 			h bankRead(pos) * vel velAmp
-		}) sum(2) outlet
+		}) sum(0) outlet
 	}
 }
 
@@ -185,7 +185,7 @@ fn smpLoopTail(maxVoices Int = kMaxVoices) () S {
 			let h = bank lookup(pitch, vel);
 			let pos = h loopPhasor(bankRate(h, pitch), g);
 			h bankRead(pos) * vel velAmp
-		}) sum(2) outlet
+		}) sum(0) outlet
 	}
 }
 
@@ -207,7 +207,7 @@ fn smpLoopEnv(maxVoices Int = kMaxVoices) () S {
 			let pos = h loopPhasor(bankRate(h, pitch), 1.0);
 			let env = g susrel(1.0, rel);
 			h bankRead(pos) * env * vel velAmp
-		}) sum(2) outlet
+		}) sum(0) outlet
 	}
 }
 

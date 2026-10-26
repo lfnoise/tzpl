@@ -13,7 +13,7 @@ fn nfA() S {
 		let ph = urand(1, Rate.init);
 		let g = gate();
 		g pause(fn() S { sinosc(f, ph) * a * 0.1 })
-	}) sum(2) outlet
+	}) sum outlet
 }
 fn nfB() S {
 	voicer(4, fn() S {
@@ -21,7 +21,7 @@ fn nfB() S {
 		let det = exprand(0.99, 1.01, 2, Rate.init);
 		let g = gate();
 		g pause(fn() S { (f * det) sinosc sum * 0.1 })
-	}) sum(2) outlet
+	}) sum outlet
 }
 fn nfC() S {
 	voicer(4, fn() S {
@@ -29,13 +29,13 @@ fn nfC() S {
 		let pattern = [1.0, 1.25, 1.5, 2.0];
 		let g = gate();
 		g pause(fn() S { (2 lfimp seq(pattern * f, 4)) sinosc * 0.1 })
-	}) sum(2) outlet
+	}) sum outlet
 }
 fn nfD() S {
 	voicer(4, fn() S {
 		let g = gate();
 		g pause(fn() S { pink() * 0.1 })
-	}) sum(2) outlet
+	}) sum outlet
 }
 fn nfE() S {
 	voicer(4, fn() S {
@@ -44,13 +44,13 @@ fn nfE() S {
 		let g = gate();
 		let env = g adsr(0.01, 0.05, 0.6, dcy);
 		g pause(fn() S { sinosc(f) * 0.1 }) * env
-	}) sum(2) outlet
+	}) sum outlet
 }
 fn nfF() S {
 	voicer(4, fn() S {
 		let g = gate();
 		g pause(fn() S { white() * 0.1 })
-	}) sum(2) outlet
+	}) sum outlet
 }
 fn nfBank() S {
 	let bank = sampleBankVar();
@@ -63,7 +63,7 @@ fn nfBank() S {
 			let pos = h loopPhasor(bankRate(h, pitch), 0.0);
 			h bankRead(pos) * vel velAmp
 		})
-	}) sum(2) outlet
+	}) sum outlet
 }
 fn evRingFlat() S {
 	voicer(4, fn() S {
@@ -76,7 +76,7 @@ fn evRingFlat() S {
 		let acc = (f * c) * 0.001 + r1 * 0.4 + r2 * 0.2;
 		d write(acc);
 		sinosc(440.0 + acc) * gate() * 0.1
-	}) sum(2) outlet
+	}) sum outlet
 }
 fn evRingAoS() S {
 	voicer(4, fn() S {
@@ -90,7 +90,7 @@ fn evRingAoS() S {
 		let acc = (f * c) * 0.001 + r1 * 0.4 + r2 * 0.2;
 		d write(acc);
 		g pause(fn() S { sinosc(440.0 + acc) * 0.1 })
-	}) sum(2) outlet
+	}) sum outlet
 }
 
 dumpCorpus([

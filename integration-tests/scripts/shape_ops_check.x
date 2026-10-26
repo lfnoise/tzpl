@@ -1,0 +1,307 @@
+-- Tensor shape operations along an axis (block engine plan 4.8, M8b).
+--
+-- Each case applies one shape operation to a tensor of the numbers 1..n and
+-- outputs (the result - the expected tensor), so every output channel is
+-- exactly 0 when the operation is right. The expected tensor comes from the
+-- reference below, which works on flat arrays and multi-indices, not on the
+-- compiler's index maps. The input is scaled by a control held at 1 and by
+-- (1 + sinosc(0)), which is 1 at audio rate, so the operation runs in the
+-- plugin rather than folding at compile time.
+--
+-- SHAPE_OPS_MODE=compile (with SYNTHC_CORPUS_MODE=compile) builds the
+-- plugins for forms_equiv --zero; otherwise this prints each case's analysis
+-- dump and an EXPECT line with the result shape the dump's OUT line must show.
+-- SHAPE_OPS_MODE=errors prints the dumps of cases the compiler must refuse.
+-- run_shape_ops_test.sh runs all three.
+
+import synthdef.*;
+import synthc.compile.*;
+import common_ugens.*;
+
+---------------------------------------------------------------------------
+-- Reference: row-major tensors as flat arrays with dims (outer first).
+
+fn prod(dims [Int]) Int {
+	var n = 1;
+	for (d : dims) { n = n * d; }
+	n
+}
+
+fn multiIdx(dims [Int], w Int) [Int] {
+	var idx [Int] = [];
+	for (d : dims) { idx push!(0); }
+	var rem = w;
+	var k = dims length - 1;
+	while (k >= 0) { idx[k] = rem % dims[k]; rem = rem // dims[k]; k = k - 1; }
+	idx
+}
+
+fn flatIdx(dims [Int], idx [Int]) Int {
+	var w = 0;
+	var k = 0;
+	while (k < dims length) { w = w * dims[k] + idx[k]; k = k + 1; }
+	w
+}
+
+fn wrap(i Int, n Int) Int = ((i % n) + n) % n;
+
+fn ax(a Int, r Int) Int = a < 0 ? a + r : a;
+
+-- Each output element reads the source element `src` maps its multi-index to.
+fn gather(xs [Float], sdims [Int], odims [Int], src ([Int]) [Int]) [Float] {
+	var out [Float] = [];
+	var w = 0;
+	while (w < prod(odims)) {
+		out push!(xs[flatIdx(sdims, src(multiIdx(odims, w)))]);
+		w = w + 1;
+	}
+	out
+}
+
+fn withAt(dims [Int], k Int, v Int) [Int] {
+	var d = dims copy;
+	d[k] = v;
+	d
+}
+
+-- An axis op: the output length along axis k, and the source index along it.
+fn alongAxis(xs [Float], sdims [Int], a Int, len Int, f (Int) Int) ([Float], [Int]) {
+	let k = ax(a, sdims length);
+	let odims = withAt(sdims, k, len);
+	let ys = gather(xs, sdims, odims, fn(idx [Int]) [Int] { withAt(idx, k, f(idx[k])) });
+	(ys, odims)
+}
+
+fn refReduce(xs [Float], sdims [Int], a Int, scan Bool) ([Float], [Int]) {
+	let k = ax(a, sdims length);
+	var odims [Int] = [];
+	var j = 0;
+	while (j < sdims length) { if (scan || j != k) { odims push!(sdims[j]); } j = j + 1; }
+	var out [Float] = [];
+	var w = 0;
+	while (w < prod(odims)) {
+		let oi = multiIdx(odims, w);
+		var si = sdims copy;
+		var q = 0;
+		j = 0;
+		while (j < sdims length) {
+			if (j == k) { si[j] = 0; } else { si[j] = oi[q]; }
+			if (scan || j != k) { q = q + 1; }
+			j = j + 1;
+		}
+		let upto = scan ? oi[k] : sdims[k] - 1;
+		var z = 0.0;
+		var e = 0;
+		while (e <= upto) { z = z + xs[flatIdx(sdims, withAt(si, k, e))]; e = e + 1; }
+		out push!(z);
+		w = w + 1;
+	}
+	(out, odims)
+}
+
+fn refPermute(xs [Float], sdims [Int], perm [Int]) ([Float], [Int]) {
+	let r = sdims length;
+	var odims [Int] = [];
+	for (p : perm) { odims push!(sdims[p]); }
+	let ys = gather(xs, sdims, odims, fn(idx [Int]) [Int] {
+		var si = sdims copy;
+		var k = 0;
+		while (k < r) { si[perm[k]] = idx[k]; k = k + 1; }
+		si
+	});
+	(ys, odims)
+}
+
+-- Concatenation along axis k of a and b (b's values follow a's).
+fn refJoin(xs [Float], adims [Int], ys [Float], bdims [Int], a Int) ([Float], [Int]) {
+	let k = ax(a, adims length);
+	let odims = withAt(adims, k, adims[k] + bdims[k]);
+	var out [Float] = [];
+	var w = 0;
+	while (w < prod(odims)) {
+		let idx = multiIdx(odims, w);
+		if (idx[k] < adims[k]) { out push!(xs[flatIdx(adims, idx)]); }
+		else { out push!(ys[flatIdx(bdims, withAt(idx, k, idx[k] - adims[k]))]); }
+		w = w + 1;
+	}
+	(out, odims)
+}
+
+-- a and b along a new axis k.
+fn refStack(xs [Float], ys [Float], dims [Int], k Int) ([Float], [Int]) {
+	var odims [Int] = [];
+	var j = 0;
+	while (j <= dims length) {
+		if (j == k) { odims push!(2); }
+		if (j < dims length) { odims push!(dims[j]); }
+		j = j + 1;
+	}
+	var out [Float] = [];
+	var w = 0;
+	while (w < prod(odims)) {
+		let idx = multiIdx(odims, w);
+		var si [Int] = [];
+		j = 0;
+		while (j < idx length) { if (j != k) { si push!(idx[j]); } j = j + 1; }
+		out push!(idx[k] == 0 ? xs[flatIdx(dims, si)] : ys[flatIdx(dims, si)]);
+		w = w + 1;
+	}
+	(out, odims)
+}
+
+---------------------------------------------------------------------------
+-- Cases
+
+fn iota(n Int, from Float) [Float] {
+	var xs [Float] = [];
+	var i = 0;
+	while (i < n) { xs push!(from + i toFloat); i = i + 1; }
+	xs
+}
+
+fn tshape(dims [Int]) Shape = dims length == 0 ? scalarShape() : shape(dims);
+
+-- The input tensor, computed in the plugin.
+fn live(xs [Float], dims [Int]) S {
+	let one = control("one", lspec(0.0, 2.0, 1.0));
+	tensor(tshape(dims), xs) * one * (1.0 + sinosc(0.0))
+}
+
+fn dimsStr(dims [Int]) String {
+	if (dims length == 0) { return "1"; }
+	var parts [String] = [];
+	for (d : dims) { parts push!(d toString); }
+	parts join("x")
+}
+
+var cases [(String, GraphFn)] = [];
+var expects [String] = [];
+
+-- `got` builds the operation's signal (inside the graph being made). The
+-- dump outputs it alone (its OUT line is its shape); the compiled plugin
+-- outputs its difference from the reference.
+let compiling = match (getEnv("SHAPE_OPS_MODE")) { some(m): m == "compile"; none: false; };
+fn add(name String, got GraphFn, want ([Float], [Int])) Void {
+	let (ys, odims) = want;
+	if (compiling) {
+		cases push!((name, fn() S { got() - tensor(tshape(odims), ys) |> outlet }));
+	} else {
+		cases push!((name, fn() S { got() |> outlet }));
+	}
+	expects push!("EXPECT %^ %^" fmt(name, dimsStr(odims)));
+}
+
+let d234 = [2, 3, 4];
+let x234 = iota(24, 1.0);
+let d34 = [3, 4];
+let x34 = iota(12, 1.0);
+let d6 = [6];
+let x6 = iota(6, 1.0);
+
+fn axisCases(tag String, xs [Float], dims [Int]) Void {
+	let r = dims length;
+	var a0 = 0 - r;
+	while (a0 < r) {
+		let a = a0;          -- a fresh binding per case (the builders run later)
+		let k = ax(a, r);
+		let n = dims[k];
+		let t = "%^_ax%^" fmt(tag, a < 0 ? "m" $ (0 - a) toString : a toString);
+		add("take_" $ t, fn() S { live(xs, dims) take(2, a) }, alongAxis(xs, dims, a, 2, fn(i Int) Int { i % n }));
+		add("takex_" $ t, fn() S { live(xs, dims) take(n + 1, a) }, alongAxis(xs, dims, a, n + 1, fn(i Int) Int { i % n }));
+		add("drop_" $ t, fn() S { live(xs, dims) drop(1, a) }, alongAxis(xs, dims, a, n - 1, fn(i Int) Int { i + 1 }));
+		add("stride_" $ t, fn() S { live(xs, dims) stride(2, a) }, alongAxis(xs, dims, a, (n + 1) // 2, fn(i Int) Int { i * 2 }));
+		add("stutter_" $ t, fn() S { live(xs, dims) stutter(2, a) }, alongAxis(xs, dims, a, n * 2, fn(i Int) Int { i // 2 }));
+		add("ncyc_" $ t, fn() S { live(xs, dims) ncyc(2, a) }, alongAxis(xs, dims, a, n * 2, fn(i Int) Int { i % n }));
+		add("slice_" $ t, fn() S { live(xs, dims) slice(1, n, a) }, alongAxis(xs, dims, a, n, fn(i Int) Int { (i + 1) % n }));
+		add("reverse_" $ t, fn() S { live(xs, dims) reverse(a) }, alongAxis(xs, dims, a, n, fn(i Int) Int { n - 1 - i }));
+		add("rotate_" $ t, fn() S { live(xs, dims) rotate(1, a) }, alongAxis(xs, dims, a, n, fn(i Int) Int { wrap(i + 1, n) }));
+		add("rotneg_" $ t, fn() S { live(xs, dims) rotate(-2, a) }, alongAxis(xs, dims, a, n, fn(i Int) Int { wrap(i - 2, n) }));
+		add("slicev_" $ t, fn() S { live(xs, dims) slice(control("off", lspec(0.0, 8.0, 2.0)) i32, 2, a) }, alongAxis(xs, dims, a, 2, fn(i Int) Int { wrap(i + 2, n) }));
+		add("sum_" $ t, fn() S { live(xs, dims) sum(a) }, refReduce(xs, dims, a, false));
+		add("scan_" $ t, fn() S { live(xs, dims) scan(BinaryOp.add, a) }, refReduce(xs, dims, a, true));
+		add("join_" $ t, fn() S { [live(xs, dims), live(iota(prod(dims), 100.0), dims)] join(a) },
+			refJoin(xs, dims, iota(prod(dims), 100.0), dims, a));
+		a0 = a0 + 1;
+	}
+	-- New axes at every position of the result.
+	var k0 = 0;
+	while (k0 <= r && r < MAX_RANK) {
+		let k = k0;
+		let ys = iota(prod(dims), 100.0);
+		add("stack_%^_%^" fmt(tag, k), fn() S { [live(xs, dims), live(ys, dims)] stack(k) }, refStack(xs, ys, dims, k));
+		k0 = k0 + 1;
+	}
+}
+
+axisCases("r1", x6, d6);
+axisCases("r2", x34, d34);
+axisCases("r3", x234, d234);
+
+add("sum_all", fn() S { live(x234, d234) sum }, (iota(1, 300.0), [Int]()));
+add("transpose_r2", fn() S { live(x34, d34) transpose }, refPermute(x34, d34, [1, 0]));
+add("transpose_r3", fn() S { live(x234, d234) transpose }, refPermute(x234, d234, [2, 1, 0]));
+add("permute_r3", fn() S { live(x234, d234) transpose([1, 2, 0]) }, refPermute(x234, d234, [1, 2, 0]));
+add("permute_neg_r3", fn() S { live(x234, d234) transpose([-1, 0, 1]) }, refPermute(x234, d234, [2, 0, 1]));
+add("reshape_r3", fn() S { live(x234, d234) reshape([4, 6]) }, (x234, [4, 6]));
+add("reshape_infer", fn() S { live(x234, d234) reshape([-1, 3]) }, (x234, [8, 3]));
+add("reshape_row", fn() S { live(x234, d234) reshape([24]) }, (x234, [24]));
+-- A 1 x n matrix stays rank 2; reversing its axis 0 (one row) is the identity.
+add("matrix_1xn", fn() S { live(x6, [1, 6]) reverse(0) }, (x6, [1, 6]));
+-- Composition: rows reversed, then each row's sum.
+add("compose", fn() S { live(x234, d234) reverse(-2) sum(-1) },
+	refReduce(alongAxis(x234, d234, -2, 3, fn(i Int) Int { 2 - i }).0, d234, -1, false));
+-- An axis op on a scalar treats it as a row.
+add("scalar_stutter", fn() S { live([5.0], [Int]()) stutter(3) }, ([5.0, 5.0, 5.0], [3]));
+
+-- Inside a voicer: each voice applies the operation to its own tensor (a
+-- note parameter held at 1 makes it voice-local) and outputs its difference
+-- from the reference, so every voice, sounding or not, outputs 0. Shapes 2x4
+-- (power-of-two voice widths: flat voice mode) and 3x4 (per-voice structs).
+-- The dump outputs the voicer itself: voices x the result shape.
+fn voiced(name String, xs [Float], dims [Int], op (S) S, want ([Float], [Int])) Void {
+	let (ys, odims) = want;
+	cases push!((name, fn() S {
+		voicer(2, fn() S {
+			let one = noteParam("one", lspec(0.0, 2.0, 1.0));
+			let r = op(tensor(tshape(dims), xs) * one * (1.0 + sinosc(0.0)));
+			compiling ? r - tensor(tshape(odims), ys) : r
+		}) |> outlet
+	}));
+	expects push!("EXPECT %^ %^" fmt(name, dimsStr([2] $ odims)));
+}
+
+let x24 = iota(8, 1.0);
+let d24 = [2, 4];
+for (vc : [("v24", x24, d24), ("v34", x34, d34)]) {
+	let (tag, xs, dims) = vc;
+	let n0 = dims[0];
+	let n1 = dims[1];
+	voiced("vtake0_" $ tag, xs, dims, fn(x S) S { x take(1, 0) }, alongAxis(xs, dims, 0, 1, fn(i Int) Int { i }));
+	voiced("vrev_" $ tag, xs, dims, fn(x S) S { x reverse }, alongAxis(xs, dims, -1, n1, fn(i Int) Int { n1 - 1 - i }));
+	voiced("vstut0_" $ tag, xs, dims, fn(x S) S { x stutter(2, 0) }, alongAxis(xs, dims, 0, n0 * 2, fn(i Int) Int { i // 2 }));
+	voiced("vrot_" $ tag, xs, dims, fn(x S) S { x rotate(1) }, alongAxis(xs, dims, -1, n1, fn(i Int) Int { wrap(i + 1, n1) }));
+	voiced("vsum0_" $ tag, xs, dims, fn(x S) S { x sum(0) }, refReduce(xs, dims, 0, false));
+	voiced("vsum1_" $ tag, xs, dims, fn(x S) S { x sum(1) }, refReduce(xs, dims, 1, false));
+	voiced("vscan0_" $ tag, xs, dims, fn(x S) S { x scan(BinaryOp.add, 0) }, refReduce(xs, dims, 0, true));
+	voiced("vtrans_" $ tag, xs, dims, fn(x S) S { x transpose }, refPermute(xs, dims, [1, 0]));
+	voiced("vjoin1_" $ tag, xs, dims, fn(x S) S { [x, x] join(1) }, refJoin(xs, dims, xs, dims, 1));
+	voiced("vstack1_" $ tag, xs, dims, fn(x S) S { [x, x] stack(1) }, refStack(xs, xs, dims, 1));
+}
+
+-- Cases the compiler must refuse.
+var bad [(String, GraphFn)] = [];
+bad push!(("bad_axis", fn() S { live(x34, d34) take(1, 2) |> outlet }));
+bad push!(("bad_neg_axis", fn() S { live(x34, d34) sum(-3) |> outlet }));
+bad push!(("bad_drop", fn() S { live(x6, d6) drop(6) |> outlet }));
+bad push!(("bad_join", fn() S { [live(x34, d34), live(x6, [2, 3])] join(0) |> outlet }));
+bad push!(("bad_stack", fn() S { [live(x34, d34), live(x6, d6)] stack |> outlet }));
+bad push!(("bad_reshape", fn() S { live(x34, d34) reshape([5, -1]) |> outlet }));
+bad push!(("bad_perm", fn() S { live(x234, d234) transpose([0, 0, 1]) |> outlet }));
+
+let mode = match (getEnv("SHAPE_OPS_MODE")) { some(m): m; none: "dump"; };
+if (mode == "errors") {
+	dumpCorpus(bad);
+} else {
+	if (mode != "compile") { for (e : expects) { e println; } }
+	dumpCorpus(cases);
+}

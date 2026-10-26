@@ -1853,7 +1853,7 @@ OUT 0 out f32 2
      35   50 [46 49           ]  2  1 Audio    Temp      f32     2 *
      36   51 [50              ]  1  0 Audio    Phi       f32     2 PhiNode
      37   52 [                ]  0  1 Audio    Temp      f32   8x2 voicer
-     38   54 [52              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, 2)
+     38   54 [52              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
      39   55 [54              ]  1  0 Audio    Sink      f32     2 outlet
 -- TREES
     TREE 1    [] Block  Input     f32     1
@@ -1913,7 +1913,7 @@ OUT 0 out f32 2
     TREE 18   [17*] Audio  Temp      f32   8x2
       0   52 [                ]  0  1 Audio    Temp      f32   8x2 voicer
     TREE 19   [18*] Audio  SeparateLoop f32     2
-      0   54 [52              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, 2)
+      0   54 [52              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
     TREE 20   [19] Audio  Sink      f32     2
       0   55 [54              ]  1  0 Audio    Sink      f32     2 outlet
 -- INIT
@@ -1966,7 +1966,7 @@ GRAPH 0
       0   52 [                ]  0  1 Audio    Temp      f32   8x2 voicer
   LOOP  7 [6] Audio  2
     TREE 19   [18*] Audio  SeparateLoop f32     2
-      0   54 [52              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, 2)
+      0   54 [52              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
     TREE 20   [19] Audio  Sink      f32     2
       0   55 [54              ]  1  0 Audio    Sink      f32     2 outlet
 GRAPH 1
@@ -2049,7 +2049,7 @@ OUT 0 out f32 2
      41   47 [43 46           ]  2  1 Audio    Temp      f32     2 *
      42   48 [47              ]  1  0 Audio    Phi       f32     2 PhiNode
      43   49 [                ]  0  1 Audio    Temp      f32   8x2 voicer
-     44   51 [49              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, 2)
+     44   51 [49              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
      45   52 [51              ]  1  0 Audio    Sink      f32     2 outlet
 -- TREES
     TREE 1    [] Block  Input     f32     1
@@ -2120,7 +2120,7 @@ OUT 0 out f32 2
     TREE 23   [22*] Audio  Temp      f32   8x2
       0   49 [                ]  0  1 Audio    Temp      f32   8x2 voicer
     TREE 24   [23*] Audio  SeparateLoop f32     2
-      0   51 [49              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, 2)
+      0   51 [49              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
     TREE 25   [24] Audio  Sink      f32     2
       0   52 [51              ]  1  0 Audio    Sink      f32     2 outlet
 -- INIT
@@ -2183,7 +2183,7 @@ GRAPH 0
       0   49 [                ]  0  1 Audio    Temp      f32   8x2 voicer
   LOOP  8 [7] Audio  2
     TREE 24   [23*] Audio  SeparateLoop f32     2
-      0   51 [49              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, 2)
+      0   51 [49              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
     TREE 25   [24] Audio  Sink      f32     2
       0   52 [51              ]  1  0 Audio    Sink      f32     2 outlet
 GRAPH 1
@@ -2283,7 +2283,7 @@ OUT 0 out f32 2
      54   64 [60 63           ]  2  1 Audio    Temp      f32     2 *
      55   65 [64              ]  1  0 Audio    Phi       f32     2 PhiNode
      56   66 [                ]  0  1 Audio    Temp      f32   8x2 voicer
-     57   68 [66              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, 2)
+     57   68 [66              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
      58   69 [68              ]  1  0 Audio    Sink      f32     2 outlet
 -- TREES
     TREE 1    [] Block  Input     f32     1
@@ -2372,7 +2372,7 @@ OUT 0 out f32 2
     TREE 28   [27*] Audio  Temp      f32   8x2
       0   66 [                ]  0  1 Audio    Temp      f32   8x2 voicer
     TREE 29   [28*] Audio  SeparateLoop f32     2
-      0   68 [66              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, 2)
+      0   68 [66              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
     TREE 30   [29] Audio  Sink      f32     2
       0   69 [68              ]  1  0 Audio    Sink      f32     2 outlet
 -- INIT
@@ -2447,7 +2447,7 @@ GRAPH 0
       0   66 [                ]  0  1 Audio    Temp      f32   8x2 voicer
   LOOP 10 [9] Audio  2
     TREE 29   [28*] Audio  SeparateLoop f32     2
-      0   68 [66              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, 2)
+      0   68 [66              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
     TREE 30   [29] Audio  Sink      f32     2
       0   69 [68              ]  1  0 Audio    Sink      f32     2 outlet
 GRAPH 1

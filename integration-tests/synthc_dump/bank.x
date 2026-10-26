@@ -18,7 +18,7 @@ fn bankVoicer() S {
 		let h = bank lookup(pitch, vel);
 		let idx = (pitch - h rootKey) f64 * (h sampleRate) * (h length);
 		h vread(idx, Interpolation.cubic) f32 * gate
-	}) sum(1) outlet
+	}) sum outlet
 }
 fn bankVoicer2() S {
 	let bank = sampleBankVar();
@@ -30,7 +30,7 @@ fn bankVoicer2() S {
 		let a = h read(0) f32;
 		let b = h vread((0.3 lfsaw) f64 * (h length), Interpolation.linear) f32;
 		(a + b) * gate
-	}) sum(1) outlet
+	}) sum outlet
 }
 fn bankLoop() S {
 	let bank = sampleBankVar();
@@ -41,7 +41,7 @@ fn bankLoop() S {
 		let h = bank lookup(pitch, vel);
 		let rate = ((pitch f64 - (h rootKey) f64) / 12.0) exp2 * (h sampleRate) * (T() f64);
 		h vread(loopPhasor(h, rate, gate), Interpolation.cubic) f32 * gate
-	}) sum(1) outlet
+	}) sum outlet
 }
 fn bankTop() S {
 	let bank = sampleBankVar();
@@ -53,7 +53,7 @@ fn resetRand() S {
 	voicer(8, fn() S {
 		let gate = noteParam("gate", gateSpec);
 		urand(1, Rate.reset) f32 * gate
-	}) sum(1) outlet
+	}) sum outlet
 }
 
 dumpCorpus([

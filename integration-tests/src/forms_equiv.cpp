@@ -19,8 +19,12 @@
 //
 // Usage: forms_equiv AUTO_BUILD_DIR SERIAL_BUILD_DIR [name-substring | =name]
 //        forms_equiv --time BUILD_DIR [name-substring]
+//        forms_equiv --zero BUILD_DIR [name-substring]
 //   --time: ns per sample of each synth in whole blocks (best of 5), for
 //   measuring the code generator's cost table against variant builds.
+//   --zero: every output sample of every synth is 0 (within 1e-4), in whole
+//   blocks and odd chunks: for tests whose synths output (result - expected),
+//   such as run_shape_ops_test.sh.
 
 #include <dlfcn.h>
 
@@ -227,8 +231,37 @@ int timeAll(char const* dir, char const* filter) {
     return 0;
 }
 
+// --zero: every output of every synth stays within 1e-4 of 0.
+int zeroAll(char const* dir, char const* filter) {
+    int failures = 0, checked = 0;
+    for (auto& [name, path] : plugins(dir)) {
+        if (filter && name.find(filter) == std::string::npos) continue;
+        for (auto const& chunks : {std::vector<int>{64}, std::vector<int>{7, 13, 1, 30, 5, 3, 64}}) {
+            Instance in;
+            std::string err;
+            if (!in.open(path, err)) { std::println("FAIL {}: {}", name, err); ++failures; break; }
+            auto y = run(in, chunks);
+            double worst = 0;
+            int at = -1;
+            for (size_t o = 0; o < y.size(); ++o)
+                for (double v : y[o])
+                    if (!(std::fabs(v) <= worst)) { worst = std::isfinite(v) ? std::fabs(v) : INFINITY; at = int(o); }
+            if (worst > 1e-4) {
+                std::println("FAIL {}: output channel {} off by {} (chunks {})", name, at, worst, chunks.size());
+                ++failures;
+                break;
+            }
+        }
+        ++checked;
+    }
+    if (checked == 0) { std::println("FAIL: no plugins in {}", dir); return 1; }
+    std::println("{} {} synths", failures ? "ZERO FAIL" : "ZERO PASS", checked);
+    return failures ? 1 : 0;
+}
+
 int main(int argc, char** argv) {
     if (argc >= 3 && std::string_view(argv[1]) == "--time") return timeAll(argv[2], argc > 3 ? argv[3] : nullptr);
+    if (argc >= 3 && std::string_view(argv[1]) == "--zero") return zeroAll(argv[2], argc > 3 ? argv[3] : nullptr);
     if (argc < 3) {
         std::println(stderr, "usage: forms_equiv AUTO_BUILD_DIR SERIAL_BUILD_DIR [name-substring]");
         return 2;

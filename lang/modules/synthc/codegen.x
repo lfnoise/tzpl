@@ -14,6 +14,7 @@ import synthdef.*;
 import synthc.ir.*;
 import synthc.opnames.*;
 import synthc.recurrence.*;
+import synthc.types.*;
 
 ---------------------------------------------------------------------------
 -- Small helpers
@@ -93,8 +94,7 @@ fn viMul(a VIdx, b VIdx) VIdx {
 fn viDiv(a VIdx, b VIdx) VIdx {
 	if (a _viC && b _viC) { return VIdx.vc(a _viVal // b _viVal); }
 	if (a _viZero) { return VIdx.vc(0); }
-	if (a _viOne) { return b; }
-	if (b _viC && b _viVal == 1) { return a; }
+	if (b _viOne) { return a; }
 	VIdx.vdiv(a, b)
 }
 
@@ -707,10 +707,6 @@ fn _genReduce(ctx Ctx, n NIdx, op BinaryOp, cols Int, cel String) String {
 -- Vec op codegen: remap the channel index, then re-emit the (materialized)
 -- input at that index. The index algebra (VIdx) replicates the C++ VarIndex
 -- simplifications so the emitted subscript byte-matches.
-fn _transposeIdx(c VIdx, inChans Int, cols Int) VIdx {
-	let rows = inChans // cols;
-	viAdd(viMul(viRem(c, VIdx.vc(rows)), VIdx.vc(cols)), viDiv(c, VIdx.vc(rows)))
-}
 -- The (mono) amount is read at the loop element `cel`, not "0": in a flat
 -- voice loop that resolves to the current voice's slot.
 fn _rotateIdx(ctx Ctx, n NIdx, c VIdx, inChans Int, cel String) VIdx {
@@ -718,9 +714,116 @@ fn _rotateIdx(ctx Ctx, n NIdx, c VIdx, inChans Int, cel String) VIdx {
 	let r = "isize(" $ genExpr(ctx, nIn, cel) $ ")";
 	viMod(viAdd(c, VIdx.vs(r)), VIdx.vc(inChans))
 }
+-- Element c of a shape, split along dims index d into (outer block, index
+-- along the axis, inner offset), with the axis length and the inner size.
+-- Without outer blocks or inner elements the split is c itself, so the
+-- index expressions of row ops are unchanged.
+struct AxisSplit { o VIdx, a VIdx, i VIdx, inner Int }
+fn _axisSplit(c VIdx, sh Shape, d Int) AxisSplit {
+	let inner = sh innerSize(d);
+	let alen = sh.dims[d];
+	let outer = sh chans // max(alen * inner, 1);
+	var a = inner == 1 ? c : viDiv(c, VIdx.vc(inner));
+	if (outer > 1) { a = viRem(a, VIdx.vc(alen)); }
+	let o = outer > 1 ? viDiv(c, VIdx.vc(alen * inner)) : VIdx.vc(0);
+	let i = inner > 1 ? viRem(c, VIdx.vc(inner)) : VIdx.vc(0);
+	AxisSplit { o: o, a: a, i: i, inner: inner }
+}
+-- The flat index of element `src` along the axis (length alen) in the same
+-- outer block and inner offset.
+fn _axisJoin(s AxisSplit, src VIdx, alen Int) VIdx =
+	viAdd(viAdd(viMul(s.o, VIdx.vc(alen * s.inner)), viMul(src, VIdx.vc(s.inner))), s.i);
+
+-- The source element output element c of an axis op reads.
+fn _axisIdx(ctx Ctx, n NIdx, vop VecOp, c VIdx, cel String) VIdx {
+	let inp = ctx.ins[n][0];
+	let out = ctx.shape[n];
+	let d = out axisDim(vop vecAxis);
+	if (d < 0) { return c; }                 -- reported at import
+	let ain = ctx.shape[inp].dims[d];
+	let sp = _axisSplit(c, out, d);
+	let a = sp.a;
+	let src = match (vop) {
+		take(num, _):      num > ain ? viMod(a, VIdx.vc(ain)) : a;
+		drop(num, _):      viAdd(a, VIdx.vc(num));
+		stride(num, _):    viMul(a, VIdx.vc(num));
+		stutter(num, _):   viDiv(a, VIdx.vc(num));
+		ncyc(_, _):        viMod(a, VIdx.vc(ain));
+		slice(off, l, _):  off + l > ain ? viMod(viAdd(a, VIdx.vc(off)), VIdx.vc(ain)) : viAdd(a, VIdx.vc(off));
+		slicev(_, _):      _rotateIdx(ctx, n, a, ain, cel);
+		reverse(_):        viSub(VIdx.vc(ain - 1), a);
+		rotate(_):         _rotateIdx(ctx, n, a, ain, cel);
+		_:                 a;
+	};
+	_axisJoin(sp, src, ain)
+}
+
+-- permute: output element c's per-axis indices, read back through the
+-- input's strides with the axes permuted.
+fn _permuteIdx(c VIdx, ins Shape, out Shape, perm [Int]) VIdx {
+	let p = resolvePerm(ins, perm);
+	let r = ins.rank;
+	if (r < 2 || p length != r) { return c; }
+	let st = ins strides;
+	var idx = VIdx.vc(0);
+	var k = 0;
+	while (k < r) {
+		let d = MAX_RANK - r + k;            -- output axis k
+		let inner = out innerSize(d);
+		var e = inner == 1 ? c : viDiv(c, VIdx.vc(inner));
+		if (k > 0) { e = viRem(e, VIdx.vc(out.dims[d])); }
+		idx = viAdd(idx, viMul(e, VIdx.vc(st[MAX_RANK - r + p[k]])));
+		k = k + 1;
+	}
+	idx
+}
+
+-- reduce along an axis (or scan: the running result up to this element):
+-- the elements of the axis through this output element's position, `inner`
+-- apart in the materialized input.
+fn _genAxisFold(ctx Ctx, n NIdx, op BinaryOp, ax Int, c VIdx, cel String, isScan Bool) String {
+	let inp = ctx.ins[n][0];
+	let ins = ctx.shape[inp];
+	let d = ins axisDim(ax);
+	if (d < 0) { return genExpr(ctx, inp, cel); }
+	let alen = ins.dims[d];
+	if (alen == 1) { return genExpr(ctx, inp, c vxstr); }
+	let ty = cppType(ctx.typ[n]);
+	let lambda = "[](%^ z, %^ x){ return %^; }" fmt(ty, ty, genBinopStr(op, ctx.typ[n] _isF32, "z", "x"));
+	-- The output element's place in the input: a reduce's output lacks the
+	-- axis, so split the input with the axis at 0 (index 0 along it).
+	let sp = isScan ? _axisSplit(c, ins, d) : _axisSplit(_reduceToInput(c, ins, d), ins, d);
+	let base = _axisJoin(sp, VIdx.vc(0), alen) vxstr;
+	var arr = _varName(ctx, inp);
+	if (ctx _isVoiceLocalStorage(inp)) {
+		let shift = `cgFlatChanShift;
+		let voice = shift == 0 ? cel : "(%^ >> %^)" fmt(cel, shift);
+		arr = "%^ + %^ * %^" fmt(arr, voice, ctx.chans[inp]);
+	}
+	if (isScan) {
+		return "scan_at<%^>(%^, %^, %^, %^)" fmt(sp.inner, base, viAdd(sp.a, VIdx.vc(1)) vxstr, arr, lambda);
+	}
+	"reduce_rows<%^, %^>(%^, %^, %^)" fmt(alen, sp.inner, base, arr, lambda)
+}
+
+-- An input element index for output element c of a reduce along dims index
+-- d: c's outer block spread by the axis length (index 0 along the axis).
+fn _reduceToInput(c VIdx, ins Shape, d Int) VIdx {
+	let inner = ins innerSize(d);
+	let alen = ins.dims[d];
+	let outer = ins chans // (alen * inner);
+	if (outer == 1) { return c; }
+	let o = viDiv(c, VIdx.vc(inner));
+	let i = inner > 1 ? viRem(c, VIdx.vc(inner)) : VIdx.vc(0);
+	viAdd(viMul(o, VIdx.vc(alen * inner)), i)
+}
+
 fn _genVec(ctx Ctx, n NIdx, vop VecOp, cel String) String {
 	let inp = ctx.ins[n][0];
 	let inChans = ctx.chans[inp];
+	-- The indices below are the input's own elements, not channels of this
+	-- node's shape: no broadcast remapping when reading it.
+	var `cgDstShape = ctx.shape[inp];
 	-- at(a, i): a dynamic gather from the materialized array a by the index signal i
 	-- at channel cel, wrapped mod a.chans. Mirrors the C++ VecAt visitor.
 	match (vop) {
@@ -760,16 +863,15 @@ fn _genVec(ctx Ctx, n NIdx, vop VecOp, cel String) String {
 		&& (ctx _isInstVar(inp) || ctx.cut[inp] isTempVarCut);
 	let shift = `cgFlatChanShift;
 	let c = viOf(!flatVoice ? cel : (shift == 0 ? "0" : "(%^ & %^)" fmt(cel, `cgFlatChanMask)));
+	match (vop) {
+		reduceAxis(op, ax): { return ctx _genAxisFold(n, op, ax, c, cel, false); }
+		scan(op, ax):       { return ctx _genAxisFold(n, op, ax, c, cel, true); }
+		_: {}
+	}
 	let idx = match (vop) {
-		take(_):         c;
-		drop(num):       viAdd(c, VIdx.vc(num));
-		stride(num):     viMul(c, VIdx.vc(num));
-		stutter(num):    viDiv(c, VIdx.vc(num));
-		ncyc(_):         viMod(c, VIdx.vc(inChans));
-		reverse:         viSub(VIdx.vc(inChans - 1), c);
-		transpose(cols): _transposeIdx(c, inChans, cols);
-		rotate:          _rotateIdx(ctx, n, c, inChans, cel);
-		_:               c;
+		permute(p):      _permuteIdx(c, ctx.shape[inp], ctx.shape[n], p);
+		reshape(_):      c;
+		_:               ctx _axisIdx(n, vop, c, cel);
 	};
 	if (flatVoice) {
 		let voice = shift == 0 ? cel : "(%^ >> %^)" fmt(cel, shift);
@@ -858,11 +960,46 @@ fn _genVecPut(ctx Ctx, root NIdx) String {
 -- join(inputs): concatenate inputs into the output array (scalar inputs are plain
 -- assignments, multichannel use memcpy); zero-fill any power-of-two padding.
 -- A gets_own_loop block (mirror the C++ VecJoin).
+-- join along an axis with outer blocks (an axis other than the first in
+-- use): per block, each input's slab of (its axis length * inner) channels.
+fn _genVecJoinBlocks(ctx Ctx, root NIdx, d Int) String {
+	let ins = ctx.ins[root];
+	let ty = cppType(ctx.typ[root]);
+	let out = ctx.shape[root];
+	let inner = out innerSize(d);
+	let outBlock = out.dims[d] * inner;
+	let outer = out chans // outBlock;
+	let t = _tabs(`cgIndent);
+	let outv = `cgFlatOwnLoop ? "%^ + i * %^" fmt(_varName(ctx, root), out chans) : _varName(ctx, root);
+	var parts [String] = [];
+	var offset = 0;
+	for (x : ins) {
+		let xc = ctx.chans[x];
+		if (xc == 0) { continue; }
+		let slab = xc // outer;
+		let xv = `cgFlatOwnLoop ? ctx _voiceArr(x) : _varName(ctx, x);
+		parts push!(t $ "for (int _o = 0; _o < %^; ++_o) memcpy(%^ + _o * %^ + %^, %^ + _o * %^, %^ * sizeof(%^));"
+			fmt(outer, outv, outBlock, offset, xv, slab, slab, ty));
+		offset = offset + slab;
+	}
+	parts join("\n")
+}
+
 fn _genVecJoin(ctx Ctx, root NIdx) String {
 	let ins = ctx.ins[root];
 	let ty = cppType(ctx.typ[root]);
 	let outv = _varName(ctx, root);
 	let t = _tabs(`cgIndent);
+	match (ctx.kind[root]) {
+		vecK(vop): {
+			let out = ctx.shape[root];
+			let d = out axisDim(vop vecAxis);
+			if (d >= 0 && out chans > out.dims[d] * out innerSize(d)) {
+				return ctx _genVecJoinBlocks(root, d);
+			}
+		}
+		_: {}
+	}
 	var parts [String] = [];
 	var offset = 0;
 	if (`cgFlatOwnLoop) {
@@ -1785,6 +1922,7 @@ fn _genVoicer(ctx Ctx, root NIdx, mv Int) String {
 		s = s $ _tabs(`cgIndent) $ "auto& vs = p->voice_state[v];\n";
 		var `cgInVoiceLoop Bool = true;
 		var `cgVoiceIdx String = "v";
+		s = s $ ctx _aosVoiceBlockLoops(bg);
 		s = s $ genLoops(ctx, ctx.graphs[bg].audioLoops) $ ctx genDelayAdvance(bg);
 		s = s $ _tabs(`cgIndent - 1) $ "}\n";
 		return s;
@@ -1996,7 +2134,7 @@ fn genTree(ctx Ctx, treeIdx Int, cel String) String {
 		-- normal inline gather and falls through.
 		vecK(vop): { match (vop) {
 			put:  { return ctx _genVecPut(root); }
-			join: { return ctx _genVecJoin(root); }
+			join(_, _): { return ctx _genVecJoin(root); }
 			_:    {}
 		} }
 		_: {}
@@ -2206,16 +2344,26 @@ fn _noteParamFlatScalar(ctx Ctx, n NIdx, psn Int, cel String) String {
 -- no ternary/reduce; vec-reorder ops need per-element indices). Mirrors the
 -- disqualifying-expr scan in simdWidth(). VecTake/VecDrop are NOT disqualified.
 -- vec-reorder ops disqualify a loop from SIMD; take/drop do not.
-fn _vecSimdDisqualified(vop VecOp) Bool = match (vop) {
-	take(_): false;  drop(_): false;  _: true;
+-- Along an axis they qualify only as plain offsets: the last axis of a
+-- single row. reshape keeps every index.
+fn _vecSimdDisqualified(ctx Ctx, n NIdx, vop VecOp) Bool = match (vop) {
+	take(_, ax): !(ctx _rowAxis(n, ax));
+	drop(_, ax): !(ctx _rowAxis(n, ax));
+	reshape(_):  false;
+	_: true;
 };
+fn _rowAxis(ctx Ctx, n NIdx, ax Int) Bool {
+	let sh = ctx.shape[n];
+	let d = sh axisDim(ax);
+	d == MAX_RANK - 1 && sh.dims[d] == sh chans
+}
 -- Whether an expression disqualifies its loop from SIMD. ctx-aware so a delay's
 -- allocSize can gate it: M5.2 vectorizes 1-sample delays (allocSize==1); ring
 -- buffers + the variable-read interpolation are still deferred, as are buffers
 -- (M5.4). The C++ vectorizes all of these; disqualifying keeps synthc correct-
 -- scalar for those loops until their SIMD paths land.
 fn _exprSimdDisqualified(ctx Ctx, e NIdx) Bool = match (ctx.kind[e]) {
-	vecK(vop):            vop _vecSimdDisqualified;
+	vecK(vop):            ctx _vecSimdDisqualified(e, vop);
 	compareopK(_):        true;
 	selectK:              true;
 	reduceK(_, _):        true;
@@ -4027,6 +4175,22 @@ fn _guardedRootLoop(ctx Ctx, li Int) String {
 fn genVoiceBlockLoops(ctx Ctx, bg Int) String {
 	var s = "";
 	for (li : ctx _pgLoops(bg)) { s = s $ ctx _guardedVoiceLoop(li); }
+	s
+}
+
+-- An AoS voice body's block loops, inside the per-voice loop (voice `v`),
+-- each when its group is due for the voice. Without them the body's
+-- block-placed values (vs. members) were never computed.
+fn _aosVoiceBlockLoops(ctx Ctx, bg Int) String {
+	var s = "";
+	for (li : ctx _pgLoops(bg)) {
+		let g = ctx.loops[li].group;
+		var `cgIndent Int = `cgIndent + 1;
+		let code = ctx _pgLoopCode(li);
+		if (code length == 0) { continue; }
+		s = s $ _tabs(`cgIndent - 1) $ "if %^ {\n" fmt(_pgDue("pg%^[v]" fmt(g)))
+			$ code $ _tabs(`cgIndent - 1) $ "}\n";
+	}
 	s
 }
 

@@ -400,6 +400,24 @@ fn shapeInference(ctx Ctx) Void {
 		}
 	}
 	ctx _settleUnsetShapes;
+	ctx _checkShapeOps;
+}
+
+-- Shape operations whose operands' final shapes don't fit them (an axis
+-- the operand lacks, a reshape that does not divide, ...). Checked after
+-- inference: at import a recurrence's shape is not settled yet.
+fn _checkShapeOps(ctx Ctx) Void {
+	for (n : ctx.sorted) {
+		match (ctx.kind[n]) {
+			vecK(vop): {
+				var shs [Shape] = [];
+				for (x : ctx.ins[n]) { shs push!(ctx.shape[x]); }
+				let err = vecShape(vop, shs).1;
+				if (err length > 0 && !(ctx.errors contains(err))) { ctx.errors push!(err); }
+			}
+			_: {}
+		}
+	}
 }
 
 -- A value computed only from loop variables has no shape of its own after

@@ -981,8 +981,9 @@ fn dust(density AsSignal, chans Int = 1) S = urand(chans) * velvet(density, chan
 -- dust2 = `density` values of random bipolar values each second (on average), otherwise zero.
 fn dust2(density AsSignal, chans Int = 1) S = birand(chans) * velvet(density, chans);
 
--- randomly panned, randomly timed, ramdom amplitude impulses
-fn pandust(density AsSignal, chans Int = 1) S = urand(chans) panfuns join * velvet(density, chans);
+-- randomly panned, randomly timed, random amplitude impulses: a 2 x chans
+-- matrix (row 0 left, row 1 right); `sum(cols)` mixes it to stereo.
+fn pandust(density AsSignal, chans Int = 1) S = urand(chans) panfuns stack * velvet(density, chans);
 
 fn dustep(freq AsSignal, chans Int = 1) S = white(chans) sampleAndHold(velvet(freq, chans));
 

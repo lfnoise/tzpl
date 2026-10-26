@@ -197,6 +197,38 @@ fn toString(s Shape) String {
 	parts join("x")
 }
 
+-- The dims index (0 .. MAX_RANK - 1) of an axis of s: axis 0 is the
+-- outermost in use, negatives count from the last. A scalar counts as a row.
+-- -1 when the axis is outside -r .. r - 1.
+fn axisDim(s Shape, axis Int) Int {
+	let r = max(s.rank, 1);
+	if (axis < 0 - r || axis >= r) { return -1; }
+	axis < 0 ? MAX_RANK + axis : MAX_RANK - r + axis
+}
+
+-- s with dims index d set to n; the rank grows to cover d.
+fn withDim(s Shape, d Int, n Int) Shape {
+	var dims = s.dims copy;
+	dims[d] = n;
+	Shape { dims: dims, rank: max(s.rank, MAX_RANK - d) }
+}
+
+-- s without dims index d (rank one less).
+fn removeDim(s Shape, d Int) Shape {
+	var dims = [1];
+	var k = 0;
+	while (k < MAX_RANK) { if (k != d) { dims push!(s.dims[k]); } k = k + 1; }
+	Shape { dims: dims, rank: max(s.rank, MAX_RANK - d) - 1 }
+}
+
+-- Channels per step along dims index d: the product of the dims after it.
+fn innerSize(s Shape, d Int) Int {
+	var n = 1;
+	var k = d + 1;
+	while (k < MAX_RANK) { n = n * s.dims[k]; k = k + 1; }
+	n
+}
+
 -- A leading voice dimension: n copies of s (for voicers). A rank-4 shape
 -- folds the new dimension into its first.
 fn prependDim(s Shape, n Int) Shape {
@@ -498,23 +530,27 @@ fn numTypeInt(op CastOp) Int {
 	}
 }
 
+-- Shape operations. An `Int` axis is as written (resolved against the
+-- operand's rank by the compiler): 0 is the outermost, negatives count from
+-- the last (cols = -1).
 enum VecOp {
 	at,
 	put,
-	take Int,
-	drop Int,
-	stride Int,
-	stutter Int,
-	ncyc Int,
-	rotate,
-	reverse,
-	transpose Int,
-	join,
-	reduce(BinaryOp, Int),
-	sum Int,
-	prod Int,
-	minOf Int,
-	maxOf Int,
+	take(Int, Int),          -- n, axis
+	drop(Int, Int),          -- n, axis
+	stride(Int, Int),        -- n, axis
+	stutter(Int, Int),       -- n, axis
+	ncyc(Int, Int),          -- n, axis
+	slice(Int, Int, Int),    -- offset, length, axis
+	slicev(Int, Int),        -- length, axis; the offset is input 1 (a signal)
+	rotate Int,              -- axis; the amount is input 1 (a signal)
+	reverse Int,             -- axis
+	permute [Int],           -- axes: output axis k is input axis perm[k]
+	reshape [Int],           -- dims (one may be -1); the flattening is unchanged
+	join(Int, Bool),         -- axis, whether it is a new axis (stack)
+	reduce BinaryOp,         -- every channel to one
+	reduceAxis(BinaryOp, Int),   -- along an axis, which goes away
+	scan(BinaryOp, Int),     -- running op along an axis
 }
 
 enum Interpolation {
@@ -1140,34 +1176,75 @@ fn put(a AsSignal, i AsSignal, v AsSignal) S {
 -- fn matmul(a S, b AsSignal) S = SignalExprKind.vecop(VecOp.at) _newSignalExpr([a asSignal, i asSignal]);
 -- fn matmul(a AsSignal, b S) S = SignalExprKind.vecop(VecOp.at) _newSignalExpr([a asSignal, i asSignal]);
 
-fn take(a S, n Int) S = SignalExprKind.vecop(VecOp.take(n pow2Compat)) _newSignalExpr([a]);
+-- Axes: 0 is the outermost, negatives count from the last, so these name the
+-- same axis at any rank. The shape operations default to the last axis.
+const cols = -1;
+const rows = -2;
+const planes = -3;
 
-fn drop(a S, n Int) S = SignalExprKind.vecop(VecOp.drop(n)) _newSignalExpr([a]);
+fn take(a S, n Int, axis Int = -1) S =
+	SignalExprKind.vecop(VecOp.take(n pow2Compat, axis)) _newSignalExpr([a]);
 
-fn stride(a S, n Int) S = SignalExprKind.vecop(VecOp.stride(n pow2Compat)) _newSignalExpr([a]);
+fn drop(a S, n Int, axis Int = -1) S =
+	SignalExprKind.vecop(VecOp.drop(n, axis)) _newSignalExpr([a]);
 
-fn stutter(a S, n Int) S = SignalExprKind.vecop(VecOp.stutter(n pow2Compat)) _newSignalExpr([a]);
+fn stride(a S, n Int, axis Int = -1) S =
+	SignalExprKind.vecop(VecOp.stride(n pow2Compat, axis)) _newSignalExpr([a]);
 
-fn ncyc(a S, n Int) S = SignalExprKind.vecop(VecOp.ncyc(n pow2Compat)) _newSignalExpr([a]);
+fn stutter(a S, n Int, axis Int = -1) S =
+	SignalExprKind.vecop(VecOp.stutter(n pow2Compat, axis)) _newSignalExpr([a]);
 
-fn rotate(a AsSignal, b AsSignal) S = SignalExprKind.vecop(VecOp.rotate) _newSignalExpr([a asSignal, b asSignal]);
+fn ncyc(a S, n Int, axis Int = -1) S =
+	SignalExprKind.vecop(VecOp.ncyc(n pow2Compat, axis)) _newSignalExpr([a]);
 
-fn reverse(a S) S = SignalExprKind.vecop(VecOp.reverse) _newSignalExpr([a]);
+-- `length` elements from `offset` along the axis, wrapping past its end.
+fn slice(a S, offset Int, length Int, axis Int = -1) S =
+	SignalExprKind.vecop(VecOp.slice(offset, length, axis)) _newSignalExpr([a]);
+-- A varying offset (an integer signal, as for `at`; the length stays fixed).
+fn slice(a S, offset S, length Int, axis Int = -1) S =
+	SignalExprKind.vecop(VecOp.slicev(length, axis)) _newSignalExpr([a, offset]);
 
-fn transpose(a S, n Int) S = SignalExprKind.vecop(VecOp.transpose(n pow2Compat)) _newSignalExpr([a]);
+-- Output element k along the axis reads element k + amount, wrapping.
+fn rotate(a AsSignal, amount AsSignal, axis Int = -1) S =
+	SignalExprKind.vecop(VecOp.rotate(axis)) _newSignalExpr([a asSignal, amount asSignal]);
 
-fn join(a [S]) S = SignalExprKind.vecop(VecOp.join) _newSignalExpr(a);
+fn reverse(a S, axis Int = -1) S = SignalExprKind.vecop(VecOp.reverse(axis)) _newSignalExpr([a]);
 
-fn reduce(a S, op BinaryOp, chans Int = 1) S {
-    SignalExprKind.vecop(VecOp.reduce(op, chans max(1) pow2Compat)) _newSignalExpr([a])
-}
-fn sum(a S, chans Int = 1) S = a reduce(BinaryOp.add, chans);
+-- The axes reversed (a matrix transposed).
+fn transpose(a S) S = SignalExprKind.vecop(VecOp.permute([Int]())) _newSignalExpr([a]);
+-- The axes permuted: output axis k is input axis perm[k].
+fn transpose(a S, perm [Int]) S = SignalExprKind.vecop(VecOp.permute(perm)) _newSignalExpr([a]);
 
-fn product(a S, chans Int = 1) S = a reduce(BinaryOp.mul, chans);
+-- The same channels in a new shape (one dim may be -1: whatever is left).
+fn reshape(a S, dims [Int]) S = SignalExprKind.vecop(VecOp.reshape(dims)) _newSignalExpr([a]);
+fn reshape(a S, sh Shape) S = a reshape(sh dimsInUse);
 
-fn minOf(a S, chans Int = 1) S = a reduce(BinaryOp.min, chans);
+-- Concatenation along an axis; the other dims must agree.
+fn join(a [S], axis Int = -1) S = SignalExprKind.vecop(VecOp.join(axis, false)) _newSignalExpr(a);
+-- The signals (all of one shape) along a new axis, which is `axis` of the
+-- result: [l, r] stack is a 2 x n matrix of n-channel l and r.
+fn stack(a [S], axis Int = 0) S = SignalExprKind.vecop(VecOp.join(axis, true)) _newSignalExpr(a);
 
-fn maxOf(a S, chans Int = 1) S = a reduce(BinaryOp.max, chans);
+-- reduce(op): every channel to one. reduce(op, axis): along an axis, which
+-- goes away (a voicer of stereo voices, voices x 2, sum(0) is stereo).
+fn reduce(a S, op BinaryOp) S = SignalExprKind.vecop(VecOp.reduce(op)) _newSignalExpr([a]);
+fn reduce(a S, op BinaryOp, axis Int) S =
+	SignalExprKind.vecop(VecOp.reduceAxis(op, axis)) _newSignalExpr([a]);
+-- Running op along an axis: element k combines elements 0..k.
+fn scan(a S, op BinaryOp, axis Int = -1) S =
+	SignalExprKind.vecop(VecOp.scan(op, axis)) _newSignalExpr([a]);
+
+fn sum(a S) S = a reduce(BinaryOp.add);
+fn sum(a S, axis Int) S = a reduce(BinaryOp.add, axis);
+
+fn product(a S) S = a reduce(BinaryOp.mul);
+fn product(a S, axis Int) S = a reduce(BinaryOp.mul, axis);
+
+fn minOf(a S) S = a reduce(BinaryOp.min);
+fn minOf(a S, axis Int) S = a reduce(BinaryOp.min, axis);
+
+fn maxOf(a S) S = a reduce(BinaryOp.max);
+fn maxOf(a S, axis Int) S = a reduce(BinaryOp.max, axis);
 
 
 ---------------------------------------------------------------------------

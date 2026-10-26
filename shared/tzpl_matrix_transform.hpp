@@ -492,6 +492,18 @@ T reduce_rows(usize col, T const* in, F f) {
     return z;
 }
 
+// The running f over `count` elements Stride apart from in[base]: one
+// element of a scan along an axis.
+template <usize Stride, typename T, typename F>
+T scan_at(usize base, usize count, T const* in, F f) {
+    T const* inp = in + base;
+    T z = inp[0];
+    for (usize k = 1; k < count; ++k) {
+        z = f(z, inp[k * Stride]);
+    }
+    return z;
+}
+
 template <typename T, usize Rows, usize Middle, usize Cols>
 void matrix_multiply(T const* a, T const* b, T const* c) {
     for (usize i = 0; i < Rows; ++i) {

@@ -1753,7 +1753,7 @@ failure. <code>drone meter; drone peak println</code> (&sect;12.6) reads the
 proxy's output level directly.</div>
 <pre><code>fadeTime(<span class="num">4.0</span>);                   <span class="cmt">-- slow morphs from here on</span>
 drone &lt;- <span class="kw">fn</span>() <span class="typ">S</span> {
-    (sinosc([<span class="num">1.0</span>, <span class="num">1.5</span>, <span class="num">2.01</span>, <span class="num">3.0</span>] * <span class="num">110.0</span>) sum(<span class="num">2</span>)) * <span class="num">0.12</span>
+    (sinosc([<span class="num">1.0</span>, <span class="num">1.5</span>, <span class="num">2.01</span>, <span class="num">3.0</span>] * <span class="num">110.0</span>) reshape([<span class="num">2</span>, <span class="num">2</span>]) sum(<span class="num">0</span>)) * <span class="num">0.12</span>
 };</code></pre>
 <p><code>play</code> and <code>stop</code> only control what you hear:
 <code>drone amp(0.5)</code> ramps the listening level without affecting any proxy

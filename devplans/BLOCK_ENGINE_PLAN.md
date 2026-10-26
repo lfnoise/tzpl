@@ -763,7 +763,16 @@ signal's row-major flattening and produce rows. With tensor signals they need an
   `stutter(k, axis)`, `slice(offset, length, axis)`, `reverse(axis)`,
   `rotate(amount, axis)`, `reduce(op, axis)`, `scan(op, axis)`; `join(axis)` concatenates
   along an axis, and `transpose` generalizes to a permutation of axes. `at`/`put` index
-  along an axis.
+  along an axis. Also `stack(axis)` (signals of one shape along a new axis) and
+  `reshape(dims)` (the same channels in a new shape, one dim may be −1).
+- **Tensor dimensions rule every operation (decided 2026-10-26).** No operation reads a
+  flat list of channels as rows and columns: the old fold `sum(n)` (channel j into
+  j mod n) and `transpose(n)` (the flattening as an n-column matrix) are removed. A
+  stereo mixdown comes from a real axis: a voicer of stereo voices is voices×2 and
+  `sum(0)` mixes it; `[l, r] stack sum(cols)` mixes panned banks; `pandust` returns
+  2×chans.
+- **The `Int` argument is the axis (decided 2026-10-26):** `sum(axis)`, `take(n, axis)`,
+  ...; `sum` with no argument reduces every channel to one (as NumPy's `axis=None`).
 - **Axis numbering (decided 2026-10-26), outer to inner, zero-based, as in J and
   NumPy:** for a value of rank r, axis 0 is the outermost and axis r − 1 the last (the
   columns). Negative axes count from the last, as in NumPy: −1 is the columns, −2 the
@@ -1747,6 +1756,34 @@ Progress (2026-10-26; M8 is done; §4.8 tensor shape operations follow as M8b):
 - `slice` with a varying offset and `rotate` with a varying amount: pointer tables
   rebuilt per parameter-group change at block rate, gathers at audio rate.
 - Docs (`Writing_SynthDefs.html` §5) and tests per §4.8.
+
+Progress (2026-10-26):
+- **Rank:** `Shape.rank` in `synthdef.x` and synthc; `tzpl_Shape.rank` in the ABI (shape
+  equality compares it; `validShape` refuses dims outside it). Signals sized by a
+  channel count are a scalar for one channel (`chansShape`, `tzpl::shapeChans`), so
+  mono voices and their voicers keep their shapes.
+- **Axis operations:** take, drop, stride, stutter, ncyc, slice (constant or integer
+  signal offset), rotate, reverse, transpose (reversed axes or a permutation), reshape,
+  join, stack, reduce/sum/product/minOf/maxOf along an axis or over everything, scan.
+  Shape inference in `types.x` (`vecShape`), errors at import (axis out of range,
+  shapes that differ off the axis, a reshape that does not divide, ...). Codegen splits
+  an element index into (outer block, index along the axis, inner offset): the static
+  operations are index maps into the materialized input, and for a row the split is the
+  index itself, so every dump golden was unchanged. Reduce along an axis is
+  `reduce_rows<len, inner>` at the element's base; scan is `scan_at<inner>`; join and
+  stack along an inner axis copy one slab per outer block.
+- **Corpus:** `sum(2)`/`sum(n)` and `transpose(n)` rewritten with axes.
+- **Test:** `run_shape_ops_test.sh` (in CI): 208 cases on ranks 1–3 at every axis, and
+  in voicers (flat and per-voice structs), each outputting (result − a reference computed
+  on flat arrays) = 0 in whole blocks and odd chunks, auto and serial forms; result
+  shapes from the analysis dump; the compile errors.
+- **Found on the way:** an AoS (per-voice struct) voicer never ran its voice body's
+  block-placed loops, so a block-rate value such as a note parameter times a constant
+  tensor read 0 — fixed (`_aosVoiceBlockLoops`). `viDiv(1, b)` returned b.
+- **Not done:** `at`/`put` along an axis (they still index the flattening); the varying
+  `slice`/`rotate` is a per-element `mod` index (no pointer tables rebuilt per
+  parameter-group change yet); index maps are not yet folded into consumers' channel
+  tables (each operation's input is materialized, as before).
 
 **M9: Voicer block form (§4.6), portability and performance.**
 - Channel-vector loops over voices, skipping idle groups, per-voice parameter caches.

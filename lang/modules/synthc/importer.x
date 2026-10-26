@@ -7,6 +7,7 @@
 
 import synthdef.*;
 import synthc.ir.*;
+import synthc.types.*;
 import synthc.fold.*;
 import synthc.rewrite.*;
 
@@ -116,19 +117,33 @@ fn _constValKey(v ConstVal) String = match (v) {
 	}
 };
 
+-- The axis suffix of a vec op key: none for the default (last) axis, so
+-- the keys of row ops are as before.
+fn _axKey(ax Int) String = ax == -1 ? "" : "a" $ ax toString;
+fn _intsKey(xs [Int]) String {
+	var parts [String] = [];
+	for (x : xs) { parts push!(x toString); }
+	parts join(",")
+}
+
 fn _vecOpKey(vop VecOp) String = match (vop) {
-	take(n):      "t" $ n toString;
-	drop(n):      "d" $ n toString;
-	stride(n):    "s" $ n toString;
-	stutter(n):   "u" $ n toString;
-	ncyc(n):      "c" $ n toString;
-	reverse:      "r";
-	transpose(n): "x" $ n toString;
-	rotate:       "o";
-	at:           "@";
-	put:          "P";
-	join:         "J";
-	_:            "?";
+	take(n, ax):      "t" $ n toString $ _axKey(ax);
+	drop(n, ax):      "d" $ n toString $ _axKey(ax);
+	stride(n, ax):    "s" $ n toString $ _axKey(ax);
+	stutter(n, ax):   "u" $ n toString $ _axKey(ax);
+	ncyc(n, ax):      "c" $ n toString $ _axKey(ax);
+	slice(o, l, ax):  "l" $ o toString $ ":" $ l toString $ _axKey(ax);
+	slicev(l, ax):    "L" $ l toString $ _axKey(ax);
+	reverse(ax):      "r" $ _axKey(ax);
+	permute(p):       "X" $ _intsKey(p);
+	reshape(d):       "h" $ _intsKey(d);
+	rotate(ax):       "o" $ _axKey(ax);
+	at:               "@";
+	put:              "P";
+	join(ax, new):    (new ? "K" : "J") $ _axKey(ax);
+	reduceAxis(op, ax): "A" $ op ordinal toString $ "|" $ ax toString;
+	scan(op, ax):     "S" $ op ordinal toString $ "|" $ ax toString;
+	_:                "?";
 };
 
 fn _kindKey(kind NodeKind) String = match (kind) {
@@ -617,38 +632,30 @@ fn _makeReduce(ctx Ctx, ins [Int], op BinaryOp, cols Int) Int {
 	_addExprNode(NodeKind.reduceK(op, cols), ins, ctx.nrate[ins[0]], ctx.typ[ins[0]], chansShape(cols))
 }
 
--- Output channel count of a vec op over flattened channels. at = the index
--- vector's chans; put = the source array's chans; join = sum of all inputs;
--- the single-input reorders use vecOutChans. The result is a row (vec ops
--- work on the row-major flattening; shaped views are a later step).
-fn _vecChans(ctx Ctx, vop VecOp, ins [Int]) Int = match (vop) {
-	at:   ctx.chans[ins[1]];
-	put:  ctx.chans[ins[0]];
-	join: { var raw = 0; for (x : ins) { raw = raw + ctx.chans[x]; } raw pow2Compat }
-	_:    vecOutChans(ctx.chans[ins[0]], vop);
-};
 fn _vecRate(ctx Ctx, vop VecOp, ins [Int]) Rate = match (vop) {
-	rotate: _maxRateOf(ins);               -- rotate's amount can be a signal
-	at:     _maxRateOf(ins);               -- max(a, i)
-	put:    _maxRateOf(ins);               -- max(a, i, v)
-	join:   _maxRateOf(ins);               -- max of all inputs
-	_:      ctx.nrate[ins[0]];
+	rotate(_):    _maxRateOf(ins);         -- rotate's amount can be a signal
+	slicev(_, _): _maxRateOf(ins);         -- so can slice's offset
+	at:           _maxRateOf(ins);         -- max(a, i)
+	put:          _maxRateOf(ins);         -- max(a, i, v)
+	join(_, _):   _maxRateOf(ins);         -- max of all inputs
+	_:            ctx.nrate[ins[0]];
 };
 
 fn _importVecOp(e SignalExpr, vop VecOp) Void {
 	var ctx Ctx = `scCtx;
 	let ins = e _resolveIns;
 	match (vop) {
-		reduce(op, cols): { _mapId(e.id, _makeReduce(ctx, ins, op, cols)); }
-		sum(cols):        { _mapId(e.id, _makeReduce(ctx, ins, BinaryOp.add, cols)); }
-		prod(cols):       { _mapId(e.id, _makeReduce(ctx, ins, BinaryOp.mul, cols)); }
-		minOf(cols):      { _mapId(e.id, _makeReduce(ctx, ins, BinaryOp.min, cols)); }
-		maxOf(cols):      { _mapId(e.id, _makeReduce(ctx, ins, BinaryOp.max, cols)); }
+		reduce(op):       { _mapId(e.id, _makeReduce(ctx, ins, op, 1)); }
 		_: {
 			-- take/drop/stride/stutter/ncyc/rotate/reverse/transpose/at/put/join:
 			-- no folding, initial type = any (narrowed to the input type by inference).
+			var shs [Shape] = [];
+			for (x : ins) { shs push!(ctx.shape[x]); }
+			-- Errors are reported after shape inference (passes.x
+			-- _checkShapeOps): a recurrence's shape is not settled yet.
+			let sh = vecShape(vop, shs).0;
 			_mapId(e.id, _addExprNode(NodeKind.vecK(vop), ins,
-				ctx _vecRate(vop, ins), ANY_NUM, chansShape(ctx _vecChans(vop, ins))));
+				ctx _vecRate(vop, ins), ANY_NUM, sh));
 		}
 	}
 }

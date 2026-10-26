@@ -184,7 +184,7 @@ enum NodeKind {
 	compareopK(CompareOp),
 	castopK(NumType),                    -- cast_type
 	reduceK(BinaryOp, Int),              -- op, cols
-	vecK(VecOp),                         -- take/drop/stride/stutter/ncyc/rotate/reverse/transpose
+	vecK(VecOp),                         -- the shape operations (synthdef.x VecOp)
 	selectK,
 
 	urandK(Int),                         -- serial
@@ -240,37 +240,32 @@ fn isSinkKind(k NodeKind) Bool = match (k) {
 	_:                   false;
 };
 
--- Mirrors Expr::should_hash_cons().
--- Output channel count for a vec op given its input chans (mirrors each
--- VecXxxExpr::calcShape). reverse/transpose/rotate keep the size.
-fn vecOutChans(inChans Int, vop VecOp) Int = match (vop) {
-	take(n):      n;
-	drop(n):      inChans - n;
-	stride(n):    (inChans + n - 1) // n;
-	stutter(n):   inChans * n;
-	ncyc(n):      inChans * n;
-	_:            inChans;
-};
-
--- Dump str() for the vec ops (mirrors VecXxxExpr::str()).
+-- Dump str() for the vec ops (mirrors VecXxxExpr::str()); a non-default
+-- axis is appended.
+fn _vecAx(ax Int) String = ax == -1 ? "" : ", axis %^" fmt(ax);
 fn _vecStr(vop VecOp) String = match (vop) {
-	take(n):      "vec_take(%^)" fmt(n);
-	drop(n):      "vec_drop(%^)" fmt(n);
-	stride(n):    "vec_stride(%^)" fmt(n);
-	stutter(n):   "vec_stutter(%^)" fmt(n);
-	ncyc(n):      "vec_ncyc(%^)" fmt(n);
-	reverse:      "vec_reverse";
-	transpose(n): "vec_transpose(%^)" fmt(n);
-	rotate:       "vec_rotate";
-	at:           "vec_at";
-	put:          "vec_put";
-	join:         "vec_join";
-	_:            "vec_?";
+	take(n, ax):      "vec_take(%^%^)" fmt(n, _vecAx(ax));
+	drop(n, ax):      "vec_drop(%^%^)" fmt(n, _vecAx(ax));
+	stride(n, ax):    "vec_stride(%^%^)" fmt(n, _vecAx(ax));
+	stutter(n, ax):   "vec_stutter(%^%^)" fmt(n, _vecAx(ax));
+	ncyc(n, ax):      "vec_ncyc(%^%^)" fmt(n, _vecAx(ax));
+	slice(o, l, ax):  "vec_slice(%^, %^%^)" fmt(o, l, _vecAx(ax));
+	slicev(l, ax):    "vec_slice(*, %^%^)" fmt(l, _vecAx(ax));
+	reverse(ax):      ax == -1 ? "vec_reverse" : "vec_reverse(axis %^)" fmt(ax);
+	permute(p):       "vec_permute(%^)" fmt(p);
+	reshape(d):       "vec_reshape(%^)" fmt(d);
+	rotate(ax):       ax == -1 ? "vec_rotate" : "vec_rotate(axis %^)" fmt(ax);
+	at:               "vec_at";
+	put:              "vec_put";
+	join(ax, new):    new ? "vec_stack(axis %^)" fmt(ax) : (ax == -1 ? "vec_join" : "vec_join(axis %^)" fmt(ax));
+	reduceAxis(op, ax): "reduce(%^, axis %^)" fmt(op binopStr, ax);
+	scan(op, ax):     "scan(%^, axis %^)" fmt(op binopStr, ax);
+	_:                "vec_?";
 };
 
 -- A vop whose output is built by its own block (memcpy/scatter), so it gets its
 -- own loop with no per-channel for-wrapper. Mirrors VecPut/VecJoin gets_own_loop().
-fn _vecGetsOwnLoop(vop VecOp) Bool = match (vop) { put: true; join: true; _: false; };
+fn _vecGetsOwnLoop(vop VecOp) Bool = match (vop) { put: true; join(_, _): true; _: false; };
 
 fn shouldHashCons(k NodeKind) Bool = match (k) {
 	inletK(_, _, _):        false;
@@ -298,7 +293,7 @@ fn isConstantKind(k NodeKind) Bool = match (k) {
 -- materialize all inputs; the reorders need input 0.
 fn needsInputTempVar(k NodeKind, i Int) Bool = match (k) {
 	reduceK(_, _): true;
-	vecK(vop):     match (vop) { put: true; join: true; _: i == 0; };
+	vecK(vop):     match (vop) { put: true; join(_, _): true; _: i == 0; };
 	phiK(_):       true;     -- PhiNodeExpr::needs_input_temp_var
 	_:             false;
 };
@@ -315,7 +310,7 @@ fn outputMustBeSeparateLoop(k NodeKind) Bool = getsOwnLoop(k);
 -- reorders force input 0; at forces all inputs; put/join force all (gets_own_loop).
 fn inputMustBeSeparateLoop(k NodeKind, i Int) Bool = match (k) {
 	reduceK(_, _): true;
-	vecK(vop):     match (vop) { at: true; put: true; join: true; _: i == 0; };
+	vecK(vop):     match (vop) { at: true; put: true; join(_, _): true; _: i == 0; };
 	_:             false;
 };
 

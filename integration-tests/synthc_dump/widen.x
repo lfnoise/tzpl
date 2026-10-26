@@ -38,7 +38,7 @@ fn neoSmpl() S {
 		let h = bank lookup(pitch, vel);
 		let pos = loopPhasorX(h length, bankRate(h, pitch), gate(), lpa, lpb);
 		h bankRead(pos) * vel velAmp
-	}) sum(2) outlet
+	}) sum(0) outlet
 }
 
 dumpCorpus([

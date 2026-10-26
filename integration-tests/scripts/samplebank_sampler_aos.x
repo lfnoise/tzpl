@@ -22,7 +22,7 @@ fn samplerAoS() S {
 		let pos = d read(1);
 		(pos + rate) -> d;
 		g pause(fn() S { h vread(pos, Interpolation.cubic) f32 })
-	}) sum(1) outlet
+	}) sum outlet
 }
 
 defSynthX(samplerAoS, "sbSamplerAoS");

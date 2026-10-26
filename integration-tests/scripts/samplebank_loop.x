@@ -26,7 +26,7 @@ fn loopSampler() S {
 		-- The note is never released in this test, so g stays 1; sus alone
 		-- decides whether the playhead keeps looping or runs out.
 		h vread(loopPhasor(h, rate, sus), Interpolation.cubic) f32 * g
-	}) sum(1) outlet
+	}) sum outlet
 }
 
 defSynthX(loopSampler, "sblSampler");

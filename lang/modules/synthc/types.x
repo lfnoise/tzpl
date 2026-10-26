@@ -48,24 +48,208 @@ fn _noShape() Shape = shape([0]);
 -- inputs).
 fn _vecInputConstraint(vop VecOp, nodeTyp NumType, i Int) NumType = match (vop) {
 	put:  i == 1 ? ANY_INT : nodeTyp;
-	join: nodeTyp;
+	join(_, _): nodeTyp;
 	_:    i == 0 ? nodeTyp : ANY_INT;
 };
 fn _vecNarrowType(ctx Ctx, n NIdx, vop VecOp, ins [Int]) NumType = match (vop) {
 	put:  ctx.typ[n] & ctx.typ[ins[0]] & ctx.typ[ins[2]];
-	join: { var t = ctx.typ[n]; for (x : ins) { t = t & ctx.typ[x]; } t }
+	join(_, _): { var t = ctx.typ[n]; for (x : ins) { t = t & ctx.typ[x]; } t }
 	_:    ctx.typ[n] & ctx.typ[ins[0]];
 };
 
--- Vec ops work on the row-major flattening of their input and yield a row.
--- at = the index vector's chans; put = the source array's chans; join = the
--- sum of all inputs; the single-input reorders use vecOutChans.
-fn _vecShapeOf(ctx Ctx, vop VecOp, ins [Int]) Shape = match (vop) {
-	at:   chansShape(ctx.chans[ins[1]]);
-	put:  chansShape(ctx.chans[ins[0]]);
-	join: { var raw = 0; for (x : ins) { raw = raw + ctx.chans[x]; } chansShape(raw pow2Compat) }
-	_:    chansShape(vecOutChans(ctx.chans[ins[0]], vop));
+-- Vec op shapes. at = the index vector's chans; put = the source array's
+-- chans; reduce(op) is a scalar. The axis
+-- ops change one axis (reduceAxis removes it); join sums the axis over its
+-- inputs; permute reorders the axes; reshape keeps the channels.
+fn _vecShapeOf(ctx Ctx, vop VecOp, ins [Int]) Shape {
+	var shs [Shape] = [];
+	for (x : ins) { shs push!(ctx.shape[x]); }
+	vecShape(vop, shs).0
+}
+
+-- The axis a single-operand axis op works along.
+fn vecAxis(vop VecOp) Int = match (vop) {
+	take(_, ax): ax;  drop(_, ax): ax;  stride(_, ax): ax;  stutter(_, ax): ax;
+	ncyc(_, ax): ax;  slice(_, _, ax): ax;  slicev(_, ax): ax;  rotate(ax): ax;
+	reverse(ax): ax;  reduceAxis(_, ax): ax;  scan(_, ax): ax;  join(ax, _): ax;
+	_: -1;
 };
+
+fn _isAxisOp(vop VecOp) Bool = match (vop) {
+	at: false;  put: false;  permute(_): false;  reshape(_): false;
+	join(_, _): false;  reduce(_): false;  _: true;
+};
+
+-- The result shape, and an error ("" when none).
+fn vecShape(vop VecOp, shs [Shape]) (Shape, String) {
+	let s = shs[0];
+	match (vop) {
+		at:            (chansShape(shs[1] chans), "");
+		put:           (chansShape(s chans), "");
+		reduce(_):     (scalarShape(), "");
+		join(ax, new): new ? _stackShape(shs, ax) : _joinShape(shs, ax);
+		permute(p):    _permuteShape(s, p);
+		reshape(dims): _reshapeShape(s, dims);
+		_:             _axisOpShape(vop, s);
+	}
+}
+
+fn _axisErr(ax Int, s Shape) String = "axis %^ is outside a rank-%^ signal" fmt(ax, max(s.rank, 1));
+
+fn _axisOpShape(vop VecOp, s Shape) (Shape, String) {
+	if (s chans == 0) { return (s, ""); }        -- not known yet
+	let ax = vop vecAxis;
+	let d = s axisDim(ax);
+	if (d < 0) { return (s, _axisErr(ax, s)); }
+	let a = s.dims[d];
+	if (vop isReduceAxis) {
+		return (s removeDim(d), "");
+	}
+	let len = match (vop) {
+		take(n, _):     n;
+		drop(n, _):     a - n;
+		stride(n, _):   (a + n - 1) // n;
+		stutter(n, _):  a * n;
+		ncyc(n, _):     a * n;
+		slice(_, l, _): l;
+		slicev(l, _):   l;
+		_:              a;
+	};
+	if (len < 1) { return (s, "%^ leaves no elements along axis %^" fmt(vop _vecName, ax)); }
+	-- A scalar stays one when the op leaves it one element.
+	if (s.rank == 0 && len == 1) { return (s, ""); }
+	let out = s withDim(d, len);
+	-- Rows keep the verification-only power-of-two rounding (row()).
+	if (out.rank == 1) { return (row(len), ""); }
+	(out, "")
+}
+
+fn isReduceAxis(vop VecOp) Bool = match (vop) { reduceAxis(_, _): true; _: false; };
+
+fn _vecName(vop VecOp) String = match (vop) {
+	take(_, _): "take";  drop(_, _): "drop";  stride(_, _): "stride";
+	stutter(_, _): "stutter";  ncyc(_, _): "ncyc";  slice(_, _, _): "slice";
+	slicev(_, _): "slice";  _: "shape op";
+};
+
+-- Concatenation along an axis of the inputs at their largest rank (a scalar
+-- counts as a row). Inputs not known yet (0 channels) are skipped.
+fn _joinShape(shs [Shape], ax Int) (Shape, String) {
+	var r = 1;
+	for (x : shs) { if (x chans > 0) { r = max(r, x.rank); } }
+	var out = noShapeOfRank(r);
+	var d = -1;
+	var total = 0;
+	var first = true;
+	for (x0 : shs) {
+		if (x0 chans == 0) { continue; }
+		let x = Shape { dims: x0.dims, rank: r };
+		if (first) {
+			d = x axisDim(ax);
+			if (d < 0) { return (x, _axisErr(ax, x)); }
+			out = x;
+			first = false;
+		} else {
+			var k = 0;
+			while (k < MAX_RANK) {
+				if (k != d && x.dims[k] != out.dims[k]) {
+					return (out, "join: shapes %^ and %^ differ off axis %^" fmt(out toString, x toString, ax));
+				}
+				k = k + 1;
+			}
+		}
+		total = total + x.dims[d];
+	}
+	if (first) { return (noShapeOfRank(1), ""); }
+	if (r == 1) { return (chansShape(total pow2Compat), ""); }
+	(out withDim(d, total), "")
+}
+
+-- Signals of one shape along a new axis (`axis` of the result).
+fn _stackShape(shs [Shape], ax Int) (Shape, String) {
+	var s = noShapeOfRank(1);
+	var n = 0;
+	for (x : shs) {
+		if (x chans == 0) { continue; }
+		if (n == 0) { s = x; }
+		else if (x != s) {
+			return (s, "stack: shapes %^ and %^ differ" fmt(s toString, x toString));
+		}
+		n = n + 1;
+	}
+	if (n == 0) { return (s, ""); }
+	if (s.rank >= MAX_RANK) { return (s, "stack: a rank-%^ signal has no room for a new axis" fmt(MAX_RANK)); }
+	let r = s.rank + 1;
+	let k = ax < 0 ? ax + r : ax;
+	if (k < 0 || k >= r) { return (s, "axis %^ is outside a rank-%^ result" fmt(ax, r)); }
+	var dims [Int] = [];
+	let inDims = s dimsInUse;
+	var j = 0;
+	while (j < r) {
+		if (j == k) { dims push!(shs length); }
+		else { dims push!(inDims[j < k ? j : j - 1]); }
+		j = j + 1;
+	}
+	(shape(dims), "")
+}
+
+fn noShapeOfRank(r Int) Shape = Shape { dims: [1, 1, 1, 0], rank: r };
+
+-- Axes permuted: output axis k is input axis perm[k] (perm [] reverses them).
+fn _permuteShape(s Shape, perm [Int]) (Shape, String) {
+	let p = resolvePerm(s, perm);
+	if (p length == 0) { return (s, "transpose: %^ is not a permutation of %^ axes" fmt(perm, s.rank)); }
+	let r = s.rank;
+	var dims = s.dims copy;
+	var k = 0;
+	while (k < r) { dims[MAX_RANK - r + k] = s.dims[MAX_RANK - r + p[k]]; k = k + 1; }
+	(Shape { dims: dims, rank: r }, "")
+}
+
+-- perm as axes 0 .. r - 1 ([] = reversed); [] when it is not a permutation.
+-- A rank-0 or rank-1 signal has only the identity.
+fn resolvePerm(s Shape, perm [Int]) [Int] {
+	let r = s.rank;
+	var p [Int] = [];
+	if (perm length == 0) {
+		var k = r - 1;
+		while (k >= 0) { p push!(k); k = k - 1; }
+		return r == 0 ? [0] : p;
+	}
+	if (perm length != r) { return [Int](); }
+	var seen [Bool] = [false, false, false, false];
+	for (x : perm) {
+		let ax = x < 0 ? x + r : x;
+		if (ax < 0 || ax >= r || seen[ax]) { return [Int](); }
+		seen[ax] = true;
+		p push!(ax);
+	}
+	p
+}
+
+-- The same channels in new dims; one dim may be -1 (inferred).
+fn _reshapeShape(s Shape, dims [Int]) (Shape, String) {
+	if (s chans == 0) { return (s, ""); }
+	if (dims length > MAX_RANK) { return (s, "reshape: more than %^ dims" fmt(MAX_RANK)); }
+	var known = 1;
+	var free = -1;
+	var k = 0;
+	for (x : dims) {
+		if (x == -1 && free < 0) { free = k; }
+		else if (x < 1) { return (s, "reshape: bad dim %^" fmt(x)); }
+		else { known = known * x; }
+		k = k + 1;
+	}
+	var d = dims copy;
+	if (free >= 0) {
+		if (s chans % known != 0) { return (s, "reshape: %^ channels do not divide by %^" fmt(s chans, known)); }
+		d[free] = s chans // known;
+	} else if (known != s chans) {
+		return (s, "reshape: %^ is not %^ channels" fmt(dims, s chans));
+	}
+	if (d length == 0) { return (scalarShape(), ""); }
+	(shape(d), "")
+}
 
 -- The recomputed shape of node n from its inputs. Elementwise ops broadcast
 -- (lcm per dimension); sources keep the shape they were declared with.

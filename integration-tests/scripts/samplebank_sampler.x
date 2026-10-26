@@ -24,7 +24,7 @@ fn sampler() S {
 		let pos = d read(1);
 		(pos + rate) -> d;
 		h vread(pos, Interpolation.cubic) f32 * g
-	}) sum(1) outlet
+	}) sum outlet
 }
 
 defSynthX(sampler, "sbSampler");
