@@ -37,6 +37,7 @@ if python3 - <<PY
 import re, sys
 want = {  # synth: (earliest, latest) time the output is 0 for good; -1 never
     "idle_decay": (0.74, 0.77), "idle_stereo": (0.74, 0.77), "idle_aos": (0.74, 0.77),
+    "idle_groups": (0.74, 0.78),
     "idle_done": (0.54, 0.57), "idle_long": (1.04, 1.07),
     "idle_off": (-1, -1), "idle_offdone": (-1, -1), "idle_trem": (-1, -1),
 }

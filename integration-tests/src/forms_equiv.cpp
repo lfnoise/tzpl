@@ -13,7 +13,9 @@
 // Inputs: an input with a spec holds its init value (isConst = 1); any other
 // input is a sum of three sines per channel (60 Hz to 3 kHz), except a voiced
 // synth's notes, whose rows hold the defaults with voice 0's gate on from the
-// first sample (resetVoice). Not white noise: rounding differences in a delay
+// first sample (resetVoice). In the equivalence run every voice plays, row r
+// with its parameters scaled by 1 + 0.07 r: voices are computed in groups,
+// and a group past the first must read its own voices. Not white noise: rounding differences in a delay
 // time are amplified by the input's slope, and noise's is the largest.
 // Random draws are seeded (TZPL_RNG_SEED), so both builds draw alike.
 //
@@ -155,6 +157,8 @@ struct Instance {
     }
 };
 
+bool gAllVoices = false;   // every voice plays (the equivalence run)
+
 // Fills block b of every input of `in` (the same values for any instance).
 void fillInputs(Instance& in, int b) {
     for (int k = 0; k < in.def.num_ins; ++k) {
@@ -171,7 +175,9 @@ void fillInputs(Instance& in, int b) {
                 if (notes) {
                     int cols = int(pd.type.shape.dims[3]);
                     int col = c % cols, row = c / cols;
-                    v = col == 0 ? (row == 0 ? 1.0 : 0.0) : (in.def.noteDefaults ? in.def.noteDefaults[col] : 0.0);
+                    double d = in.def.noteDefaults ? in.def.noteDefaults[col] : 0.0;
+                    v = col == 0 ? ((row == 0 || gAllVoices) ? 1.0 : 0.0)
+                                 : (gAllVoices ? d * (1 + 0.07 * row) : d);
                 } else if (pd.hasSpec) {
                     v = pd.spec.init;
                 } else {
@@ -195,7 +201,8 @@ std::vector<std::vector<double>> run(Instance& in, std::vector<int> const& chunk
     size_t ci = 0;
     for (int b = 0; b < kBlocks; ++b) {
         fillInputs(in, b);
-        if (b == 0 && in.def.voiced && in.def.funs.resetVoice) in.def.funs.resetVoice(in.p, 0, 0);
+        if (b == 0 && in.def.voiced && in.def.funs.resetVoice)
+            for (int v = 0; v < (gAllVoices ? in.def.maxVoices : 1); ++v) in.def.funs.resetVoice(in.p, v, 0);
         for (int off = 0; off < kBlock; ) {
             int n = std::min(chunks[ci++ % chunks.size()], kBlock - off);
             in.def.funs.process(in.p, off, n);
@@ -329,6 +336,7 @@ int main(int argc, char** argv) {
         std::println(stderr, "usage: forms_equiv AUTO_BUILD_DIR SERIAL_BUILD_DIR [name-substring]");
         return 2;
     }
+    gAllVoices = true;
     auto autoP = plugins(argv[1]), serialP = plugins(argv[2]);
     char const* filter = argc > 3 ? argv[3] : nullptr;
     std::vector<std::pair<char const*, std::vector<int>>> schedules = {

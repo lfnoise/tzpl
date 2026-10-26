@@ -25,6 +25,10 @@ cases push!(("idle_decay", fn() S { voicer(8, fn() S { sinosc(440) * env() |> q 
 cases push!(("idle_stereo", fn() S {
 	voicer(4, fn() S { [sinosc(440), sinosc(660)] stack * env() |> q }) sum(0) |> outlet
 }));
+-- an interpolating delay read: voices run in groups over the block
+cases push!(("idle_groups", fn() S {
+	voicer(8, fn() S { sinosc(440) * env() |> delayc(0.003, 0.01) |> q }) sum |> outlet
+}));
 -- control flow in the body: per-voice structs (AoS)
 cases push!(("idle_aos", fn() S {
 	voicer(8, fn() S { let e = env(); (e > 0) pause(fn() S { sinosc(440) * e }) |> q }) sum |> outlet

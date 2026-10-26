@@ -2885,7 +2885,8 @@ fn genLoop(ctx Ctx, loopIdx Int) String {
 		if (`cgSingleVoice) {
 			code = code $ _tabs(`cgIndent) $ "{ int i = vi;\n";
 		} else {
-			code = code $ _tabs(`cgIndent) $ "for (int i = 0; i < %^; ++i) {\n" fmt(`cgVoiceCount);
+			code = code $ _tabs(`cgIndent) $ (`cgVoiceGroup ? "for (usize i = G; i < G + 4; ++i) {\n"
+				: "for (int i = 0; i < %^; ++i) {\n" fmt(`cgVoiceCount));
 			if (`cgVoiceSkip) { code = code $ _tabs(`cgIndent + 1) $ "if (vidle[i]) continue;\n"; }
 		}
 		var `cgIndent Int = `cgIndent + 1;
@@ -2910,7 +2911,10 @@ fn genLoop(ctx Ctx, loopIdx Int) String {
 					code = code $ _tabs(`cgIndent) $ (z length == 0 ? "}\n" : "} else {%^ }\n" fmt(z));
 				}
 			} else {
-				code = code $ _tabs(`cgIndent) $ "for (usize i = 0; i < %^; i += %^) {\n" fmt(trip, simdW);
+				code = code $ _tabs(`cgIndent) $ (`cgVoiceGroup
+					? (loop.chans * 4 == simdW ? "{ const usize i = G;\n"
+						: "for (usize i = G * %^; i < G * %^ + %^; i += %^) {\n" fmt(loop.chans, loop.chans, loop.chans * 4, simdW))
+					: "for (usize i = 0; i < %^; i += %^) {\n" fmt(trip, simdW));
 				var `cgIndent Int = `cgIndent + 1;
 				if (`cgVoiceSkip) {
 					code = code $ _tabs(`cgIndent) $ "if (%^) {%^ continue; }\n" fmt(_lanesIdle("i", simdW), ctx _skipZero(loop, "i"));
@@ -2928,7 +2932,9 @@ fn genLoop(ctx Ctx, loopIdx Int) String {
 					code = code $ _tabs(`cgIndent) $ "for (int i = vi * %^; i < vi * %^ + %^; ++i) {\n" fmt(loop.chans, loop.chans, loop.chans);
 				}
 			} else {
-				code = code $ _tabs(`cgIndent) $ "for (int i = 0; i < %^; ++i) {\n" fmt(trip);
+				code = code $ _tabs(`cgIndent) $ (`cgVoiceGroup
+					? "for (usize i = G * %^; i < G * %^ + %^; ++i) {\n" fmt(loop.chans, loop.chans, loop.chans * 4)
+					: "for (int i = 0; i < %^; ++i) {\n" fmt(trip));
 				if (`cgVoiceSkip) {
 					code = code $ _tabs(`cgIndent + 1) $ "if (vidle[%^]) {%^ continue; }\n"
 						fmt(`cgFlatChanShift == 0 ? "i" : "i >> %^" fmt(`cgFlatChanShift), ctx _skipZero(loop, "i"));
@@ -4233,7 +4239,8 @@ fn genDelayAdvance(ctx Ctx, graph Int) String {
 	for (d : ctx.delays) {
 		if (d.allocSize != 1 && ctx _delayGraph(d) == graph) {
 			if (voiceG && `cgFlatVoice) {
-				s = s $ _tabs(`cgIndent) $ "for (int v = 0; v < %^; ++v) ++p->voice_d%^_wrpos[v];\n" fmt(mv, d.serial);
+				s = s $ _tabs(`cgIndent) $ (`cgVoiceGroup ? "for (usize v = G; v < G + 4; ++v) ++p->voice_d%^_wrpos[v];\n" fmt(d.serial)
+					: "for (int v = 0; v < %^; ++v) ++p->voice_d%^_wrpos[v];\n" fmt(mv, d.serial));
 			} else {
 				-- AoS voice delays advance inside the per-voice loop as
 				-- vs. members.
@@ -4524,7 +4531,8 @@ fn _guardedVoiceLoop(ctx Ctx, li Int) String {
 	let g = ctx.loops[li].group;
 	-- Skip the whole voice scan when no voice's group is due.
 	let head = _tabs(`cgIndent) $ "if %^\n" fmt(_pgDue("pg%^_any" fmt(g)))
-		$ _tabs(`cgIndent) $ "for (int vi = 0; vi < %^; ++vi) {\n" fmt(`cgVoiceCount);
+		$ _tabs(`cgIndent) $ (`cgVoiceGroup ? "for (usize vi = G; vi < G + 4; ++vi) {\n"
+			: "for (int vi = 0; vi < %^; ++vi) {\n" fmt(`cgVoiceCount));
 	var `cgIndent Int = `cgIndent + 1;
 	var `cgSingleVoice Bool = true;
 	let code = ctx _pgLoopCode(li);
@@ -4647,6 +4655,7 @@ fn _fuseRegions(ctx Ctx, regions [[Int]]) [[Int]] {
 		var alone = false;
 		for (li : r) {
 			if (ctx.loops[li].group <= -10) { alone = true; }
+			if (ctx _voicerGroupable(li) != NONE) { alone = true; }
 			for (t : ctx.loops[li].trees) {
 				for (e : ctx.trees[t].exprs) {
 					match (ctx.kind[e]) { delayWriteK(_): { alone = true; } delayVarReadK(_, _): { alone = true; } _: {} }
@@ -5744,6 +5753,11 @@ fn _replaceName(code String, nm String, repl String) String {
 }
 
 fn _genRegion(ctx Ctx, region [Int], delays [DelayInfo]) String {
+	let vg = ctx _voiceGroupRoot(region);
+	if (vg != NONE) {
+		let t = ctx _genVoiceGroups(region, vg);
+		if (t length > 0) { return t; }
+	}
 	var `cgIndent Int = 2;
 	var body = genLoops(ctx, region);
 	for (d : delays) { body = body $ ctx _advanceDelay(d); }
@@ -5765,6 +5779,128 @@ fn _genRegion(ctx Ctx, region [Int], delays [DelayInfo]) String {
 		if (pr length > 0) { return pr; }
 	}
 	ctx _sampleLoop(body, vbody)
+}
+
+-- Voice groups (block engine M9). A voicer whose region is its own runs
+-- one group of 4 voices at a time over the whole block, not every voice each
+-- sample: the group's per-voice state (p->voice_X, values, delays, write
+-- heads, generators) is copied into locals for the block, so it stays in
+-- registers. Its output is a block buffer. TZPL_FORMS=novgroup turns it off.
+-- Cost table (dump corpus, ns/sample against voices each sample): it pays
+-- where each voice reads through an interpolating kernel (a delay line, a
+-- buffer, a sample bank: smpPerc 1.72x, smpLoopTail 1.40x, bankLoop 1.34x,
+-- ksPluck12 1.32x; bankVoicer 0.73x is the exception), with 8 voices or
+-- more. Elsewhere one group at a time leaves each sample waiting on its
+-- short recurrences, which the per-sample form overlaps across groups
+-- (sine_voice 0.74x, resonBank 0.92x, tiny8 0.49x).
+
+-- The voicer at loop li if it can run in voice groups, else NONE.
+fn _voicerGroupable(ctx Ctx, li Int) NIdx {
+	if (serialForms() || formsOff("novgroup") || !`cgFlatVoice) { return NONE; }
+	let lp = ctx.loops[li];
+	if (lp.trees length != 1) { return NONE; }
+	let root = ctx.trees[lp.trees[0]].root;
+	let mv = match (ctx.kind[root]) { voicerK(m): m; _: 0; };
+	if (mv < 8 || mv % 4 != 0) { return NONE; }
+	let bg = ctx _voicerBodyGraph(root);
+	var kernel = false;
+	for (x : ctx.sorted) {
+		if (ctx.graphOf[x] != bg) { continue; }
+		match (ctx.kind[x]) {
+			-- shared state written in voice order
+			bufWriteK(_, _, _): { return NONE; }
+			debugK(_, _, _, _): { return NONE; }
+			delayVarReadK(_, ip): { if (_interpTaps(ip) length >= 2) { kernel = true; } }
+			bufVarReadK(_, ip, _, _): { if (_interpTaps(ip) length >= 2) { kernel = true; } }
+			bankVarReadK(ip, _, _): { if (_interpTaps(ip) length >= 2) { kernel = true; } }
+			_: {}
+		}
+	}
+	kernel ? root : NONE
+}
+
+fn _voiceGroupRoot(ctx Ctx, region [Int]) NIdx {
+	if (region length != 1 || `cgSimdWidth < 4) { return NONE; }
+	let root = ctx _voicerGroupable(region[0]);
+	(root != NONE && ctx _isBlockTemp(root)) ? root : NONE
+}
+
+-- The per-voice state arrays code names: "p->voice_X" followed by "[".
+fn _voiceStateNames(code String) [String] {
+	var names [String] = [];
+	let parts = code split("p->voice_");
+	var k = 1;
+	while (k < parts length) {
+		let head = parts[k] substring(0, min(64, parts[k] length));
+		var j = 0;
+		var going = true;
+		for (cp : head codePoints) {
+			if (going && _isIdentCp(cp)) { j = j + 1; } else { going = false; }
+		}
+		let nm = parts[k] substring(0, j);
+		if (j > 0 && !(names contains(nm))) { names push!(nm); }
+		k = k + 1;
+	}
+	names
+}
+
+-- Every "<from>idx]" in code as "<to>[(idx) - off]": the whole index, so an
+-- index like `i >> 1` keeps its meaning.
+fn _rebaseIndex(code String, from String, to String, off String) String {
+	let parts = code split(from);
+	var out = parts[0];
+	var k = 1;
+	while (k < parts length) {
+		let t = parts[k];
+		-- the index ends at the ']' that closes this '['
+		var depth = 1;
+		var j = 0;
+		for (cp : t substring(0, min(400, t length)) codePoints) {
+			if (depth > 0) {
+				if (cp == 91) { depth = depth + 1; }
+				if (cp == 93) { depth = depth - 1; }
+				if (depth > 0) { j = j + 1; }
+			}
+		}
+		out = out $ "%^[(%^) - %^]" fmt(to, t substring(0, j), off) $ t substring(j + 1, t length - j - 1);
+		k = k + 1;
+	}
+	out
+}
+
+fn _genVoiceGroups(ctx Ctx, region [Int], root NIdx) String {
+	let mv = ctx _voicerMaxVoices(root);
+	var `cgIndent Int = 3;
+	var `cgVoiceGroup Bool = true;
+	var body = genLoops(ctx, region);
+	if (body trim length == 0) { return ""; }
+	var load = "";
+	var store = "";
+	for (nm : _voiceStateNames(body)) {
+		let pv = "p->voice_" $ nm;
+		let lv = "l_voice_" $ nm;
+		body = _rebaseIndex(body, pv $ "[", lv, "o_" $ nm);
+		-- a use that is not indexed: keep the per-sample form
+		if (_usesName(body, pv)) { return ""; }
+		let per = "(sizeof(%^) / sizeof(%^[0]) / %^)" fmt(pv, pv, mv);
+		load = load $ "\t\tconst i64 o_%^ = i64(G) * i64%^;\n" fmt(nm, per)
+			$ "\t\talignas(32) std::remove_reference_t<decltype(%^[0])> %^[4 * %^];\n" fmt(pv, lv, per)
+			$ "\t\tstd::memcpy(%^, &%^[o_%^], sizeof %^);\n" fmt(lv, pv, nm, lv);
+		store = store $ "\t\tstd::memcpy(&%^[o_%^], %^, sizeof %^);\n" fmt(pv, nm, lv, lv);
+	}
+	-- a group of idle voices: its output is 0 for the block, nothing else runs
+	var idle = "";
+	if (ctx _voiceIdleOn) {
+		let C = ctx.chans[ctx.ins[ctx.subs[root][0]][0]];
+		let z = "\t\t\tfor (usize k = G * %^; k < G * %^ + %^; ++k) %^ = 0;\n" fmt(C, C, 4 * C, _varRef(ctx, root, "k"));
+		let zl = ctx _rowLocalsFor("bi", z);
+		idle = "\t\tif (all_idle<4>(&vidle[G])) {\n\t\tfor (i32 bi = off; bi < off + n; ++bi) {\n" $ zl.rows $ z $ "\t\t}\n\t\tcontinue;\n\t\t}\n";
+	}
+	let rl = ctx _rowLocalsFor("bi", body);
+	"\t{\n" $ rl.bases
+		$ "\tfor (usize G = 0; G < %^; G += 4) {\n" fmt(mv) $ idle $ load
+		$ "\t\tfor (i32 bi = off; bi < off + n; ++bi) {\n" $ rl.rows $ body $ "\t\t}\n"
+		$ store $ "\t}\n\t}\n"
 }
 
 -- A region on direct ports, 4 samples a step: its input ports transposed
@@ -6402,6 +6538,9 @@ fn genCpp(ctx Ctx, name String, simdWidth Int = 0) String {
 	-- True while emitting the voicer's per-sample body in process: its voice
 	-- loops skip idle voices (M9).
 	var `cgVoiceSkip Bool = false;
+	-- True while emitting a voicer region one group of 4 voices at a time
+	-- (G, the group's first voice, is in scope; M9).
+	var `cgVoiceGroup Bool = false;
 
 	var s = "\n";
 	s = s $ "#include \"tzpl_plugin_abi.h\"\n";

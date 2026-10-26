@@ -1837,8 +1837,21 @@ Progress (2026-10-26):
   released): `additive` 113 → 17, `resonBank` 44 → 15, `ksPluck12` 36 → 12, `wtLead`
   86 → 25, `sine_voice` 29 → 9. Trivial voicers pay for the checks (`tiny8` 1.8 →
   2.7, `gateonly` 0.4 → 1.0); `silence` 0 removes them.
-- Not done yet: loops over voice groups with state in registers, the x86-64 Linux
-  build items, the benchmarks suite.
+- **Voice groups:** a voicer in a region of its own runs one group of 4 voices over
+  the whole block; the group's per-voice state (`p->voice_*`) is copied into locals
+  for the block (indices rebased by bracket matching, so `i >> 1` keeps its meaning)
+  and its output is a block buffer. A group of idle voices only zeroes its output.
+  Cost table: only with 8+ voices and an interpolating read in the body (delay,
+  buffer, sample bank). Without such reads one group at a time leaves each sample
+  waiting on short recurrences that the per-sample form overlaps across groups
+  (`sine_voice` 0.74x, `tiny8` 0.49x); with them `smpPerc` 1.72x, `ksPluck12` 1.32x
+  (`bankVoicer` 0.73x is the exception). With idle skipping, every grouped synth is
+  faster than either alone: `ksPluck12` 36 -> 9.9 ns/sample, `ksPluck` 24 -> 9.2,
+  `smpPerc` 11.7 -> 6.0, `bankLoop` 7.1 -> 3.2. `TZPL_FORMS=novgroup` turns it off.
+- **Test gap closed:** the forms-equivalence run played only voice 0, so voice-group
+  indexing past the first group went unchecked (a precedence bug was found by hand).
+  Every voice now plays, row r with its parameters scaled by 1 + 0.07 r.
+- Not done yet: the x86-64 Linux build items, the benchmarks suite.
   - An idle voice's output is 0; its loops, block groups and draws are skipped. A
     group of 4 SIMD lanes is skipped when every voice in it is idle. `resetVoice`
     (a new note) wakes it.
