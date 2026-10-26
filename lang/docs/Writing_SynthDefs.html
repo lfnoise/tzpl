@@ -733,7 +733,7 @@ broadcasts defSynthX(<span class="hl-str">"broadcasts"</span>) <span class="hl-k
                 <tr><td><code>vec(v)</code></td><td>A row constant from an array; width = <code>v length</code>. A plain array used as a signal is the same.</td></tr>
                 <tr><td><code>fill(chans, x)</code><br><code>fill(shape, x)</code></td><td>Constant with <code>x</code> in every channel of a row of <code>chans</code>, or of any shape (an <code>AsShape</code>: <code>fill([2, 3], 0.5)</code>).</td></tr>
                 <tr><td><code>tensor(shape, values)</code></td><td>A constant of any shape, the values in row-major order (the last dimension fastest), repeating to fill: <code>tensor([2, 3], [1.0, 2.0, 3.0, 4.0, 5.0, 6.0])</code>; <code>tensor([4, 4], [1.0, 0.0])</code> alternates 1 and 0.</td></tr>
-                <tr><td><code>tensor(nested)</code></td><td>A constant written as nested arrays, whose nesting is the shape: <code>tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])</code> is 2&times;3. Up to 4 levels; every row at a level must have the same length.</td></tr>
+                <tr><td><code>tensor(nested)</code></td><td>A constant written as nested arrays, whose nesting is the shape: <code>tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])</code> is 2&times;3, as is <code>tensor([1.0, 2.0, 3.0; 4.0, 5.0, 6.0])</code> (a run of n semicolons in an array literal closes n levels). Up to 4 levels; every row at a level must have the same length.</td></tr>
             </table>
 
             <p>Integer values make integer constants, which take the element type of whatever they

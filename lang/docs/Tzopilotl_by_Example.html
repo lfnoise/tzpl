@@ -821,6 +821,12 @@ showPrefix();               <span class="cmt">-- &gt;&gt;&gt; (restored)</span><
 <span class="kw">let</span> nums = [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>, <span class="num">4</span>, <span class="num">5</span>];
 <span class="kw">let</span> floats = [<span class="num">1.0</span>, <span class="num">2.0</span>, <span class="num">3.0</span>];
 
+<span class="cmt">-- Nested arrays without inner brackets: n adjacent semicolons close n</span>
+<span class="cmt">-- levels of nesting (rows may differ in length)</span>
+[<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>; <span class="num">4</span>; <span class="num">5</span>, <span class="num">6</span>]                <span class="cmt">-- [[1, 2, 3], [4], [5, 6]]</span>
+[<span class="num">1</span>, <span class="num">2</span>; <span class="num">3</span>, <span class="num">4</span>;; <span class="num">5</span>, <span class="num">6</span>; <span class="num">7</span>, <span class="num">8</span>]        <span class="cmt">-- [[[1, 2], [3, 4]], [[5, 6], [7, 8]]]</span>
+[<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>;]                     <span class="cmt">-- [[1, 2, 3]]: a trailing run adds a level</span>
+
 <span class="cmt">-- Tuple literals (heterogeneous, fixed-length)</span>
 <span class="kw">let</span> point = (<span class="num">3</span>, <span class="num">4</span>);
 <span class="kw">let</span> mixed = (<span class="num">1</span>, <span class="num">2.5</span>, <span class="str">"hello"</span>);

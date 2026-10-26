@@ -22,6 +22,7 @@
 //
 
 #include "parser.hpp"
+#include <functional>
 #include <set>
 
 namespace ts {
@@ -1662,17 +1663,72 @@ ExprPtr Parser::parseBracketLiteral(SourceRange loc, bool isImmutable) {
         return m;
     }
 
-    // Array literal: [expr, expr, ...]
+    // Array literal: [expr, expr, ...]. Elements may also be separated by
+    // runs of semicolons, which close levels of nesting: n adjacent ';'
+    // split at level n, and the literal is as deep as its longest run, plus
+    // one. [1, 2; 3] is [[1, 2], [3]]; [1, 2; 3, 4;; 5, 6; 7, 8] is
+    // [[[1, 2], [3, 4]], [[5, 6], [7, 8]]]. Every group is wrapped at every
+    // level ([1;; 2] is [[[1]], [[2]]]), and a trailing run adds depth
+    // without an empty group ([1, 2;] is [[1, 2]]).
     ExprList elements;
+    std::vector<int> seps;   // seps[i]: separator after elements[i] (0 = comma)
+    int depth = 0;
     elements.push_back(std::move(first));
-    while (match(TokenKind::Comma)) {
-        if (check(TokenKind::RBracket)) break; // trailing comma
-        elements.push_back(parseExpression());
+    for (;;) {
+        if (match(TokenKind::Comma)) {
+            if (check(TokenKind::RBracket)) break; // trailing comma
+            seps.push_back(0);
+            elements.push_back(parseExpression());
+            continue;
+        }
+        if (check(TokenKind::Semicolon)) {
+            int run = 0;
+            u32 nextOffset = current_.loc.start.offset;
+            while (check(TokenKind::Semicolon) && current_.loc.start.offset == nextOffset) {
+                nextOffset = current_.loc.end.offset;
+                advance();
+                ++run;
+            }
+            if (check(TokenKind::Semicolon)) {
+                error(currentLoc(), "Separate semicolons in an array literal: write a "
+                                    "nesting separator as adjacent semicolons (';;')");
+                advance();
+            }
+            depth = std::max(depth, run);
+            if (check(TokenKind::RBracket)) break; // trailing run: depth only
+            seps.push_back(run);
+            elements.push_back(parseExpression());
+            continue;
+        }
+        break;
     }
     expectClosing(TokenKind::RBracket, "[", loc);
-    auto arr = std::make_unique<ArrayLiteralExpr>(loc, std::move(elements));
-    arr->isImmutable = isImmutable;
-    return arr;
+    if (depth == 0) {
+        auto arr = std::make_unique<ArrayLiteralExpr>(loc, std::move(elements));
+        arr->isImmutable = isImmutable;
+        return arr;
+    }
+    // Build the nesting: at level L, split [lo, hi) at separators of level L
+    // and build each group at level L - 1; level 0 is a flat literal.
+    std::function<ExprPtr(size_t, size_t, int)> build =
+        [&](size_t lo, size_t hi, int level) -> ExprPtr {
+        ExprList items;
+        if (level == 0) {
+            for (size_t i = lo; i < hi; ++i) items.push_back(std::move(elements[i]));
+        } else {
+            size_t start = lo;
+            for (size_t i = lo; i < hi; ++i) {
+                if (i + 1 == hi || seps[i] == level) {
+                    items.push_back(build(start, i + 1, level - 1));
+                    start = i + 1;
+                }
+            }
+        }
+        auto arr = std::make_unique<ArrayLiteralExpr>(loc, std::move(items));
+        arr->isImmutable = isImmutable;
+        return arr;
+    };
+    return build(0, elements.size(), depth);
 }
 
 ExprPtr Parser::parsePrimary() {

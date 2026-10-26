@@ -50,6 +50,11 @@ for what changed and the code to change.
 - Shape operations along any axis: `take`, `drop`, `stride`, `slice`,
   `rotate`, `reverse`, `transpose`, `reshape`, `join`, `stack`, `reduce`,
   `scan`, `sum` and kin, `at` and `put`.
+- Nested array literals without the inner brackets: a run of n semicolons
+  closes n levels of nesting, so `[1, 2, 3; 4; 5, 6]` is
+  `[[1, 2, 3], [4], [5, 6]]` and `[1, 2; 3, 4;; 5, 6; 7, 8]` is
+  `[[[1, 2], [3, 4]], [[5, 6], [7, 8]]]`. Handy for tensor constants:
+  `tensor([1.0, 2.0; 3.0, 4.0])` is a 2x2.
 - Values computed from inputs (filter coefficients, pitches) are recomputed
   only when the inputs change, and recurrences such as filters and phasors
   run as block-wide scans or state-space forms; `defSynthXStrict` (or
