@@ -333,6 +333,35 @@ template <class E> void testScans() {
     }
 }
 
+// --- Ports and rows ----------------------------------------------------------------------
+
+// portToRows4 / rowsToPort4 against the definition, for channel counts with
+// and without a partial group of 4, and their round trip.
+template <class T> void testPortRows() {
+    for (int chans : {4, 6, 16}) {
+        std::vector<std::vector<T>> buf(chans, std::vector<T>(12));
+        std::vector<T*> ch;
+        for (int c = 0; c < chans; ++c) {
+            for (int i = 0; i < 12; ++i) buf[c][i] = T(c * 100 + i);
+            ch.push_back(buf[c].data());
+        }
+        std::vector<T> rows(4 * chans);
+        bool ok = true;
+        for (int bi : {0, 3, 8}) {
+            portToRows4(ch.data(), chans, bi, rows.data());
+            for (int k = 0; k < 4; ++k)
+                for (int c = 0; c < chans; ++c) ok &= rows[k * chans + c] == T(c * 100 + bi + k);
+            std::vector<std::vector<T>> out(chans, std::vector<T>(12, T(0)));
+            std::vector<T*> och;
+            for (auto& o : out) och.push_back(o.data());
+            rowsToPort4(rows.data(), chans, och.data(), bi);
+            for (int c = 0; c < chans; ++c)
+                for (int k = 0; k < 4; ++k) ok &= out[c][bi + k] == buf[c][bi + k];
+        }
+        check(ok, "{} portToRows4/rowsToPort4, {} channels", typeName<T>(), chans);
+    }
+}
+
 // --- State space ---------------------------------------------------------------------------
 
 // Step functions of the cycles synthc will meet (tensor-ugens filter.hpp).
@@ -919,6 +948,12 @@ int main(int argc, char** argv) {
     testVecTypes<i64>();
     testVecTypes<f32>();
     testVecTypes<f64>();
+
+    section("ports and rows");
+    testPortRows<i32>();
+    testPortRows<i64>();
+    testPortRows<f32>();
+    testPortRows<f64>();
 
     section("scan");
     testScans<i32>();

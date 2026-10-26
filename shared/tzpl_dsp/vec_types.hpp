@@ -172,6 +172,37 @@ template <class V> inline void transpose4(V& r0, V& r1, V& r2, V& r3) {
 
 template <class V> inline void transpose4(V (&r)[4]) { transpose4(r[0], r[1], r[2], r[3]); }
 
+// --- Ports and rows (block engine plan M8) ----------------------------------
+//
+// A port is a table of channel pointers, each to a planar block. A
+// channel-vector loop wants rows: one sample of every channel, contiguous.
+// portToRows4 copies samples [bi, bi + 4) of channels [0, chans) into 4 rows
+// of `chans` elements (rows[k * chans + c] = ch[c][bi + k]), transposing 4
+// channels at a time in registers; rowsToPort4 is the reverse.
+template <class T> inline void portToRows4(T* const* ch, int chans, int bi, T* rows) {
+    using V = vec_t<T>;
+    int c = 0;
+    for (; c + kVecLen <= chans; c += kVecLen) {
+        V r[4] = {load<V>(ch[c] + bi), load<V>(ch[c + 1] + bi), load<V>(ch[c + 2] + bi), load<V>(ch[c + 3] + bi)};
+        transpose4(r);
+        for (int k = 0; k < 4; ++k) store(rows + k * chans + c, r[k]);
+    }
+    for (; c < chans; ++c)
+        for (int k = 0; k < 4; ++k) rows[k * chans + c] = ch[c][bi + k];
+}
+template <class T> inline void rowsToPort4(T const* rows, int chans, T* const* ch, int bi) {
+    using V = vec_t<T>;
+    int c = 0;
+    for (; c + kVecLen <= chans; c += kVecLen) {
+        V r[4];
+        for (int k = 0; k < 4; ++k) r[k] = load<V>(rows + k * chans + c);
+        transpose4(r);
+        for (int j = 0; j < 4; ++j) store(ch[c + j] + bi, r[j]);
+    }
+    for (; c < chans; ++c)
+        for (int k = 0; k < 4; ++k) ch[c][bi + k] = rows[k * chans + c];
+}
+
 // x's lanes shifted up by one, lane 0 taking `prev`'s lane 3:
 // (prev3, x0, x1, x2). Used for previous-sample values along samples.
 template <class V> inline V shiftInLast(V prev, V x) {

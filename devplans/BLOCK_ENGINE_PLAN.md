@@ -1586,10 +1586,14 @@ Progress (2026-10-25; M8 is in progress):
   0.44–0.65 vs 0.45–0.73, `sinosc` 1.3 vs 1.8, `sinosc → lpf` 1.8 vs 2.7; 4 channels:
   one-poles 0.24–0.38 vs 0.13–0.32, biquads 0.46–0.58 vs 0.98–1.05; 16 channels:
   biquads 0.56–0.62 vs 0.93–1.05, phasor oscillators 0.22–0.36 vs 0.38–0.62.
+- **Port rows (4×4 transposes):** a region on direct ports steps 4 samples at a
+  time. Each input port is transposed into 4 rows of channels
+  (`tzpl::dsp::portToRows4`, 4 channels per `transpose4`), the region's body runs
+  for each row, and output rows are transposed back (`rowsToPort4`); the per-sample
+  form runs the tail. At 16 channels a one-pole went from 0.60 to 0.15 ns/sample (TU
+  0.19–0.30), a biquad from 0.57 to 0.20 (TU 0.93); 16-channel `sinosc → lpf` is
+  1.23× faster than `main` in the app (it was 1.15×), bank 1.28×.
 - **Not done yet:**
-  - 4×4 register transposes for channel-vector loops on direct ports: at 16
-    channels a one-pole spends its time gathering and scattering 16 scalars a
-    sample (0.6 ns vs TU's 0.17);
   - the buffer arena (interval colouring, in-place reuse) and planar block buffers
     between loops;
   - fusion and loop formation beyond the inherited tree-to-loop pass, and the rest

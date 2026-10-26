@@ -375,7 +375,8 @@ int main(int argc, char** argv) {
             Plugin pl;
             std::string path = std::format("{}/uc_{}_{}.dylib", dir, c.name, ch);
             if (!pl.open(path)) {
-                std::println("{:<10} cannot load {}: {}", c.name, path, dlerror() ? dlerror() : "");
+                char const* e = dlerror();
+                std::println("{:<10} cannot load {}: {}", c.name, path, e ? e : "");
                 failed = true;
                 break;
             }

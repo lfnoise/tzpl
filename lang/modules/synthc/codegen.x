@@ -407,6 +407,23 @@ fn _inletRef(ctx Ctx, n NIdx, sn Int, cel String) String {
 	let C = ctx.chans[n];
 	let a = "in%^" fmt(sn);
 	let flat = `cgVoiceCount > 0 && `cgFlatChanShift >= 0 && `cgFlatTrip > 0;
+	if (ctx _directPort(n) && `cgPortRows) {
+		-- row k of the transposed port
+		if (`cgSimdW > 0) {
+			let w = `cgSimdW;
+			if (C >= `cgLoopChans) { return _simdLoad(ctx.typ[n], w, "&t_in%^[k * %^ + %^]" fmt(sn, C, cel)); }
+			var parts [String] = [];
+			var j = 0;
+			while (j < w) {
+				let idx = cel == "0" ? (j % C) toString : "((%^ + %^) %% %^)" fmt(cel, j, C);
+				parts push!("t_in%^[k * %^ + %^]" fmt(sn, C, idx));
+				j = j + 1;
+			}
+			return "%^{%^}" fmt(_simdType(ctx.typ[n], w), parts join(", "));
+		}
+		let ix = _indexWrapShape(ctx.shape[n], `cgDstShape, `cgLoopChans, cel);
+		return "t_in%^[k * %^ + %^]" fmt(sn, C, ix substring(1, ix length - 2));
+	}
 	if (ctx _directPort(n)) {
 		-- channel idx at sample bi, through the pointer table
 		let ra = "r_in%^" fmt(sn);
@@ -1948,7 +1965,15 @@ fn genTree(ctx Ctx, treeIdx Int, cel String) String {
 -- its input. genExpr on the outlet node itself yields the accessor.
 fn _sinkStmt(ctx Ctx, n NIdx, cel String) String = match (ctx.kind[n]) {
 	outletK(_, sn): {
-		if (ctx _directPort(n)) {
+		if (ctx _directPort(n) && `cgPortRows) {
+			let val = genExpr(ctx, ctx.ins[n][0], cel);
+			let C = ctx.chans[n];
+			if (`cgSimdW > 0) {
+				"*(%^*)&t_out%^[k * %^ + %^] = %^" fmt(_simdType(ctx.typ[n], `cgSimdW), sn, C, cel, val)
+			} else {
+				"t_out%^[k * %^ + %^] = %^" fmt(sn, C, cel, val)
+			}
+		} else if (ctx _directPort(n)) {
 			let val = genExpr(ctx, ctx.ins[n][0], cel);
 			if (`cgSimdW > 0) {
 				-- the vector's lanes to their channels at sample bi
@@ -4786,7 +4811,62 @@ fn _genRegion(ctx Ctx, region [Int], delays [DelayInfo]) String {
 		let (vb, vr) = ctx _sampleVecBody(region);
 		vbody = vb;
 	}
+	if (vbody length == 0 && `cgSimdWidth >= 4) {
+		let pr = ctx _portRowsLoop(region, delays, body);
+		if (pr length > 0) { return pr; }
+	}
 	ctx _sampleLoop(body, vbody)
+}
+
+-- A region on direct ports, 4 samples a step: its input ports transposed
+-- into 4 rows of channels, the body run for each row, its output rows
+-- transposed back; then the per-sample tail. "" if it uses no direct port.
+fn _portRowsLoop(ctx Ctx, region [Int], delays [DelayInfo], body String) String {
+	var pre = "";
+	var post = "";
+	for (x : ctx.inlets) {
+		match (ctx.kind[x]) {
+			inletK(_, sn, _): {
+				if (ctx _directPort(x) && _usesName(body, "r_in%^" fmt(sn))) {
+					let t = cppType(ctx.typ[x]);
+					let C = ctx.chans[x];
+					pre = pre $ "\t\talignas(32) %^ t_in%^[%^];\n\t\ttzpl::dsp::portToRows4(r_in%^, %^, bi, t_in%^);\n"
+						fmt(t, sn, 4 * C, sn, C, sn);
+				}
+			}
+			_: {}
+		}
+	}
+	for (x : ctx.outlets) {
+		match (ctx.kind[x]) {
+			outletK(_, sn): {
+				if (ctx _directPort(x) && _usesName(body, "r_out%^" fmt(sn))) {
+					let t = cppType(ctx.typ[x]);
+					let C = ctx.chans[x];
+					pre = pre $ "\t\talignas(32) %^ t_out%^[%^];\n" fmt(t, sn, 4 * C);
+					post = post $ "\t\ttzpl::dsp::rowsToPort4(t_out%^, %^, r_out%^, bi);\n" fmt(sn, C, sn);
+				}
+			}
+			_: {}
+		}
+	}
+	if (pre length == 0) { return ""; }
+	let rbody = ctx _portRowsBody(region, delays);
+	let rrows = (ctx _rowLocalsFor("bi + k", rbody)).rows;
+	let rl = ctx _rowLocalsFor("bi", body);
+	let bases = (ctx _rowLocalsFor("bi", rbody $ body)).bases;
+	"\t{\n" $ bases $ "\ti32 bi = off;\n"
+		$ "\tfor (; bi + 4 <= off + n; bi += 4) {\n" $ pre
+		$ "\t\tfor (i32 k = 0; k < 4; ++k) {\n" $ rrows $ rbody $ "\t\t}\n" $ post $ "\t}\n"
+		$ "\tfor (; bi < off + n; ++bi) {\n" $ rl.rows $ body $ "\t}\n\t}\n"
+}
+
+fn _portRowsBody(ctx Ctx, region [Int], delays [DelayInfo]) String {
+	var `cgPortRows Bool = true;
+	var `cgIndent Int = 3;
+	var b = genLoops(ctx, region);
+	for (d : delays) { b = b $ ctx _advanceDelay(d); }
+	b
 }
 
 fn _nodeSampleVecOK(ctx Ctx, e NIdx) Bool = match (ctx.kind[e]) {
@@ -5222,6 +5302,11 @@ fn genCpp(ctx Ctx, name String, simdWidth Int = 0) String {
 	-- value is a vector (loaded from its block buffer row, unaligned); lower
 	-- rates splat.
 	var `cgSampleVec Bool = false;
+	-- Port-rows mode (block engine M8): a channel-vector region steps 4
+	-- samples at a time; its direct ports are transposed into 4 rows of
+	-- channels (t_in<k>[k * C + c]) and back, and the body reads and writes
+	-- row k.
+	var `cgPortRows Bool = false;
 	-- Flat-voice-mode state: when cgVoiceCount > 0 we are emitting a voicer body
 	-- (the body's loops run per-voice over maxVoices). cgVoiceGraph is the body
 	-- graph index, so var refs for body nodes get the per-voice `voice_`/[i] form.
@@ -5286,6 +5371,9 @@ fn genCpp(ctx Ctx, name String, simdWidth Int = 0) String {
 	if (ctx.blockCycles length > 0) {
 		s = s $ "#include \"tzpl_dsp/scan.hpp\"\n#include \"tzpl_dsp/state_space.hpp\"\n";
 	}
+	var anyDirect = false;
+	for (x : ctx.inlets $ ctx.outlets) { if (ctx _directPort(x)) { anyDirect = true; } }
+	if (anyDirect) { s = s $ "#include \"tzpl_dsp/vec_types.hpp\"\n"; }
 	s = s $ "#include <algorithm>\n#include <cmath>\n#include <cstdio>\n#include <cstring>\n#include <cstdlib>\n#include <array>\n\n";
 	s = s $ "using namespace synthdef;\nusing namespace simd;\n";
 	s = s $ "\n";
