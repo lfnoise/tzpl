@@ -265,6 +265,29 @@ fn _vecStr(vop VecOp) String = match (vop) {
 
 -- A vop whose output is built by its own block (memcpy/scatter), so it gets its
 -- own loop with no per-channel for-wrapper. Mirrors VecPut/VecJoin gets_own_loop().
+-- A static view: every output element is one input element at an index
+-- known at compile time. It need not be stored: a consumer can read the
+-- (stored) input through the index map.
+fn isStaticView(k NodeKind) Bool = match (k) {
+	vecK(vop): match (vop) {
+		take(_, _): true;  drop(_, _): true;  stride(_, _): true;  stutter(_, _): true;
+		ncyc(_, _): true;  slice(_, _, _): true;  reverse(_): true;  permute(_): true;
+		reshape(_): true;  _: false;
+	};
+	_: false;
+};
+
+-- Consumers that read an input view inline (through its index map) rather
+-- than needing it stored: elementwise ops, other views, reduce and scan.
+fn takesInlineView(k NodeKind) Bool = match (k) {
+	unopK(_): true;  binopK(_): true;  compareopK(_): true;  castopK(_): true;
+	selectK: true;  outletK(_, _): true;  reduceK(_, _): true;
+	vecK(vop): match (vop) {
+		reduceAxis(_, _): true;  scan(_, _): true;  _: isStaticView(k);
+	};
+	_: false;
+};
+
 fn _vecGetsOwnLoop(vop VecOp) Bool = match (vop) { put: true; join(_, _): true; _: false; };
 
 fn shouldHashCons(k NodeKind) Bool = match (k) {

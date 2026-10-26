@@ -688,6 +688,9 @@ fn _genReduce(ctx Ctx, n NIdx, op BinaryOp, cols Int, cel String) String {
 	-- ops do. reduce_rows wants a pointer, and a 1-channel materialized
 	-- input is scalar storage (`vs.vN`), so the call would not compile.
 	if (rows == 1) { return genExpr(ctx, inp, cel); }
+	if (ctx.cut[inp] isNoneCut) {
+		return ctx _inlineFold(n, op, viOf(cel), VIdx.vc(rows), cols);
+	}
 	let ty = cppType(ctx.typ[n]);
 	let body = genBinopStr(op, ctx.typ[n] _isF32, "z", "x");
 	let lambda = "[](%^ z, %^ x){ return %^; }" fmt(ty, ty, body);
@@ -793,6 +796,10 @@ fn _genAxisFold(ctx Ctx, n NIdx, op BinaryOp, ax Int, c VIdx, cel String, isScan
 	-- The output element's place in the input: a reduce's output lacks the
 	-- axis, so split the input with the axis at 0 (index 0 along it).
 	let sp = isScan ? _axisSplit(c, ins, d) : _axisSplit(_reduceToInput(c, ins, d), ins, d);
+	if (ctx.cut[inp] isNoneCut) {
+		let count = isScan ? viAdd(sp.a, VIdx.vc(1)) : VIdx.vc(alen);
+		return ctx _inlineFold(n, op, _axisJoin(sp, VIdx.vc(0), alen), count, sp.inner);
+	}
 	let base = _axisJoin(sp, VIdx.vc(0), alen) vxstr;
 	var arr = _varName(ctx, inp);
 	if (ctx _isVoiceLocalStorage(inp)) {
@@ -804,6 +811,18 @@ fn _genAxisFold(ctx Ctx, n NIdx, op BinaryOp, ax Int, c VIdx, cel String, isScan
 		return "scan_at<%^>(%^, %^, %^, %^)" fmt(sp.inner, base, viAdd(sp.a, VIdx.vc(1)) vxstr, arr, lambda);
 	}
 	"reduce_rows<%^, %^>(%^, %^, %^)" fmt(alen, sp.inner, base, arr, lambda)
+}
+
+-- A reduce (or scan) over an input view read inline (not stored): `count`
+-- elements `stride` apart from `base`, each read through the view's index
+-- map from its stored source.
+fn _inlineFold(ctx Ctx, n NIdx, op BinaryOp, base VIdx, count VIdx, stride Int) String {
+	let inp = ctx.ins[n][0];
+	let ty = cppType(ctx.typ[n]);
+	let first = genExpr(ctx, inp, base vxstr);
+	let kth = genExpr(ctx, inp, viAdd(base, viMul(VIdx.vs("_k"), VIdx.vc(stride))) vxstr);
+	"[&]{ %^ z = %^; for (usize _k = 1; _k < %^; ++_k) { z = %^; } return z; }()"
+		fmt(ty, first, count vxstr, genBinopStr(op, ctx.typ[n] _isF32, "z", kth))
 }
 
 -- An input element index for output element c of a reduce along dims index

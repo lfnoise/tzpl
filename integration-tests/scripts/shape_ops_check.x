@@ -250,6 +250,19 @@ add("matrix_1xn", fn() S { live(x6, [1, 6]) reverse(0) }, (x6, [1, 6]));
 -- Composition: rows reversed, then each row's sum.
 add("compose", fn() S { live(x234, d234) reverse(-2) sum(-1) },
 	refReduce(alongAxis(x234, d234, -2, 3, fn(i Int) Int { 2 - i }).0, d234, -1, false));
+-- Views read inline by reductions, scans and other views (no copies).
+add("stride_sum", fn() S { live(x6, d6) stride(2) sum },
+	(iota(1, 9.0), [Int]()));
+add("reshape_sum0", fn() S { live(x6, d6) reshape([3, 2]) sum(0) },
+	refReduce(x6, [3, 2], 0, false));
+add("take_scan_r3", fn() S { live(x234, d234) take(2, 1) scan(BinaryOp.add, -1) },
+	refReduce(alongAxis(x234, d234, 1, 2, fn(i Int) Int { i }).0, [2, 2, 4], -1, true));
+add("rev_transpose", fn() S { live(x34, d34) reverse(0) transpose },
+	refPermute(alongAxis(x34, d34, 0, 3, fn(i Int) Int { 2 - i }).0, d34, [1, 0]));
+add("view_chain_sum", fn() S { live(x234, d234) reverse(-1) stride(2, 1) sum(0) },
+	refReduce(alongAxis(alongAxis(x234, d234, -1, 4, fn(i Int) Int { 3 - i }).0, d234, 1, 2,
+		fn(i Int) Int { i * 2 }).0, [2, 2, 4], 0, false));
+
 -- An axis op on a scalar treats it as a row.
 add("scalar_stutter", fn() S { live([5.0], [Int]()) stutter(3) }, ([5.0, 5.0, 5.0], [3]));
 

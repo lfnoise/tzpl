@@ -1780,10 +1780,16 @@ Progress (2026-10-26):
 - **Found on the way:** an AoS (per-voice struct) voicer never ran its voice body's
   block-placed loops, so a block-rate value such as a note parameter times a constant
   tensor read 0 — fixed (`_aosVoiceBlockLoops`). `viDiv(1, b)` returned b.
+- **Views are not stored:** a static view (take, drop, stride, stutter, ncyc, constant
+  slice, reverse, transpose, reshape) outside a voice body is read inline by its
+  consumers when they are elementwise ops, other views, reductions or scans: each reads
+  the view's stored source through the composed index map, and a reduce or scan over a
+  view is a loop over the mapped elements. No copy. Still stored: views with several
+  consumers, views read by `at`/`put`/`join`, and views in a voice body (flat voice
+  indexing ties element indices to the loop's per-voice width).
 - **Not done:** `at`/`put` along an axis (they still index the flattening); the varying
   `slice`/`rotate` is a per-element `mod` index (no pointer tables rebuilt per
-  parameter-group change yet); index maps are not yet folded into consumers' channel
-  tables (each operation's input is materialized, as before).
+  parameter-group change yet).
 
 **M9: Voicer block form (§4.6), portability and performance.**
 - Channel-vector loops over voices, skipping idle groups, per-voice parameter caches.

@@ -35,7 +35,7 @@ OUT 0 out f32 2
      29   30 [5               ]  1  1 Audio    Temp      f32     1 if_else
      30   31 [30              ]  1  0 Audio    Phi       f32     1 PhiNode
      31   32 [                ]  0  1 Audio    Temp      f32     4 voicer
-     32   34 [32              ]  1  1 Audio    Temp      f32   2x2 vec_reshape([-1, 2])
+     32   34 [32              ]  1  1 Audio    None      f32   2x2 vec_reshape([-1, 2])
      33   35 [34              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
      34   36 [35              ]  1  0 Audio    Sink      f32     2 outlet
 -- TREES
@@ -88,11 +88,10 @@ OUT 0 out f32 2
       0   31 [30              ]  1  0 Audio    Phi       f32     1 PhiNode
     TREE 17   [16*] Audio  Temp      f32     4
       0   32 [                ]  0  1 Audio    Temp      f32     4 voicer
-    TREE 18   [17*] Audio  Temp      f32   2x2
-      0   34 [32              ]  1  1 Audio    Temp      f32   2x2 vec_reshape([-1, 2])
-    TREE 19   [18*] Audio  SeparateLoop f32     2
-      0   35 [34              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
-    TREE 20   [19] Audio  Sink      f32     2
+    TREE 18   [17*] Audio  SeparateLoop f32     2
+      0   34 [32              ]  1  1 Audio    None      f32   2x2 vec_reshape([-1, 2])
+      1   35 [34              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
+    TREE 19   [18] Audio  Sink      f32     2
       0   36 [35              ]  1  0 Audio    Sink      f32     2 outlet
 -- INIT
   LOOP  2 [] Init   1
@@ -125,13 +124,11 @@ GRAPH 0
   LOOP 10 [9] Audio  4
     TREE 17   [16*] Audio  Temp      f32     4
       0   32 [                ]  0  1 Audio    Temp      f32     4 voicer
-  LOOP 11 [10] Audio  4
-    TREE 18   [17*] Audio  Temp      f32   2x2
-      0   34 [32              ]  1  1 Audio    Temp      f32   2x2 vec_reshape([-1, 2])
-  LOOP 12 [11] Audio  2
-    TREE 19   [18*] Audio  SeparateLoop f32     2
-      0   35 [34              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
-    TREE 20   [19] Audio  Sink      f32     2
+  LOOP 11 [10] Audio  2
+    TREE 18   [17*] Audio  SeparateLoop f32     2
+      0   34 [32              ]  1  1 Audio    None      f32   2x2 vec_reshape([-1, 2])
+      1   35 [34              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
+    TREE 19   [18] Audio  Sink      f32     2
       0   36 [35              ]  1  0 Audio    Sink      f32     2 outlet
 GRAPH 1
   LOOP  8 [0 4 7] Audio  1
@@ -222,7 +219,7 @@ OUT 0 out f32 2
      32   33 [8               ]  1  1 Audio    Temp      f32     1 if_else
      33   34 [33              ]  1  0 Audio    Phi       f32     1 PhiNode
      34   35 [                ]  0  1 Audio    Temp      f32     4 voicer
-     35   37 [35              ]  1  1 Audio    Temp      f32   2x2 vec_reshape([-1, 2])
+     35   37 [35              ]  1  1 Audio    None      f32   2x2 vec_reshape([-1, 2])
      36   38 [37              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
      37   39 [38              ]  1  0 Audio    Sink      f32     2 outlet
 -- TREES
@@ -279,11 +276,10 @@ OUT 0 out f32 2
       0   34 [33              ]  1  0 Audio    Phi       f32     1 PhiNode
     TREE 18   [17*] Audio  Temp      f32     4
       0   35 [                ]  0  1 Audio    Temp      f32     4 voicer
-    TREE 19   [18*] Audio  Temp      f32   2x2
-      0   37 [35              ]  1  1 Audio    Temp      f32   2x2 vec_reshape([-1, 2])
-    TREE 20   [19*] Audio  SeparateLoop f32     2
-      0   38 [37              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
-    TREE 21   [20] Audio  Sink      f32     2
+    TREE 19   [18*] Audio  SeparateLoop f32     2
+      0   37 [35              ]  1  1 Audio    None      f32   2x2 vec_reshape([-1, 2])
+      1   38 [37              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
+    TREE 20   [19] Audio  Sink      f32     2
       0   39 [38              ]  1  0 Audio    Sink      f32     2 outlet
 -- INIT
   LOOP  1 [] Init   0
@@ -322,13 +318,11 @@ GRAPH 0
   LOOP 11 [10] Audio  4
     TREE 18   [17*] Audio  Temp      f32     4
       0   35 [                ]  0  1 Audio    Temp      f32     4 voicer
-  LOOP 12 [11] Audio  4
-    TREE 19   [18*] Audio  Temp      f32   2x2
-      0   37 [35              ]  1  1 Audio    Temp      f32   2x2 vec_reshape([-1, 2])
-  LOOP 13 [12] Audio  2
-    TREE 20   [19*] Audio  SeparateLoop f32     2
-      0   38 [37              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
-    TREE 21   [20] Audio  Sink      f32     2
+  LOOP 12 [11] Audio  2
+    TREE 19   [18*] Audio  SeparateLoop f32     2
+      0   37 [35              ]  1  1 Audio    None      f32   2x2 vec_reshape([-1, 2])
+      1   38 [37              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
+    TREE 20   [19] Audio  Sink      f32     2
       0   39 [38              ]  1  0 Audio    Sink      f32     2 outlet
 GRAPH 1
   LOOP  9 [6 7 8] Audio  1
@@ -439,7 +433,7 @@ OUT 0 out f32 2
      53   58 [3               ]  1  1 Audio    Temp      f32     1 if_else
      54   59 [58              ]  1  0 Audio    Phi       f32     1 PhiNode
      55   60 [                ]  0  1 Audio    Temp      f32     4 voicer
-     56   62 [60              ]  1  1 Audio    Temp      f32   2x2 vec_reshape([-1, 2])
+     56   62 [60              ]  1  1 Audio    None      f32   2x2 vec_reshape([-1, 2])
      57   63 [62              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
      58   64 [63              ]  1  0 Audio    Sink      f32     2 outlet
 -- TREES
@@ -525,11 +519,10 @@ OUT 0 out f32 2
       0   59 [58              ]  1  0 Audio    Phi       f32     1 PhiNode
     TREE 26   [25*] Audio  Temp      f32     4
       0   60 [                ]  0  1 Audio    Temp      f32     4 voicer
-    TREE 27   [26*] Audio  Temp      f32   2x2
-      0   62 [60              ]  1  1 Audio    Temp      f32   2x2 vec_reshape([-1, 2])
-    TREE 28   [27*] Audio  SeparateLoop f32     2
-      0   63 [62              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
-    TREE 29   [28] Audio  Sink      f32     2
+    TREE 27   [26*] Audio  SeparateLoop f32     2
+      0   62 [60              ]  1  1 Audio    None      f32   2x2 vec_reshape([-1, 2])
+      1   63 [62              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
+    TREE 28   [27] Audio  Sink      f32     2
       0   64 [63              ]  1  0 Audio    Sink      f32     2 outlet
 -- INIT
   LOOP  1 [] Init   0
@@ -569,13 +562,11 @@ GRAPH 0
   LOOP 10 [9] Audio  4
     TREE 26   [25*] Audio  Temp      f32     4
       0   60 [                ]  0  1 Audio    Temp      f32     4 voicer
-  LOOP 11 [10] Audio  4
-    TREE 27   [26*] Audio  Temp      f32   2x2
-      0   62 [60              ]  1  1 Audio    Temp      f32   2x2 vec_reshape([-1, 2])
-  LOOP 12 [11] Audio  2
-    TREE 28   [27*] Audio  SeparateLoop f32     2
-      0   63 [62              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
-    TREE 29   [28] Audio  Sink      f32     2
+  LOOP 11 [10] Audio  2
+    TREE 27   [26*] Audio  SeparateLoop f32     2
+      0   62 [60              ]  1  1 Audio    None      f32   2x2 vec_reshape([-1, 2])
+      1   63 [62              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
+    TREE 28   [27] Audio  Sink      f32     2
       0   64 [63              ]  1  0 Audio    Sink      f32     2 outlet
 GRAPH 1
   LOOP  8 [0 6 7] Audio  1
@@ -725,7 +716,7 @@ OUT 0 out f32 2
      53   67 [2               ]  1  1 Audio    Temp      f32     1 if_else
      54   68 [67              ]  1  0 Audio    Phi       f32     1 PhiNode
      55   69 [                ]  0  1 Audio    Temp      f32     4 voicer
-     56   71 [69              ]  1  1 Audio    Temp      f32   2x2 vec_reshape([-1, 2])
+     56   71 [69              ]  1  1 Audio    None      f32   2x2 vec_reshape([-1, 2])
      57   72 [71              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
      58   73 [72              ]  1  0 Audio    Sink      f32     2 outlet
 -- TREES
@@ -816,11 +807,10 @@ OUT 0 out f32 2
       0   68 [67              ]  1  0 Audio    Phi       f32     1 PhiNode
     TREE 27   [26*] Audio  Temp      f32     4
       0   69 [                ]  0  1 Audio    Temp      f32     4 voicer
-    TREE 28   [27*] Audio  Temp      f32   2x2
-      0   71 [69              ]  1  1 Audio    Temp      f32   2x2 vec_reshape([-1, 2])
-    TREE 29   [28*] Audio  SeparateLoop f32     2
-      0   72 [71              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
-    TREE 30   [29] Audio  Sink      f32     2
+    TREE 28   [27*] Audio  SeparateLoop f32     2
+      0   71 [69              ]  1  1 Audio    None      f32   2x2 vec_reshape([-1, 2])
+      1   72 [71              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
+    TREE 29   [28] Audio  Sink      f32     2
       0   73 [72              ]  1  0 Audio    Sink      f32     2 outlet
 -- INIT
   LOOP  0 [] Init   16
@@ -858,13 +848,11 @@ GRAPH 0
   LOOP 13 [12] Audio  4
     TREE 27   [26*] Audio  Temp      f32     4
       0   69 [                ]  0  1 Audio    Temp      f32     4 voicer
-  LOOP 14 [13] Audio  4
-    TREE 28   [27*] Audio  Temp      f32   2x2
-      0   71 [69              ]  1  1 Audio    Temp      f32   2x2 vec_reshape([-1, 2])
-  LOOP 15 [14] Audio  2
-    TREE 29   [28*] Audio  SeparateLoop f32     2
-      0   72 [71              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
-    TREE 30   [29] Audio  Sink      f32     2
+  LOOP 14 [13] Audio  2
+    TREE 28   [27*] Audio  SeparateLoop f32     2
+      0   71 [69              ]  1  1 Audio    None      f32   2x2 vec_reshape([-1, 2])
+      1   72 [71              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
+    TREE 29   [28] Audio  Sink      f32     2
       0   73 [72              ]  1  0 Audio    Sink      f32     2 outlet
 GRAPH 1
   LOOP 11 [8 9 10] Audio  1
@@ -1034,7 +1022,7 @@ OUT 0 out f32 2
      64   75 [74 48           ]  2  1 Audio    Temp      f32     1 *
      65   76 [75              ]  1  0 Audio    Phi       f32     1 PhiNode
      66   77 [                ]  0  1 Audio    Temp      f32     4 voicer
-     67   79 [77              ]  1  1 Audio    Temp      f32   2x2 vec_reshape([-1, 2])
+     67   79 [77              ]  1  1 Audio    None      f32   2x2 vec_reshape([-1, 2])
      68   80 [79              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
      69   81 [80              ]  1  0 Audio    Sink      f32     2 outlet
 -- TREES
@@ -1134,11 +1122,10 @@ OUT 0 out f32 2
       0   76 [75              ]  1  0 Audio    Phi       f32     1 PhiNode
     TREE 29   [28*] Audio  Temp      f32     4
       0   77 [                ]  0  1 Audio    Temp      f32     4 voicer
-    TREE 30   [29*] Audio  Temp      f32   2x2
-      0   79 [77              ]  1  1 Audio    Temp      f32   2x2 vec_reshape([-1, 2])
-    TREE 31   [30*] Audio  SeparateLoop f32     2
-      0   80 [79              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
-    TREE 32   [31] Audio  Sink      f32     2
+    TREE 30   [29*] Audio  SeparateLoop f32     2
+      0   79 [77              ]  1  1 Audio    None      f32   2x2 vec_reshape([-1, 2])
+      1   80 [79              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
+    TREE 31   [30] Audio  Sink      f32     2
       0   81 [80              ]  1  0 Audio    Sink      f32     2 outlet
 -- INIT
   LOOP  3 [] Init   1
@@ -1199,13 +1186,11 @@ GRAPH 0
   LOOP 12 [11] Audio  4
     TREE 29   [28*] Audio  Temp      f32     4
       0   77 [                ]  0  1 Audio    Temp      f32     4 voicer
-  LOOP 13 [12] Audio  4
-    TREE 30   [29*] Audio  Temp      f32   2x2
-      0   79 [77              ]  1  1 Audio    Temp      f32   2x2 vec_reshape([-1, 2])
-  LOOP 14 [13] Audio  2
-    TREE 31   [30*] Audio  SeparateLoop f32     2
-      0   80 [79              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
-    TREE 32   [31] Audio  Sink      f32     2
+  LOOP 13 [12] Audio  2
+    TREE 30   [29*] Audio  SeparateLoop f32     2
+      0   79 [77              ]  1  1 Audio    None      f32   2x2 vec_reshape([-1, 2])
+      1   80 [79              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
+    TREE 31   [30] Audio  Sink      f32     2
       0   81 [80              ]  1  0 Audio    Sink      f32     2 outlet
 GRAPH 1
   LOOP  1 [0 2 3] Audio  1
@@ -1304,7 +1289,7 @@ OUT 0 out f32 2
      10   10 [2               ]  1  1 Audio    Temp      f32     1 if_else
      11   11 [10              ]  1  0 Audio    Phi       f32     1 PhiNode
      12   12 [                ]  0  1 Audio    Temp      f32     4 voicer
-     13   14 [12              ]  1  1 Audio    Temp      f32   2x2 vec_reshape([-1, 2])
+     13   14 [12              ]  1  1 Audio    None      f32   2x2 vec_reshape([-1, 2])
      14   15 [14              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
      15   16 [15              ]  1  0 Audio    Sink      f32     2 outlet
 -- TREES
@@ -1329,11 +1314,10 @@ OUT 0 out f32 2
       0   11 [10              ]  1  0 Audio    Phi       f32     1 PhiNode
     TREE 8    [7*] Audio  Temp      f32     4
       0   12 [                ]  0  1 Audio    Temp      f32     4 voicer
-    TREE 9    [8*] Audio  Temp      f32   2x2
-      0   14 [12              ]  1  1 Audio    Temp      f32   2x2 vec_reshape([-1, 2])
-    TREE 10   [9*] Audio  SeparateLoop f32     2
-      0   15 [14              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
-    TREE 11   [10] Audio  Sink      f32     2
+    TREE 9    [8*] Audio  SeparateLoop f32     2
+      0   14 [12              ]  1  1 Audio    None      f32   2x2 vec_reshape([-1, 2])
+      1   15 [14              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
+    TREE 10   [9] Audio  Sink      f32     2
       0   16 [15              ]  1  0 Audio    Sink      f32     2 outlet
 -- INIT
 -- RESET
@@ -1349,13 +1333,11 @@ GRAPH 0
   LOOP  5 [4] Audio  4
     TREE 8    [7*] Audio  Temp      f32     4
       0   12 [                ]  0  1 Audio    Temp      f32     4 voicer
-  LOOP  6 [5] Audio  4
-    TREE 9    [8*] Audio  Temp      f32   2x2
-      0   14 [12              ]  1  1 Audio    Temp      f32   2x2 vec_reshape([-1, 2])
-  LOOP  7 [6] Audio  2
-    TREE 10   [9*] Audio  SeparateLoop f32     2
-      0   15 [14              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
-    TREE 11   [10] Audio  Sink      f32     2
+  LOOP  6 [5] Audio  2
+    TREE 9    [8*] Audio  SeparateLoop f32     2
+      0   14 [12              ]  1  1 Audio    None      f32   2x2 vec_reshape([-1, 2])
+      1   15 [14              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
+    TREE 10   [9] Audio  Sink      f32     2
       0   16 [15              ]  1  0 Audio    Sink      f32     2 outlet
 GRAPH 1
   LOOP  3 [0 1 2] Audio  1
@@ -1433,7 +1415,7 @@ OUT 0 out f32 2
      43   57 [5               ]  1  1 Audio    Temp      f32     2 if_else
      44   58 [57              ]  1  0 Audio    Phi       f32     2 PhiNode
      45   59 [                ]  0  1 Audio    Temp      f32   4x2 voicer
-     46   61 [59              ]  1  1 Audio    Temp      f32   4x2 vec_reshape([-1, 2])
+     46   61 [59              ]  1  1 Audio    None      f32   4x2 vec_reshape([-1, 2])
      47   62 [61              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
      48   63 [62              ]  1  0 Audio    Sink      f32     2 outlet
 -- TREES
@@ -1506,11 +1488,10 @@ OUT 0 out f32 2
       0   58 [57              ]  1  0 Audio    Phi       f32     2 PhiNode
     TREE 23   [22*] Audio  Temp      f32   4x2
       0   59 [                ]  0  1 Audio    Temp      f32   4x2 voicer
-    TREE 24   [23*] Audio  Temp      f32   4x2
-      0   61 [59              ]  1  1 Audio    Temp      f32   4x2 vec_reshape([-1, 2])
-    TREE 25   [24*] Audio  SeparateLoop f32     2
-      0   62 [61              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
-    TREE 26   [25] Audio  Sink      f32     2
+    TREE 24   [23*] Audio  SeparateLoop f32     2
+      0   61 [59              ]  1  1 Audio    None      f32   4x2 vec_reshape([-1, 2])
+      1   62 [61              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
+    TREE 25   [24] Audio  Sink      f32     2
       0   63 [62              ]  1  0 Audio    Sink      f32     2 outlet
 -- INIT
   LOOP  5 [] Init   1
@@ -1569,13 +1550,11 @@ GRAPH 0
   LOOP 13 [12] Audio  8
     TREE 23   [22*] Audio  Temp      f32   4x2
       0   59 [                ]  0  1 Audio    Temp      f32   4x2 voicer
-  LOOP 14 [13] Audio  8
-    TREE 24   [23*] Audio  Temp      f32   4x2
-      0   61 [59              ]  1  1 Audio    Temp      f32   4x2 vec_reshape([-1, 2])
-  LOOP 15 [14] Audio  2
-    TREE 25   [24*] Audio  SeparateLoop f32     2
-      0   62 [61              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
-    TREE 26   [25] Audio  Sink      f32     2
+  LOOP 14 [13] Audio  2
+    TREE 24   [23*] Audio  SeparateLoop f32     2
+      0   61 [59              ]  1  1 Audio    None      f32   4x2 vec_reshape([-1, 2])
+      1   62 [61              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
+    TREE 25   [24] Audio  Sink      f32     2
       0   63 [62              ]  1  0 Audio    Sink      f32     2 outlet
 GRAPH 1
   LOOP 11 [7 9 10] Audio  2
@@ -1669,7 +1648,7 @@ OUT 0 out f32 2
      36   37 [35 36           ]  2  1 Audio    Temp      f32     1 *
      37   38 [37              ]  1  0 Audio    Phi       f32     1 PhiNode
      38   39 [                ]  0  1 Audio    Temp      f32     4 voicer
-     39   41 [39              ]  1  1 Audio    Temp      f32   2x2 vec_reshape([-1, 2])
+     39   41 [39              ]  1  1 Audio    None      f32   2x2 vec_reshape([-1, 2])
      40   42 [41              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
      41   43 [42              ]  1  0 Audio    Sink      f32     2 outlet
 -- TREES
@@ -1727,11 +1706,10 @@ OUT 0 out f32 2
       0   38 [37              ]  1  0 Audio    Phi       f32     1 PhiNode
     TREE 15   [14*] Audio  Temp      f32     4
       0   39 [                ]  0  1 Audio    Temp      f32     4 voicer
-    TREE 16   [15*] Audio  Temp      f32   2x2
-      0   41 [39              ]  1  1 Audio    Temp      f32   2x2 vec_reshape([-1, 2])
-    TREE 17   [16*] Audio  SeparateLoop f32     2
-      0   42 [41              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
-    TREE 18   [17] Audio  Sink      f32     2
+    TREE 16   [15*] Audio  SeparateLoop f32     2
+      0   41 [39              ]  1  1 Audio    None      f32   2x2 vec_reshape([-1, 2])
+      1   42 [41              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
+    TREE 17   [16] Audio  Sink      f32     2
       0   43 [42              ]  1  0 Audio    Sink      f32     2 outlet
 -- INIT
   LOOP  0 [] Init   0
@@ -1766,13 +1744,11 @@ GRAPH 0
   LOOP  7 [4] Audio  4
     TREE 15   [14*] Audio  Temp      f32     4
       0   39 [                ]  0  1 Audio    Temp      f32     4 voicer
-  LOOP  8 [7] Audio  4
-    TREE 16   [15*] Audio  Temp      f32   2x2
-      0   41 [39              ]  1  1 Audio    Temp      f32   2x2 vec_reshape([-1, 2])
-  LOOP  9 [8] Audio  2
-    TREE 17   [16*] Audio  SeparateLoop f32     2
-      0   42 [41              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
-    TREE 18   [17] Audio  Sink      f32     2
+  LOOP  8 [7] Audio  2
+    TREE 16   [15*] Audio  SeparateLoop f32     2
+      0   41 [39              ]  1  1 Audio    None      f32   2x2 vec_reshape([-1, 2])
+      1   42 [41              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
+    TREE 17   [16] Audio  Sink      f32     2
       0   43 [42              ]  1  0 Audio    Sink      f32     2 outlet
 GRAPH 1
   LOOP  4 [3 5 6] Audio  1
@@ -1880,7 +1856,7 @@ OUT 0 out f32 2
      42   43 [18              ]  1  1 Audio    Temp      f32     1 if_else
      43   44 [43              ]  1  0 Audio    Phi       f32     1 PhiNode
      44   45 [                ]  0  1 Audio    Temp      f32     4 voicer
-     45   47 [45              ]  1  1 Audio    Temp      f32   2x2 vec_reshape([-1, 2])
+     45   47 [45              ]  1  1 Audio    None      f32   2x2 vec_reshape([-1, 2])
      46   48 [47              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
      47   49 [48              ]  1  0 Audio    Sink      f32     2 outlet
 -- TREES
@@ -1948,11 +1924,10 @@ OUT 0 out f32 2
       0   44 [43              ]  1  0 Audio    Phi       f32     1 PhiNode
     TREE 19   [18*] Audio  Temp      f32     4
       0   45 [                ]  0  1 Audio    Temp      f32     4 voicer
-    TREE 20   [19*] Audio  Temp      f32   2x2
-      0   47 [45              ]  1  1 Audio    Temp      f32   2x2 vec_reshape([-1, 2])
-    TREE 21   [20*] Audio  SeparateLoop f32     2
-      0   48 [47              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
-    TREE 22   [21] Audio  Sink      f32     2
+    TREE 20   [19*] Audio  SeparateLoop f32     2
+      0   47 [45              ]  1  1 Audio    None      f32   2x2 vec_reshape([-1, 2])
+      1   48 [47              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
+    TREE 21   [20] Audio  Sink      f32     2
       0   49 [48              ]  1  0 Audio    Sink      f32     2 outlet
 -- INIT
   LOOP  0 [] Init   0
@@ -1991,13 +1966,11 @@ GRAPH 0
   LOOP 12 [11] Audio  4
     TREE 19   [18*] Audio  Temp      f32     4
       0   45 [                ]  0  1 Audio    Temp      f32     4 voicer
-  LOOP 13 [12] Audio  4
-    TREE 20   [19*] Audio  Temp      f32   2x2
-      0   47 [45              ]  1  1 Audio    Temp      f32   2x2 vec_reshape([-1, 2])
-  LOOP 14 [13] Audio  2
-    TREE 21   [20*] Audio  SeparateLoop f32     2
-      0   48 [47              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
-    TREE 22   [21] Audio  Sink      f32     2
+  LOOP 13 [12] Audio  2
+    TREE 20   [19*] Audio  SeparateLoop f32     2
+      0   47 [45              ]  1  1 Audio    None      f32   2x2 vec_reshape([-1, 2])
+      1   48 [47              ]  1  1 Audio    SeparateLoop f32     2 reduce(+, axis 0)
+    TREE 21   [20] Audio  Sink      f32     2
       0   49 [48              ]  1  0 Audio    Sink      f32     2 outlet
 GRAPH 1
   LOOP  4 [3] Audio  1

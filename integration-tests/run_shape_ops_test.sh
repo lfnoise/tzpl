@@ -46,7 +46,7 @@ for want in "axis 2 is outside a rank-2 signal" "axis -3 is outside a rank-2 sig
             "drop leaves no elements" "join: shapes 3x4 and 2x3 differ" \
             "stack: shapes 3x4 and 6 differ" "reshape: 12 channels do not divide by 5" \
             "transpose: [0, 0, 1] is not a permutation"; do
-    if echo "$ERR" | grep -qF "ERROR $want"; then echo "PASS error: $want"
+    if grep -qF "ERROR $want" <<< "$ERR"; then echo "PASS error: $want"
     else echo "FAIL error not reported: $want"; FAILED=1; fi
 done
 
@@ -55,7 +55,7 @@ rm -rf "$WORK"
 for forms in auto serial; do
     out="$(SHAPE_OPS_MODE=compile SYNTHC_CORPUS_MODE=compile TZPL_FORMS=$forms \
            TZPL_BUILD="$WORK/$forms" "$APP" --nogui --no-audio "${MODS[@]}" "$SCRIPT" 2>&1)" || true
-    if echo "$out" | grep -q "COMPILE FAIL"; then
+    if grep -q "COMPILE FAIL" <<< "$out"; then
         echo "$out" | grep "COMPILE FAIL" | head -20
         FAILED=1
         continue

@@ -732,7 +732,26 @@ fn _isInputKind(k NodeKind) Bool = match (k) {
 	_:                   false;
 };
 
+-- A static view outside any voicer body is read inline by the consumers
+-- that can (takesInlineView): it is not stored and costs no copy. (In a
+-- voice body the flat voice indexing ties element indices to the loop's
+-- per-voice width, so views there are still stored.)
+fn _inlineView(ctx Ctx, n NIdx) Bool {
+	if (!(ctx.kind[n] isStaticView)) { return false; }
+	var g = ctx.graphOf[n];
+	while (g != NONE) {
+		for (v : ctx.sorted) {
+			match (ctx.kind[v]) { voicerK(_): { if (ctx.graphOf[ctx.subs[v][0]] == g) { return false; } } _: {} }
+		}
+		g = ctx.graphs[g].parent;
+	}
+	for (c : ctx.consumers[n]) { if (!(ctx.kind[c] takesInlineView)) { return false; } }
+	true
+}
+
 fn findGraphCuts(ctx Ctx) Void {
+	var inlineViews [Bool] = false repeat(ctx numNodes);
+	for (n : ctx.sorted) { inlineViews[n] = ctx _inlineView(n); }
 	-- Phase 1: mark inputs.
 	for (n : ctx.sorted) {
 		if (ctx.kind[n] _isInputKind) { _setCut(ctx, n, GraphCut.input); }
@@ -743,7 +762,9 @@ fn findGraphCuts(ctx Ctx) Void {
 			if (ctx.kind[inp] isConstantKind) {
 				-- constants are never cut
 			} else {
-				if (needsInputTempVar(ctx.kind[n], i)) { _setCut(ctx, inp, GraphCut.temp); }
+				if (needsInputTempVar(ctx.kind[n], i) && !(i == 0 && inlineViews[inp])) {
+					_setCut(ctx, inp, GraphCut.temp);
+				}
 				-- A cross-graph reference (input lives in a different graph) is an
 				-- instance variable; otherwise rate/separate-loop/broadcast.
 				if (ctx.graphOf[n] != ctx.graphOf[inp]) {
@@ -777,7 +798,7 @@ fn findGraphCuts(ctx Ctx) Void {
 				_setCut(ctx, n, GraphCut.unused);
 			} else if (ctx.consumers[n] length > 1) {
 				_setCut(ctx, n, GraphCut.fanOut);
-			} else if (inputMustBeSeparateLoop(ctx.kind[n], 0)) {
+			} else if (inputMustBeSeparateLoop(ctx.kind[n], 0) && !inlineViews[n]) {
 				_setCut(ctx, n, GraphCut.separateLoop);
 			} else if (ctx.kind[n] isControlFlowKind) {
 				_setCut(ctx, n, GraphCut.controlFlow);
