@@ -98,6 +98,15 @@ using f64x8 = double        __attribute__((ext_vector_type(8)));
 
 #endif // !__APPLE__ (Section A)
 
+// Unaligned 4-lane views (block engine M8): sample-vector loops read and
+// write 4 consecutive samples of a block buffer from any offset, through
+// `*(f32x4u*)p`. A typedef may lower a type's alignment.
+typedef u64x4 u64x4u __attribute__((aligned(8)));
+typedef i32x4 i32x4u __attribute__((aligned(4)));
+typedef i64x4 i64x4u __attribute__((aligned(8)));
+typedef f32x4 f32x4u __attribute__((aligned(4)));
+typedef f64x4 f64x4u __attribute__((aligned(8)));
+
 // ============================================================================
 // SECTION B — Traits: get_traits<T> and Vector<S,N>
 // ============================================================================

@@ -51,6 +51,12 @@ target_link_libraries(test_block_engine
     PRIVATE audio_engine_lib
 )
 
+# Equivalence of forms (block engine plan M8): each dump-corpus synth's
+# automatic and serial builds agree (run_forms_equivalence_test.sh).
+add_executable(forms_equiv src/forms_equiv.cpp)
+target_include_directories(forms_equiv PRIVATE ${CMAKE_SOURCE_DIR}/shared)
+target_link_libraries(forms_equiv PRIVATE ${CMAKE_DL_LIBS})
+
 # Header-only voice-allocator invariants; no audio, links nothing.
 add_executable(test_voicer
     src/test_voicer.cpp

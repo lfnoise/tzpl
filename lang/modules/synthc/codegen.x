@@ -301,7 +301,20 @@ fn _varRef(ctx Ctx, n NIdx, cel String) String {
 			}
 			_: {}
 		}
-		if (ctx.chans[n] == 1) { return _simdSplat(t, w, s); }
+		if (ctx.chans[n] == 1) {
+			if (`cgSampleVec && ctx.nrate[n] == Rate.audio) {
+				-- a block buffer row: 4 samples from the row pointer
+				if (ctx _isBlockTemp(n) || ctx _isRootBuf(n)) { return _simdLoad(t, w, s); }
+				-- a temp of this region: a vector local
+				if (ctx.cut[n] isTempVarCut) { return s; }
+			}
+			if (`cgSampleVec && ctx _isRootBuf(n) && ctx.nrate[n] == Rate.block) {
+				-- a parameter group's value: per sample while it runs every sample
+				let g = ctx.groupOf[n];
+				return "(pgS%^ ? %^ : %^)" fmt(g, _simdLoad(t, w, "&%^" fmt(s)), _simdSplat(t, w, s));
+			}
+			return _simdSplat(t, w, s);
+		}
 		let C = ctx.chans[n];
 		if (C == w) { return _simdLoad(t, w, "&%^[0]" fmt(s)); }
 		if (C > w) {
@@ -361,14 +374,61 @@ fn _varRef(ctx Ctx, n NIdx, cel String) String {
 -- are node-level (never per voice): in a flat voice loop the element index
 -- spans voices x channels, so the channel is cel wrapped by the port's
 -- width; in SIMD a mono port splats and wider ones load or gather.
+-- A multichannel port read or written only by the root graph's audio loops
+-- is accessed through the engine's channel-pointer table, r_in<k>[chan][bi]
+-- (r_out<k>), with no interleaved copy (block engine plan M8, D4). The notes
+-- input, ports read at other rates, and inputs a consumer takes as a whole
+-- row (reduce, channel ops) keep their gathered block buffer.
+fn _directPort(ctx Ctx, n NIdx) Bool {
+	if (ctx.chans[n] < 2) { return false; }
+	match (ctx.kind[n]) {
+		inletK(_, sn, _): {
+			if (ctx.notesInlets contains(n)) { return false; }
+			if (ctx.consumers[n] length == 0) { return false; }
+			for (c : ctx.consumers[n]) {
+				if (ctx.nrate[c] != Rate.audio || ctx.graphOf[c] != 0) { return false; }
+				-- elementwise consumers only: a reduce, channel op or buffer
+				-- access takes the whole row
+				let elementwise = match (ctx.kind[c]) {
+					unopK(_): true; binopK(_): true; compareopK(_): true; castopK(_): true;
+					selectK: true; delayWriteK(_): true; outletK(_, _): true;
+					_: false;
+				};
+				if (!elementwise) { return false; }
+			}
+			true
+		}
+		outletK(_, _): ctx.graphOf[n] == 0;
+		_: false;
+	}
+}
+
 fn _inletRef(ctx Ctx, n NIdx, sn Int, cel String) String {
 	let C = ctx.chans[n];
 	let a = "in%^" fmt(sn);
 	let flat = `cgVoiceCount > 0 && `cgFlatChanShift >= 0 && `cgFlatTrip > 0;
+	if (ctx _directPort(n)) {
+		-- channel idx at sample bi, through the pointer table
+		let ra = "r_in%^" fmt(sn);
+		if (`cgSimdW > 0) {
+			let w = `cgSimdW;
+			var parts [String] = [];
+			var j = 0;
+			while (j < w) {
+				let idx = cel == "0" ? (j % C) toString
+				          : (C >= `cgLoopChans ? "%^ + %^" fmt(cel, j) : "((%^ + %^) %% %^)" fmt(cel, j, C));
+				parts push!("%^[%^][bi]" fmt(ra, idx));
+				j = j + 1;
+			}
+			return "%^{%^}" fmt(_simdType(ctx.typ[n], w), parts join(", "));
+		}
+		let ix = _indexWrapShape(ctx.shape[n], `cgDstShape, `cgLoopChans, cel);
+		return "%^%^[bi]" fmt(ra, ix);
+	}
 	if (`cgSimdW > 0) {
 		let w = `cgSimdW;
 		let t = ctx.typ[n];
-		if (C == 1) { return _simdSplat(t, w, "%^[0]" fmt(a)); }
+		if (C == 1) { return `cgSampleVec ? _simdLoad(t, w, a) : _simdSplat(t, w, "%^[0]" fmt(a)); }
 		if (!flat && C >= `cgLoopChans) { return _simdLoad(t, w, "&%^[%^]" fmt(a, cel)); }
 		var parts [String] = [];
 		var j = 0;
@@ -829,6 +889,14 @@ fn _dpre() String = `cgInVoiceLoop ? "vs." : "p->";
 -- cannot bleed the previous note's tail). Mirrors the C++ delayZeroGuarded.
 fn _delayZeroGuarded(d DelayInfo) Bool = d.allocSize != 1 && d.initters length == 0;
 
+-- A multichannel inline ring of the root graph is stored tap-major,
+-- d[tap][chan] (block engine plan 4.2 step 8: a buffer's layout follows its
+-- consumer): a channel-vector loop reads 4 channels of one tap as one vector.
+-- Variable-time reads need each channel's ring contiguous, so a delay with
+-- any keeps d[chan][tap].
+fn _tapMajor(ctx Ctx, d DelayInfo) Bool =
+	d.allocSize > 1 && d.chans > 1 && d.varReaders length == 0 && !(ctx _isVoiceGraphDeep(ctx _delayGraph(d)));
+
 -- A typed zero literal for guarded ring reads (mirrors the C++ zeroLiteral).
 fn _zeroLit(t NumType) String {
 	if (t _isF32) { return "0.0f"; }
@@ -951,11 +1019,18 @@ fn _delayFixReadExpr(ctx Ctx, n NIdx, d Int, k Int, cel String) String {
 			if (zg) { rd = "(%^ ? %^ : %^)" fmt(guard, rd, _zeroLit(t)); }
 			return _simdSplat(t, w, rd);
 		}
+		let tm = ctx _tapMajor(info);
+		let tap = "(%^d%^_wrpos - u64(%^)) & %^" fmt(dp, ser, k, mask);
+		if (tm && dchans == lc) {
+			-- tap-major: the tap's channels are one vector
+			let ld = _simdLoad(t, w, "&%^d%^[%^][%^]" fmt(dp, ser, tap, cel));
+			return zg ? "(%^ ? %^ : %^)" fmt(guard, ld, _simdSplat(t, w, _zeroLit(t))) : ld;
+		}
 		var parts [String] = [];
 		var j = 0;
 		while (j < w) {
 			let ci = _simdLaneChanIdx(cel, j, dchans, lc);
-			var rd = "%^d%^[%^][(%^d%^_wrpos - u64(%^)) & %^]" fmt(dp, ser, ci, dp, ser, k, mask);
+			var rd = tm ? "%^d%^[%^][%^]" fmt(dp, ser, tap, ci) : "%^d%^[%^][%^]" fmt(dp, ser, ci, tap);
 			if (zg) { rd = "(%^ ? %^ : %^)" fmt(guard, rd, _zeroLit(t)); }
 			parts push!(rd);
 			j = j + 1;
@@ -966,7 +1041,9 @@ fn _delayFixReadExpr(ctx Ctx, n NIdx, d Int, k Int, cel String) String {
 	if (info.allocSize == 1) {
 		return "%^d%^%^" fmt(_dpre(), info.serial, di);
 	}
-	var rd = "%^d%^%^[(%^d%^_wrpos - u64(%^)) & %^]" fmt(_dpre(), info.serial, di, _dpre(), info.serial, k, _delayMask(info));
+	let tapIx = "[(%^d%^_wrpos - u64(%^)) & %^]" fmt(_dpre(), info.serial, k, _delayMask(info));
+	var rd = ctx _tapMajor(info) ? "%^d%^%^%^" fmt(_dpre(), info.serial, tapIx, di)
+	                             : "%^d%^%^%^" fmt(_dpre(), info.serial, di, tapIx);
 	if (_delayZeroGuarded(info)) {
 		rd = "(%^d%^_wrpos >= u64(%^) ? %^ : %^)" fmt(_dpre(), info.serial, k, rd, _zeroLit(ctx.typ[n]));
 	}
@@ -1293,6 +1370,11 @@ fn _delayWriteStmt(ctx Ctx, n NIdx, d Int, cel String, treeSerial Int) String {
 		if (info.allocSize == 1 && dchans >= w) {
 			return "*(%^*)(&%^d%^[%^]) = %^; // %^ DelayWrite\n" fmt(_simdType(info.typ, w), dp, ser, cel, value, treeSerial);
 		}
+		let tm = ctx _tapMajor(info);
+		if (tm && dchans == lc) {
+			return "*(%^*)(&%^d%^[%^d%^_wrpos & %^][%^]) = %^; // %^ DelayWrite\n"
+				fmt(_simdType(info.typ, w), dp, ser, dp, ser, _delayMask(info), cel, value, treeSerial);
+		}
 		var s = "%^ _dw%^ = %^; // %^ DelayWrite\n" fmt(_simdType(info.typ, w), ser, value, treeSerial);
 		let mask = _delayMask(info);
 		var j = 0;
@@ -1300,6 +1382,8 @@ fn _delayWriteStmt(ctx Ctx, n NIdx, d Int, cel String, treeSerial Int) String {
 			let ci = _simdLaneChanIdx(cel, j, dchans, lc);
 			if (info.allocSize == 1) {
 				s = s $ _tabs(`cgIndent) $ "%^d%^[%^] = _dw%^[%^];\n" fmt(dp, ser, ci, ser, j);
+			} else if (tm) {
+				s = s $ _tabs(`cgIndent) $ "%^d%^[%^d%^_wrpos & %^][%^] = _dw%^[%^];\n" fmt(dp, ser, dp, ser, mask, ci, ser, j);
 			} else {
 				s = s $ _tabs(`cgIndent) $ "%^d%^[%^][%^d%^_wrpos & %^] = _dw%^[%^];\n" fmt(dp, ser, ci, dp, ser, mask, ser, j);
 			}
@@ -1310,6 +1394,8 @@ fn _delayWriteStmt(ctx Ctx, n NIdx, d Int, cel String, treeSerial Int) String {
 	let di = info.chans > 1 ? "[%^]" fmt(cel) : "";
 	if (info.allocSize == 1) {
 		"%^d%^%^ = %^; // %^\n" fmt(_dpre(), info.serial, di, value, treeSerial)
+	} else if (ctx _tapMajor(info)) {
+		"%^d%^[%^d%^_wrpos & %^]%^ = %^; // %^\n" fmt(_dpre(), info.serial, _dpre(), info.serial, _delayMask(info), di, value, treeSerial)
 	} else {
 		"%^d%^%^[%^d%^_wrpos & %^] = %^; // %^\n" fmt(_dpre(), info.serial, di, _dpre(), info.serial, _delayMask(info), value, treeSerial)
 	}
@@ -1862,12 +1948,30 @@ fn genTree(ctx Ctx, treeIdx Int, cel String) String {
 -- its input. genExpr on the outlet node itself yields the accessor.
 fn _sinkStmt(ctx Ctx, n NIdx, cel String) String = match (ctx.kind[n]) {
 	outletK(_, sn): {
-		if (`cgSimdW > 0) {
+		if (ctx _directPort(n)) {
+			let val = genExpr(ctx, ctx.ins[n][0], cel);
+			if (`cgSimdW > 0) {
+				-- the vector's lanes to their channels at sample bi
+				let w = `cgSimdW;
+				var st = "{ %^ _o = %^;" fmt(_simdType(ctx.typ[n], w), val);
+				var j = 0;
+				while (j < w) {
+					let idx = cel == "0" ? j toString : "%^ + %^" fmt(cel, j);
+					st = st $ " r_out%^[%^][bi] = _o[%^];" fmt(sn, idx, j);
+					j = j + 1;
+				}
+				st $ " }"
+			} else {
+				"r_out%^[%^][bi] = %^" fmt(sn, cel, val)
+			}
+		} else if (`cgSimdW > 0) {
 			let t = ctx.typ[n]; let w = `cgSimdW;
 			let val = genExpr(ctx, ctx.ins[n][0], cel);
 			-- Case A (chans==width): the bare outlet pointer; Case B: &accessor[cel]
 			-- (no parens around the &, mirroring the C++ Outlet visitor).
-			if (ctx.chans[n] == w) {
+			if (`cgSampleVec) {
+				"*(%^u*)out%^ = %^" fmt(_simdType(t, w), sn, val)
+			} else if (ctx.chans[n] == w) {
 				"*(%^*)out%^ = %^" fmt(_simdType(t, w), sn, val)
 			} else {
 				"*(%^*)&out%^[%^] = %^" fmt(_simdType(t, w), sn, cel, val)
@@ -1890,7 +1994,8 @@ fn _sinkStmt(ctx Ctx, n NIdx, cel String) String = match (ctx.kind[n]) {
 
 fn _simdType(t NumType, w Int) String = "%^x%^" fmt(cppType(t), w);
 fn _simdSplat(t NumType, w Int, x String) String = "(%^)(%^)" fmt(_simdType(t, w), x);
-fn _simdLoad(t NumType, w Int, ptr String) String = "*(%^*)(%^)" fmt(_simdType(t, w), ptr);
+fn _simdLoad(t NumType, w Int, ptr String) String =
+	"*(%^%^*)(%^)" fmt(_simdType(t, w), `cgSampleVec ? "u" : "", ptr);
 
 -- The per-lane channel subscript for a SIMD gather/scatter (mirror simdLaneChanIdx).
 -- Lane j reads/writes channel cel+j, wrapping by (bufChans-1) when the delay/buffer
@@ -2309,7 +2414,8 @@ fn genDelayDecls(ctx Ctx) String {
 		if (d.allocSize == 1) {
 			s = s $ base $ " d%^%^;\n" fmt(d.serial, _shape(d.chans));
 		} else if (d.allocSize > 1) {
-			s = s $ base $ " d%^%^[%^];\n" fmt(d.serial, _shape(d.chans), d.allocSize);
+			s = s $ base $ (ctx _tapMajor(d) ? " d%^[%^]%^;\n" fmt(d.serial, d.allocSize, _shape(d.chans))
+			                                 : " d%^%^[%^];\n" fmt(d.serial, _shape(d.chans), d.allocSize));
 		} else {
 			s = s $ base $ " *d%^%^;\n" fmt(d.serial, _shape(d.chans));
 		}
@@ -2571,8 +2677,9 @@ fn genAllocFun(ctx Ctx, name String) String {
 	let bufs = ctx _blockBuffers;
 	var k = 0;
 	while (k < bufs.names length) {
-		s = s $ "\tp->%^ = (%^*)calloc((size_t)maxBlock * %^, sizeof(%^));\n"
-			fmt(bufs.names[k], bufs.types[k], bufs.elems[k], bufs.types[k]);
+		s = s $ "\tp->%^ = (%^*)calloc((size_t)maxBlock * %^%^, sizeof(%^));\n"
+			fmt(bufs.names[k], bufs.types[k], bufs.elems[k],
+			    bufs.pad[k] > 0 ? " + %^" fmt(bufs.pad[k]) : "", bufs.types[k]);
 		k = k + 1;
 	}
 	s $ "\treturn p;\n}\n\n"
@@ -2584,28 +2691,31 @@ struct BlockBufs {
 	names [String],
 	types [String],
 	elems [Int],
+	pad [Int],      -- extra leading elements (a scan's w holds the prior state at [-1])
 }
 
-fn _addBuf(b BlockBufs, name String, ty String, e Int) Void {
+fn _addBuf(b BlockBufs, name String, ty String, e Int, pad Int = 0) Void {
 	b.names push!(name);
 	b.types push!(ty);
 	b.elems push!(e);
+	b.pad push!(pad);
 }
 
 fn _blockBuffers(ctx Ctx) BlockBufs {
-	let out = BlockBufs { names: [String](), types: [String](), elems: [Int]() };
+	let out = BlockBufs { names: [String](), types: [String](), elems: [Int](), pad: [Int]() };
 	-- One-channel ports are read and written in place (planar is interleaved).
 	for (x : ctx.inlets) {
-		match (ctx.kind[x]) { inletK(_, sn, _): { if (ctx.chans[x] > 1) { out _addBuf("bin%^" fmt(sn), cppType(ctx.typ[x]), ctx _portElems(x)); } } _: {} }
+		match (ctx.kind[x]) { inletK(_, sn, _): { if (ctx.chans[x] > 1 && !(ctx _directPort(x))) { out _addBuf("bin%^" fmt(sn), cppType(ctx.typ[x]), ctx _portElems(x)); } } _: {} }
 	}
 	for (x : ctx.outlets) {
-		match (ctx.kind[x]) { outletK(_, sn): { if (ctx.chans[x] > 1) { out _addBuf("bout%^" fmt(sn), cppType(ctx.typ[x]), ctx _portElems(x)); } } _: {} }
+		match (ctx.kind[x]) { outletK(_, sn): { if (ctx.chans[x] > 1 && !(ctx _directPort(x))) { out _addBuf("bout%^" fmt(sn), cppType(ctx.typ[x]), ctx _portElems(x)); } } _: {} }
 	}
 	for (x : `cgRootBuf) { out _addBuf("bk%^" fmt(ctx.serial[x]), cppType(ctx.typ[x]), ctx _rowElems(x)); }
 	for (x : `cgBlockTemps) { out _addBuf("bt%^" fmt(ctx.serial[x]), cppType(ctx.typ[x]), ctx _rowElems(x)); }
 	for (k : ctx.blockCycles) {
 		let ty = ctx _blockCycleType(k);
-		for (part : ["x", "a", "b", "w"]) { out _addBuf("rc%^_%^" fmt(k, part), ty, 1); }
+		for (part : ["x", "a", "b"]) { out _addBuf("rc%^_%^" fmt(k, part), ty, 1); }
+		out _addBuf("rc%^_w" fmt(k), ty, 1, 1);
 	}
 	out
 }
@@ -2802,6 +2912,8 @@ fn genDelayInit(ctx Ctx) String {
 							let valueJ = genExpr(ctx, ctx.ins[n][0], "%^" fmt(j));
 							if (d.allocSize == 1) {
 								s = s $ "\tp->d%^[%^] = %^;\n" fmt(d.serial, j, valueJ);
+							} else if (d.allocSize > 1 && ctx _tapMajor(d)) {
+								s = s $ "\tp->d%^[(0ull - %^ull) & %^][%^] = %^;\n" fmt(d.serial, offset, d.allocSize - 1, j, valueJ);
 							} else if (d.allocSize > 1) {
 								s = s $ "\tp->d%^[%^][(0ull - %^ull) & %^] = %^;\n" fmt(d.serial, j, offset, d.allocSize - 1, valueJ);
 							} else {
@@ -2942,7 +3054,8 @@ fn genInitFun(ctx Ctx, name String) String {
 		match (ctx.kind[x]) {
 			inletK(_, sn, _): {
 				let ty = cppType(ctx.typ[x]);
-				if (ctx.chans[x] > 1) { s = s $ "\t%^* in%^ = p->bin%^; (void)in%^;\n" fmt(ty, sn, sn, sn); }
+				if (ctx _directPort(x)) {}
+				else if (ctx.chans[x] > 1) { s = s $ "\t%^* in%^ = p->bin%^; (void)in%^;\n" fmt(ty, sn, sn, sn); }
 				else { s = s $ "\tstatic %^ z%^[1] = {}; %^* in%^ = z%^; (void)in%^;\n" fmt(ty, sn, ty, sn, sn, sn); }
 			}
 			_: {}
@@ -3070,7 +3183,8 @@ fn genVoicerNoteFuns(ctx Ctx, name String) String {
 		match (ctx.kind[x]) {
 			inletK(_, sn, _): {
 				let ty = cppType(ctx.typ[x]);
-				if (ctx.chans[x] > 1) { s = s $ "\t%^* in%^ = p->bin%^ + off * %^;\n" fmt(ty, sn, sn, ctx _portElems(x)); }
+				if (ctx _directPort(x)) {}
+				else if (ctx.chans[x] > 1) { s = s $ "\t%^* in%^ = p->bin%^ + off * %^;\n" fmt(ty, sn, sn, ctx _portElems(x)); }
 				else { s = s $ "\t%^* in%^ = (%^*)p->ins[%^].chans[0] + off;\n" fmt(ty, sn, ty, sn); }
 			}
 			_: {}
@@ -3473,13 +3587,13 @@ fn genPortDecls(ctx Ctx) String {
 	var s = "";
 	for (n : ctx.inlets) {
 		match (ctx.kind[n]) {
-			inletK(_, sn, _): { if (ctx.chans[n] > 1) { s = s $ "\t%^* bin%^;\n" fmt(cppType(ctx.typ[n]), sn); } }
+			inletK(_, sn, _): { if (ctx.chans[n] > 1 && !(ctx _directPort(n))) { s = s $ "\t%^* bin%^;\n" fmt(cppType(ctx.typ[n]), sn); } }
 			_: {}
 		}
 	}
 	for (n : ctx.outlets) {
 		match (ctx.kind[n]) {
-			outletK(_, sn): { if (ctx.chans[n] > 1) { s = s $ "\t%^* bout%^;\n" fmt(cppType(ctx.typ[n]), sn); } }
+			outletK(_, sn): { if (ctx.chans[n] > 1 && !(ctx _directPort(n))) { s = s $ "\t%^* bout%^;\n" fmt(cppType(ctx.typ[n]), sn); } }
 			_: {}
 		}
 	}
@@ -3494,7 +3608,7 @@ fn genGatherFun(ctx Ctx, name String) String {
 	for (n : ctx.inlets) {
 		match (ctx.kind[n]) {
 			inletK(_, sn, _): {
-				if (ctx.chans[n] > 1) {
+				if (ctx.chans[n] > 1 && !(ctx _directPort(n))) {
 					let t = cppType(ctx.typ[n]);
 					let e = ctx _portElems(n);
 					s = s $ "\tfor (int c = 0; c < %^; ++c) {\n" fmt(ctx.chans[n]);
@@ -3510,7 +3624,7 @@ fn genGatherFun(ctx Ctx, name String) String {
 	for (n : ctx.outlets) {
 		match (ctx.kind[n]) {
 			outletK(_, sn): {
-				if (ctx.chans[n] > 1) {
+				if (ctx.chans[n] > 1 && !(ctx _directPort(n))) {
 					let t = cppType(ctx.typ[n]);
 					let e = ctx _portElems(n);
 					s = s $ "\tfor (int c = 0; c < %^; ++c) {\n" fmt(ctx.chans[n]);
@@ -3622,7 +3736,7 @@ fn _genProcessGather(ctx Ctx) String {
 	for (x : ctx.inlets) {
 		match (ctx.kind[x]) {
 			inletK(_, sn, _): {
-				if (ctx.chans[x] > 1) {
+				if (ctx.chans[x] > 1 && !(ctx _directPort(x))) {
 					var blockOnly = ctx _pgActive;
 					for (c : ctx.consumers[x]) { if (ctx.nrate[c] != Rate.block) { blockOnly = false; } }
 					let watched = (ctx _pgInputs) contains(sn) || (sn == ctx _pgNotesSn && ctx _pgUsesNotes);
@@ -3954,9 +4068,14 @@ fn _rowEntries(ctx Ctx, row String) [RowEntry] {
 			inletK(_, sn, _): {
 				let ty = cppType(ctx.typ[x]);
 				let nm = "in%^" fmt(sn);
-				let init = ctx.chans[x] == 1 ? "(%^*)p->ins[%^].chans[0]" fmt(ty, sn) : "p->bin%^" fmt(sn);
-				out push!(RowEntry { name: nm, baseType: ty, baseInit: init,
-				                     rowDef: "%^* %^ = r_%^ + (%^) * %^;" fmt(ty, nm, nm, row, ctx _portElems(x)) });
+				if (ctx _directPort(x)) {
+					-- the channel-pointer table; indexed [chan][bi] where used
+					out push!(RowEntry { name: nm, baseType: "%^* const" fmt(ty), baseInit: "(%^* const*)p->ins[%^].chans" fmt(ty, sn), rowDef: "" });
+				} else {
+					let init = ctx.chans[x] == 1 ? "(%^*)p->ins[%^].chans[0]" fmt(ty, sn) : "p->bin%^" fmt(sn);
+					out push!(RowEntry { name: nm, baseType: ty, baseInit: init,
+					                     rowDef: "%^* %^ = r_%^ + (%^) * %^;" fmt(ty, nm, nm, row, ctx _portElems(x)) });
+				}
 			}
 			_: {}
 		}
@@ -3966,9 +4085,13 @@ fn _rowEntries(ctx Ctx, row String) [RowEntry] {
 			outletK(_, sn): {
 				let ty = cppType(ctx.typ[x]);
 				let nm = "out%^" fmt(sn);
-				let init = ctx.chans[x] == 1 ? "(%^*)p->outs[%^].chans[0]" fmt(ty, sn) : "p->bout%^" fmt(sn);
-				out push!(RowEntry { name: nm, baseType: ty, baseInit: init,
-				                     rowDef: "%^* %^ = r_%^ + (%^) * %^;" fmt(ty, nm, nm, row, ctx _portElems(x)) });
+				if (ctx _directPort(x)) {
+					out push!(RowEntry { name: nm, baseType: "%^* const" fmt(ty), baseInit: "(%^* const*)p->outs[%^].chans" fmt(ty, sn), rowDef: "" });
+				} else {
+					let init = ctx.chans[x] == 1 ? "(%^*)p->outs[%^].chans[0]" fmt(ty, sn) : "p->bout%^" fmt(sn);
+					out push!(RowEntry { name: nm, baseType: ty, baseInit: init,
+					                     rowDef: "%^* %^ = r_%^ + (%^) * %^;" fmt(ty, nm, nm, row, ctx _portElems(x)) });
+				}
 			}
 			_: {}
 		}
@@ -3978,7 +4101,8 @@ fn _rowEntries(ctx Ctx, row String) [RowEntry] {
 		let nm = "bv%^" fmt(ctx.serial[x]);
 		let stride = ctx.nrate[x] == Rate.block ? "pgS%^" fmt(ctx.groupOf[x]) : "1";
 		let def = ctx.chans[x] == 1
-			? "%^& %^ = r_%^[(%^) * %^];" fmt(ty, nm, nm, row, stride)
+			? (`cgSampleVec && stride == "1" ? "%^* %^ = r_%^ + (%^);" fmt(ty, nm, nm, row)
+			                                  : "%^& %^ = r_%^[(%^) * %^];" fmt(ty, nm, nm, row, stride))
 			: "%^* %^ = r_%^ + (%^) * %^ * %^;" fmt(ty, nm, nm, row, stride, ctx _rowElems(x));
 		out push!(RowEntry { name: nm, baseType: ty, baseInit: "p->bk%^" fmt(ctx.serial[x]), rowDef: def });
 	}
@@ -3986,7 +4110,7 @@ fn _rowEntries(ctx Ctx, row String) [RowEntry] {
 		let ty = cppType(ctx.typ[x]);
 		let nm = "v%^" fmt(ctx.serial[x]);
 		let def = ctx.chans[x] == 1
-			? "%^& %^ = r_%^[%^];" fmt(ty, nm, nm, row)
+			? (`cgSampleVec ? "%^* %^ = r_%^ + (%^);" fmt(ty, nm, nm, row) : "%^& %^ = r_%^[%^];" fmt(ty, nm, nm, row))
 			: "%^* %^ = r_%^ + (%^) * %^;" fmt(ty, nm, nm, row, ctx _rowElems(x));
 		out push!(RowEntry { name: nm, baseType: ty, baseInit: "p->bt%^" fmt(ctx.serial[x]), rowDef: def });
 	}
@@ -4010,7 +4134,7 @@ fn _rowLocalsFor(ctx Ctx, row String, code String) RowLocals {
 	for (e : ctx _rowEntries(row)) {
 		if (!(_usesName(code, e.name))) { continue; }
 		bases = bases $ "\t%^* __restrict r_%^ = %^;\n" fmt(e.baseType, e.name, e.baseInit);
-		rows = rows $ "\t\t" $ e.rowDef $ "\n";
+		if (e.rowDef length > 0) { rows = rows $ "\t\t" $ e.rowDef $ "\n"; }
 	}
 	RowLocals { bases: bases, rows: rows }
 }
@@ -4194,24 +4318,78 @@ fn _genBlockCycle(ctx Ctx, k Int, region [Int]) String {
 		p1 = "\t\tr_a[bi] = %^;\n\t\tr_b[bi] = %^;\n" fmt(a, b);
 		scanCall = "\ttzpl::dsp::scanAffineBlock(r_a + off, 1, r_b + off, 1, r_w + off, n, s);\n";
 	}
-	let rl1 = ctx _rowLocalsFor("bi", p1);
 	-- pass 2
 	var `cgReaderSub Int = r;
 	var `cgReaderExpr String = "rv";
 	var `cgSuppressDelay Int = d;
 	let body = genLoops(ctx, region);
-	let rl2 = ctx _rowLocalsFor("bi", body);
+	-- Both passes run sample-vector when their nodes are elementwise (pass 1
+	-- of a scan; the affine form's a and b stay scalar).
+	let isScan = form == "scan+" || form == "scan+wrap";
+	let sv = `cgSimdWidth >= 4 && ctx _sampleVecOK(region, r, d);
+	let sv1 = sv && isScan && ctx _exprSampleVecOK(ctx _scanInput(cy, r, v, form));
 	var s = "\t{ // recurrence %^: block form (%^)\n" fmt(k, form);
 	s = s $ "\t%^* __restrict r_x = p->rc%^_x;\n\t%^* __restrict r_a = p->rc%^_a;\n" fmt(ty, k, ty, k);
-	s = s $ "\t%^* __restrict r_b = p->rc%^_b;\n\t%^* __restrict r_w = p->rc%^_w;\n" fmt(ty, k, ty, k);
-	s = s $ "\t{\n" $ rl1.bases $ "\tfor (i32 bi = off; bi < off + n; ++bi) {\n" $ rl1.rows $ p1 $ "\t}\n\t}\n";
-	s = s $ "\t%^ s = p->d%^;\n\t%^ s0 = s;\n" fmt(ty, ser, ty);
+	-- w has a leading element: w[off - 1] is the state before the block, so
+	-- pass 2 reads every sample's prior state as w[bi - 1]
+	s = s $ "\t%^* __restrict r_b = p->rc%^_b;\n\t%^* __restrict r_w = p->rc%^_w + 1;\n" fmt(ty, k, ty, k);
+	s = s $ ctx _sampleLoop(p1, sv1 ? ctx _scanPass1SV(cy, r, v, form) : "");
+	s = s $ "\t%^ s = p->d%^;\n\tr_w[off - 1] = s;\n" fmt(ty, ser);
 	s = s $ scanCall;
-	s = s $ "\t{\n" $ rl2.bases $ "\tfor (i32 bi = off; bi < off + n; ++bi) {\n" $ rl2.rows;
-	s = s $ "\t\t%^ rv = bi == off ? s0 : r_w[bi - 1];\n" fmt(ty);
-	s = s $ body $ "\t}\n\t}\n";
+	let rvS = "\t\t%^ rv = r_w[bi - 1];\n" fmt(ty);
+	let rvV = "\t\t%^x4 rv = *(%^x4u*)(r_w + bi - 1);\n" fmt(ty, ty);
+	var vbody = "";
+	if (sv) {
+		let (vb, vr) = ctx _sampleVecBody(region);
+		vbody = vb;
+	}
+	s = s $ ctx _sampleLoop(rvS $ body, sv ? rvV $ vbody : "");
 	s = s $ "\tp->d%^ = s;\n\t}\n" fmt(ser);
 	s
+}
+
+-- A sample loop over [off, off+n) running `scalar`, or, when `vec` is given,
+-- `vec` 4 samples a step and `scalar` for the tail; with their row locals.
+fn _sampleLoop(ctx Ctx, scalar String, vec String) String {
+	let rl = ctx _rowLocalsFor("bi", scalar);
+	if (vec length == 0) {
+		return "\t{\n" $ rl.bases $ "\tfor (i32 bi = off; bi < off + n; ++bi) {\n" $ rl.rows $ scalar $ "\t}\n\t}\n";
+	}
+	let vrows = ctx _sampleVecRows(vec);
+	let bases = (ctx _rowLocalsFor("bi", vec $ scalar)).bases;
+	"\t{\n" $ bases $ "\ti32 bi = off;\n"
+		$ "\tfor (; bi + 4 <= off + n; bi += 4) {\n" $ vrows $ vec $ "\t}\n"
+		$ "\tfor (; bi < off + n; ++bi) {\n" $ rl.rows $ scalar $ "\t}\n\t}\n"
+}
+
+fn _sampleVecRows(ctx Ctx, code String) String {
+	var `cgSampleVec Bool = true;
+	(ctx _rowLocalsFor("bi", code)).rows
+}
+
+-- A scan's input: the x of the accumulation r + x (under a wrap, a - floor(a)).
+fn _scanInput(ctx Ctx, cy CycleInfo, r NIdx, v NIdx, form String) NIdx {
+	let acc = form == "scan+" ? v : ctx.ins[v][0];
+	ctx.ins[acc][0] == r ? ctx.ins[acc][1] : ctx.ins[acc][0]
+}
+
+fn _scanPass1SV(ctx Ctx, cy CycleInfo, r NIdx, v NIdx, form String) String {
+	var `cgSampleVec Bool = true;
+	var `cgSimdW Int = 4;
+	let x = ctx _scanInput(cy, r, v, form);
+	let t = ctx.typ[x];
+	let e = ctx _isRootNode(x) ? _varRef(ctx, x, "0") : genExpr(ctx, x, "0");
+	"\t\t*(%^x4u*)(r_x + bi) = %^;\n" fmt(cppType(t), e)
+}
+
+-- Is the expression at n, through its inlined nodes, elementwise (no state,
+-- draws or channel ops)?
+fn _exprSampleVecOK(ctx Ctx, n NIdx) Bool {
+	if (ctx.chans[n] > 1 || ctx.graphOf[n] != 0) { return false; }
+	if (ctx _isRootNode(n)) { return ctx.nrate[n] != Rate.audio || ctx _isBlockTemp(n) || ctx _isRootBuf(n); }
+	if (!(ctx _nodeSampleVecOK(n))) { return false; }
+	for (i : ctx.ins[n]) { if (!(ctx _exprSampleVecOK(i))) { return false; } }
+	true
 }
 
 -- Block state space (plan 4.7, "Affine, block-constant coefficients"; the
@@ -4280,7 +4458,8 @@ fn _tapRef(ctx Ctx, d Int, w Int, c String, adv String) String {
 	let di = ctx.delays[d];
 	let ci = c length > 0 ? "[%^]" fmt(c) : "";
 	if (di.allocSize == 1) { return "p->d%^%^" fmt(di.serial, ci); }
-	"p->d%^%^[(p->d%^_wrpos%^ - u64(%^)) & %^]" fmt(di.serial, ci, di.serial, adv, w, _delayMask(di))
+	let tap = "[(p->d%^_wrpos%^ - u64(%^)) & %^]" fmt(di.serial, adv, w, _delayMask(di));
+	ctx _tapMajor(di) ? "p->d%^%^%^" fmt(di.serial, tap, ci) : "p->d%^%^%^" fmt(di.serial, ci, tap)
 }
 
 -- A block buffer of node n for the state space: (pointer, row stride in
@@ -4475,8 +4654,9 @@ fn _genStateSpace(ctx Ctx, k Int, region [Int], delays [DelayInfo]) String {
 -- through memory every sample. In each plain region (not a block form):
 --  - a root-graph, one-channel delay used in that region alone (and nowhere
 --    else in process, given as `rest`) is loaded before the sample loop and
---    stored after it: a single value, or a small inline ring (2..8 samples)
---    with its write position;
+--    stored after it: a single value (an array of them for C channels), or a
+--    small inline ring (2..8 samples, up to 16 channels) with its write
+--    position;
 --  - an instance value p->v<k> the region only reads is loaded before it.
 -- Rewrites texts in place.
 fn _localizeDelays(ctx Ctx, texts [String], plain [Bool], rest String) Void {
@@ -4487,8 +4667,9 @@ fn _localizeDelays(ctx Ctx, texts [String], plain [Bool], rest String) Void {
 	var subs [[(String, String)]] = [];
 	for (t : texts) { pre push!(""); post push!(""); subs push!([(String, String)]()); }
 	for (d : ctx.delays) {
-		if (d.chans != 1 || ctx _isVoiceGraphDeep(ctx _delayGraph(d))) { continue; }
-		let ring = d.allocSize >= 2 && d.allocSize <= 8;
+		if (ctx _isVoiceGraphDeep(ctx _delayGraph(d))) { continue; }
+		let ring = d.allocSize >= 2 && d.allocSize <= 8 && d.chans <= 16;
+		let multi = d.chans > 1 && d.allocSize == 1 && d.chans <= 64;
 		if (d.allocSize != 1 && !ring) { continue; }
 		let nm = "p->d%^" fmt(d.serial);
 		let wp = nm $ "_wrpos";
@@ -4503,8 +4684,14 @@ fn _localizeDelays(ctx Ctx, texts [String], plain [Bool], rest String) Void {
 		if (uses != 1 || !plain[at]) { continue; }
 		let loc = "l_d%^" fmt(d.serial);
 		let ty = cppType(d.typ);
-		if (ring) {
-			pre[at] = pre[at] $ "\t%^ %^[%^]; std::memcpy(%^, %^, sizeof %^);\n" fmt(ty, loc, d.allocSize, loc, nm, loc)
+		if (multi) {
+			-- one value per channel, read and written a vector at a time
+			pre[at] = pre[at] $ "\talignas(32) %^ %^[%^]; std::memcpy(%^, %^, sizeof %^);\n" fmt(ty, loc, d.chans, loc, nm, loc);
+			post[at] = post[at] $ "\tstd::memcpy(%^, %^, sizeof %^);\n" fmt(nm, loc, loc);
+		} else if (ring) {
+			let dims = d.chans == 1 ? "[%^]" fmt(d.allocSize)
+			         : (ctx _tapMajor(d) ? "[%^][%^]" fmt(d.allocSize, d.chans) : "[%^][%^]" fmt(d.chans, d.allocSize));
+			pre[at] = pre[at] $ "\talignas(32) %^ %^%^; std::memcpy(%^, %^, sizeof %^);\n" fmt(ty, loc, dims, loc, nm, loc)
 			          $ "\tu64 %^_wrpos = %^;\n" fmt(loc, wp);
 			post[at] = post[at] $ "\tstd::memcpy(%^, %^, sizeof %^);\n" fmt(nm, loc, loc)
 			           $ "\t%^ = %^_wrpos;\n" fmt(wp, loc);
@@ -4593,8 +4780,55 @@ fn _genRegion(ctx Ctx, region [Int], delays [DelayInfo]) String {
 	var body = genLoops(ctx, region);
 	for (d : delays) { body = body $ ctx _advanceDelay(d); }
 	if (body trim length == 0) { return ""; }
-	let rl = ctx _rowLocalsFor("bi", body);
-	"\t{\n" $ rl.bases $ "\tfor (i32 bi = off; bi < off + n; ++bi) {\n" $ rl.rows $ body $ "\t}\n\t}\n"
+	-- sample-vector (4 samples a step, then the scalar tail) when elementwise
+	var vbody = "";
+	if (`cgSimdWidth >= 4 && delays length == 0 && ctx _sampleVecOK(region)) {
+		let (vb, vr) = ctx _sampleVecBody(region);
+		vbody = vb;
+	}
+	ctx _sampleLoop(body, vbody)
+}
+
+fn _nodeSampleVecOK(ctx Ctx, e NIdx) Bool = match (ctx.kind[e]) {
+	delayFixReadK(_, _): false; delayVarReadK(_, _): false; delayWriteK(_): false;
+	urandK(_): false; birandK(_): false; rand64K(_): false;
+	bufWriteK(_, _, _): false; bufFixReadK(_, _, _, _): false; bufVarReadK(_, _, _, _): false;
+	bankLookupK(_): false; vecK(_): false; phiK(_): false; voicerK(_): false;
+	ifK: false; forK: false; switchK(_): false; spectralChainK(_, _): false;
+	_: true;
+};
+
+-- A region's loops in sample-vector form, and the rows they use.
+fn _sampleVecBody(ctx Ctx, region [Int]) (String, String) {
+	var `cgSampleVec Bool = true;
+	var `cgSimdW Int = 4;
+	let body = genLoops(ctx, region);
+	(body, (ctx _rowLocalsFor("bi", body)).rows)
+}
+
+-- Can a region run sample-vector (4 samples a step)? Its loops are one
+-- channel, audio rate and SIMD-able, with no state (delays, random draws,
+-- buffers), control flow or channel ops: every node is elementwise over
+-- samples.
+fn _sampleVecOK(ctx Ctx, region [Int], subRead NIdx = NONE, subDelay Int = NONE) Bool {
+	for (li : region) {
+		let loop = ctx.loops[li];
+		if (loop.chans != 1 || loop.rate != Rate.audio || loop.isControlFlow) { return false; }
+		if (ctx _loopHasSimdDisqualifier(loop)) { return false; }
+		for (t : loop.trees) {
+			if (getsOwnLoop(ctx.kind[ctx.trees[t].root])) { return false; }
+			for (e : ctx.trees[t].exprs) {
+				if (ctx.graphOf[e] != 0) { return false; }
+				if (ctx.chans[e] > 1) { return false; }
+				-- a block cycle's substituted state read and suppressed write
+				if (e == subRead) { continue; }
+				let sup = match (ctx.kind[e]) { delayWriteK(dd): dd == subDelay; _: false; };
+				if (sup) { continue; }
+				if (!(ctx _nodeSampleVecOK(e))) { return false; }
+			}
+		}
+	}
+	true
 }
 
 -- process(p, off, n): the root graph's loops, region by region, over the
@@ -4979,10 +5213,15 @@ fn genCpp(ctx Ctx, name String, simdWidth Int = 0) String {
 	var `cgLoopChans Int = 1;
 	-- Target SIMD width (0 = scalar; M5 enables 2/4). Threaded for the SIMD port;
 	-- at width 0 every gen path stays scalar (M5.0 plumbing).
-	var `cgSimdWidth Int = simdWidth;
+	var `cgSimdWidth Int = serialForms() ? 0 : simdWidth;
 	-- Active SIMD width while emitting inside a SIMD loop (0 = scalar). Set by
 	-- genLoop; read by the var-ref / op / sink paths to pick vector forms.
 	var `cgSimdW Int = 0;
+	-- Sample-vector mode (block engine M8): inside a region whose loops are all
+	-- one channel, the 4 SIMD lanes are 4 consecutive samples. A per-sample
+	-- value is a vector (loaded from its block buffer row, unaligned); lower
+	-- rates splat.
+	var `cgSampleVec Bool = false;
 	-- Flat-voice-mode state: when cgVoiceCount > 0 we are emitting a voicer body
 	-- (the body's loops run per-voice over maxVoices). cgVoiceGraph is the body
 	-- graph index, so var refs for body nodes get the per-voice `voice_`/[i] form.

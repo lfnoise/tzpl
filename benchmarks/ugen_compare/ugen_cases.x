@@ -41,7 +41,7 @@ fn bwOfQ(fc Float, q Float) Float {
 let kBw = bwOfQ(kFc, kQ);
 
 let oscNames = ["phasor", "sinosc", "fsinosc", "lfupar", "lfvsaw", "lfupulse", "lfzpulse",
-                "white", "pink"];
+                "white", "pink", "sinlpf"];
 let oscFns = [
 	fn(ch Int) S { phasor(fill(ch, kFm)) },
 	fn(ch Int) S { sinosc(fill(ch, kFm)) },
@@ -52,6 +52,7 @@ let oscFns = [
 	fn(ch Int) S { lfzpulse(fill(ch, kFm), 0.3) },
 	fn(ch Int) S { white(ch) },
 	fn(ch Int) S { pink(ch) },
+	fn(ch Int) S { sinosc(fill(ch, kFm)) lpf(kFc) },
 ];
 
 let filtNames = ["lag", "lag3", "lagud", "decay", "decay2", "leakdc", "leaky",
@@ -101,7 +102,7 @@ fn emit(name String, chans Int, g GraphFn) Void {
 	}
 }
 
-for (ch : [1, 4]) {
+for (ch : [1, 4, 16]) {
 	for (i : (0..oscNames length - 1)) {
 		let f = oscFns[i];
 		emit(oscNames[i], ch, fn() S { f(ch) outlet });

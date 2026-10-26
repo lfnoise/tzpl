@@ -299,6 +299,8 @@ std::vector<Case> cases() {
         osc("lfzpulse", [=](int ch) { return lfzpulse(konst(ch, fm), konst(ch, .3)); }),
         osc("white", [](int ch) { return white(Shape_row(ch)); }, false),
         osc("pink", [](int ch) { return pink(Shape_row(ch)); }, false),
+        // The plan's M8 benchmark synth: sinosc -> lpf.
+        osc("sinlpf", [=](int ch) { return lpf(sinosc(konst(ch, fm)), konst(ch, fc), konst(ch, M_SQRT1_2)); }),
 
         filt("lag", [](S x, int ch) { return lag(x, konst(ch, 480)); }),
         filt("lag3", [](S x, int ch) { return lag3(x, konst(ch, 480)); }),
@@ -355,13 +357,14 @@ int main(int argc, char** argv) {
     std::string dir = argv[1];
     char const* filter = argc > 2 ? argv[2] : nullptr;
     int failures = 0;
-    int const chanCounts[] = {1, 4};
+    int const chanCounts[] = {1, 4, 16};
 
     std::println("ours (synthc, f32) vs tensor-ugens (f64), block {}, ns per sample per channel",
                  kBlock);
     if (checkOnly) std::println("{:<10}{:>10}{:>7}", "ugen", "err dB", "shift");
-    else std::println("{:<10}{:>10}{:>7}  {:>8}{:>8}{:>7}  {:>8}{:>8}{:>7}", "ugen", "err dB",
-                      "shift", "ours 1", "TU 1", "ratio", "ours 4", "TU 4", "ratio");
+    else std::println("{:<10}{:>10}{:>7}  {:>8}{:>8}{:>7}  {:>8}{:>8}{:>7}  {:>8}{:>8}{:>7}", "ugen",
+                      "err dB", "shift", "ours 1", "TU 1", "ratio", "ours 4", "TU 4", "ratio", "ours 16",
+                      "TU 16", "ratio");
     for (Case const& c : cases()) {
         if (filter && c.name.find(filter) == std::string::npos) continue;
         std::string errCol = "-", shiftCol = "";

@@ -1547,6 +1547,54 @@ Reference-ugen comparison (2026-10-25), `benchmarks/ugen_compare/`:
 - **Benchmark targets:** a mono `sinosc → lpf → out` at least 2× faster per sample than
   `main`; 16-channel no slower than `main`.
 
+Progress (2026-10-25; M8 is in progress):
+- **Sample-vector loops:** a region whose loops are all one channel, audio rate and
+  elementwise (no delays, random draws, buffers, control flow or channel ops) runs 4
+  samples a step, then a scalar tail. It reuses the channel-vector emitter: the lanes
+  are samples, a per-sample value loads 4 samples from its row (unaligned, `f32x4u`),
+  lower rates splat. A block scan's two passes run this way too: its `w` buffer has
+  a leading element holding the prior state, so pass 2 reads `w[bi − 1]`.
+- **Cost table, first entry:** a state space per channel below 4 channels; at 4 or
+  more, the plain recurrence runs 4 channels to a vector, and independent vector
+  chains hide its latency. Measured: at 16 channels the channel-vector recurrence
+  is 0.61–0.67 ns/sample against 0.86–1.41 for a state space per channel. The dump
+  says `channel-vector` for those cycles.
+- **State in locals for multichannel delays:** single values as aligned local arrays,
+  and inline rings of up to 16 channels.
+- **Tap-major rings:** a multichannel inline ring without variable-time readers is
+  stored `d[tap][chan]`, so a channel-vector loop reads one tap of 4 channels as one
+  vector (plan §4.2 step 8, layout by consumer).
+- **Direct ports:** a multichannel port used only by root audio loops through
+  elementwise consumers is read and written through the engine's channel-pointer
+  table (`r_in<k>[chan][bi]`); its interleaved buffer, gather and scatter are gone.
+  The notes input, ports read at other rates, and inputs a reduce or channel op takes
+  whole keep the gathered buffer. This removes M7's temporary copy for those ports.
+- **Equivalence of forms** (`run_forms_equivalence_test.sh`, `forms_equiv.cpp`, in
+  CI on macOS and Linux): every dump-corpus synth built normally and with
+  `TZPL_FORMS=serial` (no block forms, no vector loops), run in blocks of 64, of 1
+  and in odd chunks, agrees within −50 dB (worst −61 dB, `fxMultiTap`: a lagged
+  delay time rounding differently; most below −80). Inputs are sums of sines, and
+  random draws are seeded. 158 of 158 pass.
+- **Fixes on the way:** `tzpl_simd.hpp` included `<sleef.h>` inside its namespace on
+  Linux, which hid the Sleef functions from `tzpl_dsp`: every plugin with a block form
+  failed to compile there (CI caught it). Generated code includes `<algorithm>`.
+- **Benchmarks against `main`** (ms of CPU per node-second, `main` → now): mono
+  `sinosc → lpf` 0.281 → 0.125 (2.24×, target ≥ 2×); 16-channel 0.965 → 0.836
+  (1.15×, target ≥ 1×); knobs 0.247 → 0.250; chorus 1.104 → 0.748; bank 3.099 →
+  2.350.
+- **Reference comparison** (ns/sample/channel, ours vs TU): 1 channel: biquads
+  0.44–0.65 vs 0.45–0.73, `sinosc` 1.3 vs 1.8, `sinosc → lpf` 1.8 vs 2.7; 4 channels:
+  one-poles 0.24–0.38 vs 0.13–0.32, biquads 0.46–0.58 vs 0.98–1.05; 16 channels:
+  biquads 0.56–0.62 vs 0.93–1.05, phasor oscillators 0.22–0.36 vs 0.38–0.62.
+- **Not done yet:**
+  - 4×4 register transposes for channel-vector loops on direct ports: at 16
+    channels a one-pole spends its time gathering and scattering 16 scalars a
+    sample (0.6 ns vs TU's 0.17);
+  - the buffer arena (interval colouring, in-place reuse) and planar block buffers
+    between loops;
+  - fusion and loop formation beyond the inherited tree-to-loop pass, and the rest
+    of the cost table (register budget, transposes).
+
 **M9: Voicer block form (§4.6), portability and performance.**
 - Channel-vector loops over voices, skipping idle groups, per-voice parameter caches.
 - An x86-64 Linux build with Sleef inline headers, FTZ and DAZ on audio and render

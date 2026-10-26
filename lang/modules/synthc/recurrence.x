@@ -192,11 +192,16 @@ fn recClassStr(ctx Ctx, c RecClass) String = match (c) {
 -- when the cycle runs as a plain recurrence. A first-order cycle is one
 -- state read of weight 1 on a delay kept as a single value (allocSize 1)
 -- with no other reader, in the root graph, one channel throughout.
+-- TZPL_FORMS=serial: every loop in its plain serial form (no block forms,
+-- no channel- or sample-vector loops), the reference for the
+-- equivalence-of-forms test (block engine plan M8).
+fn serialForms() Bool = match (getEnv("TZPL_FORMS")) { some(v): v == "serial"; none: false; };
+
 fn blockFormOf(ctx Ctx, cy CycleInfo, c RecClass) String {
 	-- TZPL_STRICT_RECURRENCES=1: every recurrence in its own order (plain
 	-- recurrences, exact against the serial code), for reference renders.
 	let strict = match (getEnv("TZPL_STRICT_RECURRENCES")) { some(v): v == "1"; none: false; };
-	if (strict) { return ""; }
+	if (strict || serialForms()) { return ""; }
 	let kind = match (c) {
 		scan(op):           (op == "+" || op == "+wrap") ? "scan" $ op : "";
 		affineScan:         "affine";
@@ -322,17 +327,23 @@ fn _blockMembers(ctx Ctx, cy CycleInfo, form String) [NIdx] {
 }
 
 -- Record each cycle's class and strategy for the analysis dump: "block"
--- with its form for a cycle the generator runs over the block, "serial" for
--- a plain per-sample recurrence.
+-- with its form for a cycle the generator runs over the block,
+-- "channel-vector" for a plain recurrence over 4 or more channels (4 to a
+-- vector), "serial" for one over fewer.
 fn annotateRecurrences(ctx Ctx) Void {
 	let classes = ctx classifyRecurrences;
 	var i = 0;
 	while (i < ctx.cycles length) {
 		let c = classes[i];
 		let form = ctx blockFormOf(ctx.cycles[i], c);
+		-- not in block form: 4 or more channels run the recurrence 4 channels to
+		-- a vector, fewer one sample of one channel at a time
+		let cc = ctx.chans[ctx.cycles[i].nodes[0]];
+		var cv = cc >= 4 && cc % 4 == 0;
+		for (x : ctx.cycles[i].nodes) { match (ctx.kind[x]) { vecK(_): { cv = false; } _: {} } }
 		let strategy = match (c) {
 			notRecurrence: "";
-			_: form length > 0 ? "block (%^)" fmt(form) : "serial";
+			_: form length > 0 ? "block (%^)" fmt(form) : (cv ? "channel-vector" : "serial");
 		};
 		ctx.cycles[i] = CycleInfo { ...ctx.cycles[i], cls: ctx recClassStr(c), strategy: strategy };
 		i = i + 1;
@@ -354,9 +365,9 @@ fn annotateRecurrences(ctx Ctx) Void {
 --  - The outputs are the cycle values used outside it (other than by its
 --    delays' writers).
 -- Root graph, float states of one type; 1 to 8 states, 1 to 4 inputs and
--- outputs. Every cycle node and delay has the same channel count C, and
--- each channel runs as its own state space (inputs and inlined expressions
--- have C channels or 1, broadcast).
+-- outputs. Every cycle node and delay has the same channel count C (1 to 3),
+-- and each channel runs as its own state space (inputs and inlined
+-- expressions have C channels or 1, broadcast).
 struct SSModel {
 	ok Bool,
 	delays [Int],      -- delay indices: the cycle's own, then input delays
@@ -438,6 +449,11 @@ fn stateSpaceModel(ctx Ctx, cy CycleInfo) SSModel {
 	var m = _noModel();
 	if (cy.readers length == 0) { return m; }
 	let C = ctx.chans[cy.nodes[0]];
+	-- Strategy (plan 4.2 step 6, the first entry of the cost table): with 4 or
+	-- more channels the plain recurrence runs 4 channels to a vector, and
+	-- independent vector chains hide its latency; measured faster than a state
+	-- space per channel (block engine plan M8).
+	if (C >= 4) { return m; }
 	for (x : cy.nodes) { if (ctx.graphOf[x] != 0 || ctx.chans[x] != C) { return m; } }
 	m = SSModel { ...m, chans: C };
 	let t = ctx.typ[ctx.dsrc[cy.readers[0]]];

@@ -115,10 +115,12 @@ jobs:
         env:
           BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
+          cmake --build build --target forms_equiv -j$(sysctl -n hw.ncpu)
           tests="run_synthc_dump_test.sh run_live_plan_test.sh
                  run_fx_compile_test.sh run_fill_buffer_test.sh
                  run_bitops_d0_test.sh run_osc_test.sh run_pink_test.sh
-                 run_neg_abs_rewrite_test.sh run_widen_test.sh"
+                 run_neg_abs_rewrite_test.sh run_widen_test.sh
+                 run_forms_equivalence_test.sh"
           # Gated off on block-engine until their milestone lands:
           # run_live_test.sh -- live proxy self-reference needs inter-node
           # feedback, which the block engine refuses until MF (errCyclicConnection).
@@ -188,7 +190,8 @@ jobs:
           tests="run_synthc_dump_test.sh run_live_plan_test.sh
                  run_fx_compile_test.sh run_fill_buffer_test.sh
                  run_bitops_d0_test.sh run_osc_test.sh run_pink_test.sh
-                 run_neg_abs_rewrite_test.sh run_widen_test.sh"
+                 run_neg_abs_rewrite_test.sh run_widen_test.sh
+                 run_forms_equivalence_test.sh"
           # Gated off on block-engine until their milestone lands:
           # run_live_test.sh -- live proxy self-reference needs inter-node
           # feedback, which the block engine refuses until MF (errCyclicConnection).

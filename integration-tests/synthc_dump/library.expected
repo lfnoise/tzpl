@@ -1798,7 +1798,7 @@ GROUP 10 sources [notes[2]] per-voice nodes [4]
 CYCLE 0 weight 1 recurrence nodes [18 27 28 29] delays [18<-29:1]
   CLASS affine-block order 1 STRATEGY serial
 CYCLE 1 weight 1 recurrence nodes [76 73 74 75 77 78] delays [76<-78:2 73<-78:1]
-  CLASS affine-block order 3 STRATEGY serial
+  CLASS affine-block order 3 STRATEGY channel-vector
 DELAY 0 f32 1
     18 f32 1 delay_fix_read(1)
     30 f32 1 delay_write
@@ -2601,7 +2601,7 @@ GRAPH 0
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 2 recurrence nodes [3 5 6] delays [3<-6:2]
-  CLASS affine-block order 2 STRATEGY block (statespace)
+  CLASS affine-block order 2 STRATEGY channel-vector
 DELAY 0 f32 4
      2 f32 0 delay_init
      3 f32 4 delay_fix_read(2)
@@ -7641,9 +7641,9 @@ GROUP 1 sources [decay] nodes [1 30 32 67 69]
 GROUP 2 sources [mix] nodes [3]
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [22 33 34 35 36 38 39] delays [22<-39:1 33<-36:1]
-  CLASS affine-block order 2 STRATEGY serial
+  CLASS affine-block order 2 STRATEGY channel-vector
 CYCLE 1 weight 1 recurrence nodes [59 70 71 72 73 75 76] delays [59<-76:1 70<-73:1]
-  CLASS affine-block order 2 STRATEGY serial
+  CLASS affine-block order 2 STRATEGY channel-vector
 CYCLE 2 weight 1 recurrence nodes [88 90 91] delays [88<-91:1]
   CLASS affine-block order 1 STRATEGY serial
 CYCLE 3 weight 1 recurrence nodes [103 105 106] delays [103<-106:1]
@@ -7921,7 +7921,7 @@ GROUP 3 sources [decay root] nodes [32 35 37]
 GROUP 4 sources [mix] nodes [4]
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [30 38 39 40 41 43 44] delays [30<-44:1 38<-41:1]
-  CLASS affine-block order 2 STRATEGY serial
+  CLASS affine-block order 2 STRATEGY channel-vector
 DELAY 0 f32 8
     30 f32 8 delay_var_read
     45 f32 8 delay_write
@@ -11155,7 +11155,7 @@ GROUP 1 sources [mix] nodes [18]
 CYCLE 0 weight 1 recurrence nodes [11 14 15 16] delays [11<-16:1]
   CLASS affine-block order 1 STRATEGY block (affine)
 CYCLE 1 weight 1 recurrence nodes [93 94 97 99 100 101 104 105] delays [93<-101:1 100<-105:1]
-  CLASS general (audio-rate coefficients, order 2) at 97 * STRATEGY serial
+  CLASS general (audio-rate coefficients, order 2) at 97 * STRATEGY channel-vector
 DELAY 0 f32 1
     11 f32 1 delay_fix_read(1)
     17 f32 1 delay_write
