@@ -1856,8 +1856,13 @@ Progress (2026-10-26):
   device's callback thread and the NRT renderer). Plugins are dylibs, so
   `-ffast-math`'s startup FTZ never reached them. `test_block_engine` checks a
   subnormal product flushes on the rendering thread.
-- Not done yet: Sleef inline headers and a per-ISA register budget (both need
-  x86-64 measurements; this machine is arm64), the benchmarks suite.
+- **Benchmarks suite** `benchmarks/block_engine/` (`run.sh`, `bench.x`, README with
+  results): whole-app CPU per node-second, 16 nodes, `--nrt` 61 s minus 1 s, best
+  of 3; `APP`/`MODROOT` point at another build to compare. Against `main`: sinlpf1
+  2.49x, echo 3.51x, chorus 1.93x, bank 1.67x, pluck 2.51x, bankseq 2.22x; the
+  voicer cases against M8b: pluck 2.0x, bankseq 1.9x, bank 1.5x.
+- Not done yet: Sleef inline headers and a per-ISA register budget. Both need
+  x86-64 measurements, and this machine is arm64.
   - An idle voice's output is 0; its loops, block groups and draws are skipped. A
     group of 4 SIMD lanes is skipped when every voice in it is idle. `resetVoice`
     (a new note) wakes it.
