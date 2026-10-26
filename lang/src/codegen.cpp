@@ -3604,6 +3604,11 @@ u16 CodeGen::genBinaryOp(BinaryOpExpr* expr) {
         u32 skip = emitJump(skipOp, dst);
         u16 rightReg = genExpr(static_cast<Expr*>(expr->right.get()));
         emitMov(dst, rightReg);
+        // Free b's temporaries. They are written only when b runs, so on the
+        // skip path they hold whatever an earlier tenant left; still allocated
+        // and typed (e.g. a String temp of `s == "x"`), a later stack map
+        // would root that stale word -- a GC crash (an Int read as an Obj*).
+        freeRegsTo((u16)(dst + 1));
         patchJump(skip);
         setRegType(dst, compiler_.boolType());
         return dst;

@@ -1,0 +1,24 @@
+-- pick  (14 regs, 2 args, type fn(String, Int) Int)
+     0  SAFEPOINT                 ; refs: [r0]
+     1  MULI_INT                r2, r1, 2
+     3  LOAD_OBJ                r3, r0
+     5  EQ_STR                  r4, r0, r3
+     7  MOV                     r5, r4
+     9  JUMP_IF_TRUE            r5  -> 18
+    12  LOAD_OBJ                r6, r1
+    14  EQ_STR                  r7, r0, r6
+    16  MOV                     r5, r7
+    18  LOAD_OBJ                r6, r2
+    20  CONCAT_STR              r7, r0, r6
+    22  MOV                     r8, r2
+    24  CALL                    r9, r1, r8  ;  228  (helper)
+    27  JUMP_IF_FALSE           r5  -> 41  ; refs: [r0, r3, r6, r7]
+    30  MOV                     r11, r7
+    32  CALL_PRIM               r12, r1, r11  ;  105
+    35  ADD_INT                 r13, r9, r12  ; refs: [r0, r3, r6, r7]
+    37  MOV                     r10, r13
+    39  JUMP                    -> 43
+    41  MOV                     r10, r9
+    43  RETURN                  r10, r1
+9
+7
