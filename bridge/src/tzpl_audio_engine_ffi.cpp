@@ -124,7 +124,7 @@ static char const* stripFfiPrefix(char const* name) {
 // returned an error, log it to stderr so the failure is not silent.
 static void returnErr(ts::VM& vm, u16 dst, tzpl_SErr err, char const* fnName) {
     if (err != tzpl_errNone) {
-        std::fprintf(stderr, "audio_engine.%s: %s\n",
+        std::fprintf(vm.errorOutput(), "audio_engine.%s: %s\n",
                      stripFfiPrefix(fnName), errName(err));
     }
     vm.reg(dst).i = static_cast<i64>(err);
@@ -365,7 +365,7 @@ static void ffi_newNode(ts::VM& vm, u16 dst, u16, u16 argBase) {
     if (engine::Engine* eng = getEngine(vm)) {
         engine::DefDesc unused;
         if (!engine::getDefDesc(eng, defName, unused)) {
-            std::fprintf(stderr,
+            std::fprintf(vm.errorOutput(),
                 "audio_engine.newNode: no synthdef named \"%s\" is loaded "
                 "(still compiling? `defSynthX(...) await`, or use `play`, "
                 "which waits for an in-flight compile)\n", defName);
@@ -1336,7 +1336,9 @@ static void ffi_siloEval(ts::VM& vm, u16 dst, u16, u16 argBase) {
     vm.makeCurrent();
 
     if (!compiled.success) {
-        ts::printDiagnostics(compiled.errors, source, "<silo>", std::cerr, true);
+        { std::ostringstream os;
+          ts::printDiagnostics(compiled.errors, source, "<silo>", os, vm.errorOutput() == stderr);
+          std::fputs(os.str().c_str(), vm.errorOutput()); }
         returnErr(vm, dst, tzpl_errInternal, __func__);
         return;
     }
@@ -1423,7 +1425,9 @@ static void ffi_siloLoad(ts::VM& vm, u16 dst, u16, u16 argBase) {
         // bare "compile error". The messages carry their own source-context
         // snippet, so the offending line is visible even though its number is
         // relative to the injected preamble (a few lines above the user code).
-        ts::printDiagnostics(compiled.errors, source, "<siloLoad>", std::cerr, true);
+        { std::ostringstream os;
+          ts::printDiagnostics(compiled.errors, source, "<siloLoad>", os, vm.errorOutput() == stderr);
+          std::fputs(os.str().c_str(), vm.errorOutput()); }
         std::string msg = "siloLoad: compile error";
         for (auto& ln : ts::formatErrorsPlain(compiled.errors, source, "<siloLoad>"))
             { msg += "\n"; msg += ln; }
@@ -1486,7 +1490,7 @@ static void ffi_siloStartAt(ts::VM& vm, u16, u16, u16 argBase) {
         if (siloIndex < 0 || siloIndex >= (int)ctx->siloVMs.size()) continue;
         auto& state = ctx->siloVMs[siloIndex];
         if (!state.vm || state.startGlobalIndex < 0) {
-            std::fprintf(stderr, "siloStartAt: silo %d has no start() entry\n", siloIndex);
+            std::fprintf(vm.errorOutput(), "siloStartAt: silo %d has no start() entry\n", siloIndex);
             continue;
         }
         // NB: if a user bundle is already open on this thread, begin fails
@@ -1757,7 +1761,7 @@ static void ffi_readFile(ts::VM& vm, u16 dst, u16, u16 argBase) {
     const char* path = regString(vm, argBase);
     std::ifstream f(path);
     if (!f) {
-        std::fprintf(stderr, "readFile: cannot open '%s'\n", path ? path : "(null)");
+        std::fprintf(vm.errorOutput(), "readFile: cannot open '%s'\n", path ? path : "(null)");
         vm.reg(dst).o = new ts::StringObj(std::string());
         return;
     }

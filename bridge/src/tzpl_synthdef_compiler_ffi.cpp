@@ -84,7 +84,7 @@ static char const* stripFfiPrefix(char const* name) {
 static void returnErrString(ts::VM& vm, u16 dst, std::string const& err,
                             char const* fnName) {
     if (!err.empty()) {
-        std::fprintf(stderr, "synthdef.%s: %s\n", stripFfiPrefix(fnName), err.c_str());
+        std::fprintf(vm.errorOutput(), "synthdef.%s: %s\n", stripFfiPrefix(fnName), err.c_str());
     }
     returnString(vm, dst, err);
 }
@@ -243,7 +243,7 @@ static void finishAsyncCompile(ts::VM& vm,
         err = loadAndRegister(vm, st->dylibPath);
     }
     if (!err.empty()) {
-        std::fprintf(stderr, "synthdef.%s: %s\n", fnName, err.c_str());
+        std::fprintf(vm.errorOutput(), "synthdef.%s: %s\n", fnName, err.c_str());
     }
     forgetPendingCompile(st->name, fut);
     ts::Word w;

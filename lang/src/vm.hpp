@@ -905,6 +905,9 @@ public:
     // Print output
     FILE* printOutput() const { return printOutput_; }
     void setPrintOutput(FILE* f) { printOutput_ = f; }
+    // Where native functions report errors: the print output when a host
+    // has redirected it (the app's output pane), else stderr.
+    FILE* errorOutput() const { return printOutput_ == stdout ? stderr : printOutput_; }
 
     // List print limit
     i64 listPrintLimit() const { return listPrintLimit_; }

@@ -364,7 +364,7 @@ static void storeOnChange(ts::VM& vm, u16 argBase) {
     if (UIWidget* w = ui->findById(id)) {
         w->onChange = handler;
     } else {
-        std::fprintf(stderr, "ui.onChange: no widget with id %llu\n",
+        std::fprintf(vm.errorOutput(), "ui.onChange: no widget with id %llu\n",
                      static_cast<unsigned long long>(id));
     }
 }
@@ -400,7 +400,7 @@ static void ffi_uiOnCell(ts::VM& vm, u16, u16, u16 argBase) {
     if (UIWidget* w = ui->findById(id)) {
         w->onCell = handler;
     } else {
-        std::fprintf(stderr, "ui.onCell: no widget with id %llu\n",
+        std::fprintf(vm.errorOutput(), "ui.onCell: no widget with id %llu\n",
                      static_cast<unsigned long long>(id));
     }
 }
@@ -453,7 +453,7 @@ static void ffi_uiBindInput(ts::VM& vm, u16 dst, u16, u16 argBase) {
         }
     }
     if (err != tzpl_errNone) {
-        std::fprintf(stderr, "ui.bindInput: node %lld input \"%s\": error %d\n",
+        std::fprintf(vm.errorOutput(), "ui.bindInput: node %lld input \"%s\": error %d\n",
                      static_cast<long long>(nodeID), input, (int)err);
     }
     vm.reg(dst).i = static_cast<i64>(err);
@@ -497,7 +497,7 @@ static void ffi_uiBindInputY(ts::VM& vm, u16 dst, u16, u16 argBase) {
         }
     }
     if (err != tzpl_errNone) {
-        std::fprintf(stderr, "ui.bindInputY: node %lld input \"%s\": error %d\n",
+        std::fprintf(vm.errorOutput(), "ui.bindInputY: node %lld input \"%s\": error %d\n",
                      static_cast<long long>(nodeID), input, (int)err);
     }
     vm.reg(dst).i = static_cast<i64>(err);
@@ -878,9 +878,9 @@ static i64 makeTapWidget(ts::VM& vm, const char* name, UIWidgetKind kind,
                       silo, &err));
     if (err != tzpl_errNone) {
         if (nodeID < 0) {
-            std::fprintf(stderr, "ui: master tap failed (%d)\n", err);
+            std::fprintf(vm.errorOutput(), "ui: master tap failed (%d)\n", err);
         } else {
-            std::fprintf(stderr,
+            std::fprintf(vm.errorOutput(),
                          "ui: tap on node %lld outlet %d failed (%d)\n",
                          static_cast<long long>(nodeID), outlet, err);
         }
@@ -1004,7 +1004,7 @@ static void ffi_uiWaveform(ts::VM& vm, u16 dst, u16, u16 argBase) {
         std::lock_guard<std::mutex> lock(ctx->bufferPathsMtx);
         auto it = ctx->bufferPaths.find({nodeID, bufID});
         if (it == ctx->bufferPaths.end()) {
-            std::fprintf(stderr,
+            std::fprintf(vm.errorOutput(),
                          "ui.waveform: no file loaded for node %lld buf %lld\n",
                          static_cast<long long>(nodeID),
                          static_cast<long long>(bufID));
@@ -1020,7 +1020,7 @@ static void ffi_uiWaveform(ts::VM& vm, u16 dst, u16, u16 argBase) {
     }
     std::uint64_t id = bindWaveformWidget(ui, panel, name, path.c_str());
     if (id == 0)
-        std::fprintf(stderr, "ui.waveform: cannot read \"%s\"\n", path.c_str());
+        std::fprintf(vm.errorOutput(), "ui.waveform: cannot read \"%s\"\n", path.c_str());
     vm.reg(dst).i = static_cast<i64>(id);
 }
 
@@ -1102,7 +1102,7 @@ static void ffi_uiControl(ts::VM& vm, u16 dst, u16, u16 argBase) {
         }
     }
     if (id == 0) {
-        std::fprintf(stderr, "ui.control: node %lld has no control \"%s\"\n",
+        std::fprintf(vm.errorOutput(), "ui.control: node %lld has no control \"%s\"\n",
                      static_cast<long long>(nodeID), control);
     }
     vm.reg(dst).i = id;
@@ -1126,7 +1126,7 @@ static void ffi_uiControls(ts::VM& vm, u16 dst, u16, u16 argBase) {
                 ids.push_back(id);
         }
     } else {
-        std::fprintf(stderr, "ui.controls: unknown node %lld\n",
+        std::fprintf(vm.errorOutput(), "ui.controls: unknown node %lld\n",
                      static_cast<long long>(nodeID));
     }
 
