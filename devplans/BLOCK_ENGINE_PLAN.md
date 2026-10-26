@@ -1613,10 +1613,35 @@ Progress (2026-10-25; M8 is in progress):
 - **The equivalence test's limit is −40 dB:** `fxMultiTap` measures −61 dB on arm64
   and −47 dB on x86-64 (a 38400-sample delay time held to ~0.002 samples by f32 in any
   form); a wrong form is +30 dB.
+- **Port rows only for channel-vector ports:** a direct port narrower than a multiple
+  of 4 channels (stereo) keeps per-sample access; transposing it was extra copying.
+- **Block-wise delay lines (plan §4.4):**
+  - *Value ranges* (`recurrence.x valueRange`): interval arithmetic over constants, the
+    sample rate (8–768 kHz), input specs, `+ − × ÷ min max`, `sin`/`cos` and kin,
+    compares and selects. An input is assumed to stay within its spec.
+  - A runtime-sized root delay line whose written value is computed from outside the
+    region without delay reads or random draws (feedforward), and whose every read's
+    lower bound puts its kernel's newest tap at least a sample back, is written for
+    the whole block first; the region then runs with its write left out. Every
+    runtime-sized root ring holds max delay + `maxBlock`, so the block's writes never
+    overwrite what a read in the block still needs. Chorus (reads ≥ 146 samples) and
+    the granulator qualify; feedback delays (echo, flanger, ping-pong) don't.
+  - The read pass then runs sample-vector: lanes are 4 samples of one channel, each
+    at its own write head, through the vector interpolation kernels.
+- **Sample-vector for 2–3 channels:** regions whose loops have 1 to 3 channels run
+  sample-vector, one channel at a time (4 or more run channel-vector).
+- **Planar block temps:** a temp whose channel count is not a multiple of 4, written
+  channel by channel and read only elementwise, is stored planar (channel c at
+  `base + c·maxBlock`); a sample-vector loop reads it contiguously, and so does a
+  state space per channel. Channel-vector temps keep interleaved rows (D4).
+- **Benchmarks against `main`** (ms of CPU per node-second, `main` → now, side by
+  side): mono `sinosc → lpf` 0.282 → 0.123 (2.3×); 16-channel 0.943 → 0.775 (1.22×);
+  knobs 0.242 → 0.231; chorus 1.122 → 0.596 (1.88×); bank 3.137 → 2.251 (1.39×).
 - **Not done yet:**
-  - planar block buffers between loops (multichannel temps are still interleaved
-    rows; sample-vector consumers of multichannel temps would want planar);
-  - the rest of the cost table (register budget; when to transpose versus gather).
+  - block-wise feedback delays whose minimum delay is at least a block (read the block
+    first, then write);
+  - the rest of the cost table (a register budget; costs that weigh transposes
+    against gathers instead of fixed rules).
 
 **M9: Voicer block form (§4.6), portability and performance.**
 - Channel-vector loops over voices, skipping idle groups, per-voice parameter caches.

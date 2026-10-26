@@ -571,3 +571,86 @@ fn _ownerOfGraph(ctx Ctx, g Int) NIdx {
 	}
 	NONE
 }
+
+-- Value ranges (block engine plan 4.2 step 0: interval analysis of delay
+-- times). (lo, hi) bounds every value n can take, from constants, the sample
+-- rate (8 kHz to 768 kHz), input specs, and interval arithmetic through
+-- elementwise ops; (-kRangeInf, kRangeInf) when nothing is known. An input
+-- with a spec is taken to stay in its range.
+let kRangeInf = 1.0e300;
+
+fn valueRange(ctx Ctx, n NIdx) (Float, Float) = ctx _range(n, 0);
+
+fn _unknownRange() (Float, Float) = (0.0 - kRangeInf, kRangeInf);
+
+fn _isFiniteRange(r (Float, Float)) Bool = r.0 > 0.0 - kRangeInf && r.1 < kRangeInf;
+
+fn _range(ctx Ctx, n NIdx, depth Int) (Float, Float) {
+	if (depth > 48) { return _unknownRange(); }
+	let ins = ctx.ins[n];
+	match (ctx.kind[n]) {
+		constant(v, _): {
+			let k = v constSize;
+			if (k == 0) { return _unknownRange(); }
+			var lo = v constF64At(0);
+			var hi = lo;
+			var i = 1;
+			while (i < k) { let x = v constF64At(i); lo = min(lo, x); hi = max(hi, x); i = i + 1; }
+			return (lo, hi);
+		}
+		sampleRate: { return (8000.0, 768000.0); }
+		sampleDur: { return (1.0 / 768000.0, 1.0 / 8000.0); }
+		inletK(_, _, spec): {
+			return match (spec) { some(sp): (sp.spec.lo min(sp.spec.hi), sp.spec.lo max(sp.spec.hi)); none: _unknownRange(); };
+		}
+		castopK(_): { return ctx _range(ins[0], depth + 1); }
+		compareopK(_): { return (0.0, 1.0); }
+		selectK: {
+			var lo = kRangeInf;
+			var hi = 0.0 - kRangeInf;
+			var i = 1;
+			while (i < ins length) { let r = ctx _range(ins[i], depth + 1); lo = min(lo, r.0); hi = max(hi, r.1); i = i + 1; }
+			return (lo, hi);
+		}
+		unopK(op): {
+			match (op) {
+				sin: { return (-1.0, 1.0); }
+				cos: { return (-1.0, 1.0); }
+				sinpi: { return (-1.0, 1.0); }
+				cospi: { return (-1.0, 1.0); }
+				tanh: { return (-1.0, 1.0); }
+				_: {}
+			}
+			let a = ctx _range(ins[0], depth + 1);
+			match (op) {
+				neg: { return (0.0 - a.1, 0.0 - a.0); }
+				abs: { return a.0 >= 0.0 ? a : (a.1 <= 0.0 ? (0.0 - a.1, 0.0 - a.0) : (0.0, max(0.0 - a.0, a.1))); }
+				floor: { return _isFiniteRange(a) ? (a.0 floor, a.1 floor) : _unknownRange(); }
+				_: { return _unknownRange(); }
+			}
+		}
+		binopK(op): {
+			let a = ctx _range(ins[0], depth + 1);
+			let b = ctx _range(ins[1], depth + 1);
+			match (op) {
+				add: { return _isFiniteRange(a) && _isFiniteRange(b) ? (a.0 + b.0, a.1 + b.1)
+				                                                     : (a.0 + b.0 max(0.0 - kRangeInf), a.1 + b.1 min(kRangeInf)); }
+				sub: { return _isFiniteRange(a) && _isFiniteRange(b) ? (a.0 - b.1, a.1 - b.0) : _unknownRange(); }
+				mul: {
+					if (!(_isFiniteRange(a) && _isFiniteRange(b))) { return _unknownRange(); }
+					let p1 = a.0 * b.0; let p2 = a.0 * b.1; let p3 = a.1 * b.0; let p4 = a.1 * b.1;
+					return (min(min(p1, p2), min(p3, p4)), max(max(p1, p2), max(p3, p4)));
+				}
+				div: {
+					if (!(_isFiniteRange(a) && _isFiniteRange(b)) || (b.0 <= 0.0 && b.1 >= 0.0)) { return _unknownRange(); }
+					let q1 = a.0 / b.0; let q2 = a.0 / b.1; let q3 = a.1 / b.0; let q4 = a.1 / b.1;
+					return (min(min(q1, q2), min(q3, q4)), max(max(q1, q2), max(q3, q4)));
+				}
+				min: { return (min(a.0, b.0), min(a.1, b.1)); }
+				max: { return (max(a.0, b.0), max(a.1, b.1)); }
+				_: { return _unknownRange(); }
+			}
+		}
+		_: { return _unknownRange(); }
+	}
+}

@@ -301,6 +301,26 @@ fn _varRef(ctx Ctx, n NIdx, cel String) String {
 			}
 			_: {}
 		}
+		if (`cgSampleVec && ctx.chans[n] > 1) {
+			-- sample-vector over one channel (cel) of a 2-3 channel loop
+			let C = ctx.chans[n];
+			let ix = _indexWrapShape(ctx.shape[n], `cgDstShape, `cgLoopChans, cel);
+			let ci = ix substring(1, ix length - 2);
+			let audio = ctx.nrate[n] == Rate.audio;
+			if (audio && ctx _planarTemp(n)) {
+				return _simdLoad(t, w, "&%^[(%^) * mb]" fmt(s, ci));   -- planar: contiguous
+			}
+			if (audio && (ctx _isBlockTemp(n) || ctx _isRootBuf(n))) {
+				-- interleaved rows: 4 samples of channel ci, a row apart
+				return _svStrided(t, w, s, ci, ctx _rowElems(n));
+			}
+			if (audio && ctx.cut[n] isTempVarCut) { return "%^[%^]" fmt(s, ci); }   -- a vector per channel
+			if (ctx _isRootBuf(n) && ctx.nrate[n] == Rate.block) {
+				let g = ctx.groupOf[n];
+				return "(pgS%^ ? %^ : %^)" fmt(g, _svStrided(t, w, s, ci, ctx _rowElems(n)), _simdSplat(t, w, "%^[%^]" fmt(s, ci)));
+			}
+			return _simdSplat(t, w, "%^[%^]" fmt(s, ci));
+		}
 		if (ctx.chans[n] == 1) {
 			if (`cgSampleVec && ctx.nrate[n] == Rate.audio) {
 				-- a block buffer row: 4 samples from the row pointer
@@ -329,7 +349,10 @@ fn _varRef(ctx Ctx, n NIdx, cel String) String {
 		-- Narrower than the SIMD width (e.g. 2-chan into 4-wide): expand element-wise.
 		var parts [String] = [];
 		var j = 0;
-		while (j < w) { parts push!("%^[%^]" fmt(s, j % C)); j = j + 1; }
+		while (j < w) {
+			parts push!(ctx _planarTemp(n) ? "%^[%^ * mb]" fmt(s, j % C) : "%^[%^]" fmt(s, j % C));
+			j = j + 1;
+		}
 		return "%^{%^}" fmt(_simdType(t, w), parts join(", "));
 	}
 	-- Flat voice mode: per-voice SoA indexing (mirrors the C++ flat-voice
@@ -367,7 +390,9 @@ fn _varRef(ctx Ctx, n NIdx, cel String) String {
 	}
 	let isPort = match (ctx.kind[n]) { inletK(_, _, _): true; outletK(_, _): true; _: false; };
 	if (ctx.chans[n] == 1 && !isPort) { return s; }
-	s $ _indexWrapShape(ctx.shape[n], `cgDstShape, `cgLoopChans, cel)
+	let ix = _indexWrapShape(ctx.shape[n], `cgDstShape, `cgLoopChans, cel);
+	if (ctx _planarTemp(n)) { return "%^[(%^) * mb]" fmt(s, ix substring(1, ix length - 2)); }
+	s $ ix
 }
 
 -- An input port's gathered value p->in<sn>[] at loop element `cel`. Ports
@@ -407,6 +432,12 @@ fn _inletRef(ctx Ctx, n NIdx, sn Int, cel String) String {
 	let C = ctx.chans[n];
 	let a = "in%^" fmt(sn);
 	let flat = `cgVoiceCount > 0 && `cgFlatChanShift >= 0 && `cgFlatTrip > 0;
+	if (`cgSampleVec && `cgSimdW > 0 && C > 1) {
+		let ix = _indexWrapShape(ctx.shape[n], `cgDstShape, `cgLoopChans, cel);
+		let ci = ix substring(1, ix length - 2);
+		if (ctx _directPort(n)) { return _simdLoad(ctx.typ[n], `cgSimdW, "r_in%^[%^] + bi" fmt(sn, ci)); }
+		return _svStrided(ctx.typ[n], `cgSimdW, a, ci, ctx _portElems(n));
+	}
 	if (ctx _directPort(n) && `cgPortRows) {
 		-- row k of the transposed port
 		if (`cgSimdW > 0) {
@@ -1320,6 +1351,22 @@ fn _delayVarReadExpr(ctx Ctx, n NIdx, d Int, ip Interpolation, cel String) Strin
 		let off = genExpr(ctx, ctx.ins[n][0], cel);
 		return _delayVarGenRead(ip, _vDelayBuf(ctx, info, cel), _vDelayWrpos(info, cel), _vDelayMask(info, cel), off, zg);
 	}
+	if (`cgSampleVec && `cgSimdW > 0) {
+		-- lanes are samples: one channel's ring, each lane at its own write head
+		let w = `cgSimdW;
+		let di = _delayDIndex(ctx, d, n, cel);
+		var bufs [String] = [];
+		var wrs [String] = [];
+		var masks [String] = [];
+		var j = 0;
+		while (j < w) {
+			bufs push!("p->d%^%^" fmt(info.serial, di));
+			wrs push!(j == 0 ? "p->d%^_wrpos" fmt(info.serial) : "(p->d%^_wrpos + %^)" fmt(info.serial, j));
+			masks push!(_delayMask(info));
+			j = j + 1;
+		}
+		return _genSimdInterp(ctx.typ[n], w, ip, bufs, wrs, masks, genExpr(ctx, ctx.ins[n][0], cel), false, zg);
+	}
 	if (`cgSimdW > 0) { return _delayVarReadSimd(ctx, n, info, ip, cel); }
 	let off = genExpr(ctx, ctx.ins[n][0], cel);
 	let di = _delayDIndex(ctx, d, n, cel);
@@ -1906,6 +1953,7 @@ fn genTree(ctx Ctx, treeIdx Int, cel String) String {
 		inletK(_, _, _): { return ""; }   -- gathered by process()
 		delayWriteK(d): {
 			if (d == `cgSuppressDelay) { return ""; }   -- a block-form cycle sets its state itself
+			if (`cgSuppressDelays contains(d)) { return ""; }   -- a block-wise delay was written first
 			return _tabs(`cgIndent) $ _delayWriteStmt(ctx, root, d, cel, tree.serial);
 		}
 		delayInitK(_, _): { return ""; }   -- emitted by genDelayInit
@@ -1956,6 +2004,17 @@ fn genTree(ctx Ctx, treeIdx Int, cel String) String {
 		indentStr $ "%^ %^ = %^; // %^ %^\n"
 			fmt(declT, _varName(ctx, root), genExpr(ctx, root, cel),
 			    tree.serial, ctx.cut[root] cutStr)
+	} else if (`cgSampleVec && ctx _planarTemp(root)) {
+		let ix = _indexWrapShape(ctx.shape[root], `cgDstShape, `cgLoopChans, cel);
+		indentStr $ "*(%^u*)&%^[(%^) * mb] = %^; // %^ %^\n"
+			fmt(_simdType(ctx.typ[root], `cgSimdW), _varName(ctx, root), ix substring(1, ix length - 2),
+			    genExpr(ctx, root, cel), tree.serial, ctx.cut[root] cutStr)
+	} else if (`cgSampleVec && ctx.chans[root] > 1 && (ctx _isBlockTemp(root) || ctx _isRootBuf(root))) {
+		-- sample-vector of one channel into interleaved rows
+		let ix = _indexWrapShape(ctx.shape[root], `cgDstShape, `cgLoopChans, cel);
+		indentStr $ "%^; // %^ %^\n"
+			fmt(_svScatter(ctx.typ[root], `cgSimdW, _varName(ctx, root), ix substring(1, ix length - 2), ctx _rowElems(root),
+			               genExpr(ctx, root, cel)), tree.serial, ctx.cut[root] cutStr)
 	} else {
 		indentStr $ "%^ = %^; // %^ %^\n"
 			fmt(_varRef(ctx, root, cel), genExpr(ctx, root, cel),
@@ -1967,7 +2026,15 @@ fn genTree(ctx Ctx, treeIdx Int, cel String) String {
 -- its input. genExpr on the outlet node itself yields the accessor.
 fn _sinkStmt(ctx Ctx, n NIdx, cel String) String = match (ctx.kind[n]) {
 	outletK(_, sn): {
-		if (ctx _directPort(n) && `cgPortRows) {
+		if (`cgSampleVec && ctx.chans[n] > 1) {
+			let val = genExpr(ctx, ctx.ins[n][0], cel);
+			let t = ctx.typ[n];
+			if (ctx _directPort(n)) {
+				"*(%^u*)(r_out%^[%^] + bi) = %^" fmt(_simdType(t, `cgSimdW), sn, cel, val)
+			} else {
+				_svScatter(t, `cgSimdW, "out%^" fmt(sn), cel, ctx _portElems(n), val)
+			}
+		} else if (ctx _directPort(n) && `cgPortRows) {
 			let val = genExpr(ctx, ctx.ins[n][0], cel);
 			let C = ctx.chans[n];
 			if (`cgSimdW > 0) {
@@ -2020,6 +2087,21 @@ fn _sinkStmt(ctx Ctx, n NIdx, cel String) String = match (ctx.kind[n]) {
 -- SIMD helpers (M5.1). Mirror simdTypeName/simdSplat/simdLoad/simdStore.
 
 fn _simdType(t NumType, w Int) String = "%^x%^" fmt(cppType(t), w);
+-- A sample-vector stored into interleaved rows: row[ci + j * stride] = lane j.
+fn _svScatter(t NumType, w Int, row String, ci String, stride Int, val String) String {
+	var st = "{ %^ _v = %^;" fmt(_simdType(t, w), val);
+	var j = 0;
+	while (j < w) { st = st $ " %^[(%^) + %^] = _v[%^];" fmt(row, ci, j * stride, j); j = j + 1; }
+	st $ " }"
+}
+
+-- Lanes j of a sample-vector over interleaved rows: row[ci + j * stride].
+fn _svStrided(t NumType, w Int, row String, ci String, stride Int) String {
+	var parts [String] = [];
+	var j = 0;
+	while (j < w) { parts push!(j == 0 ? "%^[%^]" fmt(row, ci) : "%^[(%^) + %^]" fmt(row, ci, j * stride)); j = j + 1; }
+	"%^{%^}" fmt(_simdType(t, w), parts join(", "))
+}
 fn _simdSplat(t NumType, w Int, x String) String = "(%^)(%^)" fmt(_simdType(t, w), x);
 fn _simdLoad(t NumType, w Int, ptr String) String =
 	"*(%^%^*)(%^)" fmt(_simdType(t, w), `cgSampleVec ? "u" : "", ptr);
@@ -2315,7 +2397,8 @@ fn genLoop(ctx Ctx, loopIdx Int) String {
 			let root = ctx.trees[t].root;
 			if (ctx.cut[root] isTempVarCut && !_consumedInLoop(ctx, t) && !(ctx _isBlockTemp(root))) {
 				let shp = flat ? "[%^]" fmt(`cgVoiceCount * ctx.chans[root]) : _shape(ctx.chans[root]);
-				decls = decls $ "\t%^ %^%^;\n" fmt(cppType(ctx.typ[root]), _varName(ctx, root), shp);
+				let dty = `cgSampleVec ? _simdType(ctx.typ[root], 4) : cppType(ctx.typ[root]);
+				decls = decls $ "\t%^ %^%^;\n" fmt(dty, _varName(ctx, root), shp);
 			}
 		}
 		if (decls length > 0) { s = s $ decls $ "\n"; }
@@ -2753,7 +2836,7 @@ fn _blockBuffers(ctx Ctx) BlockBufs {
 	while (bi < `cgBlockTemps length) {
 		let x = `cgBlockTemps[bi];
 		let o = owners[bi];
-		out _addBuf("bt%^" fmt(ctx.serial[x]), cppType(ctx.typ[x]), ctx _rowElems(x), 0,
+		out _addBuf("bt%^" fmt(ctx.serial[x]), cppType(ctx.typ[x]), ctx _bufElems(x), 0,
 		            o == x ? "" : "bt%^" fmt(ctx.serial[o]));
 		bi = bi + 1;
 	}
@@ -2798,7 +2881,8 @@ fn _blockTempArena(ctx Ctx) [NIdx] {
 		var j = 0;
 		while (j < i) {
 			let y = temps[j];
-			if (owner[j] == y && slotEnd[j] < lo[i] && ctx.typ[y] == ctx.typ[x] && ctx _rowElems(y) == ctx _rowElems(x)) {
+			if (owner[j] == y && slotEnd[j] < lo[i] && ctx.typ[y] == ctx.typ[x] && ctx _bufElems(y) == ctx _bufElems(x)
+			    && ctx _planarTemp(y) == ctx _planarTemp(x)) {
 				o = y;
 				slotEnd[j] = hi[i];
 				break;
@@ -3053,7 +3137,9 @@ fn genDelayAlloc(ctx Ctx) String {
 			let headroom = max(4, d.maxOverread);
 			let maxExpr = genExpr(ctx, ctx.ins[d.maxDelay][0], "0");
 			let ty = cppType(d.typ);
-			s = s $ "\tu64 d%^_size = nextPowerOfTwo(%^+u64(ceil(%^)));\n" fmt(d.serial, headroom, maxExpr);
+			-- + maxBlock: a block-wise delay writes the whole block before its
+			-- reads (plan 4.4), so the ring must hold max delay + a block
+			s = s $ "\tu64 d%^_size = nextPowerOfTwo(%^+u64(ceil(%^))+u64(p->maxBlock));\n" fmt(d.serial, headroom, maxExpr);
 			s = s $ "\tp->d%^_mask = d%^_size - 1;\n" fmt(d.serial, d.serial);
 			if (d.chans == 1) {
 				s = s $ "\tp->d%^ = (%^*)calloc(d%^_size, sizeof(%^));\n" fmt(d.serial, ty, d.serial, ty);
@@ -4155,6 +4241,39 @@ fn _rowElems(ctx Ctx, x NIdx) Int {
 	c == 1 ? 1 : (c + 3) // 4 * 4
 }
 
+-- A block temp whose channel count is not a multiple of 4 is stored planar:
+-- channel c's samples at base + c * maxBlock (D4: layout by consumer). Its
+-- loops run one channel at a time (sample-vector or scalar), and a state
+-- space per channel reads it contiguously; channel-vector loops (4, 8, ...
+-- channels) keep interleaved rows.
+-- Only when every access is per channel: written channel by channel, and
+-- every consumer elementwise (a reduce or channel op takes a whole row).
+fn _planarTemp(ctx Ctx, x NIdx) Bool {
+	if (!(ctx _isBlockTemp(x)) || ctx.chans[x] < 2 || ctx.chans[x] % 4 == 0) { return false; }
+	-- written channel by channel by its tree, unless it builds a whole row
+	let rowWriter = match (ctx.kind[x]) {
+		vecK(_): true; reduceK(_, _): true; phiK(_): true;
+		ifK: true; forK: true; switchK(_): true; voicerK(_): true; spectralChainK(_, _): true;
+		_: false;
+	};
+	if (rowWriter || getsOwnLoop(ctx.kind[x])) { return false; }
+	for (c : ctx.consumers[x]) {
+		if (!(_elementwiseKind(ctx.kind[c]))) { return false; }
+		if (ctx.chans[c] != ctx.chans[x]) { return false; }
+	}
+	true
+}
+
+fn _elementwiseKind(k NodeKind) Bool = match (k) {
+	unopK(_): true; binopK(_): true; compareopK(_): true; castopK(_): true;
+	selectK: true; delayWriteK(_): true; outletK(_, _): true;
+	_: false;
+};
+
+-- Elements per maxBlock of a block buffer: interleaved row width, or the
+-- channel count for a planar temp.
+fn _bufElems(ctx Ctx, x NIdx) Int = ctx _planarTemp(x) ? ctx.chans[x] : ctx _rowElems(x);
+
 fn genBlockBufDecls(ctx Ctx) String {
 	var s = "";
 	for (k : ctx.blockCycles) {
@@ -4238,7 +4357,8 @@ fn _rowEntries(ctx Ctx, row String) [RowEntry] {
 		let nm = "v%^" fmt(ctx.serial[x]);
 		let def = ctx.chans[x] == 1
 			? (`cgSampleVec ? "%^* %^ = r_%^ + (%^);" fmt(ty, nm, nm, row) : "%^& %^ = r_%^[%^];" fmt(ty, nm, nm, row))
-			: "%^* %^ = r_%^ + (%^) * %^;" fmt(ty, nm, nm, row, ctx _rowElems(x));
+			: (ctx _planarTemp(x) ? "%^* %^ = r_%^ + (%^);" fmt(ty, nm, nm, row)   -- channel c at [c * mb]
+			                      : "%^* %^ = r_%^ + (%^) * %^;" fmt(ty, nm, nm, row, ctx _rowElems(x)));
 		out push!(RowEntry { name: nm, baseType: ty, baseInit: "p->bt%^" fmt(ctx.serial[x]), rowDef: def });
 	}
 	out
@@ -4267,7 +4387,8 @@ fn _rowLocalsFor(ctx Ctx, row String, code String) RowLocals {
 }
 
 fn _advanceDelay(ctx Ctx, d DelayInfo) String =
-	d.allocSize != 1 ? _tabs(`cgIndent) $ "++p->d%^_wrpos;\n" fmt(d.serial) : "";
+	d.allocSize == 1 ? "" : (`cgSampleVec ? _tabs(`cgIndent) $ "p->d%^_wrpos += 4;\n" fmt(d.serial)
+	                                       : _tabs(`cgIndent) $ "++p->d%^_wrpos;\n" fmt(d.serial));
 
 ---------------------------------------------------------------------------
 -- Block-form recurrences (block-engine M7, plan 4.7). A first-order cycle
@@ -4601,6 +4722,7 @@ fn _ssBuf(ctx Ctx, n NIdx) (String, Int) {
 		}
 		_: {}
 	}
+	if (ctx _planarTemp(n)) { return ("p->bt%^" fmt(ctx.serial[n]), -1); }   -- planar: c * mb + sample
 	if (ctx _isBlockTemp(n)) { return ("p->bt%^" fmt(ctx.serial[n]), ctx _rowElems(n)); }
 	if (ctx _isRootBuf(n) && ctx.nrate[n] == Rate.audio) { return ("p->bk%^" fmt(ctx.serial[n]), ctx _rowElems(n)); }
 	("", 0)
@@ -4745,9 +4867,14 @@ fn _genStateSpace(ctx Ctx, k Int, region [Int], delays [DelayInfo]) String {
 			xs push!("(%^*)p->ins[%^].chans[c] + off" fmt(ty, portSn));
 			incs push!("1");
 		} else {
-			let chOff = C > 1 && ctx.chans[e] > 1 ? " + c" : "";
-			xs push!("%^ + off * %^%^" fmt(b.0, b.1, chOff));
-			incs push!(b.1 toString);
+			if (b.1 < 0) {
+				xs push!("%^ + %^off" fmt(b.0, C > 1 && ctx.chans[e] > 1 ? "c * mb + " : ""));
+				incs push!("1");
+			} else {
+				let chOff = C > 1 && ctx.chans[e] > 1 ? " + c" : "";
+				xs push!("%^ + off * %^%^" fmt(b.0, b.1, chOff));
+				incs push!(b.1 toString);
+			}
 		}
 		i = i + 1;
 	}
@@ -4756,8 +4883,13 @@ fn _genStateSpace(ctx Ctx, k Int, region [Int], delays [DelayInfo]) String {
 	o = 0;
 	while (o < no) {
 		let b = (yPtr[o], yStr[o]);
-		ys push!("%^ + off * %^%^" fmt(b.0, b.1, C > 1 ? " + c" : ""));
-		yincs push!(b.1 toString);
+		if (b.1 < 0) {
+			ys push!("%^ + %^off" fmt(b.0, C > 1 ? "c * mb + " : ""));
+			yincs push!("1");
+		} else {
+			ys push!("%^ + off * %^%^" fmt(b.0, b.1, C > 1 ? " + c" : ""));
+			yincs push!(b.1 toString);
+		}
 		o = o + 1;
 	}
 	s = s $ ind $ "%^ const* xin[%^] = {%^};\n" fmt(ty, ni, xs join(", "));
@@ -4786,6 +4918,94 @@ fn _genStateSpace(ctx Ctx, k Int, region [Int], delays [DelayInfo]) String {
 	if (ex.post length > 0) { s = s $ ctx _genRegion(ex.post, postDelays); }
 	s = s $ "\t}\n\t}\n";
 	s
+}
+
+-- Block-wise delays (plan 4.4): a region's runtime-sized delay line whose
+-- written value doesn't depend on its reads, and whose every read is far
+-- enough back that its kernel touches only samples written before the
+-- current one, is written for the whole block first; the region then runs
+-- with that write left out. The ring holds max delay + a block
+-- (genDelayAlloc), so the block's writes never overwrite a sample a read in
+-- the same block still needs.
+fn _genRegionWithBlockDelays(ctx Ctx, region [Int], delays [DelayInfo]) String {
+	var bd [Int] = [];
+	var pre = "";
+	for (di : delays) {
+		let d = ctx _delayIndexOfSerial(di.serial);
+		if (d != NONE && ctx _blockDelayOK(d, region)) {
+			bd push!(d);
+			pre = pre $ ctx _blockDelayWritePass(d);
+		}
+	}
+	if (bd length == 0) { return ctx _genRegion(region, delays); }
+	var `cgSuppressDelays [Int] = bd;
+	"\t{\n" $ pre $ ctx _genRegion(region, delays) $ "\t}\n"
+}
+
+fn _delayIndexOfSerial(ctx Ctx, ser Int) Int {
+	var i = 0;
+	while (i < ctx.delays length) { if (ctx.delays[i].serial == ser) { return i; } i = i + 1; }
+	NONE
+}
+
+-- The newest tap an interpolation kernel reads, relative to floor(delay).
+fn _interpFwd(ip Interpolation) Int = match (ip) { cubic: 1; lagrange: 3; sinc: 3; _: 0; };
+
+fn _blockDelayOK(ctx Ctx, d Int, region [Int]) Bool {
+	if (serialForms()) { return false; }
+	let di = ctx.delays[d];
+	if (di.allocSize != 0 || di.maxDelay == NONE || di.writer == NONE) { return false; }
+	if (di.fixReaders length > 0 || di.varReaders length == 0) { return false; }
+	if (ctx.graphOf[di.writer] != 0) { return false; }
+	for (r : di.varReaders) {
+		if (ctx.graphOf[r] != 0) { return false; }
+		let ip = match (ctx.kind[r]) { delayVarReadK(_, i): i; _: Interpolation.none; };
+		let lo = (ctx valueRange(ctx.ins[r][0])).0;
+		if (!(lo >= (_interpFwd(ip) + 1) toFloat)) { return false; }
+	}
+	ctx _writeValueReady(ctx.ins[di.writer][0], region, 0)
+}
+
+-- Can the value at n be computed before the region runs? Inlined nodes are
+-- recomputed (no delay reads, no random draws); a materialized one must come
+-- from outside the region (a port, an earlier region, a parameter group).
+fn _writeValueReady(ctx Ctx, n NIdx, region [Int], depth Int) Bool {
+	if (depth > 64) { return false; }
+	match (ctx.kind[n]) { inletK(_, _, _): { return true; } _: {} }
+	if (ctx isMaterialized(n)) {
+		let li = ctx _rootLoopOfNode(n);
+		if (li != NONE && region contains(li)) { return false; }
+		return ctx.graphOf[n] == 0;
+	}
+	if (!(ctx _nodeSampleVecOK(n))) { return false; }
+	for (i : ctx.ins[n]) { if (!(ctx _writeValueReady(i, region, depth + 1))) { return false; } }
+	true
+}
+
+-- The write pass of a block-wise delay: every sample of the block, every
+-- channel, into the ring from the current write head (which the region
+-- then advances per sample as before).
+fn _blockDelayWritePass(ctx Ctx, d Int) String {
+	let di = ctx.delays[d];
+	let v = ctx.ins[di.writer][0];
+	var `cgIndent Int = 2;
+	var `cgRoot Int = NONE;
+	var `cgSimdW Int = 0;
+	var `cgLoopChans Int = di.chans;
+	var `cgDstShape Shape = ctx.shape[di.writer];
+	var code = "";
+	var c = 0;
+	while (c < di.chans) {
+		let cel = c toString;
+		let e = ctx _isRootNode(v) ? _varRef(ctx, v, cel) : genExpr(ctx, v, cel);
+		let slot = di.chans > 1 ? "p->d%^[%^]" fmt(di.serial, c) : "p->d%^" fmt(di.serial);
+		code = code $ "\t\t%^[w & p->d%^_mask] = %^;\n" fmt(slot, di.serial, e);
+		c = c + 1;
+	}
+	let rl = ctx _rowLocalsFor("bi", code);
+	"\t{ // delay %^ written for the block before its reads\n" fmt(di.serial)
+		$ rl.bases $ "\tu64 w = p->d%^_wrpos;\n" fmt(di.serial)
+		$ "\tfor (i32 bi = off; bi < off + n; ++bi, ++w) {\n" $ rl.rows $ code $ "\t}\n\t}\n"
 }
 
 -- One region: its loops sample by sample, and the root delays it owns.
@@ -4924,10 +5144,16 @@ fn _genRegion(ctx Ctx, region [Int], delays [DelayInfo]) String {
 	var body = genLoops(ctx, region);
 	for (d : delays) { body = body $ ctx _advanceDelay(d); }
 	if (body trim length == 0) { return ""; }
-	-- sample-vector (4 samples a step, then the scalar tail) when elementwise
+	-- sample-vector (4 samples a step, then the scalar tail) when elementwise;
+	-- the only delays it may own are block-wise ones, already written
+	var allBlock = true;
+	for (di : delays) {
+		let d = ctx _delayIndexOfSerial(di.serial);
+		if (!(`cgSuppressDelays contains(d))) { allBlock = false; }
+	}
 	var vbody = "";
-	if (`cgSimdWidth >= 4 && delays length == 0 && ctx _sampleVecOK(region)) {
-		let (vb, vr) = ctx _sampleVecBody(region);
+	if (`cgSimdWidth >= 4 && allBlock && ctx _sampleVecOK(region)) {
+		let (vb, vr) = ctx _sampleVecBody(region, delays);
 		vbody = vb;
 	}
 	if (vbody length == 0 && `cgSimdWidth >= 4) {
@@ -5004,16 +5230,17 @@ fn _nodeSampleVecOK(ctx Ctx, e NIdx) Bool = match (ctx.kind[e]) {
 	delayFixReadK(_, _): false; delayVarReadK(_, _): false; delayWriteK(_): false;
 	urandK(_): false; birandK(_): false; rand64K(_): false;
 	bufWriteK(_, _, _): false; bufFixReadK(_, _, _, _): false; bufVarReadK(_, _, _, _): false;
-	bankLookupK(_): false; vecK(_): false; phiK(_): false; voicerK(_): false;
+	bankLookupK(_): false; vecK(_): false; reduceK(_, _): false; phiK(_): false; voicerK(_): false;
 	ifK: false; forK: false; switchK(_): false; spectralChainK(_, _): false;
 	_: true;
 };
 
 -- A region's loops in sample-vector form, and the rows they use.
-fn _sampleVecBody(ctx Ctx, region [Int]) (String, String) {
+fn _sampleVecBody(ctx Ctx, region [Int], delays [DelayInfo] = [DelayInfo]()) (String, String) {
 	var `cgSampleVec Bool = true;
 	var `cgSimdW Int = 4;
-	let body = genLoops(ctx, region);
+	var body = genLoops(ctx, region);
+	for (d : delays) { body = body $ ctx _advanceDelay(d); }
 	(body, (ctx _rowLocalsFor("bi", body)).rows)
 }
 
@@ -5024,17 +5251,25 @@ fn _sampleVecBody(ctx Ctx, region [Int]) (String, String) {
 fn _sampleVecOK(ctx Ctx, region [Int], subRead NIdx = NONE, subDelay Int = NONE) Bool {
 	for (li : region) {
 		let loop = ctx.loops[li];
-		if (loop.chans != 1 || loop.rate != Rate.audio || loop.isControlFlow) { return false; }
+		-- 1 channel, or 2-3 run one channel at a time (4 or more run
+		-- channel-vector instead)
+		if (loop.chans < 1 || loop.chans > 3 || loop.rate != Rate.audio || loop.isControlFlow) { return false; }
 		if (ctx _loopHasSimdDisqualifier(loop)) { return false; }
 		for (t : loop.trees) {
 			if (getsOwnLoop(ctx.kind[ctx.trees[t].root])) { return false; }
 			for (e : ctx.trees[t].exprs) {
 				if (ctx.graphOf[e] != 0) { return false; }
-				if (ctx.chans[e] > 1) { return false; }
+				if (ctx.chans[e] > 1 && ctx.chans[e] != loop.chans) { return false; }
+				for (x : ctx.ins[e]) { if (ctx.chans[x] > 1 && ctx.chans[x] != loop.chans) { return false; } }
 				-- a block cycle's substituted state read and suppressed write
 				if (e == subRead) { continue; }
-				let sup = match (ctx.kind[e]) { delayWriteK(dd): dd == subDelay; _: false; };
-				if (sup) { continue; }
+				-- a block-wise delay's reads and its (already done) write
+				let blockDelay = match (ctx.kind[e]) {
+					delayWriteK(dd): dd == subDelay || `cgSuppressDelays contains(dd);
+					delayVarReadK(dd, _): `cgSuppressDelays contains(dd);
+					_: false;
+				};
+				if (blockDelay) { continue; }
 				if (!(ctx _nodeSampleVecOK(e))) { return false; }
 			}
 		}
@@ -5046,6 +5281,8 @@ fn _sampleVecOK(ctx Ctx, region [Int], subRead NIdx = NONE, subDelay Int = NONE)
 -- samples of [off, off+n) (block layout above).
 fn genTickFun(ctx Ctx, name String) String {
 	var s = "void %^_process(%^* p, i32 off, i32 n) {\n" fmt(name, name);
+	-- planar block temps: channel c of a temp at [c * mb]
+	s = s $ "\tconst i32 mb = p->maxBlock; (void)mb;\n";
 	s = s $ ctx genParamGroupModes;
 	var g = 0;
 	while (ctx _pgActive && g < ctx.paramGroups length) {
@@ -5080,7 +5317,7 @@ fn genTickFun(ctx Ctx, name String) String {
 		var seen = 0;
 		for (x : regionCycle) { if (x == kk) { seen = seen + 1; } }
 		let k = kk != NONE && seen > 1 ? NONE : kk;
-		texts push!(k == NONE ? ctx _genRegion(regions[ri], owned[ri])
+		texts push!(k == NONE ? ctx _genRegionWithBlockDelays(regions[ri], owned[ri])
 		            : (ctx _blockCycleForm(k) == "statespace" ? ctx _genStateSpace(k, regions[ri], owned[ri])
 		                                                       : ctx _genBlockCycle(k, regions[ri])));
 		plain push!(k == NONE);
@@ -5488,6 +5725,7 @@ fn genCpp(ctx Ctx, name String, simdWidth Int = 0) String {
 	var `cgReaderSub Int = NONE;
 	var `cgReaderExpr String = "";
 	var `cgSuppressDelay Int = NONE;
+	var `cgSuppressDelays [Int] = [];
 	`cgRootBuf = ctx rootBufNodes;
 	`cgBlockTemps = ctx blockTempNodes;
 	var `cgInVoiceLoop Bool = false;
