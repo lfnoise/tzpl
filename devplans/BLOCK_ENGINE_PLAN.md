@@ -1772,7 +1772,7 @@ Progress (2026-10-26):
   index itself, so every dump golden was unchanged. Reduce along an axis is
   `reduce_rows<len, inner>` at the element's base; scan is `scan_at<inner>`; join and
   stack along an inner axis copy one slab per outer block.
-- **Corpus:** `sum(2)`/`sum(n)` and `transpose(n)` rewritten with axes.
+- **Corpus:** `sum(2)`/`sum(n)` and `transpose(n)` rewritten with axes; mono voicers that dealt voices to L/R keep it as `reshape([-1, 2]) sum(0)`.
 - **Test:** `run_shape_ops_test.sh` (in CI): 208 cases on ranks 1–3 at every axis, and
   in voicers (flat and per-voice structs), each outputting (result − a reference computed
   on flat arrays) = 0 in whole blocks and odd chunks, auto and serial forms; result
