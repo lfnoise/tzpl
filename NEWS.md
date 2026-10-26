@@ -5,7 +5,7 @@ in [git](https://github.com/lfnoise/tzpl/commits/main); this file records
 the changes worth knowing about as a user of the platform. Rendered on the
 documentation site as the Changelog page.
 
-## Unreleased
+## v0.3.0 (26 October 2026)
 
 **The block engine** -- the audio engine and the synth compiler were
 rebuilt to process audio in blocks (64 samples by default) instead of a
@@ -58,6 +58,22 @@ for what changed and the code to change.
 
 **Fixed**
 
+- A crash in long renders and live sessions that play scores
+  (`music.play`): a list built from a coroutine (`coro toList`, which
+  `score` uses) could be freed by the garbage collector before it was
+  returned, and the player read it later. Several other places where an
+  incremental collection could free a value still in use (`Ref` updates of
+  structs, dynamic variables, resumed coroutines, lazy lists) were fixed at
+  the same time.
+- Building a signal outside a synthdef graph (`let s = fill(...)` at top
+  level) is now an error naming the problem instead of a crash.
+- Importing two modules that both define a type of the same name
+  (`synthdef` and `music.shape` both have `Shape`) and then using the bare
+  name is now an "ambiguous type" error that names both modules, instead of
+  silently picking one.
+- In a voicer whose voices run as SIMD lanes, a view (`take`, `drop`,
+  `slice`, ...) of a per-voice value read voice 0's channels for every
+  voice.
 - A template function, or a function without a declared return type, is
   type-checked when it is first called -- and it was checked seeing the
   caller's local variables. A caller with a parameter named like a
