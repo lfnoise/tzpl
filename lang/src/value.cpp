@@ -273,6 +273,15 @@ ListNode* ListNode::create(Type* type) {
 void ListNode::force(VM& vm) {
     if (isLazy_) {
         ListGenerator* gen = generator_;
+        // SATB: this node drops its generator pointer, and generate() rewrites
+        // the generator's own fields (source cursors, counters) and this
+        // node's head/tail. Shade everything they reach now, and re-gray both
+        // afterwards in case either was already scanned this cycle: otherwise
+        // a source node reachable at cycle start only through the generator's
+        // old cursor is swept while the list still points at it.
+        TracingGC& gc = vm.tracingGC();
+        gc.writeBarrier(gen);
+        gc.barrierChildren(gen);
         // Clear lazy state and zero the head payload before generate() runs.
         // generate() will write into head_/headTail_ and/or tail_; clearing
         // first prevents re-entry and ensures the union is in head_ mode.
@@ -291,6 +300,8 @@ void ListNode::force(VM& vm) {
         vm.gcKeepAlivePush(gen);
         vm.gcKeepAlivePush(this);
         gen->generate(vm, this);
+        gc.rescan(gen);
+        gc.rescan(this);
         vm.gcKeepAlivePop();
         vm.gcKeepAlivePop();
         // Release the old owner's retain on the generator.

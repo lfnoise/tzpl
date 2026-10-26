@@ -940,8 +940,14 @@ void builtin_toList_coroutine(VM& vm, u16 dst, u16, u16 argBase) {
     if (coro->state_ == CoroutineObj::Done) {
         node->tail_ = nullptr;
     } else {
+        // The peek runs the coroutine, which can step the GC, and the head
+        // node (with the first value in it) is reachable only from this C++
+        // frame until it lands in dst: pin it, or it is swept and the list
+        // returned is already freed.
         Word secondBuf[8] = {};
+        vm.gcKeepAlivePush(node);
         syncResumeCoroutineInto(vm, coro, secondBuf);
+        vm.gcKeepAlivePop();
         if (coro->state_ == CoroutineObj::Done) {
             // Only one value
             node->tail_ = nullptr;

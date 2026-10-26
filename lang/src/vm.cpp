@@ -376,6 +376,8 @@ VM::~VM() {
     delete codeImage_;
 }
 
+void VM::satbBarrier(Obj* old) { tracingGC().writeBarrier(old); }
+
 // Phase 4g.5: implementations for inline-composite dynvar save/restore.
 void VM::dynScopePushInline(u32 varIdx, Word const* newPayload, Type* type) {
     if (dynStackTop_ >= maxDynStack_) {
@@ -398,6 +400,9 @@ void VM::dynScopePushInline(u32 varIdx, Word const* newPayload, Type* type) {
     entry.type = type;
     entry.savedValue.i = (i64)dynStackPayloadTop_;
     entry.isObj = false;
+    // SATB: the old payload moves to the save stack, which may already have
+    // been scanned this cycle; shade it so it survives.
+    if (type) gcBarrierInlinePointers(&dynVars_[varIdx], type, tracingGC());
     // Transfer OLD payload (with its Obj* ownership) into the save buffer.
     Word* save = dynStackPayload_ + dynStackPayloadTop_;
     for (u32 i = 0; i < n; ++i) save[i] = dynVars_[varIdx + i];
@@ -418,9 +423,13 @@ void VM::dynScopeRestore(u32 mark) {
             u32 n = entry.sizeWords;
             u32 off = (u32)entry.savedValue.i;
             Word* save = dynStackPayload_ + off;
+            // SATB: the current payload is dropped; shade it.
+            gcBarrierInlinePointers(&dynVars_[entry.varIndex], entry.type, tracingGC());
             for (u32 i = 0; i < n; ++i) dynVars_[entry.varIndex + i] = save[i];
             dynStackPayloadTop_ = off; // pop payload words (saves are LIFO)
         } else {
+            if (entry.isObj && dynVars_[entry.varIndex].o)
+                tracingGC().writeBarrier(dynVars_[entry.varIndex].o);
             dynVars_[entry.varIndex] = entry.savedValue;
         }
     }
@@ -770,7 +779,7 @@ void VM::resumeAsync(CoroutineObj* coro) {
         u16 stride = awaited->valueWords_;
         for (u16 i = 0; i < stride; ++i) regs_[newBase + dst + i] = awaited->value_[i];
     }
-    frame->gcMapIndex_ = UINT16_MAX;             // nothing retained until next suspend
+    frame->releaseSavedRegs(tracingGC());        // nothing retained until next suspend
 
     pushFrame(nullptr, frame->codeBlock_, newBase, frame->numRegs_, 0);
 

@@ -185,6 +185,8 @@ void op_store_global_inline(VM& vm, Code* pc) {
     auto* type = static_cast<Type*>(pc[3].p);
     u32 n = type ? (u32)type->sizeWords_ : 1u;
     if (n == 0) n = 1;
+    // SATB: shade the old payload (globals are scanned incrementally).
+    if (type) gcBarrierInlinePointers(&vm.global(idx), type, vm.tracingGC());
     for (u32 i = 0; i < n; ++i) vm.global(idx + i) = vm.reg((u16)(src + i));
     DISPATCH(4);
 }
@@ -4877,10 +4879,12 @@ void op_ref_set_inline(VM& vm, Code* pc) {
     auto* refType = static_cast<RefType*>(ref->type_);
     Type* et = refType->elemType_;
     u32 n = ref->sizeWords_;
-    // Release embedded Obj* in the old payload.
-    // Copy in the new payload.
+    // SATB: shade the old payload's Obj* fields before overwriting them, as
+    // op_ref_set does for a boxed value. Without it, an object reachable only
+    // through the old payload (e.g. a list node moved into another field of
+    // the new one) is freed if the Ref was already scanned this cycle.
+    gcBarrierInlinePointers(&ref->v[0], et, vm.tracingGC());
     for (u32 i = 0; i < n; ++i) ref->v[i] = vm.reg((u16)(valReg + i));
-    // Retain embedded Obj* in the new payload.
     // Result of the assignment expression is the assigned value.
     if (dst != valReg) {
         for (u32 i = 0; i < n; ++i) vm.reg((u16)(dst + i)) = vm.reg((u16)(valReg + i));
@@ -5028,7 +5032,7 @@ void op_coro_resume(VM& vm, Code* pc) {
             vm.regsBase()[newBase + i] = frame->regs_[i];
         }
 
-        frame->gcMapIndex_ = UINT16_MAX;  // nothing retained until next yield
+        frame->releaseSavedRegs(vm.tracingGC());  // nothing retained until next yield
 
         // Push flat frame for coro body (gcReturnPC: see the Created branch).
         vm.pushFrame(nullptr, frame->codeBlock_, newBase, frame->numRegs_, 0,
@@ -5535,6 +5539,8 @@ void op_store_dynamic_inline(VM& vm, Code* pc) {
     auto* type = static_cast<Type*>(pc[3].p);
     u32 n = type ? (u32)type->sizeWords_ : 1u;
     if (n == 0) n = 1;
+    // SATB: shade the old payload before overwriting it.
+    if (type) gcBarrierInlinePointers(&vm.dynVar(idx), type, vm.tracingGC());
     for (u32 i = 0; i < n; ++i) vm.dynVar(idx + i) = vm.reg((u16)(src + i));
     DISPATCH(4);
 }

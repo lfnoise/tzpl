@@ -1660,6 +1660,28 @@ public:
         }
     }
 
+    // Resume: the saved registers move back to the register file and the
+    // frame stops claiming them. That drop is a heap deletion, so shade what
+    // the frame held (SATB): if the root scan has already passed the stack,
+    // the resumed frame's registers are never scanned this cycle, and a value
+    // reachable only through this frame at cycle start would be swept while
+    // the coroutine still uses it.
+    void releaseSavedRegs(TracingGC& gc) {
+        if (gc.phase() == TracingGC::Phase::Mark && codeBlock_) {
+            if (gcMapIndex_ < codeBlock_->coroGCMaps_.size()) {
+                for (u16 idx : codeBlock_->coroGCMaps_[gcMapIndex_]) {
+                    if (idx < numRegs_ && regs_[idx].o) gc.writeBarrier(regs_[idx].o);
+                }
+            }
+            if (gcMapIndex_ < codeBlock_->coroInlineGCMaps_.size()) {
+                for (auto const& [idx, ty] : codeBlock_->coroInlineGCMaps_[gcMapIndex_]) {
+                    if (idx < numRegs_) gcBarrierInlinePointers(&regs_[idx], ty, gc);
+                }
+            }
+        }
+        gcMapIndex_ = UINT16_MAX;  // nothing retained until next suspend
+    }
+
 private:
     CoroutineFrame(Type* type, CodeBlock* cb, u16 numRegs);
 };

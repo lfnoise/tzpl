@@ -1963,16 +1963,27 @@ M0 ─┬─ M1 ─────────────────────�
 Everything below is recorded in the milestone notes above or came up after them. None of
 it blocks the merge.
 
-**Known bugs, not fixed** (being addressed next):
-- VM crash when an enum payload holds an enum (M5); worked around with a flat payload
-  in `bundles.x`; repro in `devplans/repros/nested_enum_payload_crash/`. Matching a
-  struct inside an enum payload also crashed a test script (2026-10-26).
-- GC crash with arrays of tuples in app renders; synthc uses parallel arrays instead.
-- Building a signal outside a graph (`let s = fill(...)` at top level) segfaults instead
-  of reporting an error.
-- Flat-voice SIMD `take`/`drop` of a partial-width per-voice input indexes without the
-  voice base (M4 "known gap"; never rechecked).
-- `synthdef` and `music.shape` both define `Shape` and `shape` (unrelated types).
+**Known bugs** (addressed 2026-10-26):
+- VM crash when an enum payload holds an enum (M5): **fixed.** The nested enums were only
+  the trigger. `toList` over a coroutine held the new head node only in a C++ local while
+  it resumed the coroutine to peek at the second value; a GC cycle inside that resume
+  swept the node, and the music player read the freed list later. The node is now pinned.
+  The hunt also closed SATB write-barrier holes: inline `Ref` stores, inline global and
+  dynvar stores, dynvar save/restore, coroutine resume (the frame dropping its saved
+  registers), and lazy-list forcing (generator fields and the forced node). Regression
+  test: `lang/tests/gc/coroutine_tolist_head_root.x`. The flat payload in `bundles.x`
+  stays (it is simpler); the repro in `devplans/repros/nested_enum_payload_crash/` (crashing
+  every time at a64b21d) renders all three demos with the fix. The "struct inside an enum payload" script crash no longer
+  reproduces at 279aefb, with or without these fixes.
+- GC crash with arrays of tuples in app renders: **not reproduced.** Restoring the tuple
+  array in synthc and rendering the bubbles corpus item runs clean at f66338b (where it
+  was seen) and at HEAD, with and without the fixes above. Its symptom (a crash inside
+  `step_root_frames`) differs from the bug fixed, so it stays open; synthc keeps the
+  parallel arrays.
+- Building a signal outside a graph: fixed in 279aefb (`_requireGraph`).
+- Flat-voice SIMD views of per-voice values: fixed in 279aefb (per-lane gather).
+- `synthdef` and `music.shape` both defining `Shape`/`shape`: an imported type name two
+  wildcard imports define is now an "ambiguous type" error (279aefb).
 
 **Deferred features:**
 - `setInputX` on part of a connected input (needs partly detached inputs; channel

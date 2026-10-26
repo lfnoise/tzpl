@@ -518,6 +518,9 @@ public:
     // (and so the GC's data can be reset/replaced in tests).
     std::unique_ptr<class TracingGC> tracingGC_;
     class TracingGC& tracingGC();
+    // SATB write barrier on an Obj* about to be overwritten (out of line: the
+    // GC header is not included here).
+    void satbBarrier(Obj* old);
 
     // Constructor with pool size, shared type universe, and optional target
     explicit VM(VMConfig const& config, TypeUniverse& typeUniverse, const VMTarget& target = {});
@@ -870,6 +873,9 @@ public:
         entry.type = nullptr;
         entry.savedValue = dynVars_[varIdx];
         entry.isObj = dynVarIsObj_[varIdx];
+        // SATB: the old value moves to the save stack, which may already
+        // have been scanned this cycle.
+        if (entry.isObj && entry.savedValue.o) satbBarrier(entry.savedValue.o);
         dynVars_[varIdx] = newValue;
     }
 

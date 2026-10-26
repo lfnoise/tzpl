@@ -177,6 +177,11 @@ void TracingGC::mark(GCObj* obj) {
     grayWorklist_.push_back(obj);
 }
 
+void TracingGC::barrierChildren(GCObj* obj) {
+    if (phase_ != Phase::Mark || !obj || obj->isImmortal()) return;
+    gcScanByTag(obj, *this);
+}
+
 void TracingGC::resetColors() {
     // Every non-immortal live object starts a cycle as White. Immortals
     // (object constants, type metadata) stay invisible to color machinery;

@@ -207,6 +207,20 @@ public:
         grayWorklist_.push_back(oldVal);
     }
 
+    // Mutating an object's fields in bulk (a lazy-list generator advancing its
+    // cursors, a forced node getting its head/tail): shade its current
+    // children first, as a write barrier on every field.
+    void barrierChildren(GCObj* obj);
+    // ...and after the mutation, if the object was already scanned, gray it
+    // again so its new children are marked too (they may have been reachable
+    // at cycle start only through fields the mutation overwrote).
+    inline void rescan(GCObj* obj) {
+        if (phase_ != Phase::Mark || !obj || obj->isImmortal()) return;
+        if (obj->color_ != GCColor::Black) return;
+        obj->color_ = GCColor::Gray;
+        grayWorklist_.push_back(obj);
+    }
+
     // Phase 5.4: proportional auto-trigger. After each completed cycle the
     // next trigger threshold is set to max(kMinTrigger, lastBlackCount *
     // growthFactor) -- i.e., let the heap grow some multiple of the post-
