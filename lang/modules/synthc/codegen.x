@@ -1219,6 +1219,8 @@ fn _genSimdInterp(t NumType, w Int, ip Interpolation,
 	-- kernel call (sinc needs the per-lane coefficient table)
 	var kcall = "";
 	match (ip) {
+		-- no interpolation: the one tap (there is no kernel to call)
+		none: { kcall = "_s0"; }
 		sinc: {
 			r = r $ _genSimdSincCoeffs(w, scalarOff, stype, vtype);
 			kcall = _kSincKernelCall;
@@ -1413,6 +1415,17 @@ fn _delayWriteStmt(ctx Ctx, n NIdx, d Int, cel String, treeSerial Int) String {
 			    genExpr(ctx, ctx.ins[vin][2], cel), treeSerial);
 	}
 	let value = genExpr(ctx, ctx.ins[n][0], cel);
+	if (`cgSampleVec && `cgSimdW > 0) {
+		-- lanes are samples: each to its own slot from the write head
+		let di = _delayDIndex(ctx, d, n, cel);
+		var st = "{ %^ _dw = %^;" fmt(_simdType(info.typ, `cgSimdW), value);
+		var j = 0;
+		while (j < `cgSimdW) {
+			st = st $ " p->d%^%^[(p->d%^_wrpos + %^) & %^] = _dw[%^];" fmt(info.serial, di, info.serial, j, _delayMask(info), j);
+			j = j + 1;
+		}
+		return st $ " } // %^ DelayWrite\n" fmt(treeSerial);
+	}
 	if (ctx _isVoiceDelay(d)) {
 		if (`cgSimdW > 0) { return _voiceDelayWriteSimd(ctx, info, value, cel, treeSerial); }
 		-- Per-voice 1-sample delay: write the voice's single slot.
@@ -4937,9 +4950,77 @@ fn _genRegionWithBlockDelays(ctx Ctx, region [Int], delays [DelayInfo]) String {
 			pre = pre $ ctx _blockDelayWritePass(d);
 		}
 	}
-	if (bd length == 0) { return ctx _genRegion(region, delays); }
 	var `cgSuppressDelays [Int] = bd;
-	"\t{\n" $ pre $ ctx _genRegion(region, delays) $ "\t}\n"
+	-- the others whose reads, this call, all stay n samples behind the write
+	-- head: a guard (static bounds, or the block's minimum delay times) picks
+	-- the vectorizable form per call
+	var fb [Int] = [];
+	var guards [String] = [];
+	var checks = "";
+	for (di : delays) {
+		let d = ctx _delayIndexOfSerial(di.serial);
+		if (d == NONE || bd contains(d)) { continue; }
+		let (ok, g, chk) = ctx _feedbackBlockGuard(d, region);
+		if (ok) { fb push!(d); guards push!(g); checks = checks $ chk; }
+	}
+	if (bd length == 0 && fb length == 0) { return ctx _genRegion(region, delays); }
+	var body = ctx _genRegion(region, delays);
+	if (fb length > 0) {
+		let vbody = ctx _genRegionVecDelays(region, delays, fb);
+		if (vbody != body) {
+			body = checks $ "\tif (%^) {\n" fmt(guards join(" && ")) $ vbody $ "\t} else {\n" $ body $ "\t}\n";
+		}
+	}
+	"\t{\n" $ pre $ body $ "\t}\n"
+}
+
+fn _genRegionVecDelays(ctx Ctx, region [Int], delays [DelayInfo], fb [Int]) String {
+	var `cgVecDelays [Int] = fb;
+	ctx _genRegion(region, delays)
+}
+
+-- A runtime-sized root delay line read only by variable-time reads in the
+-- region: (true, guard, check code) when its reads can be shown to stay at
+-- least n samples (plus the kernel's newest tap) behind the write head this
+-- call. A read whose delay time is computable before the region gets the
+-- block's minimum time, computed first; any other needs a static lower bound.
+fn _feedbackBlockGuard(ctx Ctx, d Int, region [Int]) (Bool, String, String) {
+	let di = ctx.delays[d];
+	if (serialForms() || di.allocSize != 0 || di.maxDelay == NONE || di.writer == NONE) { return (false, "", ""); }
+	if (di.fixReaders length > 0 || di.varReaders length == 0 || ctx.graphOf[di.writer] != 0) { return (false, "", ""); }
+	var terms [String] = [];
+	var chk = "";
+	for (r : di.varReaders) {
+		if (ctx.graphOf[r] != 0) { return (false, "", ""); }
+		let ip = match (ctx.kind[r]) { delayVarReadK(_, i): i; _: Interpolation.none; };
+		let fwd = _interpFwd(ip);
+		let t = ctx.ins[r][0];
+		if (ctx _writeValueReady(t, region, 0)) {
+			-- the block's minimum delay time
+			let nm = "_mt%^" fmt(ctx.serial[r]);
+			var `cgIndent Int = 2;
+			var `cgRoot Int = NONE;
+			var `cgSimdW Int = 0;
+			var `cgLoopChans Int = ctx.chans[t] max(1);
+			var `cgDstShape Shape = ctx.shape[t];
+			var code = "";
+			var c = 0;
+			while (c < ctx.chans[t] max(1)) {
+				let e = ctx _isRootNode(t) ? _varRef(ctx, t, c toString) : genExpr(ctx, t, c toString);
+				code = code $ "\t\t%^ = std::min(%^, double(%^));\n" fmt(nm, nm, e);
+				c = c + 1;
+			}
+			let rl = ctx _rowLocalsFor("bi", code);
+			chk = chk $ "\tdouble %^ = 1e300;\n\t{\n" fmt(nm) $ rl.bases
+				$ "\tfor (i32 bi = off; bi < off + n; ++bi) {\n" $ rl.rows $ code $ "\t}\n\t}\n";
+			terms push!("%^ >= double(n + %^)" fmt(nm, fwd));
+		} else {
+			let lo = (ctx valueRange(t)).0;
+			if (!(lo >= (fwd + 1) toFloat)) { return (false, "", ""); }
+			terms push!("n + %^ <= %^" fmt(fwd, (lo floor) toInt));
+		}
+	}
+	(true, terms join(" && "), chk)
 }
 
 fn _delayIndexOfSerial(ctx Ctx, ser Int) Int {
@@ -5149,7 +5230,7 @@ fn _genRegion(ctx Ctx, region [Int], delays [DelayInfo]) String {
 	var allBlock = true;
 	for (di : delays) {
 		let d = ctx _delayIndexOfSerial(di.serial);
-		if (!(`cgSuppressDelays contains(d))) { allBlock = false; }
+		if (!(`cgSuppressDelays contains(d)) && !(`cgVecDelays contains(d))) { allBlock = false; }
 	}
 	var vbody = "";
 	if (`cgSimdWidth >= 4 && allBlock && ctx _sampleVecOK(region)) {
@@ -5265,8 +5346,8 @@ fn _sampleVecOK(ctx Ctx, region [Int], subRead NIdx = NONE, subDelay Int = NONE)
 				if (e == subRead) { continue; }
 				-- a block-wise delay's reads and its (already done) write
 				let blockDelay = match (ctx.kind[e]) {
-					delayWriteK(dd): dd == subDelay || `cgSuppressDelays contains(dd);
-					delayVarReadK(dd, _): `cgSuppressDelays contains(dd);
+					delayWriteK(dd): dd == subDelay || `cgSuppressDelays contains(dd) || `cgVecDelays contains(dd);
+					delayVarReadK(dd, _): `cgSuppressDelays contains(dd) || `cgVecDelays contains(dd);
 					_: false;
 				};
 				if (blockDelay) { continue; }
@@ -5726,6 +5807,9 @@ fn genCpp(ctx Ctx, name String, simdWidth Int = 0) String {
 	var `cgReaderExpr String = "";
 	var `cgSuppressDelay Int = NONE;
 	var `cgSuppressDelays [Int] = [];
+	-- block-wise feedback delays (plan 4.4): their reads stay a block behind
+	-- the write head this call, so their reads and writes vectorize
+	var `cgVecDelays [Int] = [];
 	`cgRootBuf = ctx rootBufNodes;
 	`cgBlockTemps = ctx blockTempNodes;
 	var `cgInVoiceLoop Bool = false;
