@@ -306,12 +306,17 @@ void DocumentStore::adoptHistory(std::unique_ptr<HistNode> root,
     savedCursor_ = nullptr;   // see rerootHistory
     // Unify the working snapshot with the cursor's when content-equal, so
     // the first post-load commit's pointer compare doesn't record a
-    // phantom node. (They differ legitimately when the file was saved
-    // with uncommitted changes.)
+    // phantom node. They differ when the file was saved with uncommitted
+    // changes, or its cells were rewritten by a tool: record the file's
+    // content as an "open" node then, so the cursor holds what the file
+    // shows. Otherwise the first commit after opening (running a cell)
+    // would record that difference and mark an unedited document dirty.
     if (snap_ && cursor_->snap
         && contentHashOf(*snap_) == contentHashOf(*cursor_->snap)
         && sameSnapshot(*snap_, *cursor_->snap)) {
         snap_ = cursor_->snap;
+    } else if (snap_) {
+        commit("open");
     }
     enforceHistoryCap();
 }

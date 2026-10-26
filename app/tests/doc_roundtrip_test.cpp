@@ -136,6 +136,10 @@ static int filterCells(char const* inPath, char const* outPath,
         }
     }
 
+    // Record the edit in the history, so the saved cursor holds the text
+    // the document now shows.
+    if (changed) store.commit("filter cells");
+
     if (!doc::saveDocument(store, ctx, outPath, err)) {
         std::fprintf(stderr, "save failed: %s\n", err.c_str());
         return 1;
@@ -431,6 +435,47 @@ static void testDirtyFlag() {
     std::printf("dirty flag: ok\n");
 }
 
+// A file whose cells differ from its history cursor (saved with an
+// uncommitted change, or rewritten by a tool such as filtercells before it
+// committed) must open clean AND stay clean when a cell is merely run: the
+// open records the file's content as an "open" node, so the "run cell"
+// commit finds nothing new. It used to record the difference then and mark
+// an unedited document dirty.
+static void testOpenUncommittedContent() {
+    bridge::AppContext ctx;
+    std::string err;
+    std::string path = tempPath("tzpl_doc_uncommitted.tzd");
+
+    doc::DocumentStore store;
+    store.rerootHistory("start");
+    auto id = store.insertCell(0, doc::CellKind::Code, "", "old();");
+    store.commit("add cell");
+    store.setCellText(id, "new();");            // not committed
+    CHECK(doc::saveDocument(store, ctx, path, err));
+
+    doc::DocumentStore store2;
+    doc::LoadedHistory hist;
+    auto snap = doc::loadDocument(ctx, path, err, &store2.interns(), &hist);
+    CHECK(snap);
+    store2.reset(std::move(snap), path);
+    CHECK(hist.root && hist.cursor);
+    store2.adoptHistory(std::move(hist.root), hist.cursor);
+    store2.clearModified();
+    CHECK(!store2.modified());
+    CHECK(store2.cell(id)->text == "new();");
+    CHECK(store2.historyCursor()->label == "open");
+    CHECK(store2.snapshot() == store2.historyCursor()->snap);
+
+    CHECK(!store2.commit("run cell"));          // running changes nothing
+    CHECK(!store2.modified());
+
+    CHECK(store2.undo());                       // the older state is kept
+    CHECK(store2.cell(id)->text == "old();");
+
+    std::filesystem::remove(path);
+    std::printf("open uncommitted content: ok\n");
+}
+
 static void testV1Compat() {
     bridge::AppContext ctx;
     std::string err;
@@ -641,6 +686,7 @@ int main(int argc, char** argv) {
     testStoreDedup();
     testHistoryRoundTrip();
     testDirtyFlag();
+    testOpenUncommittedContent();
     testV1Compat();
     testHistorySize();
     testMalformedHistory();
