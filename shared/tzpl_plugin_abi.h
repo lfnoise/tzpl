@@ -104,8 +104,8 @@ typedef enum tzpl_SErr {
     tzpl_errCommandsQueuedButNotSent,
     tzpl_errNoActiveBundle,
     tzpl_errEngineInUse,
-    tzpl_errCyclicConnection,   /* a connection would close a cycle (the
-                                   graph is feed-forward only) */
+    tzpl_errCyclicConnection,   /* unused: connections may form cycles (the
+                                   silo's feedbackMode); kept for numbering */
 
     tzpl_errTypeMismatch,
     tzpl_errRateMismatch,

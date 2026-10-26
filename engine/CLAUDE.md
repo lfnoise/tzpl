@@ -29,7 +29,7 @@ The shared plugin ABI header lives in `../shared/tzpl_plugin_abi.h`.
 | `tzpl_random.hpp` | xoroshiro128++ PRNG, SIMD-templated |
 | `tzpl_complex.hpp` | Complex number utilities |
 | `tzpl_plugin_interface.hpp` | Legacy/reference plugin helpers (mostly commented out) |
-| `tzpl_test_plugins.hpp/cpp` | Hand-written v3 test plugins (sinosc, +, *, voicerTest, pass, counter, vtest, rec) |
+| `tzpl_test_plugins.hpp/cpp` | Hand-written v3 test plugins (sinosc, +, *, voicer, pass, counter, vtest, rec) |
 | `main.cpp` | Old manual test driver |
 | `RtAudio.h/cpp` | Third-party cross-platform audio I/O (CoreAudio on macOS) |
 

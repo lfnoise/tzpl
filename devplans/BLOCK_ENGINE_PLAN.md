@@ -1921,6 +1921,28 @@ Progress (2026-10-26):
 - Add a NEWS.md entry (breaking: ABI v3, `setControl` removed).
 - Merge to `main`.
 
+Progress (2026-10-26):
+- `synthdef-compiler/` deleted with its CMake option; README, CLAUDE.md,
+  CONTRIBUTING, the release skill, docs/LINUX.md, the PR template, the docs site
+  (its C++ compiler architecture page dropped) and its workflow updated. The bridge
+  now also refuses a cached plugin older than ABI v3. `shared/tzpl_simd.hpp` stays:
+  generated plugins use it.
+- NEWS.md: the block engine (breaking changes, new features, measured speedups).
+- Docs reviewed against the code and rewritten where wrong: Writing_SynthDefs (§2,
+  §5 views and the `rotate` direction, §7 "Inputs and Controls", §9 recurrence forms
+  and feedback between nodes, §12 voicers, §14), the Cookbook, Live Controls §3.2 and
+  §3.4, Music Libraries, FFI_Guide (§9.9, §12 rewritten around synthc, §18.1-§18.14),
+  engine/Architecture.md (scheduler, load protocol, buffers, commands). The site builds
+  with no broken links. `Err` gains `errRegionOutOfRange` (code 28).
+- Found and left open (code, not docs):
+  - OSC bundles with a real NTP timetag never fire: the timetag's seconds are passed
+    as a beat on clock slot 0.
+  - NATS `engine.setInputX` takes the curve as an optional fifth argument and has no
+    `disconnectInputX` (OSC has it).
+  - There is no `strictRecurrences` option to `defSynthX`, only the environment
+    variable `TZPL_STRICT_RECURRENCES=1` (§4.7 named an option).
+  - The `--nrt` command line cannot set the engine block size.
+
 **Dependencies:**
 
 ```

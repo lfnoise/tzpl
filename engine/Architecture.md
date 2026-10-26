@@ -6,8 +6,9 @@
 The audio engine is a real-time system for instantiating, connecting, and processing
 a dynamic graph of audio processing nodes. It supports:
 
-- Dynamic loading of native synth plugins (`.dylib`)
+- Dynamic loading of native synth plugins (`.dylib`, `.so` on Linux; plugin ABI v3)
 - Block processing (default 64 samples) over tensor-shaped signals (up to 4 dimensions)
+- Feedback between nodes (cycles run a sample at a time, or a block at a time)
 - Multi-channel connections between nodes with type checking and broadcasting
 - Inputs that hold values: stepped, ramped, impulsed, or crossfaded per channel
 - Cross-fading on connect, disconnect, and input changes (7 curve types)
@@ -16,8 +17,9 @@ a dynamic graph of audio processing nodes. It supports:
 - Parallel processing across multiple silos
 - A safety limiter on the master output
 
-The engine is designed for integration with a scripting language and a synthdef compiler
-that generates native plugin code from graph descriptions.
+The engine is designed for integration with a scripting language (Tzopilotl, through
+`bridge/`) and a synth compiler that generates native plugin code from graph descriptions
+(synthc, `lang/modules/synthc/`; compile and link in `bridge/src/tzpl_synth_build.cpp`).
 
 
 ## System Diagram
@@ -33,7 +35,7 @@ thread-local CmdBundle
     v  push to AtomicFifo
 +-------------------------------------------+
 |  RT Audio Thread                          |
-|  audioCallback()                          |
+|  processAudioBlock()                      |
 |    |-- signal worker silos to start       |
 |    |-- process silo 0                     |
 |    |-- binary-tree mixdown across silos   |
@@ -56,28 +58,39 @@ The `Engine` is the top-level object. It owns:
 - **Silos** (`silos_`): A vector of `Silo` objects — independent parallel processing units.
 - **NodeDef table** (`defs_`): A hash table (2048 bins, separate chaining) mapping
   hashed names to `NodeDef` pointers. All registered plugin types live here.
-- **RtAudio instance**: Manages the platform audio I/O (CoreAudio on macOS).
+- **Audio backend** (`backend_`, an `AudioBackend`): opens the device and calls
+  `processAudioBlock()` from its callback. The default is RtAudio (CoreAudio on macOS,
+  ALSA/JACK/Pulse on Linux); hosts can supply their own (the JUCE app does). An NRT
+  engine has none.
 - **Safety limiter**: A lookahead peak limiter applied to the final mixed output.
 - **Background threads**: An NRT command thread and a dead-node deletion thread.
 
 ### Engine Lifecycle
 
-1. `newEngine(config, streamParams)` — Allocates the engine, creates silos, opens the
-   audio device, defines the built-in "Audio Out" node, and starts worker threads.
-2. `startAudio(e)` — Starts the RtAudio stream. The audio callback begins firing.
+1. `newEngine(config, streamParams, backend = nullptr)` — Allocates the engine, creates
+   silos, opens the audio device, defines the built-in "Audio Out" and "Audio In" nodes, and
+   starts worker threads. `EngineConfig` sets `numSilos` (default 4), `numTempoClocks`
+   (beat clock slots per silo, default 1) and `blockSize` (default 64, a multiple of 4, at
+   most 1024).
+2. `startAudio(e)` — Starts the backend's stream. The audio callback begins firing.
 3. Client code sends commands via `begin()`/`go()`/`sched()`.
 4. `stopAudio(e)` — Stops the audio stream.
 5. `freeEngine(e)` — Tears everything down.
+
+For offline rendering, `newEngineNRT(config, streamParams)` opens no device; the caller
+calls `renderNRTBlock(e, out)` to render `streamParams.bufferFrames` frames at a time.
 
 ### Safety Limiter
 
 The `SafetyLimiter` is a lookahead brickwall limiter on the master output:
 
 - **Zap**: Replaces NaN, denormal, infinite, and very large values with zero.
-- **Lookahead**: Uses a one-block delay to anticipate peaks.
+- **Lookahead**: Delays the output by one device buffer to anticipate peaks.
 - **Hold**: Holds the limiting gain for 250ms after a peak to avoid pumping.
-- **Recovery**: Linear ramp back to unity gain (0.04 per block).
-- **Interpolation**: Gain is linearly interpolated across the block for smooth transitions.
+- **Recovery**: Linear ramp back to unity gain (0.04 per device buffer).
+- **Interpolation**: Gain is linearly interpolated across the buffer for smooth transitions.
+
+The limiter works on whole device buffers (`bufferFrames`), not on engine blocks.
 
 Applied after all silos are mixed down but before the output reaches the audio device.
 
@@ -90,7 +103,14 @@ A **Silo** is an independent, parallel audio processing context. Each silo has i
 - **Worker thread**: Silo 0 runs on the audio callback thread; silos 1..N-1 each have
   a dedicated thread running at real-time priority (SCHED_RR, priority 63).
 - **Command queues**: Lock-free SPSC FIFOs for RT/NRT communication.
-- **Scheduler**: A hash-wheel scheduler for time-ordered command dispatch.
+- **TempoClock slots** (`tempoClocks_`, `tzpl_tempo_clock.hpp`): `numTempoClocks` beat
+  clocks, each mapping beats to samples through a tempo ramp and holding a beat-sorted queue
+  of scheduled bundles. Slot k is kept in sync across silos (tempo changes are broadcast to
+  every silo's slot k).
+- **Task hooks** (`taskNextFn_` / `taskRunFn_`): the bridge's silo task scheduler (silo VM
+  coroutines and actor timers), merged with the clock queues in time order once per block.
+- **Feedback mode** (`feedbackMode_`): how the silo runs cycles of nodes (see *Topological
+  Sort*).
 - **Output buffer**: Accumulated into the final mix via binary-tree reduction.
 
 ### Dual Node Tables
@@ -107,8 +127,9 @@ design avoids any locking on the RT thread.
 
 ### Audio Processing Pipeline
 
-Per audio callback (one buffer of N frames), the buffer is processed in chunks of up to
-one block (`blockSize_`, default 64; the last chunk may be shorter). `processBlock(off, n)`:
+Per audio callback (one device buffer of N frames), `processFrames()` processes the buffer
+in chunks of up to one block (`blockSize_`, default 64; the last chunk may be shorter, and
+synths handle any n, so this adds no latency). `processBlock(off, n)`:
 
 1. **Process RT commands**: Pop command lists from `from_nrt_` FIFO. Immediate commands
    execute directly. Scheduled commands are queued on their TempoClock slot.
@@ -124,7 +145,11 @@ one block (`blockSize_`, default 64; the last chunk may be shorter). `processBlo
    set per channel), then call `process(off, len)` for each segment between the node's
    discrete events.
 6. Taps; interleave the output node's input into the silo's output buffer.
-7. Retire finished crossfaders and pending frees; `sampleTime_ += n`.
+7. `finishBlock()`: retire finished crossfaders, remove nodes freed in this block, and
+   hand the block's commands to the NRT thread; then `sampleTime_ += n`.
+
+After the last chunk, the GC heartbeat of an attached silo VM runs (once per device
+buffer).
 
 Then **Mixdown**: binary-tree reduction — even-indexed silos wait for their odd-indexed
 sibling and sum the output buffers. This cascades until silo 0 has the final mix.
@@ -145,11 +170,13 @@ Nodes are sorted via depth-first traversal starting from the `outputNode_`:
   closing input with its source's previous sample, the per-sample engine's one-sample
   delay; `block` runs whole blocks with the closing inputs a block late.
 
-The sort only runs when `needsSort_` is true (set by connect/disconnect operations).
+The sort only runs when `needsSort_` is true (set by connect/disconnect operations). It is
+generation-stamped (`sortGen_`) and never walks the previous sorted list, which may hold
+hidden nodes the NRT side has already deleted.
 
 ### Inter-Silo Synchronization
 
-- `dispatch_semaphore_signal(start_sem_)` wakes each worker silo.
+- `start_sem_.signal()` (from `processAudioBlock`) wakes each worker silo.
 - Each worker signals `done_sem_` when finished.
 - During mixdown, even-indexed silos wait on the odd sibling's `done_sem_` and accumulate.
 
@@ -244,7 +271,9 @@ Key fields:
 
 ### Plugin ABI (`../shared/tzpl_plugin_abi.h`)
 
-The plugin ABI is a pure C interface shared between the engine and the synthdef compiler.
+The plugin ABI is a pure C interface between the engine and plugins (those synthc
+generates, the hand-written test plugins, or any other conforming library). Its version,
+`TZPL_PLUGIN_ABI_VERSION`, is 3 (block processing); loaders refuse anything older.
 It defines:
 
 - **`tzpl_SynthData`**: The base struct for plugin instances. Contains the function table,
@@ -267,24 +296,46 @@ It defines:
   Notes are not plugin calls: the engine allocates voices and writes the rows of the
   `notes` input itself (§7).
 
-- **`tzpl_SignalType`**: Describes a port's data format: element type (`i32`/`f32`/`i64`/`f64`),
+- **`tzpl_InPort` / `tzpl_OutPort`**: What a synth sees of a port: `chans` (one pointer per
+  channel to a buffer of `maxBlock` samples) plus per-channel `isConst` and `version`.
+  The engine refreshes an input's flags before every `process` call. A synth may set its
+  outputs' flags to report a channel constant for the block; the engine passes that on to
+  the inputs the output feeds.
+
+- **`tzpl_SignalType`**: Describes a port's data format: element type (`i32`/`i64`/`f32`/`f64`, in that enum order),
   rate (`const`/`init`/`reset`/`audio`; informational on ports, every input is audio
   rate at the ABI), and `tzpl_Shape`: up to 4 dimensions, row-major, unused leading
   dimensions 1. Channel counts are exact (no power-of-two rounding).
 
-- **`tzpl_SynthDef`**: The static description of a plugin type, provided by the plugin's
-  `load` function.
+- **`tzpl_SynthDef`**: The static description of a plugin type, returned by the plugin's
+  `load` function: name, function table, input and output `tzpl_PortDef`s (name, type, and
+  for inputs an optional `tzpl_ControlSpec`), and for voiced synths `voiced`, `maxVoices`
+  and `noteDefaults`.
 
 ### Plugin Loading
 
-Plugins are `.dylib` shared libraries. The loading protocol:
+Plugins are shared libraries (`.dylib` on macOS, `.so` on Linux). The loading protocol
+(`loadOneDef` in `tzpl_client_interface.cpp`):
 
-1. Engine scans a directory for files matching `*_synth.dylib`.
-2. `dlopen` loads the library.
-3. `dlsym` looks up a symbol named `"load"` of type `void (*)(Engine*)`.
-4. The load function calls `addNodeDef(engine, info)` to register the plugin.
+1. `dlopen` loads the library.
+2. `dlsym("tzpl_abi_version")` reads the ABI version stamp. A library without one, or with
+   a version older than 3 or newer than the engine's, is refused.
+3. `dlsym("load")`, of type `tzpl_SynthDef (*)(void)` (`tzpl_LoadSynthDefFun`), returns the
+   def by value.
+4. Optional symbols are probed: `loadBufferDefs`, `loadTags`, `loadSampleBankDefs`,
+   `swapSampleBank`. A plugin that reads the shared-input table exports
+   `tzpl_sharedInput`, which the engine points at its table.
+5. The counts, arrays, shapes and required functions (`alloc`, `free`, `process`) are
+   validated; a malformed def is refused.
+6. `addSynthDef(engine, def, handle, ...)` registers it. A def with the name of an existing
+   one supersedes it: nodes already running keep the old def (it is refcounted), new nodes
+   use the new one.
 
-A single plugin can also be loaded by name via `loadDef(engine, dirPath, defName)`.
+`loadDefs(engine, dirPath)` loads every plugin library under a directory, recursively.
+`loadDef(engine, dirPath, defName)` searches it for `<defName>_synth.dylib` (`.so`). synthc
+builds name their libraries `<name>_synth_rN.dylib`, a new revision for each build, and the
+bridge loads them by path. `getPluginFileDesc` reads a library's def without registering it
+(the app's plugin browser).
 
 ### Signal Types and Type Checking
 
@@ -342,9 +393,10 @@ dropped.
 
 ### Scheduling
 
-- **`schedImmediate`**: Execute as soon as the RT thread picks up the command.
-- **`schedBetterLateThanNever`**: Convert stream time to sample time. If late, execute anyway.
-- **`schedOnTimeOnly`**: If late, set error and discard.
+- **`schedImmediate`**: Execute at the start of the next block the RT thread processes.
+- **`schedBetterLateThanNever`** (the default for `sched`): Fire when the clock slot reaches
+  the beat; if the beat has already passed, execute at the start of the next block.
+- **`schedOnTimeOnly`**: If the beat has already passed, set `tzpl_errTooLate` and discard.
 
 Each TempoClock slot keeps a beat-sorted command queue. Once per block,
 `collectAndRunEvents()` pops every command due in the block from every clock, resolves
@@ -369,6 +421,13 @@ in time order (see *Audio Processing Pipeline*).
 | `NoteOffCmd` | Drop the voice's gate |
 | `AllNotesOffCmd` | Release all notes |
 | `NoteSetParamsCmd` | Step or ramp note parameters (index-value pairs) |
+| `AllNotesOffAllCmd` | Release all notes on every voiced node in the silo |
+| `ClearSchedCmd` | Drop every bundle still waiting on the silo's TempoClock slots |
+| `ChannelOffsetCmd` | Set where the silo's output lands in the device channels |
+| `ResizeBufferCmd` / `LoadBufferCmd` / `ReplaceBufferCmd` | Swap a buffer into a node's buffer slot; NRT stage frees the old one |
+| `ReplaceSampleBankCmd` | Swap a sample bank into a node's bank slot |
+| `TapOutletCmd` / `TapMasterCmd` / `UntapCmd` | Install or remove a signal tap |
+| `SetClockTempoCmd` / `SchedClockTempoRampCmd` | Set or ramp a TempoClock slot's tempo; one is sent to every silo |
 
 
 ## 6. Cross-Fading (`tzpl_xfader.hpp/cpp`)
@@ -491,7 +550,7 @@ Silo tasks reach the same operations without a bundle (`rtNoteOn`, `rtNoteOff`,
 
 | Thread | Role | Priority |
 |--------|------|----------|
-| Audio callback | Signals workers, processes silo 0, mixdown, safety limiter | Real-time (system) |
+| Audio callback (or the NRT render thread) | Signals workers, processes silo 0, mixdown, safety limiter | Real-time (system) |
 | Worker threads (1..N-1) | Each processes one silo | SCHED_RR, priority 63 |
 | NRT command thread | Runs `doNRT()` on completed commands | Normal (polls 25ms) |
 | Dead node thread | Deletes nodes pushed from the RT thread | Normal (polls 25ms) |
@@ -517,26 +576,19 @@ the Le, Guatto, Cohen, Pop algorithm (SBAC-PAD 2013).
   background thread.
 - **Exception guarding**: The audio callback wraps processing in try/catch to prevent
   exceptions from crashing the audio thread.
-- **NaN/denormal protection**: The safety limiter's `zap()` function eliminates bad
-  floating-point values from the output buffer.
+- **NaN/denormal protection**: Every silo worker thread, and the thread calling
+  `processAudioBlock` (device callback or NRT renderer), sets flush-to-zero
+  (`shared/tzpl_denormals.hpp`), so plugins never compute on subnormals. The safety
+  limiter's `zap()` function eliminates bad floating-point values from the output buffer.
 
 
 ## 9. S-Expression Parser (`tzpl_sexpr.hpp/cpp`)
 
-The engine includes an s-expression parser for text-based command input. An s-expression
-is parsed into `sexpr::Item` values — a variant of `bool`, `int64_t`, `double`, `Symbol`,
-`std::string`, or `std::vector<Item>`.
-
-Example command format:
-```lisp
-(sched 100
-  (newNode sinosc 101)
-  (setInput (101 0) (300))
-  (connect (101 0) (0 0)))
-```
-
-A binary serialization format (`Builder`/`ListBuilder`) is partially implemented for
-compact encoding of s-expressions.
+The engine includes an s-expression parser. An s-expression is parsed into `sexpr::Item`
+values — a variant of `bool`, `int64_t`, `double`, `Symbol`, `std::string`, or
+`std::vector<Item>`. Nothing in the engine executes s-expression commands; only the old
+manual test driver (`main.cpp`) uses the parser. The binary message format used over NATS
+is `shared/tzpl_sexpr_bin.hpp`.
 
 
 ## 10. Built-In Plugins (`tzpl_test_plugins.cpp`)
@@ -559,37 +611,76 @@ The bridge also registers native `_wireN` / `_gainN` defs (and shaped forms such
 ## 11. Client API Summary (`tzpl_client_interface.hpp`)
 
 ### Engine Lifecycle
-- `newEngine(config, streamParams)` / `freeEngine(e)`
-- `startAudio(e)` / `stopAudio(e)`
-- `loadDefs(e, dirPath)` / `loadDef(e, dirPath, defName)`
+- `newEngine(config, streamParams, backend = nullptr)` / `newEngineNRT(config, streamParams)` / `freeEngine(e)`
+- `startAudio(e)` / `stopAudio(e)` / `isAudioRunning(e)`
+- `renderNRTBlock(e, out)` — NRT engines: render one buffer.
+- `masterGain(e, gain)` / `masterMute(e, mute)` / `safetyLimiter(e, onoff)`
+- `feedbackMode(e, silo, FeedbackMode::sample | block)` — how a silo runs cycles.
+
+### Plugins and Introspection
+- `loadDefs(e, dirPath)` / `loadDef(e, dirPath, defName)` / `loadOneDef(e, path)`
+- `addSynthDef(e, def, dlHandle, ...)` — register a def directly (built-in and synthc defs).
+- `copyNodeDefs(from, to)` — give a new engine (an NRT render) the same defs.
+- `listNodeDefs` / `getDefDesc` / `listDefDescs` — `DefDesc` lists inputs (with shape and
+  spec), outputs, buffers, sample banks, `voiced` and `maxVoices`.
+- `listPluginFiles` / `getPluginFileDesc` — find and describe plugin files without loading them.
+- `graphGeneration(e)` / `getGraphDesc(e, silo, out)` — the topology shadow (graph view).
 
 ### Command Bundling
 - `begin(e)` — Start a command bundle.
 - `go(silo)` — Dispatch to a silo immediately.
-- `sched(silo, clock, beat, policy)` — Dispatch to a silo at a scheduled beat.
+- `sched(silo, clock, beat, policy)` — Dispatch to a silo at a beat on a TempoClock slot.
+
+### Tempo Clocks
+- `setTempo(e, clock, bpm)` / `schedTempoChange(e, clock, atBeat, targetBPM, rampBeats)` —
+  applied to slot `clock` on every silo; not bundled.
+- `clockBeats(e, clock)` / `clockTempoBPM(e, clock)` / `clockQuery(...)`
 
 ### Graph Mutation
 - `newNode(defName, nodeID)` / `freeNode(nodeID)` / `freeAllNodes()`
-- `connect(src, dst, xfadeTime, curve)` -- broadcasts or folds differing shapes
-- `disconnectInput(dst, xfadeTime, curve)` / `disconnectOutput(src)` / `disconnectNode(nodeID)`
+- `connect(src, dst, xfadeTime, curve)` -- broadcasts or folds differing shapes; may close a cycle
+- `disconnectInput(dst, xfadeTime, curve)` / `disconnectSource(src, dst, xfadeTime, curve)` /
+  `disconnectOutput(src)` / `disconnectNode(nodeID)`
 - `reconnectOutput(oldSrc, newSrc, xfadeTime, curve)`
 - `replaceNode(oldNodeID, newNodeID, xfadeTime, curve)`
+- `channelOffset(offset)` — where the silo's output lands in the device channels.
 
-### Parameter Control
+### Input Values
 Inputs are addressed by port index or by name (resolved at submit), and a `Region`
-(a box: offset and extent per dimension, or a flat channel range) picks the channels.
-Values are broadcast cyclically over the region.
+(the whole port, a flat channel range, or a box: offset and extent per dimension) picks the
+channels. Values are broadcast cyclically over the region. A region that does not fit the
+shape aborts the bundle with `tzpl_errRegionOutOfRange`.
 - `setInput(port, region, values, rampTime = 0, curve)` — Step, or ramp from the current value.
 - `setInputX(port, region, values, xfadeTime, curve)` — Crossfade to the values (a connected
-  input fades its signal out and is left holding them).
+  input fades its signal out and is left holding them; whole port only).
 - `impulseInput(port, region, values)` — The values for one sample, then back.
+- `setInput(port, numValues, values, xfadeTime, curve)` — older whole-port forms (f32, f64,
+  i32, i64 values; channels `[0, numValues)`, no broadcasting).
+- `setSharedInput(slot, value)` / `getSharedInput(slot)` — the process-global shared-input
+  table plugins read directly; not bundled, not scheduled.
 
 ### Polyphonic Notes
 - `noteOn(nodeID, noteID, length, paramValues)`
 - `noteOff(nodeID, noteID)`
-- `allNotesOff(nodeID)`
+- `allNotesOff(nodeID)` / `allNotesOffAll()` (every voiced node in the silo)
 - `noteSetParams(nodeID, noteID, n, params, rampTime = 0)`
 - `noteSetParamRange(nodeID, noteID, first, length, values, rampTime = 0)`
+- `rtNoteOn` / `rtNoteOff` / `rtNoteSetParams(silo, ...)` — from silo tasks on the RT
+  thread, at the task's event time, without a bundle.
+- `clearSched()` — drop every beat-scheduled bundle still pending in the silo.
 
-### Buffers (declared, not yet implemented)
-- `newBuffer` / `freeBuffer` / `resizeBuffer` / `loadBuffer` / `zeroBuffer`
+### Buffers and Sample Banks (bundled)
+- `resizeBuffer(nodeID, bufID, numChannels, length)` — an empty buffer.
+- `loadBuffer(nodeID, bufID, path, channelOffset, frameOffset, numFrames)` — reads the file
+  when the command is recorded.
+- `replaceBuffer(nodeID, bufID, buffer)` — a buffer the caller built.
+- `loadSampleBank(nodeID, bankID, zones)` / `replaceSampleBank(nodeID, bankID, bank)`
+
+The swap onto the node happens on the RT thread; the replaced buffer or bank is freed on
+the NRT thread.
+
+### Taps and Metering
+- `tapOutlet(nodeID, outlet, tapID, mode, ...)` / `tapMaster(tapID, mode, ...)` / `untap(tapID)` (bundled)
+- `tapPeak` / `tapRms` / `tapChans` / `tapShape` / `tapDrain`, and `rtTap*` for silo code
+- `masterPeak` / `masterRms` / `masterPeakHold` / `masterClipCount`
+- `getEngineStats` / `resetEngineStats`

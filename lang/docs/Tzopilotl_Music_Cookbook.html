@@ -438,11 +438,14 @@ of built-ins see <a href="Builtin_Functions.html">Builtin Functions</a>.</p>
 <ul>
   <li><strong>The language VM</strong> (<code>lang/</code>) &mdash; a statically
   typed, real-time-safe interpreter. This is what runs your <code>.x</code> file.</li>
-  <li><strong>The synthdef compiler</strong> &mdash; turns a signal-flow graph you
-  write in Tzopilotl into an optimized native <code>.dylib</code> plugin.</li>
+  <li><strong>The synthdef compiler</strong> (<code>synthc</code>, itself written in
+  Tzopilotl) &mdash; turns a signal-flow graph you write in Tzopilotl into an
+  optimized native <code>.dylib</code> plugin.</li>
   <li><strong>The audio engine</strong> (<code>engine/</code>) &mdash; loads those
   plugins as <em>node defs</em>, builds a live audio graph of <em>nodes</em>, and
-  processes audio sample-accurately. It is organized into <strong>silos</strong>
+  processes audio in blocks (64 samples by default) with sample-accurate timing:
+  a scheduled change lands on its exact sample, even in the middle of a block.
+  It is organized into <strong>silos</strong>
   (independent real-time processing units).</li>
   <li><strong>The bridges</strong> (<code>bridge/</code>) &mdash; FFI modules that
   expose the engine, the compiler, the clock, OSC and NATS to Tzopilotl. You reach
@@ -467,7 +470,7 @@ are three locations, and the same actor/message APIs work across all of them:</p
   where your script starts, where you build the graph, and where a "conductor"
   lives. "NRT" means non-real-time: it may allocate and block.</li>
   <li><strong>Silos</strong> &mdash; each silo has its own VM on a real-time audio
-  thread, driven sample-by-sample. Silo code is <em>rt-restricted</em>: it must not
+  thread, driven once per audio block. Silo code is <em>rt-restricted</em>: it must not
   allocate from the system heap or block. This is the natural home for musical
   scheduling, because a silo actor can wake exactly on the beat.</li>
   <li><strong>Other processes</strong> &mdash; a separate Tzopilotl process,
@@ -522,17 +525,15 @@ name you choose.</p>
 channels &mdash; so <code>[440.0, 441.0] sinosc</code> is a two-channel detuned
 pair. The UGen library lives in <code>lang/modules/common_ugens.x</code>
 (oscillators, noise, envelopes) and <code>lang/modules/filters.x</code> (filters);
-the compiler internals are described in
-<code>synthdef-compiler/ARCHITECTURE.md</code>. This chapter is a quick tour;
+the compiler itself, <code>synthc</code>, lives in <code>lang/modules/synthc/</code>.
+This chapter is a quick tour;
 the full guide &mdash; signal rates, element types, channel broadcasting,
 delays, buffers, voicers, and a complete UGen reference &mdash; is
 <a href="Writing_SynthDefs.html">Writing SynthDefs</a>.</p>
-<div class="note"><strong>Two compile paths</strong>
-<code>defSynthX</code> is the production compiler (the Tzopilotl-hosted
-<code>synthc</code>). An older <code>defSynth</code> calls the legacy C++ compiler
-and exists mainly as a differential oracle. Prefer <code>defSynthX</code>. Both
-need a working <code>clang</code> toolchain on <code>PATH</code> &mdash; they emit
-C++, compile it to a <code>.dylib</code>, and <code>dlopen</code> it. Both are
+<div class="note"><strong>Compiling</strong>
+<code>defSynthX</code> runs the compiler, <code>synthc</code>. It needs a working
+<code>clang</code> toolchain on <code>PATH</code> &mdash; it emits C++, compiles it
+to a <code>.dylib</code>, and <code>dlopen</code>s it. It is
 <strong>async</strong>: the clang step runs in the background so music that is
 already playing never pauses. Write <code>mySynth defSynthX(<span
 class="str">"mySynth"</span>) await;</code> when the next line needs the def
@@ -581,7 +582,7 @@ ready to instantiate as a node (next section).</p>
 <p>For a playable instrument you wrap a single <em>voice</em> in
 <code>voicer(maxVoices, voiceFn)</code> and sum the voices. A voice reads its
 per-note inputs with <code>noteParam(name, spec)</code> and its note on/off
-trigger with <code>gate()</code> (gate is voice input 0, injected automatically).</p>
+trigger with <code>gate()</code> (the gate is set by the engine at note on and note off).</p>
 <pre><code><span class="kw">import</span> synthdef.*;
 <span class="kw">import</span> synthc.compile.*;
 <span class="kw">import</span> common_ugens.*;
@@ -600,14 +601,25 @@ trigger with <code>gate()</code> (gate is voice input 0, injected automatically)
 
 sineSynth <span class="fn">defSynthX</span>(<span class="str">"sine_voice"</span>) await;</code></pre>
 <p><strong>How it works.</strong> <code>voicer(16, sineVoice)</code> instantiates the
-voice graph 16 times with independent note state; <code>sum</code> reduces them to
-one stereo signal. <code>noteParam</code>s become columns of the synth's
+voice graph 16 times with independent note state; <code>sum</code> mixes them down
+to one channel. <code>noteParam</code>s become columns of the synth's
 <code>notes</code> input in the order they are declared (column 0 is always the
 gate, which the engine sets; here column 1 = pitch, column 2 = amp), and the
 params after the gate &mdash; <code>[pitch, amp]</code> &mdash; are the layout you
 pass to <code>noteOn</code> when you play the synth in
 <a href="#notes">section&nbsp;4</a>. The <code>adsr</code> envelope opens when the
 gate goes high (note on) and releases when it goes low (note off).</p>
+<p>The engine, not the synth, decides which voice a note gets: each
+<code>noteOn</code> writes the gate and params into one row of the synth's
+<code>notes</code> input at the note's exact sample. A released voice costs
+nothing once it has finished: by default, once its output has stayed below
+&minus;120&nbsp;dB for 0.2&nbsp;s. To end voices sooner, say when a voice is done
+with <code>doneWhen</code> in the voice body &mdash; for example
+<code>(pch nnhz sinosc * env * amp) doneWhen(env &lt; <span class="num">0.001</span>)</code>,
+done once the released envelope is 60&nbsp;dB down &mdash; or change the silence time with the third argument,
+<code>voicer(<span class="num">16</span>, sineVoice, <span class="num">0.5</span>)</code>.
+<code>voicer(<span class="num">16</span>, sineVoice, <span class="num">0.0</span>)</code> turns
+the check off, which can be cheaper for a few very simple voices.</p>
 <div class="note"><strong>Tip</strong>
 Compiling a synthdef invokes <code>clang</code> to build a <code>.dylib</code>. To
 skip that while prototyping note logic, use the engine's built-in
@@ -701,8 +713,8 @@ inputs &mdash; is a <strong>command</strong>. Commands are gathered into an
   &mdash; apply it sample-accurately when tempo <code>clock</code> reaches
   <code>beat</code>.</li>
 </ul>
-<p>Bundling means a whole patch change lands on the audio thread together, between
-two samples &mdash; never half-applied. The dispatch call takes the silo index the
+<p>Bundling means a whole patch change lands on the audio thread together, at one
+sample &mdash; never half-applied. The dispatch call takes the silo index the
 bundle targets (silo 0 is the audio-callback thread; see
 <a href="#silos">section&nbsp;5</a>). The bundle is validated as a whole at
 dispatch: if any command in it is invalid, the entire bundle is discarded and the
@@ -734,7 +746,12 @@ playing for as long as the app is open. (You can use the engine's built-in
 instance of the named def; <code>connect</code> redirects node 101's output buffer
 pointer into the output node's input (a zero-copy patch &mdash; no samples are
 copied during processing). The engine re-runs a topological sort whenever
-connections change, so the graph is always processed in dependency order. To take
+connections change, so the graph is always processed in dependency order. A
+connection may also close a loop (one node feeding back into an earlier one): by
+default the loop's nodes then run a sample at a time and the connection that
+closes it arrives one sample late. <code>feedbackMode(silo,
+FeedbackMode.feedbackBlock)</code> makes that connection one block late instead,
+which costs less CPU but changes the sound of tight loops. To take
 a node down later, call <code>freeNode(nodeId)</code> inside a bundle; for a smooth
 transition use the crossfading variants (<code>connectX</code>,
 <code>replaceNode</code>). The full surface is in the
@@ -788,12 +805,20 @@ is <code>[pitch, amp]</code>. The engine's built-in <code>"voicer"</code> takes
 <pre><code><span class="fn">begin</span>();
 <span class="fn">allNotesOff</span>(<span class="num">200</span>);   <span class="cmt">-- release all held voices on the synth</span>
 <span class="fn">sched</span>(<span class="num">0</span>);</code></pre>
-<p><strong>How it works.</strong> Each <code>noteOn</code> claims a free voice in the
-node's pool, keyed by the note id, and feeds it the param array (filling any
+<p>While the chord holds you can change a sounding note's params.
+<code>noteSetParams</code> counts params from 0 after the gate (here 0 = pitch);
+with a ramp time the change glides. This bends the top note up a tone over half a
+second:</p>
+<pre><code><span class="fn">begin</span>();
+<span class="fn">noteSetParams</span>(<span class="num">200</span>, <span class="num">2</span>, <span class="num">0</span>, [<span class="num">69.0</span>], <span class="num">0.5</span>);   <span class="cmt">-- note 2: pitch 67 -> 69 over 0.5 s</span>
+<span class="fn">sched</span>(<span class="num">0</span>);</code></pre>
+<p><strong>How it works.</strong> Each <code>noteOn</code> takes a voice from the
+node's pool &mdash; the one released longest ago, or if every voice is sounding,
+the one started longest ago &mdash; and feeds it the param array (filling any
 trailing params from the voice's declared defaults). A later
 <code>noteOff(200, 0)</code> drops the gate on the voice with that id, so its
-release stage plays out. Reusing a note id while it is still sounding retriggers
-that same voice. Like all graph changes, note commands are bundled and can be
+release stage plays out. Reusing a note id while it is still sounding releases
+the voice holding it and starts the new note on another voice. Like all graph changes, note commands are bundled and can be
 beat-scheduled with <code>sched(silo, clock, beat)</code> &mdash; which is exactly what
 the generative and actor recipes below do.</p>
 
@@ -1774,8 +1799,8 @@ verb &lt;- <span class="kw">fn</span>() <span class="typ">S</span> { drone() rev
 verb play;
 drone stop;                      <span class="cmt">-- keep only the reverberated path</span></code></pre>
 <p>A proxy may read itself (<code>fb &lt;- fn() S { (fb() * 0.5) + input }</code>)
-&mdash; the loop closes with a one-sample delay, which is the engine's feedback
-primitive. Freeing a proxy that others still read is safe: their input simply
+&mdash; the loop closes with a one-sample delay, as any loop of connections does
+in the engine's default feedback mode (&sect;3.3). Freeing a proxy that others still read is safe: their input simply
 goes silent until you redefine them. References must appear at the top level of
 the signal function, not inside <code>voicer</code>/<code>if_</code> bodies.</p>
 <pre><code><span class="cmt">-- stop cell:</span>
@@ -1877,12 +1902,13 @@ drone free;</code></pre>
   <tr><td><code>engineStart / engineStop / masterGain</code></td><td>audio_engine</td><td>NRT</td></tr>
   <tr><td><code>begin / go(silo) / sched(silo) / sched(silo,clock,beat)</code></td><td>audio_engine</td><td>NRT</td></tr>
   <tr><td><code>newNode / connect / freeNode</code></td><td>audio_engine</td><td>NRT</td></tr>
-  <tr><td><code>noteOn / noteOff</code></td><td>audio_engine</td><td>NRT</td></tr>
-  <tr><td><code>playNote / releaseNote</code></td><td>audio_engine</td><td>silo</td></tr>
-  <tr><td><code>setInput / setInputX / impulseInput</code></td><td>audio_engine</td><td>NRT / silo</td></tr>
+  <tr><td><code>noteOn / noteOff / noteSetParams / allNotesOff</code></td><td>audio_engine</td><td>NRT</td></tr>
+  <tr><td><code>playNote / releaseNote / setNoteParams</code></td><td>audio_engine</td><td>silo</td></tr>
+  <tr><td><code>setInput / setInputAt / setInputBox / setInputX / impulseInput</code></td><td>audio_engine</td><td>NRT / silo</td></tr>
+  <tr><td><code>feedbackMode(silo, FeedbackMode)</code></td><td>audio_engine</td><td>NRT</td></tr>
   <tr><td><code>setTempo(clock,bpm) / clockBeats / clockTempo</code></td><td>audio_engine</td><td>NRT</td></tr>
   <tr><td><code>attachVM / siloLoad / siloStartAt / detachVM</code></td><td>audio_engine</td><td>NRT</td></tr>
-  <tr><td><code>defSynthX / defSynth / listSynthDefs</code></td><td>synthc.compile / synthdef / audio_engine</td><td>NRT</td></tr>
+  <tr><td><code>defSynthX / listSynthDefs</code></td><td>synthc.compile / audio_engine</td><td>NRT</td></tr>
   <tr><td><code>loadBuffer / fillBuffer / resizeBuffer</code></td><td>audio_engine</td><td>NRT</td></tr>
   <tr><td><code>loadSampleBank / sampleZone</code></td><td>audio_engine</td><td>NRT</td></tr>
   <tr><td><code>oscTables / sawTables / squareTables / triTables</code></td><td>wavetables</td><td>NRT</td></tr>
@@ -1911,7 +1937,7 @@ drone free;</code></pre>
   <tr><td>Embedding, FFI, OSC, NATS, Clock/Tempo, Silo VM, NRT render, binary messages</td><td><a href="FFI_Guide.html">FFI Guide</a></td></tr>
   <tr><td>Engine FFI surface (every node/connection/note call)</td><td><a href="FFI_Guide.html#audio-engine">FFI Guide &mdash; Audio Engine</a></td></tr>
   <tr><td>Engine design: silos, nodes, commands, voices, topo sort</td><td><code>engine/Architecture.md</code>, <code>engine/CLAUDE.md</code></td></tr>
-  <tr><td>SynthDef compiler: the <code>S</code> graph, rates, codegen</td><td><code>synthdef-compiler/ARCHITECTURE.md</code></td></tr>
+  <tr><td>SynthDefs: the <code>S</code> graph, rates, shapes, inputs, voicers</td><td><a href="Writing_SynthDefs.html">Writing SynthDefs</a>; the compiler, <code>lang/modules/synthc/</code></td></tr>
   <tr><td>UGen / filter / DSP libraries</td><td><code>lang/modules/common_ugens.x</code>, <code>filters.x</code>, <code>dsp_math.x</code></td></tr>
   <tr><td>Ready-made note-playing instruments (defs + voice-building UGens)</td><td><code>lang/modules/instruments.x</code>, <code>examples/note_synthdefs.x</code></td></tr>
   <tr><td>Actor model + message format</td><td><code>lang/modules/actors.x</code>, <code>messageEncoding.x</code>, <code>message.x</code></td></tr>

@@ -309,9 +309,10 @@
             modules involved &mdash; <code>synthdef</code> (the building blocks), <code>common_ugens</code>
             (unit generators built from them), and <code>filters</code> (biquad filters).
             <p style="margin-top: 0.6em;">For a task-oriented introduction with engine and scheduling recipes, see the
-            <a href="Tzopilotl_Music_Cookbook.html">Music Cookbook</a>. For the compiler internals
-            (the 14-pass pipeline, codegen, SIMD) see <code>synthdef-compiler/ARCHITECTURE.md</code> in the
-            repository.</p>
+            <a href="Tzopilotl_Music_Cookbook.html">Music Cookbook</a>. The compiler, synthc, is itself
+            written in Tzopilotl (<code>lang/modules/synthc/</code> in the repository); its design &mdash;
+            block processing, parameter groups, recurrence analysis &mdash; is described in
+            <code>devplans/BLOCK_ENGINE_PLAN.md</code>.</p>
         </div>
 
         <div class="toc">
@@ -329,7 +330,7 @@
                 <li><a href="#operators">4. Signal Operators</a></li>
                 <li><a href="#vecops">5. Shape Operations</a></li>
                 <li><a href="#units">6. Basic Units: fs, T, inlet, outlet, debug</a></li>
-                <li><a href="#controls">7. Controls</a></li>
+                <li><a href="#controls">7. Inputs and Controls</a></li>
                 <li><a href="#random">8. Random Signals</a></li>
                 <li><a href="#delays">9. Delays and Feedback</a></li>
                 <li><a href="#buffers">10. Sample Buffers</a></li>
@@ -445,6 +446,13 @@ beep defSynthX(<span class="hl-str">"beep"</span>) await;      <span class="cmt"
 
             <h3 id="rates">2.1 Signal rates</h3>
 
+            <p>The engine runs every node a <strong>block</strong> of samples at a time (64 by
+            default). A compiled synth computes the whole block in one call, so it can run several
+            samples or several channels in one vector instruction. Your graph still describes one
+            sample: an audio-rate value has a new value every sample, <code>d(<span class="hl-num">1</span>)</code> is
+            the previous sample (<a href="#delays">&sect;9</a>), and an input set or a note started
+            mid-block takes effect at its exact sample. Blocks only change how much work is skipped.</p>
+
             <p>Rates say how often a value needs to be recomputed. From slowest to fastest:</p>
 
             <table>
@@ -455,8 +463,8 @@ beep defSynthX(<span class="hl-str">"beep"</span>) await;      <span class="cmt"
                     <td><code>fs()</code>, <code>T()</code>, random values with <code>rate: Rate.init</code>, delay allocation</td></tr>
                 <tr><td><code>Rate.reset</code></td><td>Once per note-on (inside a voicer; once at init otherwise)</td>
                     <td>Per-note setup: sample bank lookups (<a href="#samplebanks">&sect;10</a>), per-note random values with <code>rate: Rate.reset</code></td></tr>
-                <tr><td><code>Rate.block</code></td><td>Once per block while its inputs hold still; every sample while any of them moves</td>
-                    <td>Math derived only from inputs (<code>control(...)</code>, <code>noteParam(...)</code>) and slower values. The compiler places it; you never declare it.</td></tr>
+                <tr><td><code>Rate.block</code></td><td>Only when one of its inputs has changed; every sample while any of them moves</td>
+                    <td>Math derived only from controls (<code>control(...)</code> and the other specced inputs of <a href="#controls">&sect;7</a>), note parameters (<code>noteParam(...)</code>), and slower values. The compiler places it; you never declare it.</td></tr>
                 <tr><td><code>Rate.audio</code></td><td>Every sample</td>
                     <td>Oscillators, filters, anything downstream of an audio signal</td></tr>
             </table>
@@ -464,12 +472,21 @@ beep defSynthX(<span class="hl-str">"beep"</span>) await;      <span class="cmt"
             <p><strong>Inputs are signals.</strong> A synth has no separate &ldquo;controls&rdquo;:
             every parameter is an input port, and every input is a signal. An input nothing is
             connected to holds a value (its spec's <code>init</code>, else 0) until you set, ramp, or
-            patch it (<a href="#controls">&sect;7</a>). Math that depends only on inputs and slower
-            values is a <em>parameter group</em>, placed at <code>block</code> rate: the compiled
-            synth recomputes it once per block when one of its source inputs has changed, skips it
-            when none has, and computes it every sample while a source is ramping or connected to a
-            moving signal. So a knob that sits still costs nothing, and the same synth can be driven
-            from an audio-rate signal with no recompile.</p>
+            patch it (<a href="#controls">&sect;7</a>). Math that depends only on controls, note
+            parameters and slower values is a <em>parameter group</em>, placed at <code>block</code>
+            rate. At the start of each block the compiled synth asks the engine, for each input a
+            group reads, whether it was changed and whether it is constant over this block. It skips
+            the group when none of its inputs changed, recomputes it once when one was set to a new
+            value, and computes it every sample while one is ramping or connected to a moving
+            signal. So a knob that sits still costs nothing, and the same synth can be driven from
+            an audio-rate signal with no recompile. The check is per input: setting one element of a
+            multichannel control recomputes every group that reads that control.</p>
+
+            <p>A plain <code>inlet</code> (one without a spec) is treated as an audio signal, since
+            it is usually patched from another node; math on it runs every sample. Inside
+            <code>if_</code>/<code>switch</code> branches (<a href="#controlflow">&sect;11</a>) and
+            spectral bodies (<a href="#spectral">&sect;13</a>), block-rate math is computed every
+            sample too.</p>
 
             <p>Note parameters are columns of the voiced synth's <code>notes</code> input
             (<a href="#voicer">&sect;12</a>), so they behave the same way: math derived purely from
@@ -707,9 +724,23 @@ urand() &lt; prob          <span class="cmt">-- Bernoulli trigger (see coin)</sp
             signal they act on its channels in order. <code>axis</code> is 0 for the outermost,
             negative from the last (<code>cols</code> = &minus;1, <code>rows</code> = &minus;2,
             <code>planes</code> = &minus;3); an axis the signal does not have is a compile error. A
-            scalar counts as a row of one. Everything except a varying <code>slice</code> offset or
-            <code>rotate</code> amount is resolved when the synth is compiled: the rearranging
-            operations cost nothing at run time, their consumers read the source channels directly.</p>
+            scalar counts as a row of one. Result shapes, and errors (an axis out of range, shapes
+            that disagree off the axis, a <code>reshape</code> that does not divide), are found when
+            the synth is compiled.</p>
+
+            <p>The rearranging operations &mdash; <code>take</code>, <code>drop</code>,
+            <code>stride</code>, <code>stutter</code>, <code>ncyc</code>, <code>slice</code>,
+            <code>rotate</code>, <code>reverse</code>, <code>transpose</code>, <code>reshape</code>
+            &mdash; are <strong>views</strong>: they compute nothing. Each output channel is one
+            channel of the source, chosen when the synth is compiled, and the operations that consume
+            the view (arithmetic, ugens, other views, <code>sum</code> and the other reductions) read
+            the source channels in the rearranged order, with no copy. A view is stored as a copy
+            only when it has several consumers, when <code>at</code>, <code>put</code> or
+            <code>join</code> reads it, or inside a voicer's voice body. A <code>slice</code> offset
+            or <code>rotate</code> amount that is a signal rather than a constant picks the source
+            channel while the synth runs: each element is read from its current source position,
+            still with no copy. <code>join</code> and <code>stack</code> copy their operands into the
+            result; <code>reduce</code> and <code>scan</code> compute it.</p>
 
             <table>
                 <tr><th>Function</th><th>Description</th></tr>
@@ -719,7 +750,7 @@ urand() &lt; prob          <span class="cmt">-- Bernoulli trigger (see coin)</sp
                 <tr><td><code>stutter(a, n, axis = -1)</code></td><td>Each element <code>n</code> times: <code>[a b] stutter(2)</code> &rarr; <code>[a a b b]</code>.</td></tr>
                 <tr><td><code>ncyc(a, n, axis = -1)</code></td><td>The whole axis <code>n</code> times: <code>[a b] ncyc(2)</code> &rarr; <code>[a b a b]</code>.</td></tr>
                 <tr><td><code>slice(a, offset, n, axis = -1)</code></td><td><code>n</code> elements from <code>offset</code>, wrapping past the end. The offset may be an integer signal (the length stays fixed).</td></tr>
-                <tr><td><code>rotate(a, k, axis = -1)</code></td><td>Element <code>i</code> becomes element <code>i + k</code>, wrapping (<code>k</code> a constant or an integer signal).</td></tr>
+                <tr><td><code>rotate(a, k, axis = -1)</code></td><td>Element <code>i</code> of the result is element <code>i + k</code> of <code>a</code>, wrapping: <code>[a b c] rotate(1)</code> &rarr; <code>[b c a]</code> (<code>k</code> a constant or an integer signal).</td></tr>
                 <tr><td><code>reverse(a, axis = -1)</code></td><td>The axis in reverse order.</td></tr>
                 <tr><td><code>transpose(a)</code></td><td>The axes in reverse order: a matrix transposed.</td></tr>
                 <tr><td><code>transpose(a, perm)</code></td><td>The axes permuted: axis <code>k</code> of the result is axis <code>perm[k]</code> of <code>a</code>.</td></tr>
@@ -768,7 +799,7 @@ x reshape([<span class="hl-num">6</span>, -<span class="hl-num">1</span>])  <spa
                 <tr><th>Function</th><th>Description</th></tr>
                 <tr><td><code>fs()</code></td><td>The sample rate, as an init-rate signal. Never hard-code 44100/48000 &mdash; graphs are compiled independent of the device rate.</td></tr>
                 <tr><td><code>T()</code></td><td>The sample duration, <code>1/fs()</code>. The natural increment for phase accumulators: <code>freq * T()</code> is cycles per sample.</td></tr>
-                <tr><td><code>inlet(typ, chans = 1, name = "in")</code><br><code>inlet(typ, shape, name)</code></td><td>Declare an input port. <code>typ</code> is a <code>NumType</code> (usually <code>FLOAT32</code>). A synthdef with inlets is an effect: the engine patches other nodes' outputs into it with <code>connect</code>.</td></tr>
+                <tr><td><code>inlet(typ, chans = 1, name = "in")</code><br><code>inlet(typ, shape, name)</code></td><td>Declare an input port. <code>typ</code> is a <code>NumType</code> (usually <code>FLOAT32</code>). A synthdef with inlets is an effect: the engine patches other nodes' outputs into it with <code>connect</code>. Unconnected, it holds 0, or a value set on it with <code>setInput</code> (<a href="#controls">&sect;7</a>).</td></tr>
                 <tr><td><code>outlet(a, name = "out")</code></td><td>Declare an output port carrying <code>a</code>. Every synthdef needs at least one; multiple named outlets are allowed. The outlet's channel count is the signal's.</td></tr>
                 <tr><td><code>debug(input, label = "debug", period = 4096, consecutive = 1)</code></td><td>Periodically dump the signal's value(s) to stderr: every <code>period</code> samples, print the next <code>consecutive</code> samples of all channels with the absolute sample time and <code>label</code>. Returns its input unchanged, so it drops into a pipeline: <code>x debug(<span class="hl-str">"x"</span>, <span class="hl-num">1024</span>, <span class="hl-num">4</span>)</code>.</td></tr>
             </table>
@@ -785,22 +816,69 @@ x reshape([<span class="hl-num">6</span>, -<span class="hl-num">1</span>])  <spa
 
         <!-- ============================================================ -->
         <div class="section" id="controls">
-            <h2>7. Controls</h2>
+            <h2>7. Inputs and Controls</h2>
 
-            <p>A <strong>control</strong> is an input port that carries a <code>ControlSpec</code>:
-            an <code>f32</code> input like any <code>inlet</code>, plus the range, initial value and
-            widget kind a UI needs. Until something sets or connects it, it holds its spec's
-            <code>init</code>. Because it is an ordinary input it can be stepped, ramped, crossfaded,
-            fired as a one-sample impulse, or patched from another node's output at run time, and a
-            multichannel control can be set one element or one region at a time. Only the subgraph
-            that depends on a changed control recomputes (<a href="#rates">&sect;2.1</a>). Set them
-            from Tzopilotl with the <code>audio_engine</code> bridge &mdash;
-            <code>setInput(nodeID, <span class="hl-str">"cutoff"</span>, <span class="hl-num">800.0</span>)</code>,
-            addressed by name or by input index, with an optional ramp time &mdash; or let the app's UI
-            generate widgets from them &mdash; the control's spec and kind determine the widget (see
+            <p>A synth's parameters are its <strong>inputs</strong>. There is no separate kind of
+            &ldquo;control&rdquo; port: a <strong>control</strong> is an input port that carries a
+            <code>ControlSpec</code> &mdash; an <code>f32</code> input like any <code>inlet</code>,
+            plus the range, initial value and widget kind a UI needs. Until something sets or
+            connects it, it holds its spec's <code>init</code>. Because it is an ordinary input it can
+            be stepped, ramped, crossfaded, fired as a one-sample impulse, or connected to another
+            node's output, and a multichannel control can be set one element or one region at a time.
+            Every change lands on its exact sample, even in the middle of a block. Only the math that
+            depends on a changed control recomputes (<a href="#rates">&sect;2.1</a>).</p>
+
+            <p>Set inputs from Tzopilotl with the <code>audio_engine</code> bridge. Each call names
+            the input by name or by index, and takes one value or an array of values, which repeats
+            cyclically over the channels it addresses. They are bundle commands: put them between
+            <code>begin()</code> and <code>sched(silo)</code> (or <code>go</code>), like
+            <code>newNode</code> and <code>connect</code>, and they take effect when the bundle
+            does. The app's UI can also generate widgets from controls &mdash; the spec and kind
+            determine the widget (see
             <a href="Live_Controls_and_Notebooks.html">Live Controls and Notebooks</a>).</p>
 
+            <table>
+                <tr><th>Call</th><th>Effect</th></tr>
+                <tr><td><code>setInput(node, port, value)</code><br><code>setInput(node, port, value, rampTime, curve)</code></td>
+                    <td>Step the whole input to <code>value</code>, or ramp to it over <code>rampTime</code> seconds (<code>curve</code> is a <code>FadeCurve</code>, linear by default).</td></tr>
+                <tr><td><code>setInputAt(node, port, first, values, rampTime)</code></td>
+                    <td>The same for the channels <code>first</code> .. <code>first + n - 1</code> of a multichannel input (row-major order); the others keep their values.</td></tr>
+                <tr><td><code>setInputBox(node, port, offset, extent, values, rampTime)</code></td>
+                    <td>A rectangular region of a shaped input, given by its corner and size in each dimension (an extent of 0 runs to the end).</td></tr>
+                <tr><td><code>setInputX(node, port, value, xfadeTime)</code></td>
+                    <td>Crossfade to the value. A connected input fades its signal out and is left holding the value.</td></tr>
+                <tr><td><code>impulseInput(node, port, value)</code><br><code>impulseInputAt(node, port, first, values)</code></td>
+                    <td>The value for one sample, then back to 0: how a <code>trigger</code> is fired.</td></tr>
+                <tr><td><code>connect(srcNode, srcPort, node, port)</code></td>
+                    <td>Drive the input from another node's output instead. Inputs are numbered in the order the graph declares them. On a connected input, <code>setInput</code> and <code>setInputAt</code> change the value it returns to when disconnected.</td></tr>
+            </table>
+
+<pre><code><span class="hl-kw">import</span> synthdef.*;
+<span class="hl-kw">import</span> synthc.compile.*;
+<span class="hl-kw">import</span> common_ugens.*;
+<span class="hl-kw">import</span> filters.*;
+<span class="hl-kw">import</span> audio_engine.*;
+
+<span class="cmt">-- three detuned saws, a three-element control, through one filter</span>
+<span class="hl-kw">fn</span> triad() S {
+    <span class="hl-kw">let</span> freqs = control(<span class="hl-str">"freqs"</span>, espec(<span class="hl-num">40.0</span>, <span class="hl-num">4000.0</span>, <span class="hl-num">220.0</span>), <span class="hl-num">3</span>);
+    <span class="hl-kw">let</span> cutoff = control(<span class="hl-str">"cutoff"</span>, espec(<span class="hl-num">100.0</span>, <span class="hl-num">8000.0</span>, <span class="hl-num">800.0</span>));
+    freqs smoothSaw(<span class="hl-num">4</span>) sum lpf(cutoff) * <span class="hl-num">0.1</span> |&gt; outlet
+}
+triad defSynthX(<span class="hl-str">"triad"</span>) await;
+<span class="hl-kw">let</span> n = <span class="hl-str">"triad"</span> play;
+
+begin(); setInput(n, <span class="hl-str">"freqs"</span>, [<span class="hl-num">220.0</span>, <span class="hl-num">277.2</span>, <span class="hl-num">330.0</span>]); sched(<span class="hl-num">0</span>);   <span class="cmt">-- a chord</span>
+begin(); setInputAt(n, <span class="hl-str">"freqs"</span>, <span class="hl-num">2</span>, <span class="hl-num">370.0</span>, <span class="hl-num">0.5</span>); sched(<span class="hl-num">0</span>);           <span class="cmt">-- glide the top note only</span>
+begin(); setInput(n, <span class="hl-str">"cutoff"</span>, <span class="hl-num">4000.0</span>, <span class="hl-num">2.0</span>); sched(<span class="hl-num">0</span>);          <span class="cmt">-- open the filter over 2 s</span>
+
+n stop;</code></pre>
+
             <h3>Constructors</h3>
+            <p><code>control</code>, <code>trigger</code>, <code>toggle</code> and <code>choice</code>
+            each make an input with a spec; the kind tells a UI which widget to draw and how to send
+            its value. <code>noteParam</code> and <code>gate</code> are listed here because they
+            also take specs, but they are columns of a voicer's <code>notes</code> input.</p>
             <table>
                 <tr><th>Function</th><th>Kind</th><th>Description</th></tr>
                 <tr><td><code>control(name, spec, chans = 1)</code><br><code>control(name, spec, shape)</code></td><td>continuous</td>
@@ -812,9 +890,9 @@ x reshape([<span class="hl-num">6</span>, -<span class="hl-num">1</span>])  <spa
                 <tr><td><code>choice(name, numChoices, init = 0, chans = 1)</code></td><td>select</td>
                     <td>Integer choice 0 .. numChoices-1 in unit steps. UIs render a number box. Pairs naturally with <code>switch</code> (<a href="#controlflow">&sect;11</a>).</td></tr>
                 <tr><td><code>noteParam(name, spec, chans = 1)</code></td><td>&mdash;</td>
-                    <td>Per-note parameter inside a voicer body (<a href="#voicer">&sect;12</a>).</td></tr>
+                    <td>Per-note parameter inside a voicer body: <code>chans</code> columns of the synth's <code>notes</code> input, not an input of its own (<a href="#voicer">&sect;12</a>).</td></tr>
                 <tr><td><code>gate()</code></td><td>&mdash;</td>
-                    <td>The implicit per-note gate: <code>noteParam(<span class="hl-str">"gate"</span>, &hellip;)</code>, high while the note is held.</td></tr>
+                    <td>The per-note gate: column 0 of <code>notes</code>, set by the engine &mdash; 1 while the note is held, 0 after note-off.</td></tr>
             </table>
 
             <h3>ControlSpec and warps</h3>
@@ -827,7 +905,12 @@ x reshape([<span class="hl-num">6</span>, -<span class="hl-num">1</span>])  <spa
             curve a UI uses to map slider position to value (<code>exponential</code> for frequencies
             and gains, <code>step(sz)</code> for quantized values, <code>signedSquare</code> /
             <code>cubed</code> for finer resolution near zero). The warp does not change what your graph
-            receives; it shapes the widget.</p>
+            receives; it shapes the widget. The shorthands <code>lspec(lo, hi, init)</code> and
+            <code>espec(lo, hi, init)</code> build a linear or exponential spec.</p>
+
+            <p>A control can also follow a signal: <code>connect</code> another node's output into
+            it and it changes sample by sample. The math that reads it then runs every sample, and
+            goes back to running only on changes once the control is disconnected and holds still.</p>
 
             <div class="note">
                 <strong>Smoothing.</strong> A plain <code>setInput</code> is a step. For anything audible
@@ -969,6 +1052,88 @@ freqs fsinosc * (amps reshape([<span class="hl-num">4</span>, <span class="hl-nu
     d &lt;- x;
     d(rate sinosc uni * maxSamps)      <span class="cmt">-- d(S) = vread, cubic by default</span>
 }</code></pre>
+
+            <p><code>d(<span class="hl-num">0</span>)</code> is the written signal itself, so it must come after the
+            write in your code; reading it first would be feedback with no delay, which has no value,
+            and is an error. A variable read whose delay time goes below 0 reads at 0.</p>
+
+            <h3>Feedback runs in blocks, with per-sample results</h3>
+
+            <p>A loop through a delay is a <em>recurrence</em>: each sample depends on earlier ones.
+            The engine runs the synth a block at a time, but you still get the per-sample definition
+            you wrote. The compiler finds each loop, classifies it, and picks a form that computes a
+            whole block with the same values:</p>
+            <ul>
+                <li><strong>Running sums and wrapped accumulators</strong> (<code>phasor</code> and the
+                oscillators built on it, counters): a running sum across the block, several samples at
+                a time.</li>
+                <li><strong>Linear filters whose coefficients come from controls or note
+                parameters</strong> (<code>onepole</code>, <code>lag</code>, the biquads,
+                <code>ring</code>, <code>leakdc</code>): a matrix form that steps the filter's state
+                a block at a time, rebuilt only when a control changes. While a coefficient is ramping
+                or connected to a moving signal, the same filter switches, per block, to the plain
+                loop (or, for a one-pole, a running form over the block); the state carries over
+                exactly.</li>
+                <li><strong>Everything else</strong> (envelopes such as <code>adsr</code>, nonlinear
+                feedback, filters with audio-rate coefficients): a loop a sample at a time over just
+                the loop's own nodes, with everything outside it computed for the whole block. With 4
+                or more channels or voices, 4 run side by side.</li>
+            </ul>
+
+            <p>The block forms round differently from a sample-at-a-time loop, by about 2&times;10<sup>&minus;5</sup>
+            relative in <code>f32</code> and 10<sup>&minus;14</sup> in <code>f64</code>. That is inaudible,
+            but where a fed-back value drives a decision (a gate threshold, a sequencer step, a
+            quantizer, a delay time, a very resonant filter) the difference can grow. To compile
+            every loop in plain sample order &mdash; for a reference render to compare against
+            &mdash; start the app with the environment variable
+            <code>TZPL_STRICT_RECURRENCES=1</code>; it applies to every synth compiled while it is
+            set. To see which form each loop got, print the graph's analysis: each
+            <code>CYCLE</code> line is followed by its <code>CLASS</code> and
+            <code>STRATEGY</code>.</p>
+
+<pre><code><span class="cmt">-- prints one CYCLE per feedback loop: here the phasor inside sinosc</span>
+<span class="cmt">-- (a scan) and the lpf (a block state space)</span>
+<span class="hl-kw">fn</span> tone() S = <span class="hl-num">220</span> sinosc lpf(<span class="hl-num">1000</span>) * <span class="hl-num">0.1</span> |&gt; outlet;
+makeGraph(tone) analysisDump(<span class="hl-str">"tone"</span>) println;</code></pre>
+
+            <p>Delay lines are sized for the block automatically. A delay with no feedback (a chorus,
+            a granulator) is written for the whole block first and then read several samples at a
+            time; a feedback delay whose reads stay at least a block behind its write head (a long
+            echo) is computed that way too.</p>
+
+            <h3 id="nodefeedback">Feedback between nodes</h3>
+
+            <p>Feedback <em>inside</em> one synth is always written with a <code>delayVar</code>.
+            Between nodes you can also <code>connect</code> outputs into inputs so that they form a
+            cycle &mdash; a node into itself, or around a chain. The engine finds each cycle and runs
+            it in one of two modes, chosen per silo with <code>feedbackMode</code> (from
+            <code>audio_engine</code>):</p>
+            <ul>
+                <li><code>FeedbackMode.feedbackSample</code> (the default): the cycle's nodes run a
+                sample at a time, and the connection that closes the cycle delivers its source's
+                previous sample &mdash; a one-sample loop. Each node pays its per-call setup every
+                sample, so a cycle costs several times what the same nodes cost in a chain.</li>
+                <li><code>FeedbackMode.feedbackBlock</code>: the nodes run whole blocks and the closing
+                connection is a block late (64 samples by default) &mdash; cheap, as in
+                SuperCollider, and audibly different for tight loops.</li>
+            </ul>
+            <p>Nodes outside cycles run in blocks either way.</p>
+
+<pre><code><span class="hl-kw">import</span> audio_engine.*;
+
+<span class="cmt">-- a sine whose frequency is modulated by its own output</span>
+<span class="hl-kw">fn</span> selfFM() S {
+    <span class="hl-kw">let</span> fb = inlet(FLOAT32, <span class="hl-num">1</span>, <span class="hl-str">"fb"</span>);
+    sinosc(<span class="hl-num">220</span> + fb * <span class="hl-num">1500</span>) * <span class="hl-num">0.2</span> |&gt; outlet
+}
+selfFM defSynthX(<span class="hl-str">"selfFM"</span>) await;
+<span class="hl-kw">let</span> n = <span class="hl-str">"selfFM"</span> play;                          <span class="cmt">-- a plain sine at first</span>
+begin(); connect(n, <span class="hl-num">0</span>, n, <span class="hl-num">0</span>); sched(<span class="hl-num">0</span>);        <span class="cmt">-- its output into its own input</span>
+
+feedbackMode(<span class="hl-num">0</span>, FeedbackMode.feedbackBlock);    <span class="cmt">-- the loop a block late: a different sound</span>
+feedbackMode(<span class="hl-num">0</span>, FeedbackMode.feedbackSample);   <span class="cmt">-- back to the default</span>
+
+n stop;</code></pre>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
@@ -1169,16 +1334,19 @@ loadSampleBank(<span class="hl-num">100</span>, <span class="hl-num">0</span>, [
 
             <p><code>voicer(maxVoices, voiceFn)</code> instantiates <code>maxVoices</code> copies of the
             voice subgraph, each with independent state (delays, envelopes, random values) and per-note
-            parameters. The voicer's output carries the voices as channels; <code>sum</code> mixes them.
-            The engine handles voice allocation, stealing, and note lifetimes.</p>
+            parameters. The voicer's output has one row per voice: a mono voice gives a row of
+            <code>maxVoices</code> channels, which <code>sum</code> mixes to one; a stereo voice gives a
+            <code>maxVoices</code>&times;2 matrix, which <code>sum(<span class="hl-num">0</span>)</code> mixes to a stereo
+            pair. The engine handles voice allocation, stealing, and note lifetimes.</p>
 
             <ul>
                 <li><strong><code>noteParam(name, spec)</code></strong> declares a per-note parameter
                 inside the voice body. The compiled synth gets one input named <code>notes</code>, a
-                matrix with a row per voice; each note parameter is a column of it. When a note starts,
+                matrix with a row per voice; each note parameter is a column of it (a parameter
+                declared with <code>chans</code> &gt; 1 takes that many columns). When a note starts,
                 the engine writes the note's parameter values into its voice's row; parameters the note
                 does not give take their spec's <code>init</code>.</li>
-                <li><strong><code>gate()</code></strong> reads the implicit per-note gate (column 0 of
+                <li><strong><code>gate()</code></strong> reads the per-note gate (column 0 of
                 <code>notes</code>, written by the engine): 1 while the
                 note is held, 0 after note-off. Drive an <code>asr</code>/<code>adsr</code> release from
                 it, or ignore it for one-shot percussive voices (use <code>gate() tr</code> as a
@@ -1186,16 +1354,28 @@ loadSampleBank(<span class="hl-num">100</span>, <span class="hl-num">0</span>, [
             </ul>
 
             <p>Trigger notes from Tzopilotl with the <code>audio_engine</code> bridge:
-            <code>noteOn(nodeID, noteID, params)</code> and <code>noteOff(nodeID, noteID)</code>.
-            The <code>params</code> array matches <strong>the order in which <code>noteParam</code> is
-            declared in the voice body</strong>; <code>gate</code> is not part of it &mdash; the engine
-            sets it. <code>noteSetParams(nodeID, noteID, first, values, rampTime)</code> changes a
-            sounding note's parameters from index <code>first</code>, stepped or ramped. The
-            music libraries' player and the app's piano roll drive voicers the same way.</p>
+            <code>noteOn(nodeID, noteID, params)</code> and <code>noteOff(nodeID, noteID)</code>,
+            inside a <code>begin()</code> &hellip; <code>sched(silo)</code> bundle like any other
+            command. The <code>params</code> array matches <strong>the order in which
+            <code>noteParam</code> is declared in the voice body</strong>; <code>gate</code> is not
+            part of it &mdash; the engine sets it. <code>noteSetParams(nodeID, noteID, first, values,
+            rampTime)</code> changes a sounding note's parameters from index <code>first</code>,
+            stepped or ramped. The music libraries' player and the app's piano roll drive voicers the
+            same way.</p>
+
+            <p>What a note does, at the sample the bundle is scheduled for: the engine picks a voice
+            (the one released longest ago, else it steals the one started longest ago), resets that
+            voice's state &mdash; delays, envelopes, filter memory, its random generator &mdash; and
+            runs its <code>Rate.reset</code> work, then writes the voice's row of <code>notes</code>.
+            Math that depends only on note parameters is a parameter group per voice
+            (<a href="#rates">&sect;2.1</a>): it is recomputed when that voice's row changes, and
+            every sample only while one of its parameters is ramping. Voices are computed four at a
+            time where the voice body allows it.</p>
 
 <pre><code><span class="hl-kw">import</span> synthdef.*;
 <span class="hl-kw">import</span> synthc.compile.*;
 <span class="hl-kw">import</span> common_ugens.*;
+<span class="hl-kw">import</span> audio_engine.*;
 
 <span class="hl-kw">fn</span> organVoice() S {
     <span class="hl-kw">let</span> f = noteParam(<span class="hl-str">"freq"</span>, ControlSpec { lo: <span class="hl-num">20.0</span>, hi: <span class="hl-num">12000.0</span>, init: <span class="hl-num">440.0</span>, warp: ControlWarp.exponential });
@@ -1211,11 +1391,14 @@ loadSampleBank(<span class="hl-num">100</span>, <span class="hl-num">0</span>, [
 
 <span class="hl-kw">fn</span> organ() S = voicer(<span class="hl-num">8</span>, organVoice) sum outlet;
 organ defSynthX(<span class="hl-str">"organ"</span>) await;
+<span class="hl-kw">let</span> n = <span class="hl-str">"organ"</span> play;
 
-<span class="cmt">-- engine side: params are [freq, amp] -- declaration order; the engine sets gate</span>
-newNode(<span class="hl-str">"organ"</span>, <span class="hl-num">100</span>); connect(<span class="hl-num">100</span>, <span class="hl-num">0</span>, <span class="hl-num">0</span>, <span class="hl-num">0</span>);
-noteOn(<span class="hl-num">100</span>, <span class="hl-num">1</span>, [<span class="hl-num">261.6</span>, <span class="hl-num">0.5</span>]);
-noteOff(<span class="hl-num">100</span>, <span class="hl-num">1</span>);</code></pre>
+<span class="cmt">-- params are [freq, amp] -- declaration order; the engine sets gate</span>
+begin(); noteOn(n, <span class="hl-num">1</span>, [<span class="hl-num">261.6</span>, <span class="hl-num">0.5</span>]); noteOn(n, <span class="hl-num">2</span>, [<span class="hl-num">329.6</span>, <span class="hl-num">0.4</span>]); sched(<span class="hl-num">0</span>);
+begin(); noteSetParams(n, <span class="hl-num">2</span>, <span class="hl-num">0</span>, [<span class="hl-num">392.0</span>], <span class="hl-num">0.3</span>); sched(<span class="hl-num">0</span>);   <span class="cmt">-- glide note 2 up</span>
+begin(); noteOff(n, <span class="hl-num">1</span>); noteOff(n, <span class="hl-num">2</span>); sched(<span class="hl-num">0</span>);
+
+n stop;</code></pre>
 
             <div class="note">
                 Voice bodies are ordinary subgraphs: they can contain delays, filters, random init-rate
@@ -1311,12 +1494,9 @@ noteOff(<span class="hl-num">100</span>, <span class="hl-num">1</span>);</code><
             success, <code>err(message)</code> on a failed analysis, compile, or load &mdash; and
             prints nothing.</p>
 
-            <p><code>defSynth</code> (in <code>synthdef.x</code>) is the legacy path through the C++
-            compiler via the S-expression serializer. It byte-matches <code>defSynthX</code>'s output
-            and is retained as the differential-test oracle; new code should use
-            <code>defSynthX</code>. It is async in the same way, panics on failure the same way
-            (with a <code>defSynthChecked</code> fallible form), and returns the synthdef's
-            S-expression text.</p>
+            <p>synthc writes the plugin as C++ and builds it with the system <code>clang</code>.
+            The generated source is the string the future holds, and is also written to
+            <code>~/tzpl-build/cpp/</code>, which helps when a synth does not sound as expected.</p>
 
             <h3>Tags</h3>
 
@@ -1346,7 +1526,7 @@ noteOff(<span class="hl-num">100</span>, <span class="hl-num">1</span>);</code><
             <table>
                 <tr><th>Function</th><th>Description</th></tr>
                 <tr><td><code>makeGraph(synthFun)</code></td><td>Run the function and return the in-memory <code>SignalGraph</code> (no compile).</td></tr>
-                <tr><td><code>toSynthSexpr(graph, name)</code></td><td>The <code>(Synth name ...)</code> S-expression for a graph &mdash; the exchange format both compilers consume. Handy for debugging what your code actually built.</td></tr>
+                <tr><td><code>analysisDump(graph, name)</code></td><td>(<code>synthc.compile</code>) The compiler's analysis of a graph as text: its ports with shapes and specs, every node with its rate, type and shape, the parameter groups, and each feedback loop with the form chosen for it (<a href="#delays">&sect;9</a>). Handy for checking what your code actually built.</td></tr>
             </table>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>

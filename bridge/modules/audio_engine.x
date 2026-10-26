@@ -62,6 +62,7 @@ enum Err {
     errClockOutOfRange,
     errResourceLimit,
     errBadSampleBank,
+    errRegionOutOfRange,
 }
 
 -- Input values (block engine: synths have no controls; every parameter is

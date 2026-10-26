@@ -417,6 +417,10 @@ scope(<span class="str">"out"</span>, node);</code></pre>
 
 <p>A window named <strong>demo</strong> appears with a <code>freq</code> slider (exponential, 50&ndash;2000&nbsp;Hz) and an <code>amp</code> slider &mdash; widgets derived from a synthdef default into a panel named after the def. The scope, created by hand without a panel, lands in the default <strong>Controls</strong> window. Drag the sliders &mdash; the sound follows immediately, even while other code is evaluating.</p>
 
+<p>The sliders stay on screen after you stop the sound; to stop it, free the node:</p>
+
+<pre><code>stop(node);   <span class="cmt">-- free the demo node -- silence</span></code></pre>
+
 <!-- ================================================================ -->
 <h2 id="ui-module">3. The <code>ui</code> Module</h2>
 
@@ -463,28 +467,43 @@ masterSpectrum(<span class="str">"spec"</span>);</code></pre>
 <!-- -------------------------------- -->
 <h3 id="ui-binding">3.2 Binding to Sound</h3>
 
-<p>There are two binding paths, and a widget may use both at once:</p>
+<p>A synth's controls are its <em>inputs</em>: each <code>control</code> in a synthdef is an input with a range (its <code>ControlSpec</code>). A slider bound to an input sets the input's value each time you move it, exactly as <code>setInput(node, name, value)</code> would from code. There are two binding paths, and a widget may use both at once. With the <code>demo</code> synth from the Quick Start playing as <code>node</code>:</p>
 
-<pre><code><span class="kw">let</span> cutoff = slider(<span class="str">"cutoff"</span>, <span class="typ">ControlSpec</span> { lo: <span class="num">20.0</span>, hi: <span class="num">20000.0</span>, init: <span class="num">440.0</span>, warp: <span class="typ">ControlWarp</span>.exponential });
+<pre><code><span class="kw">let</span> pitch = slider(<span class="str">"pitch"</span>, <span class="typ">ControlSpec</span> { lo: <span class="num">100.0</span>, hi: <span class="num">1000.0</span>, init: <span class="num">220.0</span>, warp: <span class="typ">ControlWarp</span>.exponential });
 
 <span class="cmt">-- FAST PATH: drive a synth input directly. The slider sets the input</span>
 <span class="cmt">-- without going through your code, so it keeps working at full rate</span>
 <span class="cmt">-- even while a long eval (say, a synthdef compile) runs.</span>
-cutoff bindInput(node, <span class="str">"cutoff"</span>);
+pitch bindInput(node, <span class="str">"freq"</span>);
 
 <span class="cmt">-- FLEXIBLE PATH: a callback, for logic (sequencing, bookkeeping, math).</span>
 <span class="cmt">-- Coalesced: fires with the LATEST value at most once per GUI frame.</span>
-cutoff onChange(<span class="kw">fn</span>(v <span class="typ">Float</span>) <span class="typ">Void</span> { <span class="str">"cutoff -&gt; %^"</span> fmt(v) println; });</code></pre>
+pitch onChange(<span class="kw">fn</span>(v <span class="typ">Float</span>) <span class="typ">Void</span> { <span class="str">"pitch -&gt; %^"</span> fmt(v) println; });</code></pre>
 
-<p><code>bindInput</code> resolves the input <em>by name</em> against the node's synthdef and returns an <code>audio_engine</code> error code (0&nbsp;=&nbsp;ok; nonzero for a name the def doesn't have). Any input can be bound, not only the def's declared controls. For an XY pad, bind each axis: <code>bindInput</code> drives X and <code>bindInputY</code> drives Y; <code>onChangeXY</code> receives both values. A range slider works the same way: <code>bindInput</code> drives the lo end, <code>bindInputY</code> the hi end, and <code>onChangeRange</code> receives <code>(lo, hi)</code>.</p>
+<p>Drag the new <code>pitch</code> slider: the tone follows it, and each new value is printed in the output panel.</p>
 
-<p>On a multichannel input, the optional <code>element</code> argument picks one element (a channel, counted row-major for a matrix-shaped input); the default, <code>-1</code>, drives the whole input with the widget's value(s) repeated across it. So one xy pad can steer two elements of the same input:</p>
+<p><code>bindInput</code> resolves the input <em>by name</em> against the node's synthdef and returns an <code>audio_engine</code> error code (0&nbsp;=&nbsp;ok; nonzero for a name the def doesn't have). Any input can be bound, not only the def's declared controls. A bound slider sets the value it moves to (no glide); for a glide, use <code>onChange</code> and call <code>setInput</code> with a ramp time. If something else is patched into the input with <code>connect</code>, the connected signal wins: the slider changes only the value the input returns to when that connection is removed. For an XY pad, bind each axis: <code>bindInput</code> drives X and <code>bindInputY</code> drives Y; <code>onChangeXY</code> receives both values. A range slider works the same way: <code>bindInput</code> drives the lo end, <code>bindInputY</code> the hi end, and <code>onChangeRange</code> receives <code>(lo, hi)</code>.</p>
 
-<pre><code><span class="cmt">-- "pos" is a 2-channel input: x drives element 0, y drives element 1</span>
-<span class="kw">let</span> pad = xy(<span class="str">"pos"</span>, <span class="typ">ControlSpec</span> { lo: <span class="num">0.0</span>, hi: <span class="num">1.0</span>, init: <span class="num">0.5</span>, warp: <span class="typ">ControlWarp</span>.linear },
-                     <span class="typ">ControlSpec</span> { lo: <span class="num">0.0</span>, hi: <span class="num">1.0</span>, init: <span class="num">0.5</span>, warp: <span class="typ">ControlWarp</span>.linear });
-pad bindInput(node, <span class="str">"pos"</span>, <span class="num">0</span>);
-pad bindInputY(node, <span class="str">"pos"</span>, <span class="num">1</span>);</code></pre>
+<p>On a multichannel input, the optional <code>element</code> argument picks one element (a channel, counted row-major for a matrix-shaped input); the default, <code>-1</code>, drives the whole input with the widget's value(s) repeated across it. So one xy pad can steer two elements of the same input &mdash; here the left and right pitches of a stereo pair:</p>
+
+<pre><code><span class="cmt">-- "freq" is a 2-channel control: one pitch per ear</span>
+<span class="kw">fn</span> <span class="fn">pair</span>() <span class="typ">S</span> {
+    <span class="kw">let</span> f = control(<span class="str">"freq"</span>, <span class="typ">ControlSpec</span> { lo: <span class="num">100.0</span>, hi: <span class="num">1000.0</span>, init: <span class="num">220.0</span>, warp: <span class="typ">ControlWarp</span>.exponential }, <span class="num">2</span>);
+    f sinosc(<span class="num">0</span>) mul(<span class="num">0.2</span>) outlet
+}
+pair defSynthX(<span class="str">"pair"</span>) await;
+<span class="kw">let</span> pn = play(<span class="str">"pair"</span>);
+
+<span class="cmt">-- x drives element 0 (left), y drives element 1 (right)</span>
+<span class="kw">let</span> pad = xy(<span class="str">"lr"</span>, <span class="typ">ControlSpec</span> { lo: <span class="num">100.0</span>, hi: <span class="num">1000.0</span>, init: <span class="num">220.0</span>, warp: <span class="typ">ControlWarp</span>.exponential },
+                    <span class="typ">ControlSpec</span> { lo: <span class="num">100.0</span>, hi: <span class="num">1000.0</span>, init: <span class="num">220.0</span>, warp: <span class="typ">ControlWarp</span>.exponential });
+pad bindInput(pn, <span class="str">"freq"</span>, <span class="num">0</span>);
+pad bindInputY(pn, <span class="str">"freq"</span>, <span class="num">1</span>);</code></pre>
+
+<p>Moving the pad sideways retunes the left ear and moving it up and down retunes the right. Stop both synths when you are done:</p>
+
+<pre><code>stop(pn);
+stop(node);</code></pre>
 
 <div class="tip"><p>Prefer <code>bindInput</code> for anything that shapes sound in real time. Use <code>onChange</code> when you need language-side logic. If an eval holds the VM busy, fast-path bindings keep sounding; callbacks queue their latest value and fire when the VM frees up.</p></div>
 
@@ -550,7 +569,18 @@ pad bindInputY(node, <span class="str">"pos"</span>, <span class="num">1</span>)
 <!-- -------------------------------- -->
 <h3 id="ui-derive">3.4 Widgets from Synthdefs</h3>
 
-<p>Compiled synthdefs carry each declared control's name and <code>ControlSpec</code> (a control is an input with a spec). The <code>ui</code> module can materialize widgets directly from them; a multichannel control becomes a multislider (or a row of buttons, for toggles and triggers):</p>
+<p>Compiled synthdefs carry each declared control's name and <code>ControlSpec</code> (a control is an input with a spec). The <code>ui</code> module can materialize widgets directly from them. What appears depends on how the def declared the input:</p>
+
+<table>
+<tr><th>Declared in the synthdef with</th><th>Appears as</th></tr>
+<tr><td><code>control(name, spec)</code></td><td>a slider over the spec's range and warp</td></tr>
+<tr><td><code>toggle(name)</code></td><td>a checkbox</td></tr>
+<tr><td><code>trigger(name)</code></td><td>a button</td></tr>
+<tr><td><code>choice(name, n)</code></td><td>a number box stepping through 0&hellip;n&minus;1</td></tr>
+<tr><td>any of these with more than one channel</td><td>one bar per channel (a multislider), or a row of buttons for toggles and triggers</td></tr>
+</table>
+
+<p>A plain <code>inlet</code> has no range, so <code>controls(node)</code> skips it; bind a widget to it by hand with <code>bindInput</code>. Per-note parameters (<code>noteParam</code>) are not inputs of their own &mdash; they arrive with each note &mdash; so they get no widgets either.</p>
 
 <pre><code><span class="cmt">-- One widget, everything (name, range, warp, init, binding) from the def:</span>
 <span class="kw">let</span> c = control(node, <span class="str">"cutoff"</span>);

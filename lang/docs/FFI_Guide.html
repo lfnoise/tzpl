@@ -431,7 +431,7 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
       <ol>
         <li><a href="#synthdef-overview">Overview</a></li>
         <li><a href="#synthdef-functions">Functions</a></li>
-        <li><a href="#synthdef-caching">Compilation Caching</a></li>
+        <li><a href="#synthdef-caching">Build Directory and Revisions</a></li>
         <li><a href="#synthdef-examples">Examples</a></li>
       </ol>
     </li>
@@ -2056,7 +2056,7 @@ osc.<span class="fn">removeHandler</span>(<span class="str">"/trigger"</span>);<
 
 <ul>
   <li><strong>Timetag &le; 1</strong> (including the "immediately" timetag): execute all messages immediately via <code>begin()/go(silo)</code>.</li>
-  <li><strong>Timetag &gt; 1</strong>: schedule execution at the corresponding engine stream time via <code>begin()/sched(silo, &hellip;)</code>. The NTP timestamp is converted to engine stream time.</li>
+  <li><strong>Timetag &gt; 1</strong>: the bundle is submitted with <code>sched(silo, 0, t)</code>, where <code>t</code> is the timetag read as seconds (the NTP seconds field plus its fraction), used directly as a <em>beat</em> on engine TempoClock slot 0. The timetag is not yet mapped from wall-clock time to engine time, so a real NTP time (seconds since 1900) names a beat billions of beats ahead and the bundle never fires. Only a client that sends small timetags meaning &ldquo;slot-0 beat&rdquo; gets scheduled bundles today; otherwise send immediate bundles.</li>
 </ul>
 
 <h4>Silo selection</h4>
@@ -2074,7 +2074,7 @@ osc.<span class="fn">removeHandler</span>(<span class="str">"/trigger"</span>);<
 <p>Graph manipulation commands sent as standalone messages (outside a bundle) are automatically wrapped in a <code>begin()/go(0)</code> transaction so they execute atomically. Inside a bundle, this auto-wrapping is suppressed and the bundle provides the transaction boundary; the <code>/engine/silo</code> element selects the silo passed at submit.</p>
 
 <div class="note">
-  <strong>Note:</strong> Bundles can be nested. Inner bundles inherit the outer bundle's transaction context.
+  <strong>Note:</strong> Do not nest bundles that carry engine commands. A nested bundle is dispatched as its own <code>begin()</code>/<code>go()</code> (or <code>sched()</code>), but each thread has only one open engine bundle: the inner submit also sends whatever the outer bundle recorded before it, and the outer bundle's messages after it find no open bundle and are dropped.
 </div>
 
 <!-- ================================================================ -->
@@ -2606,7 +2606,7 @@ module's internal timeline.</p>
 
 <div class="note">
   <strong>Note:</strong> <code>delay</code> drives the async/await event loop (the orchestration layer on the NRT VM), which is distinct from the engine TempoClock slots that schedule audio-thread commands. See the &ldquo;Async and Await&rdquo; section of <em>Tzopilotl by Example</em> for the full async model (<code>async fn</code>, <code>await</code>, <code>Future&lt;T&gt;</code>, <code>awaitAll</code> / <code>gather</code>).
-  Timelines: on a SILO VM the per-sample tick fires <code>delay</code> timers against the audio tempo clock, so <code>await delay</code> there is sample-accurate real time. On the NRT VM the timeline is <em>logical</em>: a top-level <code>await</code> pumps the loop by jumping the virtual beat to the earliest timer, so <code>await delay(4.0)</code> in a script or notebook cell resolves without waiting any wall-clock time (this is what lets NRT renders run faster than real time). When a script really must pace itself against the outside world, use <code>await delayReal(seconds)</code> from the clock module: the future is resolved by the live scheduler&rsquo;s wall-clock thread, and the wait survives the clear-schedulers panic (which drops handlers, not pending awaits). To await <em>musical</em> time on the same tempo clock that drives <code>sched</code>/<code>go</code> &mdash; ramps and all &mdash; use <code>await delayBeats(beats)</code>, the awaitable sibling of a <code>sched()</code> callback.
+  Timelines: on a SILO VM the silo fires <code>delay</code> timers against the audio tempo clock, once per block at the exact sample each timer's beat falls on, so <code>await delay</code> there is sample-accurate real time. On the NRT VM the timeline is <em>logical</em>: a top-level <code>await</code> pumps the loop by jumping the virtual beat to the earliest timer, so <code>await delay(4.0)</code> in a script or notebook cell resolves without waiting any wall-clock time (this is what lets NRT renders run faster than real time). When a script really must pace itself against the outside world, use <code>await delayReal(seconds)</code> from the clock module: the future is resolved by the live scheduler&rsquo;s wall-clock thread, and the wait survives the clear-schedulers panic (which drops handlers, not pending awaits). To await <em>musical</em> time on the same tempo clock that drives <code>sched</code>/<code>go</code> &mdash; ramps and all &mdash; use <code>await delayBeats(beats)</code>, the awaitable sibling of a <code>sched()</code> callback.
 </div>
 
 <!-- -------------------------------- -->
@@ -2707,73 +2707,63 @@ module's internal timeline.</p>
 <!-- -------------------------------- -->
 <h3 id="synthdef-overview">12.1 Overview</h3>
 
-<p>The <code>synthdef</code> foreign module provides functions for compiling synth definitions from s-expression descriptions. The compilation pipeline parses the s-expression, performs graph analysis, generates C++ code, compiles it into a dynamic library (<code>.dylib</code>), and optionally loads it into the running audio engine.</p>
+<p>Synth definitions are compiled by <strong>synthc</strong>, a compiler written in Tzopilotl (<code>lang/modules/synthc/</code>). It builds the signal graph from a synth function, analyses it, and generates C++ source. The bridge then writes that source to the build directory, compiles and links it with the system clang into a plugin library, and loads it into the engine (<code>bridge/src/tzpl_synth_build.cpp</code>). The C++ synthdef compiler and its s-expression input are retired.</p>
 
-<p>All functions are registered under the <code>synthdef</code> foreign module. Import them with:</p>
+<p>The normal entry point is <code>defSynthX</code> from <code>synthc.compile</code> (see <em>Writing SynthDefs</em>). It calls the foreign functions below, which are registered in the foreign module <code>synthdef_ffi</code> and re-exported by the <code>synthdef</code> module:</p>
 
-<pre><code><span class="kw">import</span> synthdef.*;</code></pre>
+<pre><code><span class="kw">import</span> synthdef.*;
+<span class="kw">import</span> synthc.compile.*;</code></pre>
 
-<p>Both functions are marked as <strong>non-RT-safe</strong> (they invoke the system compiler and perform file I/O), so they cannot be called from a real-time compiled context.</p>
+<p>All of them are <strong>non-RT-safe</strong> (they run the system compiler, read and write files, or <code>dlopen</code>), so they cannot be called from silo code.</p>
 
 <!-- -------------------------------- -->
 <h3 id="synthdef-functions">12.2 Functions</h3>
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
-  <tr><td><code>compileSynthDef(sexpr String) String</code></td><td>Compile a synth definition from an s-expression string. Generates C++ code and compiles it to a <code>.dylib</code>, but does <em>not</em> load it into the engine. Returns <code>""</code> on success, or an error message on failure. The result is cached for subsequent calls.</td></tr>
-  <tr><td><code>compileSynthDefAndLoad(sexpr String) String</code></td><td>Compile a synth definition and load it into the running audio engine. Performs the same compilation as <code>compileSynthDef</code>, then loads the resulting <code>.dylib</code> and registers the definition with the engine. Returns <code>""</code> on success, or an error message on failure. Requires an engine to be attached to the VM.</td></tr>
-  <tr><td><code>compileSynthDefAndLoadAsync(sexpr String) Future&lt;String&gt;</code></td><td>Async variant of <code>compileSynthDefAndLoad</code>: the compile runs on the VM's background I/O worker, so scheduled music keeps playing while clang runs. The future resolves to <code>""</code> on success or an error message; when it resolves, the def has been loaded and registered. This is the backend of the synthdef module's <code>defSynth</code>. Inside an NRT render the job runs synchronously and the future is returned already resolved.</td></tr>
-  <tr><td><code>writeCompileAndLoadAsync(name String, cppSource String) Future&lt;String&gt;</code></td><td>Async backend of synthc's <code>defSynthX</code>: writes already-generated C++ source, compiles and links it on the background worker, then loads and registers the def. Same resolution semantics as <code>compileSynthDefAndLoadAsync</code>.</td></tr>
+  <tr><td><code>defSynthX(synthFun, name String) Future&lt;String&gt;</code></td><td>(<code>synthc.compile</code>) Build the graph from <code>synthFun</code>, generate C++ with synthc, compile it on a background thread, and load the def into the engine. Resolves to the generated C++ source. A failed compile prints the error and halts the script. Await it before the def's first <code>newNode</code>; redefining a def that is playing can be left unawaited (nodes already running keep their old code).</td></tr>
+  <tr><td><code>defSynthXChecked(synthFun, name String) Future&lt;Result&lt;String, String&gt;&gt;</code></td><td>(<code>synthc.compile</code>) The same, but never halts: <code>ok(cpp)</code> on success, <code>err(message)</code> on a failed analysis, compile or load.</td></tr>
+  <tr><td><code>writeCompileAndLoadAsync(name String, cppSource String) Future&lt;String&gt;</code></td><td>The async backend of <code>defSynthX</code>: writes already-generated C++ source, compiles and links it on the VM's background I/O worker, so scheduled music keeps playing while clang runs, then loads and registers the def. Resolves to <code>""</code> on success or an error message. Inside an NRT render the job runs synchronously and the future is returned already resolved.</td></tr>
+  <tr><td><code>synthDefReady(name String) Future&lt;String&gt;</code></td><td>The future of the compile of <code>name</code> currently in flight, or an already-resolved future (<code>""</code>) when there is none. The music player awaits it before creating a node, so a def whose <code>defSynthX</code> was not awaited is waited for at its first play.</td></tr>
+  <tr><td><code>writeAndCompileCpp(name String, cppSource String) String</code></td><td>Synchronous: write the source, compile and link it. Returns the library path, or a string starting with <code>"error:"</code>. Does not load it.</td></tr>
+  <tr><td><code>loadSynthDylib(path String) String</code></td><td>Load a compiled plugin library and register its def with the engine (the render's engine inside an NRT render). Returns <code>""</code> on success or an error message.</td></tr>
+  <tr><td><code>compareAudioFiles(pathA String, pathB String) Float</code>, <code>audioFileMaxAbs(path String) Float</code>, <code>ftosF32Cpp(x Float) String</code></td><td>Test helpers: the largest sample difference between two float WAV files, the largest absolute sample in one, and a float formatted as a C++ <code>f32</code> literal the way the code generator writes it.</td></tr>
 </table>
 
-<p>The <code>sexpr</code> argument must be in the format <code>(Synth &lt;name&gt; (Graph ...))</code>. The synth name is extracted from the s-expression.</p>
-
 <div class="note">
-  <strong>Note:</strong> <code>compileSynthDefAndLoad</code> requires an audio engine to be attached to the VM via the <code>AppContext</code> user data. If no engine is present, it returns the error <code>"no engine attached to VM"</code>.
+  <strong>Note:</strong> The functions that load a def need an audio engine attached to the VM (or a running NRT render); without one they return the error <code>"no engine attached to VM"</code>.
 </div>
 
 <!-- -------------------------------- -->
-<h3 id="synthdef-caching">12.3 Compilation Caching</h3>
+<h3 id="synthdef-caching">12.3 Build Directory and Revisions</h3>
 
-<p>Both functions maintain an in-memory cache keyed by the s-expression content. When <code>compileSynthDefAndLoad</code> is called with an s-expression that has already been compiled, it skips recompilation and reuses the cached <code>.dylib</code> path, then loads and registers the definition directly. This makes repeated calls with the same definition fast.</p>
+<p>Generated source and libraries go in the build directory: <code>$TZPL_BUILD</code> if set, else <code>~/tzpl-build/</code>, with the libraries in its <code>dylib/</code> subdirectory. There is no in-memory cache: every <code>defSynthX</code> compiles. Each build of a name gets a new revision, <code>&lt;name&gt;_synth_rN.dylib</code>, so loading it never disturbs nodes still running an earlier revision. The newest three revisions of each name are kept on disk (<code>$TZPL_KEEP_REVISIONS</code> changes the count). The compiler is <code>$TZPL_CC</code> if set, else <code>clang</code> on macOS and the C++ compiler the build was configured with elsewhere.</p>
 
 <!-- -------------------------------- -->
 <h3 id="synthdef-examples">12.4 Examples</h3>
 
-<h4>Low-level: compiling from an s-expression string</h4>
+<h4>Define a synth and play it</h4>
 
 <pre><code><span class="kw">import</span> synthdef.*;
+<span class="kw">import</span> synthc.compile.*;
+<span class="kw">import</span> common_ugens.*;
 <span class="kw">import</span> audio_engine.*;
 
-<span class="kw">let</span> sexpr = <span class="str">"(Synth mySine (Graph 1 ((0 Constant 1 12 (440.0)) (1 Outlet \"out\" 0))))"</span>;
-<span class="kw">let</span> err = <span class="fn">compileSynthDefAndLoad</span>(sexpr);
-<span class="kw">if</span> (err <span class="fn">length</span> > <span class="num">0</span>) {
-    <span class="fn">println</span>(<span class="str">"ERROR: "</span> $ err);
-};
+<span class="kw">fn</span> mySine() S = <span class="num">440.0</span> <span class="fn">sinosc</span> * <span class="num">0.1</span> |&gt; <span class="fn">outlet</span>;
 
-<span class="cmt">-- The "mySine" definition is now available in the engine.</span>
-<span class="cmt">-- Create a node using it:</span>
-<span class="fn">newNode</span>(<span class="str">"mySine"</span>, <span class="num">1</span>);</code></pre>
+mySine <span class="fn">defSynthX</span>(<span class="str">"mySine"</span>) <span class="kw">await</span>;   <span class="cmt">-- compile and load</span>
 
-<h4>High-level: using the synthdef module's <code>defSynth</code></h4>
+<span class="fn">begin</span>();
+<span class="fn">newNode</span>(<span class="str">"mySine"</span>, <span class="num">101</span>);
+<span class="fn">connect</span>(<span class="num">101</span>, <span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);
+<span class="fn">go</span>(<span class="num">0</span>);</code></pre>
 
-<p>The <code>synthdef</code> Tzopilotl module provides <code>defSynth</code>, which builds the graph from a function, converts it to an s-expression, and calls <code>compileSynthDefAndLoadAsync</code> automatically. It is an async function; <code>await</code> it when the following code needs the def to be loaded:</p>
+<h4>Report a failed compile instead of halting</h4>
 
-<pre><code><span class="kw">import</span> synthdef.*;
-
-<span class="fn">defSynth</span>(<span class="kw">fn</span>() { <span class="num">440.0</span> <span class="fn">sinosc</span> <span class="fn">outlet</span> }, <span class="str">"mySine"</span>) <span class="kw">await</span>;</code></pre>
-
-<h4>Compile only (without loading)</h4>
-
-<pre><code><span class="kw">import</span> synthdef.*;
-
-<span class="kw">let</span> sexpr = <span class="str">"(Synth offlineDef (Graph 1 ((0 Constant 1 12 (440.0)) (1 Outlet \"out\" 0))))"</span>;
-<span class="kw">let</span> err = <span class="fn">compileSynthDef</span>(sexpr);
-<span class="kw">if</span> (err <span class="fn">length</span> > <span class="num">0</span>) {
-    <span class="fn">println</span>(<span class="str">"Compile failed: "</span> $ err);
-} <span class="kw">else</span> {
-    <span class="fn">println</span>(<span class="str">"Compiled successfully (not loaded into engine)"</span>);
-};</code></pre>
+<pre><code><span class="kw">match</span> (mySine <span class="fn">defSynthXChecked</span>(<span class="str">"mySine"</span>) <span class="kw">await</span>) {
+    ok(cpp): { <span class="fn">println</span>(<span class="str">"compiled"</span>); }
+    err(msg): { <span class="fn">println</span>(<span class="str">"ERROR: "</span> $ msg); }
+}</code></pre>
 
 <!-- ================================================================ -->
 <h2 id="silo-vm">13. Silo VM</h2>
@@ -2837,7 +2827,7 @@ module's internal timeline.</p>
 <ul>
   <li><code>print</code> and <code>println</code> are allowed (for debugging).</li>
   <li><code>gc</code> and <code>disassemble</code> are rejected at compile time.</li>
-  <li>Non-RT-safe foreign functions (e.g., <code>loadPlugins</code>, <code>compileSynthDef</code>) are rejected at compile time.</li>
+  <li>Non-RT-safe foreign functions (e.g., <code>loadPlugins</code>, <code>writeCompileAndLoadAsync</code>) are rejected at compile time.</li>
   <li>All user-defined functions that only call RT-safe functions are permitted.</li>
   <li>Engine command functions (<code>begin</code>, <code>newNode</code>, <code>connect</code>, <code>setInput</code>, <code>noteOn</code>, etc.) are available.</li>
 </ul>
@@ -2906,7 +2896,7 @@ module's internal timeline.</p>
   <li><strong>Async:</strong> <code>renderNRT</code> returns immediately with a handle. The language never blocks waiting for a render &mdash; poll with <code>isRenderDone(h)</code> or register a one-shot <code>onRenderDone(h, cb)</code> callback.</li>
   <li><strong>Independent per render:</strong> each call creates its own Engine, tempo scheduler, and render thread. Multiple renders run concurrently without interfering.</li>
   <li><strong>Live audio coexists:</strong> the live engine (if the script has called <code>engineStart()</code>) keeps playing while one or more NRT renders run in the background.</li>
-  <li><strong>Logical audio time:</strong> inside a render, all schedulers (engine per-sample <code>SchedulerQueue</code>, the RT tempo scheduler, and the per-render <code>NRTTempoScheduler</code> in its manual mode) advance with the sample clock. Scripts using <code>clock.go</code>, <code>playFor</code>, coroutine <code>yield</code>, and beat-scheduled bundles (<code>sched(silo, clock, beat)</code>) produce identical timing in NRT and RT, up to floating-point determinism.</li>
+  <li><strong>Logical audio time:</strong> inside a render, all schedulers (the engine's TempoClock slots, the silo task scheduler, and the per-render <code>NRTTempoScheduler</code> in its manual mode) advance with the sample clock. Scripts using <code>clock.go</code>, <code>playFor</code>, coroutine <code>yield</code>, and beat-scheduled bundles (<code>sched(silo, clock, beat)</code>) produce identical timing in NRT and RT, up to floating-point determinism.</li>
 </ul>
 
 <h3 id="nrt-render-ffi">14.2 FFI Functions</h3>
@@ -2987,7 +2977,7 @@ module's internal timeline.</p>
     <tr><td><code>--tail</code></td><td><code>&lt;seconds&gt;</code></td><td>Default tail rendered after the stop signal (default <code>1.0</code>).</td></tr>
     <tr><td><code>--nrt-safety-cap</code></td><td><code>&lt;seconds&gt;</code></td><td>Upper bound (default <code>3600</code>). Render aborts with a stderr warning if exceeded.</td></tr>
     <tr><td><code>--sample-rate</code></td><td><code>&lt;hz&gt;</code></td><td>Engine sample rate.</td></tr>
-    <tr><td><code>--buffer-frames</code></td><td><code>&lt;n&gt;</code></td><td>Render block size.</td></tr>
+    <tr><td><code>--buffer-frames</code></td><td><code>&lt;n&gt;</code></td><td>Frames rendered per engine call (the device buffer size of a live engine). The engine processes each in blocks of up to 64 samples. The NRT tempo scheduler is advanced once per call, so immediate commands from script handlers land on these boundaries.</td></tr>
     <tr><td><code>--channels</code></td><td><code>&lt;n&gt;</code></td><td>Output channel count.</td></tr>
   </tbody>
 </table>
@@ -3004,9 +2994,9 @@ module's internal timeline.</p>
   <li><strong>Thread-local routing:</strong> inside a render's setup closure and any handler running on that render's scheduler, FFI calls like <code>ae.newNode</code> and <code>clock.go</code> consult a thread-local &ldquo;current render&rdquo; context and target this render's engine / scheduler. Outside a render context, the same calls target the live engine.</li>
   <li><strong>Concurrency:</strong> the script's main thread and render threads all share the one <code>NRTVM</code>; the NRTVM mutex serializes VM access across threads. Render setups and handlers run on render threads; the VM's bytecode execution is serialized so the language remains single-threaded as observed by the script.</li>
   <li><strong>Time inside a render:</strong> <code>getStreamTime()</code> returns logical audio time, advancing with rendered samples. The render's tempo scheduler runs in manual mode: the render thread calls <code>tickTo(currentLogicalSeconds)</code> once per block, firing handlers synchronously. Latency is automatically zero.</li>
-  <li><strong>Sample-accurate commands:</strong> the engine's per-sample <code>SchedulerQueue</code> and the <code>RTTempoScheduler</code> fire at exact sample boundaries, just as in RT playback.</li>
+  <li><strong>Sample-accurate commands:</strong> beat-scheduled bundles on the engine's TempoClock slots and silo tasks fire at their exact sample (a fade or ramp at its fractional sample), just as in RT playback.</li>
   <li><strong>Determinism:</strong> for a deterministic patch (no input-driven state, no PRNG seeding from clock, no wall-clock scheduling), repeated renders produce byte-identical WAV files.</li>
-  <li><strong>Multi-silo:</strong> worker silos still run on their own threads and are signalled per block, so multi-core machines render faster. The SCHED_RR priority bump applied to RT worker threads is skipped for NRT engines.</li>
+  <li><strong>Multi-silo:</strong> worker silos still run on their own threads and are signalled once per <code>--buffer-frames</code> call, so multi-core machines render faster. The SCHED_RR priority bump applied to RT worker threads is skipped for NRT engines.</li>
   <li><strong>Shutdown:</strong> the app's shutdown sequence joins all in-flight render threads before destroying the live VM, so no render can outlive the resources it captures.</li>
 </ul>
 
@@ -3482,7 +3472,8 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
 
 <h3 id="silo-msg-notes">17.5 Silo Node Commands</h3>
 <p>A silo actor typically reacts to a message by triggering a synth node in its own graph. These run immediately on the silo's RT thread (no bundle, no allocation) and are real-time safe:</p>
-<pre><code><span class="cmt">-- Trigger note `noteID` on `node` now, with a Float parameter array. (audio_engine, rt-safe)</span>
+<pre><code><span class="cmt">-- Trigger note `noteID` on `node` at the current event time (a task fires at its</span>
+<span class="cmt">-- beat's sample), with a Float parameter array. (audio_engine, rt-safe)</span>
 <span class="kw">fn</span> <span class="fn">playNote</span>(node <span class="typ">Int</span>, noteID <span class="typ">Int</span>, params <span class="typ">[Float]</span>) <span class="typ">Int</span>
 
 <span class="cmt">-- Release a sounding note on `node`. (audio_engine, rt-safe)</span>
@@ -3492,7 +3483,7 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
 <span class="cmt">-- (rampTime 0) or ramped over rampTime seconds. (audio_engine, rt-safe)</span>
 <span class="kw">fn</span> <span class="fn">setNoteParams</span>(node <span class="typ">Int</span>, noteID <span class="typ">Int</span>, first <span class="typ">Int</span>, values <span class="typ">[Float]</span>, rampTime <span class="typ">Float</span>) <span class="typ">Int</span></code></pre>
 <div class="note">
-  <strong>Note:</strong> These are the in-task counterparts to the NRT <code>noteOn</code>/<code>noteOff</code>/<code>noteSetParams</code> bundle commands (&sect;<a href="#silo-vm">13</a>): same effect, but issued from inside the silo rather than queued from NRT.
+  <strong>Note:</strong> These are the in-task counterparts to the NRT <code>noteOn</code>/<code>noteOff</code>/<code>noteSetParams</code> bundle commands (&sect;<a href="#ae-notes">18.8</a>): same effect, but issued from inside the silo rather than queued from NRT.
 </div>
 
 <h3 id="silo-msg-nats">17.6 NATS Bridge</h3>
@@ -3542,7 +3533,7 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
 <ul>
   <li><strong>Command bundling:</strong> functions that modify the audio graph do not execute immediately &mdash; they are collected into a bundle opened by <code>begin()</code> and submitted atomically by <code>go(silo)</code> / <code>sched(silo, &hellip;)</code>; the target silo is chosen at submit time (&sect;18.4).</li>
   <li><strong>Error codes:</strong> error-returning functions return <code>Int</code>, where <code>0</code> = success. The codes are the <code>Err</code> enum (&sect;<a href="#ae-enums">18.12</a>). Every function is listed with its section and thread class in &sect;<a href="#ae-index">18.14</a>.</li>
-  <li><strong>Enums:</strong> the constants (<code>FadeCurve</code>, <code>SchedPolicy</code>, <code>Err</code>, <code>Enable</code>, <code>TapMode</code>) are defined in the Tzopilotl wrapper module <code>bridge/modules/audio_engine.x</code>, which re-exports the foreign functions alongside them. Simple enums are implicitly coerced to <code>Int</code> when passed to FFI functions, so you can write <code>connectX(&hellip;, FadeCurve.fadeEqualPower)</code> directly.</li>
+  <li><strong>Enums:</strong> the constants (<code>FadeCurve</code>, <code>SchedPolicy</code>, <code>Err</code>, <code>Enable</code>, <code>TapMode</code>, <code>FeedbackMode</code>) are defined in the Tzopilotl wrapper module <code>bridge/modules/audio_engine.x</code>, which re-exports the foreign functions alongside them. Simple enums are implicitly coerced to <code>Int</code> when passed to FFI functions, so you can write <code>connectX(&hellip;, FadeCurve.fadeEqualPower)</code> directly.</li>
   <li><strong>RT safety:</strong> the command-bundling, node, connection, parameter, and note functions are RT-safe (they queue commands through a lock-free FIFO), so they may also be called from silo VM code (&sect;13). Lifecycle, plugin loading, and introspection functions are NRT-only.</li>
 </ul>
 
@@ -3575,12 +3566,12 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
 <!-- -------------------------------- -->
 <h3 id="ae-plugins">18.3 Plugin Loading</h3>
 
-<p>Plugins are shared libraries (<code>.dylib</code>/<code>.so</code>) conforming to the C plugin ABI (<code>shared/tzpl_plugin_abi.h</code>). Any conforming library can be loaded, not just those produced by the synthdef compiler (&sect;<a href="#synthdef-compiler">12</a>). Both functions are NRT-only (file I/O + <code>dlopen</code>).</p>
+<p>Plugins are shared libraries (<code>.dylib</code>/<code>.so</code>) conforming to the C plugin ABI (<code>shared/tzpl_plugin_abi.h</code>, version 3: block processing). Any conforming library can be loaded, not just those built by synthc (&sect;<a href="#synthdef-compiler">12</a>). A library must export <code>tzpl_abi_version</code>; one built for an older ABI (the per-sample engine, version 1 or 2) is refused with a message on stderr asking for a rebuild. Both functions are NRT-only (file I/O + <code>dlopen</code>).</p>
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
-  <tr><td><code>loadPlugins(path String) Bool</code></td><td>Load all plugin definitions found in the directory at <code>path</code>. Returns <code>true</code> on success.</td></tr>
-  <tr><td><code>loadPlugin(path String, name String) Bool</code></td><td>Load a single plugin definition from the shared library at <code>path</code> under the given <code>name</code>. Returns <code>true</code> on success.</td></tr>
+  <tr><td><code>loadPlugins(path String) Bool</code></td><td>Load every plugin library found in the directory at <code>path</code> and its subdirectories. Returns <code>true</code> if at least one loaded and none failed.</td></tr>
+  <tr><td><code>loadPlugin(path String, name String) Bool</code></td><td>Load the def <code>name</code>: searches the directory at <code>path</code> (and its subdirectories) for the library <code>&lt;name&gt;_synth.dylib</code> (<code>.so</code> on Linux) and loads it. Returns <code>true</code> on success.</td></tr>
   <tr><td><code>wireDef(chans Int) String</code><br><code>wireDef(shape [Int]) String</code></td><td>Name of the engine's native pass-through def of <code>chans</code> channels, or of a shape given as its dimensions, row-major (<code>_wire2</code>, <code>_wire3</code>, <code>_wire2x3</code>, &hellip;: <code>out = in</code>), registering it on the current engine on first use. No plugin compile; usable in <code>newNode</code> as soon as it returns. Empty string if there is no engine.</td></tr>
   <tr><td><code>gainDef(chans Int) String</code><br><code>gainDef(shape [Int]) String</code></td><td>Name of the engine's native gain def of that many channels or that shape (<code>_gain2</code>, &hellip;: <code>out = in * vol</code>, inlet 0 = <code>in</code>, inlet 1 = <code>vol</code>, one channel, so it can be set with <code>setInput</code>, ramped, or crossfaded with <code>setInputX</code>). Registered on first use, never compiled. The <code>live</code> module builds every proxy's anchor and monitor from these two.</td></tr>
 </table>
@@ -3641,7 +3632,7 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
   <tr><td><code>connect(srcNode Int, srcPort Int, dstNode Int, dstPort Int) Int</code></td><td>Connect an output port to an input port. Takes effect instantly (no crossfade).</td></tr>
   <tr><td><code>connectX(srcNode Int, srcPort Int, dstNode Int, dstPort Int, xfade Float, curve Int) Int</code></td><td>Connect with a crossfade. <code>xfade</code> is the fade duration in seconds; <code>curve</code> is a <code>FadeCurve</code>.</td></tr>
   <tr><td><code>disconnectInput(dstNode Int, dstPort Int) Int</code></td><td>Disconnect whatever is connected to the given input port. Takes effect instantly.</td></tr>
-  <tr><td><code>disconnectInputX(dstNode Int, dstPort Int, xfade Float, curve Int) Int</code></td><td>Disconnect an input port with a crossfade to silence.</td></tr>
+  <tr><td><code>disconnectInputX(dstNode Int, dstPort Int, xfade Float, curve Int) Int</code></td><td>Disconnect an input port, crossfading from the signal to the value the input holds when unconnected (its spec's <code>init</code>, 0 without a spec, or whatever <code>setInput</code> last gave it).</td></tr>
   <tr><td><code>disconnectSource(srcNode Int, srcPort Int, dstNode Int, dstPort Int) Int</code></td><td>Disconnect the specific connection from the given output port to the given input port. Takes effect instantly.</td></tr>
   <tr><td><code>disconnectSourceX(srcNode Int, srcPort Int, dstNode Int, dstPort Int, xfade Float, curve Int) Int</code></td><td>Same, with a crossfade to silence.</td></tr>
   <tr><td><code>disconnectOutput(srcNode Int, srcPort Int) Int</code></td><td>Disconnect all connections from the given output port.</td></tr>
@@ -3651,13 +3642,19 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
 </table>
 
 <div class="note">
-  <strong>Note:</strong> Connections are validated on the audio thread; a connection that would create a cycle, or whose ports disagree in element type or have incompatible shapes, is rejected with the corresponding <code>Err</code> code (&sect;<a href="#ae-enums">18.12</a>).
+  <strong>Note:</strong> Connections are validated when the bundle is submitted. Ports must have the same element type, or the bundle is refused with <code>errTypeMismatch</code>. Shapes need not match: a source no larger than the input in every dimension is broadcast over it (input channel index mod source size, per dimension; stereo into a 4-channel input lands as L, R, L, R), and a source larger in some dimension is summed down to the input's shape. Connecting a second source to an input mixes them.
+</div>
+
+<div class="note">
+  <strong>Feedback:</strong> a connection may close a cycle (a node feeding itself, directly or through other nodes). The silo runs the nodes of the cycle a sample at a time, and the connection that closes it delivers its source's previous sample: a one-sample delay around the loop. <code>feedbackMode(silo, FeedbackMode.feedbackBlock)</code> (&sect;<a href="#ae-lifecycle">18.2</a>) runs them a block at a time instead, with that connection a block (64 samples by default) late, which costs much less. Nodes outside cycles always run a block at a time.
 </div>
 
 <!-- -------------------------------- -->
 <h3 id="ae-params">18.7 Parameter Control</h3>
 
-<p>Synths have no separate controls: every parameter is an input port, and a <em>control</em> is an input that carries a <code>ControlSpec</code>. An input nothing is connected to holds a value (its spec's <code>init</code>, else 0). Each function below addresses the input by <code>port</code>, either an <code>Int</code> port index or a <code>String</code> input name (resolved against the node's def when the bundle is submitted; an unknown name aborts the bundle). <code>value</code> is a <code>Float</code> or a <code>[Float]</code>, repeated cyclically over the addressed channels. <code>curve</code> is a <code>FadeCurve</code> (default <code>FadeCurve.fadeLinear</code>). All must be called within a <code>begin()</code>/<code>go(silo)</code> bundle and take effect at the bundle's sample.</p>
+<p>Synths have no separate controls: every parameter is an input port, and a <em>control</em> is an input that carries a <code>ControlSpec</code>. An input nothing is connected to holds a value (its spec's <code>init</code>, else 0). Each function below addresses the input by <code>port</code>, either an <code>Int</code> port index or a <code>String</code> input name (resolved against the node's def when the bundle is submitted; an unknown name aborts the bundle). <code>value</code> is a <code>Float</code>, an <code>Int</code> or a <code>[Float]</code>, repeated cyclically over the addressed channels. <code>curve</code> is a <code>FadeCurve</code> (default <code>FadeCurve.fadeLinear</code>). All must be called within a <code>begin()</code>/<code>go(silo)</code> bundle and take effect at the bundle's sample; a ramp or crossfade whose bundle's beat falls between two samples starts between them.</p>
+
+<p>Each channel of an input is its own buffer, so different channels can hold different values, and a shaped input (a 4&times;3 matrix, say) can be set one element, one range of channels, or one box at a time. A channel that is not changing tells the synth so, and the synth skips recomputing what depends only on that channel. A region that does not fit the input's shape aborts the bundle with error code 28 (<code>tzpl_errRegionOutOfRange</code> in the C header).</p>
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
@@ -3679,7 +3676,7 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
 
 <h4>Shared inputs</h4>
 
-<p>The process-global <em>shared-input table</em> is a small array of floats that any synth can read at audio rate with the <code>sharedIn(slot)</code> ugen (see <em>Writing SynthDefs</em>). Writes are plain stores &mdash; no bundle, no scheduling &mdash; and take effect within one sample, which makes the table the cheapest way to stream a continuous controller (mouse, sensor, LFO computed in a script) into many nodes at once.</p>
+<p>The process-global <em>shared-input table</em> is a small array of floats that any synth can read at audio rate with the <code>sharedIn(slot)</code> ugen (see <em>Writing SynthDefs</em>). Writes are plain stores &mdash; no bundle, no scheduling &mdash; and take effect within one block, which makes the table the cheapest way to stream a continuous controller (mouse, sensor, LFO computed in a script) into many nodes at once.</p>
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
@@ -3690,18 +3687,18 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
 <!-- -------------------------------- -->
 <h3 id="ae-notes">18.8 Note / Voice Management</h3>
 
-<p>For nodes that support polyphonic voice allocation (e.g., voicer nodes). These must be called within a <code>begin()</code>/<code>go(silo)</code> bundle.</p>
+<p>For voiced nodes: synths built with a voicer. A voiced synth has an input named <code>notes</code> with one row per voice, <code>{maxVoices, 1+N}</code>: column 0 is the gate and columns 1..N are the note parameters, in the order the voice body declares its <code>noteParam</code>s. The engine, not the plugin, allocates voices. <code>noteOn</code> picks a row (the voice released longest ago, else it steals the one started longest ago), restarts that voice's state at the note's sample, and steps the row's gate to 1 and its parameters to the note's values. <code>noteOff</code> steps the gate to 0; the voice keeps sounding through its release until the synth finds it silent or the voice is reused. These must be called within a <code>begin()</code>/<code>go(silo)</code> bundle and take effect at the bundle's sample. On a node that is not voiced they do nothing.</p>
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
-  <tr><td><code>noteOn(nodeID Int, noteID Int, params [Float]) Int</code></td><td>Start a new voice on the given voicer node. <code>noteID</code> identifies the voice for later <code>noteOff</code>/<code>noteSetParams</code> calls; <code>params</code> holds the voice's initial parameter values, in the order the voice body declares its <code>noteParam</code>s (the engine sets the gate itself; parameters left out take their spec's <code>init</code>).</td></tr>
+  <tr><td><code>noteOn(nodeID Int, noteID Int, params [Float]) Int</code></td><td>Start a new voice on the given voicer node. <code>noteID</code> identifies the voice for later <code>noteOff</code>/<code>noteSetParams</code> calls; a <code>noteID</code> that is already sounding ends that voice first. <code>params</code> holds the voice's initial parameter values, in the order the voice body declares its <code>noteParam</code>s (the engine sets the gate itself; parameters left out take their spec's <code>init</code>).</td></tr>
   <tr><td><code>noteOff(nodeID Int, noteID Int) Int</code></td><td>Release the voice identified by <code>noteID</code>.</td></tr>
   <tr><td><code>allNotesOff(nodeID Int) Int</code></td><td>Release all active voices on the given voicer node.</td></tr>
-  <tr><td><code>noteSetParams(nodeID Int, noteID Int, firstParam Int, values [Float]) Int</code><br><code>noteSetParams(nodeID Int, noteID Int, firstParam Int, values [Float], rampTime Float) Int</code></td><td>Update parameters on an active voice: sets <code>values length</code> consecutive parameters starting at index <code>firstParam</code>, stepped or ramped over <code>rampTime</code> seconds.</td></tr>
+  <tr><td><code>noteSetParams(nodeID Int, noteID Int, firstParam Int, values [Float]) Int</code><br><code>noteSetParams(nodeID Int, noteID Int, firstParam Int, values [Float], rampTime Float) Int</code></td><td>Update parameters on an active voice: sets <code>values length</code> consecutive parameters starting at index <code>firstParam</code> (0 is the first <code>noteParam</code>, not the gate), stepped or ramped linearly over <code>rampTime</code> seconds. Each voice ramps on its own, so this gives per-note glides.</td></tr>
 </table>
 
 <div class="note">
-  <strong>Note:</strong> Code running <em>inside</em> a silo (a silo actor or task) triggers voices directly with <code>playNote</code>/<code>releaseNote</code> instead of a bundle &mdash; see &sect;<a href="#silo-msg-notes">17.5</a>.
+  <strong>Note:</strong> Code running <em>inside</em> a silo (a silo actor or task) triggers voices directly with <code>playNote</code>/<code>releaseNote</code>/<code>setNoteParams</code> instead of a bundle &mdash; see &sect;<a href="#silo-msg-notes">17.5</a>.
 </div>
 
 <!-- -------------------------------- -->
@@ -3871,6 +3868,16 @@ freeVmTaps();</code></pre>
   <tr><td><code>tapScope</code></td><td>Levels plus a sample FIFO, drained with <code>tapSamples</code></td></tr>
 </table>
 
+<h4><code>FeedbackMode</code></h4>
+
+<p>How a silo runs a cycle of connections; set with <code>feedbackMode(silo, mode)</code> (&sect;<a href="#ae-lifecycle">18.2</a>).</p>
+
+<table>
+  <tr><th>Case</th><th>Description</th></tr>
+  <tr><td><code>feedbackSample</code></td><td>The cycle's nodes run a sample at a time; the closing connection is one sample late (the default)</td></tr>
+  <tr><td><code>feedbackBlock</code></td><td>The cycle's nodes run a block at a time; the closing connection is one block late</td></tr>
+</table>
+
 <h4><code>Enable</code></h4>
 
 <table>
@@ -3909,12 +3916,12 @@ freeVmTaps();</code></pre>
 <!-- -------------------------------- -->
 <h3 id="ae-index">18.14 Function Index</h3>
 
-<p>Every function that <code>import audio_engine.*;</code> brings in, with where it is described and where it may run. <em>Bundled</em> functions record into the open <code>begin()</code> bundle and are RT-safe; <em>RT-safe</em> functions may be called from silo code as well as the main VM; <em>NRT</em> functions may only be called on the main (non-real-time) VM; <em>silo-only</em> functions need the real-time silo context and are rejected at compile time elsewhere. The functions themselves are registered by the bridge into the foreign module <code>audio_engine_ffi</code>, which <code>audio_engine.x</code> re-exports &mdash; so a search of the module sources finds only the handful defined in Tzopilotl (<code>spawn</code>, <code>sampleZone</code>, the array-of-zones <code>loadSampleBank</code>, and the <code>setInput</code> family).</p>
+<p>Every function that <code>import audio_engine.*;</code> brings in, with where it is described and where it may run. <em>Bundled</em> functions record into the open <code>begin()</code> bundle and are RT-safe; <em>RT-safe</em> functions may be called from silo code as well as the main VM; <em>NRT</em> functions may only be called on the main (non-real-time) VM; <em>silo-only</em> functions need the real-time silo context and are rejected at compile time elsewhere. The functions themselves are registered by the bridge into the foreign module <code>audio_engine_ffi</code>, which <code>audio_engine.x</code> re-exports &mdash; so a search of the module sources finds only the handful defined in Tzopilotl (<code>spawn</code>, <code>feedbackMode</code>, <code>sampleZone</code>, the array-of-zones <code>loadSampleBank</code>, and the <code>setInput</code> family, which wraps the foreign primitives <code>inputOp</code> and <code>inputOpBox</code>).</p>
 
 <table>
   <tr><th>Function</th><th>Section</th><th>Runs</th></tr>
-  <tr><td><code>engineStart</code>, <code>engineStop</code>, <code>isAudioRunning</code>, <code>getStreamTime</code>, <code>masterGain</code>, <code>safetyLimiter</code>, <code>inputChannels</code></td><td>&sect;<a href="#ae-lifecycle">18.2</a> Engine Lifecycle</td><td>NRT</td></tr>
-  <tr><td><code>loadPlugins</code>, <code>loadPlugin</code></td><td>&sect;<a href="#ae-plugins">18.3</a> Plugin Loading</td><td>NRT</td></tr>
+  <tr><td><code>engineStart</code>, <code>engineStop</code>, <code>isAudioRunning</code>, <code>getStreamTime</code>, <code>masterGain</code>, <code>safetyLimiter</code>, <code>feedbackMode</code>, <code>inputChannels</code>, <code>panicSchedulers</code></td><td>&sect;<a href="#ae-lifecycle">18.2</a> Engine Lifecycle</td><td>NRT</td></tr>
+  <tr><td><code>loadPlugins</code>, <code>loadPlugin</code>, <code>wireDef</code>, <code>gainDef</code></td><td>&sect;<a href="#ae-plugins">18.3</a> Plugin Loading</td><td>NRT</td></tr>
   <tr><td><code>begin</code>, <code>go</code>, <code>sched(silo)</code>, <code>sched(silo, clock, beat)</code>, <code>schedPolicy</code></td><td>&sect;<a href="#ae-bundling">18.4</a> Command Bundling</td><td>RT-safe</td></tr>
   <tr><td><code>setTempo(clock, bpm)</code>, <code>schedTempoChange(clock, &hellip;)</code>, <code>clockBeats</code>, <code>clockTempo</code></td><td>&sect;<a href="#clock-engine-slots">11.6</a> Engine TempoClock Slots</td><td>RT-safe</td></tr>
   <tr><td><code>newNode</code>, <code>freeNode</code>, <code>freeAllNodes</code>, <code>channelOffset</code></td><td>&sect;<a href="#ae-nodes">18.5</a> Node Operations</td><td>Bundled</td></tr>

@@ -327,7 +327,7 @@
 
         <div class="intro">
             The <code>music.*</code> family (<code>lang/modules/music/</code>) is a set of composition libraries built on one shared core: four dialects for generating music, each drawing on a different tradition of computer-music system design, all producing the same <code>List&lt;Event&gt;</code> so they interoperate freely and share one player. Every layer supports <strong>any real-numbered division of the octave</strong> (or of any period &mdash; equal temperaments with fractional step counts, tritave-based tunings, just-intonation and Scala-style tables) and <strong>any real-numbered division of time</strong> (time is <code>Float</code> beats throughout).
-            <p style="margin-top: 0.6em;">Everything except <code>music.play</code> is pure and runs under plain <code>tzpl</code> (which is how the golden tests work); <code>music.play</code> talks to the audio engine and needs the app (<code>tzpl_app</code>). Each dialect module re-exports <code>music.core</code>, so a single <code>import music.pat.*;</code> (or <code>.media</code>, <code>.job</code>, <code>.spans</code>, <code>.play</code>) is enough. For a task-oriented walkthrough see the <a href="Tzopilotl_Music_Cookbook.html">Music Cookbook</a>, chapter&nbsp;11.</p>
+            <p style="margin-top: 0.6em;">Everything except <code>music.play</code> is pure and runs under plain <code>tzpl</code> (which is how the golden tests work); <code>music.play</code> talks to the audio engine and needs the app (<code>tzpl_app_juce</code> or <code>tzpl_app</code>). Each dialect module re-exports <code>music.core</code>, so a single <code>import music.pat.*;</code> (or <code>.media</code>, <code>.job</code>, <code>.spans</code>, <code>.play</code>) is enough. For a task-oriented walkthrough see the <a href="Tzopilotl_Music_Cookbook.html">Music Cookbook</a>, chapter&nbsp;11.</p>
         </div>
 
         <div class="toc">
@@ -354,7 +354,7 @@
                 <tr><th>Type / Function</th><th>Description</th></tr>
                 <tr><td><code>Pitch</code></td><td>Enum: <code>hz(Float)</code>, <code>step(Float)</code> (real-valued tuning step; in <code>et12</code> a step is a MIDI note number), <code>degree(Int, Float)</code> (whole scale degree + accidental in tuning steps, root-relative), <code>ratio(Float)</code>, <code>cents(Float)</code> (both root-relative), <code>rest</code>.</td></tr>
                 <tr><td><code>degree(d, acc = 0.0)</code></td><td>Canonical degree constructor: <code>degree(4)</code> is scale degree 4, <code>degree(4, 1.0)</code> the same degree sharpened by one tuning step. The accidental is a per-note inflection; to transpose a whole performance chromatically, re-anchor the tuning with <code>transposeRoot</code> instead.</td></tr>
-                <tr><td><code>Event</code></td><td>Struct: <code>t</code>, <code>dur</code>, <code>sustain</code>, <code>amp</code>, <code>pitch</code>, and <code>params [(Symbol, Float)]</code> &mdash; named per-note synth controls.</td></tr>
+                <tr><td><code>Event</code></td><td>Struct: <code>t</code>, <code>dur</code>, <code>sustain</code>, <code>amp</code>, <code>pitch</code>, and <code>params [(Symbol, Float)]</code> &mdash; named per-note synth parameters (a <code>Voice</code> matches them by name to the synth's <code>noteParam</code>s).</td></tr>
                 <tr><td><code>event(t, dur, pitch, amp = 0.5, sustain = 0.0, params = [])</code></td><td>Constructor; <code>sustain</code> defaults to <code>0.8 * dur</code> when not given.</td></tr>
                 <tr><td><code>isRest(e)</code></td><td>True when the pitch is <code>Pitch.rest</code>.</td></tr>
                 <tr><td><code>offset(es, dt)</code> / <code>stretch(es, k)</code> / <code>gain(es, k)</code></td><td>Shift onsets / scale time (onset, dur, sustain) / scale amplitude. Lazy.</td></tr>
@@ -442,36 +442,38 @@ randSeed(<span class="hl-num">2026</span>);
         <div class="section" id="music-score">
             <h2>music.score / music.play</h2>
             <p>The player, split so its logic stays testable. <code>music.score</code> is pure: it lowers an event stream to a time-ordered command stream &mdash; <code>noteOn</code> at each onset, <code>noteOff</code> at onset&nbsp;+&nbsp;sustain, note IDs allocated round-robin from the voice's pool, rests skipped. <code>NoteCmd</code> deliberately mirrors the note cases of <code>bundles.x</code>'s <code>EngineCmd</code>, so the engine adapter is a one-line map per case. <code>music.play</code> (engine-coupled; re-exports <code>bundles.*</code>) turns each group of simultaneous commands into <em>one</em> first-class <code>Bundle</code> scheduled at an absolute beat on the engine's TempoClock &mdash; chords are atomic and timing is sample-accurate.</p>
+            <p>The target is a voiced synth (one built with <code>voicer</code>). The engine chooses the synth voice for each note &mdash; the one released longest ago, or, when every voice is sounding, the one started longest ago &mdash; and writes the note's gate and parameters into that voice's row of the synth's <code>notes</code> input at the note's exact sample. A <code>Voice</code>'s <code>poly</code> is only the range of note IDs the score hands out; the synth's own voice count comes from its <code>voicer(maxVoices, &hellip;)</code>. A released voice stops costing CPU once it has finished (see <a href="Writing_SynthDefs.html#voicer">Writing SynthDefs</a> on <code>voicer</code> and <code>doneWhen</code>).</p>
             <table>
                 <tr><th>Type / Function</th><th>Description</th></tr>
-                <tr><td><code>NoteCmd</code></td><td><code>noteOn(node, id, params)</code> / <code>noteOff(node, id)</code> / <code>noteSetParams(&hellip;)</code>.</td></tr>
+                <tr><td><code>NoteCmd</code></td><td><code>noteOn(node, id, params)</code> / <code>noteOff(node, id)</code> / <code>noteSetParams(node, id, first, params, ramp)</code> &mdash; change a sounding note's params from index <code>first</code> (0 = the first param after the gate), stepped when <code>ramp</code> is 0, else gliding over <code>ramp</code> seconds.</td></tr>
                 <tr><td><code>Voice</code>, <code>voice(node, names, defaults, poly = 16)</code></td><td>How events map onto one synth node: positional param order (= <code>noteParam</code> declaration order), per-name defaults, note-ID pool size.</td></tr>
-                <tr><td><code>pitchVoice(node)</code> / <code>freqVoice(node)</code></td><td>Ready-made voices: <code>['pitch, 'amp]</code> for synths taking a note number, <code>['freq, 'amp]</code> for synths taking Hz.</td></tr>
+                <tr><td><code>pitchVoice(node, poly = 16)</code> / <code>freqVoice(node, poly = 16)</code></td><td>Ready-made voices: <code>['pitch, 'amp]</code> for synths taking a note number (such as the engine's built-in <code>"voicer"</code> def), <code>['freq, 'amp]</code> for synths taking Hz.</td></tr>
                 <tr><td><code>eventParams(e, v, t, s)</code></td><td>Resolve one event to positional <code>[Float]</code>: <code>'freq</code> &rarr; <code>pitchHz</code> through the tuning; <code>'pitch</code> &rarr; the equivalent (fractional) note number, so any tuning survives a note-number synth exactly; <code>'amp</code> &rarr; the event amp; other names look up <code>e.params</code>, then the default.</td></tr>
-                <tr><td><code>score(events, v, t = et12, s = major)</code></td><td>Lazy <code>List&lt;(Float, NoteCmd)&gt;</code> &mdash; the golden-test surface.</td></tr>
+                <tr><td><code>score(events, v, t = et12, s = major, idBase = 0)</code></td><td>Lazy <code>List&lt;(Float, NoteCmd)&gt;</code> &mdash; the golden-test surface. <code>idBase</code> offsets the note IDs, so two scores sounding on one node at once do not release each other's notes (<code>play</code> picks a fresh base per player).</td></tr>
                 <tr><td><code>showScore(sc)</code></td><td>One <code>beat: command</code> line per entry.</td></tr>
                 <tr><td><code>play(events, v, t = et12, s = major, silo = 0, clock = 0)</code></td><td>Compile and start playing; returns a <code>Player</code> handle.</td></tr>
                 <tr><td><code>stop(p)</code> / <code>replace(p, events)</code> / <code>enqueue(p, events)</code></td><td>Stop (releases held notes); swap the playing sequence at the next wake; queue a sequence to follow the current one.</td></tr>
                 <tr><td><code>stopAll()</code></td><td>Stop every player started by <code>play</code> and not yet stopped &mdash; the recovery when a <code>Player</code> binding was overwritten and the old player plays on.</td></tr>
                 <tr><td><code>stopFirst()</code> / <code>stopLast()</code></td><td>Stop one running player: the oldest (first started) or the newest (undo the latest <code>play</code>). Return true if one was stopped.</td></tr>
-                <tr><td><code>voiceBundle(v, defName)</code></td><td>Node-graph setup (create voicer, connect to output) as a reusable <code>Bundle</code>.</td></tr>
-                <tr><td><code>scorePlayer(sc)</code></td><td>A coroutine for code running <em>inside</em> a silo task: walks a score with immediate <code>playNote</code>/<code>releaseNote</code>; drive it with <code>spawn(clock, scorePlayer(sc))</code>.</td></tr>
+                <tr><td><code>voiceBundle(v, defName)</code></td><td>Node-graph setup (create the voiced synth's node as <code>v.node</code>, connect it to the output) as a reusable <code>Bundle</code>.</td></tr>
+                <tr><td><code>scorePlayer(sc)</code></td><td>A coroutine for code running <em>inside</em> a silo task: walks a score with immediate <code>playNote</code>/<code>releaseNote</code>/<code>setNoteParams</code>; drive it with <code>spawn(clock, scorePlayer(sc))</code>.</td></tr>
                 <tr><td><code>render(events, v, defName, path, durSecs, t = et12, s = major)</code></td><td>Offline render of a finite stream via <code>renderNRT</code>; returns the handle for <code>await renderDone(h)</code>.</td></tr>
             </table>
             <pre><code><span class="hl-kw">import</span> music.pat.*;
 <span class="hl-kw">import</span> music.play.*;
 <span class="hl-kw">import</span> audio_engine.*;
 
+<span class="cmt">-- tune and melody: the music.pat example above</span>
 engineStart();
 <span class="hl-kw">let</span> v = pitchVoice(<span class="hl-num">101</span>);
-voiceBundle(v, <span class="hl-str">"my_voicer"</span>) go(<span class="hl-num">0</span>);
+voiceBundle(v, <span class="hl-str">"voicer"</span>) go(<span class="hl-num">0</span>);   <span class="cmt">-- the engine's built-in [pitch, amp] synth</span>
 
 <span class="hl-kw">let</span> p = play(tune, v, et12, pentMinor);   <span class="cmt">-- sample-accurate Bundles on the beat</span>
-p replace(otherTune);                     <span class="cmt">-- swap what's playing</span>
-p stop;
+p replace(melody);                        <span class="cmt">-- swap what's playing</span>
+p stop;                                   <span class="cmt">-- stop and release every held note</span>
 
 <span class="cmt">-- or render offline, in any tuning:</span>
-<span class="hl-kw">let</span> h = render(tune, v, <span class="hl-str">"my_voicer"</span>, <span class="hl-str">"/tmp/take1.wav"</span>, <span class="hl-num">20.0</span>, bp() root(<span class="hl-num">220.0</span>, <span class="hl-num">0.0</span>), chromatic(<span class="hl-num">13</span>));
+<span class="hl-kw">let</span> h = render(tune, v, <span class="hl-str">"voicer"</span>, <span class="hl-str">"/tmp/take1.wav"</span>, <span class="hl-num">20.0</span>, bp() root(<span class="hl-num">220.0</span>, <span class="hl-num">0.0</span>), chromatic(<span class="hl-num">13</span>));
 <span class="hl-kw">await</span> renderDone(h);</code></pre>
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
