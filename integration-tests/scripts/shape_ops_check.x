@@ -263,6 +263,15 @@ add("view_chain_sum", fn() S { live(x234, d234) reverse(-1) stride(2, 1) sum(0) 
 	refReduce(alongAxis(alongAxis(x234, d234, -1, 4, fn(i Int) Int { 3 - i }).0, d234, 1, 2,
 		fn(i Int) Int { i * 2 }).0, [2, 2, 4], 0, false));
 
+-- Dynamic views read inline: gathers through a signal offset.
+add("slicev_sum0_r2", fn() S { live(x34, d34) slice(control("off", lspec(0.0, 8.0, 2.0)) i32, 2, 0) sum(0) },
+	refReduce(alongAxis(x34, d34, 0, 2, fn(i Int) Int { wrap(i + 2, 3) }).0, [2, 4], 0, false));
+-- 1..6 rotated by -1 is 6 1 2 3 4 5; every other element sums to 12.
+add("rotate_stride_sum", fn() S { live(x6, d6) rotate(control("amt", lspec(-8.0, 8.0, -1.0)) i32) stride(2) sum },
+	(iota(1, 12.0), [Int]()));
+add("rotate_scan_r2", fn() S { live(x34, d34) rotate(1, -1) scan(BinaryOp.add, -1) },
+	refReduce(alongAxis(x34, d34, -1, 4, fn(i Int) Int { wrap(i + 1, 4) }).0, d34, -1, true));
+
 -- An axis op on a scalar treats it as a row.
 add("scalar_stutter", fn() S { live([5.0], [Int]()) stutter(3) }, ([5.0, 5.0, 5.0], [3]));
 

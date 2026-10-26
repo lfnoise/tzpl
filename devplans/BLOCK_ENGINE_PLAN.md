@@ -1780,16 +1780,19 @@ Progress (2026-10-26):
 - **Found on the way:** an AoS (per-voice struct) voicer never ran its voice body's
   block-placed loops, so a block-rate value such as a note parameter times a constant
   tensor read 0 — fixed (`_aosVoiceBlockLoops`). `viDiv(1, b)` returned b.
-- **Views are not stored:** a static view (take, drop, stride, stutter, ncyc, constant
-  slice, reverse, transpose, reshape) outside a voice body is read inline by its
+- **Views are not stored:** a view (take, drop, stride, stutter, ncyc, slice, rotate,
+  reverse, transpose, reshape) outside a voice body is read inline by its
   consumers when they are elementwise ops, other views, reductions or scans: each reads
   the view's stored source through the composed index map, and a reduce or scan over a
   view is a loop over the mapped elements. No copy. Still stored: views with several
   consumers, views read by `at`/`put`/`join`, and views in a voice body (flat voice
   indexing ties element indices to the loop's per-voice width).
-- **Not done:** `at`/`put` along an axis (they still index the flattening); the varying
-  `slice`/`rotate` is a per-element `mod` index (no pointer tables rebuilt per
-  parameter-group change yet).
+- **Varying slice and rotate** are views too: read inline, each element is a gather
+  from the stored source at `mod(k + offset, n)`, with no copy at any rate (fxMatrixDelay,
+  whose feedback path rotates, 8.38 -> 7.78 ns/sample). Deviation: no channel-pointer
+  table rebuilt per parameter-group change. With the gather inline, a table would save
+  one `mod` per element; left for the cost table if a synth shows it.
+- **Not done:** `at`/`put` along an axis (they still index the flattening).
 
 **M9: Voicer block form (§4.6), portability and performance.**
 - Channel-vector loops over voices, skipping idle groups, per-voice parameter caches.

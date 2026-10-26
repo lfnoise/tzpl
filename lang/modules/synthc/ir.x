@@ -277,13 +277,23 @@ fn isStaticView(k NodeKind) Bool = match (k) {
 	_: false;
 };
 
+-- A view whose index map depends on a signal: rotate's amount, slice's
+-- varying offset (input 1). Read inline it is a gather from the stored
+-- source.
+fn isDynamicView(k NodeKind) Bool = match (k) {
+	vecK(vop): match (vop) { rotate(_): true; slicev(_, _): true; _: false; };
+	_: false;
+};
+
+fn isView(k NodeKind) Bool = isStaticView(k) || isDynamicView(k);
+
 -- Consumers that read an input view inline (through its index map) rather
 -- than needing it stored: elementwise ops, other views, reduce and scan.
 fn takesInlineView(k NodeKind) Bool = match (k) {
 	unopK(_): true;  binopK(_): true;  compareopK(_): true;  castopK(_): true;
 	selectK: true;  outletK(_, _): true;  reduceK(_, _): true;
 	vecK(vop): match (vop) {
-		reduceAxis(_, _): true;  scan(_, _): true;  _: isStaticView(k);
+		reduceAxis(_, _): true;  scan(_, _): true;  _: isView(k);
 	};
 	_: false;
 };

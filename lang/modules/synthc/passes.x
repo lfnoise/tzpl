@@ -732,12 +732,13 @@ fn _isInputKind(k NodeKind) Bool = match (k) {
 	_:                   false;
 };
 
--- A static view outside any voicer body is read inline by the consumers
--- that can (takesInlineView): it is not stored and costs no copy. (In a
+-- A view outside any voicer body is read inline by the consumers that can
+-- (takesInlineView): it is not stored and costs no copy (a dynamic view's
+-- consumers gather from its source). (In a
 -- voice body the flat voice indexing ties element indices to the loop's
 -- per-voice width, so views there are still stored.)
 fn _inlineView(ctx Ctx, n NIdx) Bool {
-	if (!(ctx.kind[n] isStaticView)) { return false; }
+	if (!(ctx.kind[n] isView)) { return false; }
 	var g = ctx.graphOf[n];
 	while (g != NONE) {
 		for (v : ctx.sorted) {
