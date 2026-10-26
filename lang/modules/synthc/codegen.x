@@ -930,8 +930,24 @@ fn _genVec(ctx Ctx, n NIdx, vop VecOp, cel String) String {
 	-- out [voice * chans + chan]: remap the channel within the voice and add
 	-- the voice base. Remapping the flat index instead mixes voices (an
 	-- ncyc read voice 0's slots for every voice).
-	let flatVoice = `cgSimdW == 0 && `cgVoiceCount > 0 && ctx _isVoiceLocalStorage(inp)
+	let voiceLocal = `cgVoiceCount > 0 && ctx _isVoiceLocalStorage(inp)
 		&& (ctx _isInstVar(inp) || ctx.cut[inp] isTempVarCut);
+	-- In a SIMD voice loop, each lane is that scalar read at its own flat
+	-- index: mapping the vector's flat index through the view first ran a
+	-- take or drop of a wider per-voice value into the next voice.
+	if (voiceLocal && `cgSimdW > 0) {
+		let w = `cgSimdW;
+		var lanes [String] = [];
+		var j = 0;
+		while (j < w) {
+			let lane = cel == "0" ? j toString : (j == 0 ? cel : "(%^ + %^)" fmt(cel, j));
+			var `cgSimdW Int = 0;
+			lanes push!(ctx _genVec(n, vop, lane));
+			j = j + 1;
+		}
+		return "%^{%^}" fmt(_simdType(ctx.typ[n], w), lanes join(", "));
+	}
+	let flatVoice = `cgSimdW == 0 && voiceLocal;
 	let shift = `cgFlatChanShift;
 	let c = viOf(!flatVoice ? cel : (shift == 0 ? "0" : "(%^ & %^)" fmt(cel, `cgFlatChanMask)));
 	match (vop) {

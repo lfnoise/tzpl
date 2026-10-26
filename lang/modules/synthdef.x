@@ -330,12 +330,23 @@ fn _nextDelayVarId() ID {
 	out
 }
 
+-- Signals exist only inside a graph function (the one given to defSynthX
+-- or makeGraph), whose graph records them. Built anywhere else (a `let` at
+-- top level), the graph state is unbound: say so, rather than crash on it.
+fn _requireGraph() Void {
+	if (!`buildingGraph) {
+		panic("a signal was built outside a graph function: build signals inside the function given to defSynthX (or makeGraph), e.g. fn mySynth() S { ... }");
+	}
+}
+
 fn _addToGraph(expr S) S {
+	_requireGraph();
 	`curGraphExprs = `curGraphExprs push(expr);
 	expr
 }
 
 fn _addToGraph(dv DelayVar) DelayVar {
+	_requireGraph();
 	`curGraphDelays = `curGraphDelays push(dv);
 	dv
 }
@@ -347,6 +358,7 @@ fn _nextBufferVarId() ID {
 }
 
 fn _addToGraph(bv BufferVar) BufferVar {
+	_requireGraph();
 	`curGraphBuffers = `curGraphBuffers push(bv);
 	bv
 }
@@ -358,6 +370,7 @@ fn _nextSampleBankVarId() ID {
 }
 
 fn _addToGraph(sb SampleBankVar) SampleBankVar {
+	_requireGraph();
 	`curGraphSampleBanks = `curGraphSampleBanks push(sb);
 	sb
 }
@@ -1335,6 +1348,7 @@ type GraphFn1 = fn(S) S;
 
 fn _makeTopGraph(f GraphFn) SignalGraph {
 	-- fresh graph state
+	var `buildingGraph Bool = true;
 	var `curGraphExprs [SignalExpr] = [];
 	var `curGraphDelays [DelayVar] = [];
 	var `curGraphBuffers [BufferVar] = [];

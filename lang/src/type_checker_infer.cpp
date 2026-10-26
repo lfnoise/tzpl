@@ -498,6 +498,7 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
             auto* lit = static_cast<StructLiteralExpr*>(expr);
             StructType* stype = nullptr;
 
+            if (reportAmbiguousType(lit->structName, lit->loc)) return compiler_.intType();
             // Try non-template struct first
             auto it = structTypes_.find(lit->structName);
             if (it != structTypes_.end()) {

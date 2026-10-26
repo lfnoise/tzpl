@@ -262,10 +262,12 @@ void TypeChecker::checkImportDecl(ImportDeclNode* decl) {
                         break;
                     }
                     case ExportEntry::StructT:
+                        noteWildcardImportedType(name, entry.structType, importPathString(decl->modulePath));
                         structTypes_[name] = entry.structType;
                         importedTypeReExport_[name] = decl->isReExport;
                         break;
                     case ExportEntry::EnumT:
+                        noteWildcardImportedType(name, entry.enumType, importPathString(decl->modulePath));
                         enumTypes_[name] = entry.enumType;
                         importedTypeReExport_[name] = decl->isReExport;
                         break;
@@ -352,10 +354,12 @@ void TypeChecker::checkImportDecl(ImportDeclNode* decl) {
                     case ExportEntry::StructT:
                         structTypes_[localName] = entry.structType;
                         importedTypeReExport_[localName] = decl->isReExport;
+                        ambiguousImportedTypes_.erase(localName);   // imported by name: settled
                         break;
                     case ExportEntry::EnumT:
                         enumTypes_[localName] = entry.enumType;
                         importedTypeReExport_[localName] = decl->isReExport;
+                        ambiguousImportedTypes_.erase(localName);
                         break;
                     case ExportEntry::TemplateStructT:
                         templateStructs_[localName] = entry.templateStructDecl;

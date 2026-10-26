@@ -1,0 +1,11 @@
+Type error [tests/errors/ambiguous_imported_type.x:5:8]
+  |
+5 | fn f(p Point) Float = p.x;
+  |        ^---^
+  Type 'Point' is defined by both 'same_type_a' and 'same_type_b', imported with .*; import the one you mean by name (import <module>.{Point}) or import a module under an alias
+
+Type error [tests/errors/ambiguous_imported_type.x:5:23]
+  |
+5 | fn f(p Point) Float = p.x;
+  |                       ^
+  Field access not supported on this type

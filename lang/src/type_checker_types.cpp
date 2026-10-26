@@ -61,6 +61,7 @@ Type* TypeChecker::resolveTypeExpr(TypeExpr* typeExpr) {
         if (named->name == "Fraction") return compiler_.fractionType();
         if (named->name == "Complex") return compiler_.complexType();
         if (named->name == "Any") return compiler_.anyType();
+        if (reportAmbiguousType(named->name, typeExpr->loc)) return compiler_.intType();
         // Check struct types
         auto it = structTypes_.find(named->name);
         if (it != structTypes_.end()) return it->second;

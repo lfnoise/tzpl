@@ -343,6 +343,31 @@ fn voiced(name String, xs [Float], dims [Int], op (S) S, want ([Float], [Int])) 
 	expects push!("EXPECT %^ %^" fmt(name, dimsStr([2] $ odims)));
 }
 
+-- Voices that differ: only voice 0's gate is on (forms_equiv --zero), so
+-- (1 + gate) doubles voice 0. A view of a per-voice value that indexed
+-- without the voice's base would read voice 0's values in every voice.
+-- Partial widths (a 4-wide value viewed 2 wide) in flat SIMD voice loops.
+fn voicedGate(name String, nv Int, xs [Float], dims [Int], op (S) S, want ([Float], [Int])) Void {
+	let (ys, odims) = want;
+	cases push!((name, fn() S {
+		voicer(nv, fn() S {
+			let k = 1.0 + gate();
+			let r = op(tensor(tshape(dims), xs) * k * (1.0 + sinosc(0.0)));
+			compiling ? r - tensor(tshape(odims), ys) * k : r
+		}) |> outlet
+	}));
+	expects push!("EXPECT %^ %^" fmt(name, dimsStr([nv] $ odims)));
+}
+for (nv : [4, 8]) {
+	let t = "v" $ nv toString;
+	voicedGate("gtake_" $ t, nv, iota(4, 1.0), [4], fn(x S) S { x take(2) }, ([1.0, 2.0], [2]));
+	voicedGate("gdrop_" $ t, nv, iota(4, 1.0), [4], fn(x S) S { x drop(2) }, ([3.0, 4.0], [2]));
+	voicedGate("gstride_" $ t, nv, iota(4, 1.0), [4], fn(x S) S { x stride(2) }, ([1.0, 3.0], [2]));
+	voicedGate("gslice_" $ t, nv, iota(4, 1.0), [4], fn(x S) S { x slice(1, 2) }, ([2.0, 3.0], [2]));
+	voicedGate("grev_" $ t, nv, iota(4, 1.0), [4], fn(x S) S { x reverse }, ([4.0, 3.0, 2.0, 1.0], [4]));
+	voicedGate("gtake2d_" $ t, nv, iota(8, 1.0), [2, 4], fn(x S) S { x take(2, cols) }, ([1.0, 2.0, 5.0, 6.0], [2, 2]));
+}
+
 let x24 = iota(8, 1.0);
 let d24 = [2, 4];
 for (vc : [("v24", x24, d24), ("v34", x34, d34)]) {

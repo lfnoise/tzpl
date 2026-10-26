@@ -336,6 +336,20 @@ private:
 
     // Scope stack (local variables)
     std::vector<std::unordered_map<std::string, VarInfo>> scopes_;
+    // Type names two wildcard imports define differently: the later import
+    // used to win silently ("declared to return 'Shape' but body yields
+    // 'Shape'"). Naming one is an error until a local declaration or an
+    // explicit import settles it.
+    std::unordered_map<std::string, std::string> importedTypeModule_;    // name -> defining module
+    std::unordered_map<std::string, std::string> ambiguousImportedTypes_; // name -> "a' and 'b"
+    void noteWildcardImportedType(std::string const& name, Type* type, std::string const& module);
+    static std::string importPathString(std::vector<std::string> const& path) {
+        std::string out;
+        for (auto const& p : path) { if (!out.empty()) out += '.'; out += p; }
+        return out;
+    }
+    // An error (and true) when `name` is an ambiguous imported type.
+    bool reportAmbiguousType(std::string const& name, SourceRange loc);
 
     // Global variables
     std::unordered_map<std::string, VarInfo> globalVars_;

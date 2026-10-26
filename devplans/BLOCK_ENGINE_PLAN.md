@@ -1958,6 +1958,56 @@ M0 ─┬─ M1 ─────────────────────�
 
 ---
 
+## 7b. Remaining work (as of 2026-10-26, after M10 short of the merge)
+
+Everything below is recorded in the milestone notes above or came up after them. None of
+it blocks the merge.
+
+**Known bugs, not fixed** (being addressed next):
+- VM crash when an enum payload holds an enum (M5); worked around with a flat payload
+  in `bundles.x`; repro in `devplans/repros/nested_enum_payload_crash/`. Matching a
+  struct inside an enum payload also crashed a test script (2026-10-26).
+- GC crash with arrays of tuples in app renders; synthc uses parallel arrays instead.
+- Building a signal outside a graph (`let s = fill(...)` at top level) segfaults instead
+  of reporting an error.
+- Flat-voice SIMD `take`/`drop` of a partial-width per-voice input indexes without the
+  voice base (M4 "known gap"; never rechecked).
+- `synthdef` and `music.shape` both define `Shape` and `shape` (unrelated types).
+
+**Deferred features:**
+- `setInputX` on part of a connected input (needs partly detached inputs; channel
+  pointers already allow it). Region-shaped faders; `connect` into a destination region.
+- Patching one live proxy into another proxy's control inputs.
+- Mid-block graph edits are exact only on float ports; integer ports,
+  `disconnectOutput`, `disconnectNode` and `freeAllNodes` apply at the block start.
+- Branching on a block-rate condition runs per sample (block work inside `if_` /
+  `switch` bodies is demoted to audio).
+- Parameter groups recompute when any element of a source input changes (per-channel
+  provenance, §4.2 step 1a).
+- Views inside a voice body are still stored; no per-group pointer tables for varying
+  `slice` / `rotate`.
+- AoS voicers (control flow in the voice body) run one voice at a time.
+- The Max/Pd event-system design needs rethinking without event rate.
+
+**Performance:**
+- M9's x86-64 items: Sleef inline headers and a per-ISA register budget (need x86-64
+  measurements). On Linux `logb`, `erf`, `erfc`, `tgamma`, `lgamma`, `remainder`,
+  `fdim` and `nextafter` run lane by lane; no 8-lane f32 loops on AVX2 / AVX-512.
+- A cycle in sample mode pays each plugin's per-call setup per sample (1.5x `main` for a
+  tiny pair); a per-sample entry point in generated plugins if real patches need it.
+- Voice groups: `bankVoicer` 0.73x without idle skipping; idle checks cost tiny voicers
+  about 1 ns/sample (`silence` 0 removes them).
+- §10 follow-ups: graph retiming; matrix scans for higher-order time-varying recurrences.
+
+**Tests and CI:**
+- OSC and NATS are not built in CI; the timetag and new NATS commands are checked
+  locally (OSC) or only compiled (NATS: no server).
+- Live-audio scripts contend for the device when run back to back (false failures).
+- The forms-equivalence run plays default note parameters and loads no sample banks.
+
+**Process:** merge `block-engine` to `main`; the docs site (migration page, landing
+notice) deploys from `main`.
+
 ## 8. Testing strategy
 
 **Kept, adapted:**

@@ -251,6 +251,29 @@ VarInfo* TypeChecker::lookupVar(const std::string& name) {
     return nullptr;
 }
 
+void TypeChecker::noteWildcardImportedType(std::string const& name, Type* type,
+                                           std::string const& module) {
+    Type* prev = nullptr;
+    if (auto it = structTypes_.find(name); it != structTypes_.end()) prev = it->second;
+    else if (auto eit = enumTypes_.find(name); eit != enumTypes_.end()) prev = eit->second;
+    auto origin = importedTypeModule_.find(name);
+    // The same type reached by two import paths (a re-export) is fine; a
+    // different one from another module is ambiguous.
+    if (prev && prev != type && origin != importedTypeModule_.end() && origin->second != module) {
+        ambiguousImportedTypes_[name] = origin->second + "' and '" + module;
+    }
+    importedTypeModule_[name] = module;
+}
+
+bool TypeChecker::reportAmbiguousType(std::string const& name, SourceRange loc) {
+    auto it = ambiguousImportedTypes_.find(name);
+    if (it == ambiguousImportedTypes_.end()) return false;
+    error(loc, "Type '" + name + "' is defined by both '" + it->second +
+          "', imported with .*; import the one you mean by name (import <module>.{" + name +
+          "}) or import a module under an alias");
+    return true;
+}
+
 void TypeChecker::error(SourceRange loc, const std::string& msg) {
     errors_.push_back(CompileError(CompileError::TypeError, loc, msg,
                                    sourceFilePath_, sourceText_));
@@ -349,6 +372,7 @@ void TypeChecker::check(Program& program) {
             NameTypePairVec empty(rt::STLAllocator<NameTypePair>(nullptr));
             auto* structType = new StructType(compiler_.intern(sd->name), std::move(empty), sd->isTupleStruct);
             structTypes_[sd->name] = structType;
+            ambiguousImportedTypes_.erase(sd->name);   // a local declaration wins
             sd->resolvedType = structType;
         }
     }
@@ -676,6 +700,7 @@ void TypeChecker::checkREPLInput(Program& program) {
             NameTypePairVec empty(rt::STLAllocator<NameTypePair>(nullptr));
             auto* structType = new StructType(compiler_.intern(sd->name), std::move(empty), sd->isTupleStruct);
             structTypes_[sd->name] = structType;
+            ambiguousImportedTypes_.erase(sd->name);   // a local declaration wins
             sd->resolvedType = structType;
         }
     }
