@@ -1168,15 +1168,26 @@ struct SetSiloTaskSchedCmd : engine::Command {
     bool doNRT(engine::Silo*) override { return true; }
 };
 
-// Command that detaches the VM from the silo and deletes it on the NRT thread.
+// Command that detaches the VM and its task scheduler from the silo and
+// deletes both on the NRT thread. The scheduler's hooks must go in the same
+// doRT as the VM: left installed, the silo keeps running the VM's tasks and
+// actors while doNRT deletes the VM (a stopped melody plays on, a note sounds
+// after allNotesOff, and the freed VM memory is written to).
 struct DetachAndDeleteVMCmd : engine::Command {
     ts::VM* vm_;
-    explicit DetachAndDeleteVMCmd(ts::VM* vm) : vm_(vm) {}
+    SiloTaskScheduler* sched_;
+    DetachAndDeleteVMCmd(ts::VM* vm, SiloTaskScheduler* sched) : vm_(vm), sched_(sched) {}
     void doRT(engine::Silo* s) override {
         s->vm_ = nullptr;
         s->heartbeatFn_ = nullptr;
+        if (s->taskSched_ == sched_) {
+            s->taskSched_ = nullptr;
+            s->taskNextFn_ = nullptr;
+            s->taskRunFn_ = nullptr;
+        }
     }
     bool doNRT(engine::Silo* s) override {
+        delete sched_;
         delete vm_;
         return true;
     }
@@ -1280,9 +1291,11 @@ static void ffi_detachVM(ts::VM& vm, u16 dst, u16, u16 argBase) {
 
     // Transfer VM ownership to the command. doRT nulls silo->vm_,
     // doNRT deletes the VM on the engine's NRT command thread.
-    sendCmdToSilo(eng, siloIndex, new DetachAndDeleteVMCmd(state.vm));
+    sendCmdToSilo(eng, siloIndex, new DetachAndDeleteVMCmd(
+        state.vm, static_cast<SiloTaskScheduler*>(state.taskSched)));
 
     state.vm = nullptr;
+    state.taskSched = nullptr;   // owned by the command now (outbox pump skips it)
     // Tear down the incremental compile context before its moduleCompiler/target.
     state.incCompiler.reset();
     state.target.reset();
