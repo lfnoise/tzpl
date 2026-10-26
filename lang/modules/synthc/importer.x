@@ -138,8 +138,8 @@ fn _vecOpKey(vop VecOp) String = match (vop) {
 	permute(p):       "X" $ _intsKey(p);
 	reshape(d):       "h" $ _intsKey(d);
 	rotate(ax):       "o" $ _axKey(ax);
-	at:               "@";
-	put:              "P";
+	at(ax):           "@" $ _axKey(ax);
+	put(ax):          "P" $ _axKey(ax);
 	join(ax, new):    (new ? "K" : "J") $ _axKey(ax);
 	reduceAxis(op, ax): "A" $ op ordinal toString $ "|" $ ax toString;
 	scan(op, ax):     "S" $ op ordinal toString $ "|" $ ax toString;
@@ -635,8 +635,8 @@ fn _makeReduce(ctx Ctx, ins [Int], op BinaryOp, cols Int) Int {
 fn _vecRate(ctx Ctx, vop VecOp, ins [Int]) Rate = match (vop) {
 	rotate(_):    _maxRateOf(ins);         -- rotate's amount can be a signal
 	slicev(_, _): _maxRateOf(ins);         -- so can slice's offset
-	at:           _maxRateOf(ins);         -- max(a, i)
-	put:          _maxRateOf(ins);         -- max(a, i, v)
+	at(_):        _maxRateOf(ins);         -- max(a, i)
+	put(_):       _maxRateOf(ins);         -- max(a, i, v)
 	join(_, _):   _maxRateOf(ins);         -- max of all inputs
 	_:            ctx.nrate[ins[0]];
 };

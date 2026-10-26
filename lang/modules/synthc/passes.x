@@ -938,7 +938,7 @@ fn _inplaceForWrite(ctx Ctx, n NIdx, d Int) Void {
 	if (ctx.graphOf[n] != 0) { return; }
 	let p = ctx.ins[n][0];
 	let isPut = match (ctx.kind[p]) {
-		vecK(vop): match (vop) { put: true; _: false; };
+		vecK(vop): match (vop) { put(_): true; _: false; };
 		_: false;
 	};
 	if (!isPut) { return; }
@@ -965,7 +965,7 @@ fn _inplaceForWrite(ctx Ctx, n NIdx, d Int) Void {
 		seen insert!(c);
 		let ok = match (ctx.kind[c]) {
 			vecK(vop): match (vop) {
-				at: ctx.chans[c] == 1 && ctx.chans[ctx.ins[c][1]] == 1;
+				at(_): ctx.chans[c] == 1 && ctx.chans[ctx.ins[c][1]] == 1;
 				_: false;
 			};
 			_: false;

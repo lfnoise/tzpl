@@ -255,8 +255,8 @@ fn _vecStr(vop VecOp) String = match (vop) {
 	permute(p):       "vec_permute(%^)" fmt(p);
 	reshape(d):       "vec_reshape(%^)" fmt(d);
 	rotate(ax):       ax == -1 ? "vec_rotate" : "vec_rotate(axis %^)" fmt(ax);
-	at:               "vec_at";
-	put:              "vec_put";
+	at(ax):           ax == -1 ? "vec_at" : "vec_at(axis %^)" fmt(ax);
+	put(ax):          ax == -1 ? "vec_put" : "vec_put(axis %^)" fmt(ax);
 	join(ax, new):    new ? "vec_stack(axis %^)" fmt(ax) : (ax == -1 ? "vec_join" : "vec_join(axis %^)" fmt(ax));
 	reduceAxis(op, ax): "reduce(%^, axis %^)" fmt(op binopStr, ax);
 	scan(op, ax):     "scan(%^, axis %^)" fmt(op binopStr, ax);
@@ -298,7 +298,7 @@ fn takesInlineView(k NodeKind) Bool = match (k) {
 	_: false;
 };
 
-fn _vecGetsOwnLoop(vop VecOp) Bool = match (vop) { put: true; join(_, _): true; _: false; };
+fn _vecGetsOwnLoop(vop VecOp) Bool = match (vop) { put(_): true; join(_, _): true; _: false; };
 
 fn shouldHashCons(k NodeKind) Bool = match (k) {
 	inletK(_, _, _):        false;
@@ -326,7 +326,7 @@ fn isConstantKind(k NodeKind) Bool = match (k) {
 -- materialize all inputs; the reorders need input 0.
 fn needsInputTempVar(k NodeKind, i Int) Bool = match (k) {
 	reduceK(_, _): true;
-	vecK(vop):     match (vop) { put: true; join(_, _): true; _: i == 0; };
+	vecK(vop):     match (vop) { put(_): true; join(_, _): true; _: i == 0; };
 	phiK(_):       true;     -- PhiNodeExpr::needs_input_temp_var
 	_:             false;
 };
@@ -343,7 +343,7 @@ fn outputMustBeSeparateLoop(k NodeKind) Bool = getsOwnLoop(k);
 -- reorders force input 0; at forces all inputs; put/join force all (gets_own_loop).
 fn inputMustBeSeparateLoop(k NodeKind, i Int) Bool = match (k) {
 	reduceK(_, _): true;
-	vecK(vop):     match (vop) { at: true; put: true; join(_, _): true; _: i == 0; };
+	vecK(vop):     match (vop) { at(_): true; put(_): true; join(_, _): true; _: i == 0; };
 	_:             false;
 };
 

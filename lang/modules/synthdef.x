@@ -534,8 +534,8 @@ fn numTypeInt(op CastOp) Int {
 -- operand's rank by the compiler): 0 is the outermost, negatives count from
 -- the last (cols = -1).
 enum VecOp {
-	at,
-	put,
+	at Int,                  -- axis; the index is input 1
+	put Int,                 -- axis; the index is input 1, the values input 2
 	take(Int, Int),          -- n, axis
 	drop(Int, Int),          -- n, axis
 	stride(Int, Int),        -- n, axis
@@ -1164,12 +1164,17 @@ fn loopPhasor(h BankSample, rate AsSignal, sustain AsSignal) S {
 ---------------------------------------------------------------------------
 --- Vector operations
 
-fn at(a S, i S) S        = SignalExprKind.vecop(VecOp.at) _newSignalExpr([a asSignal, i asSignal]);
-fn at(a S, i AsSignal) S = SignalExprKind.vecop(VecOp.at) _newSignalExpr([a asSignal, i asSignal]);
-fn at(a AsSignal, i S) S = SignalExprKind.vecop(VecOp.at) _newSignalExpr([a asSignal, i asSignal]);
+-- at(a, i, axis): elements of a along the axis at the (integer) index i,
+-- wrapping. A scalar i picks one slice (the axis goes away); a row of k
+-- indices gives the axis length k. On a row: channels i of a.
+fn at(a S, i S, axis Int = -1) S = SignalExprKind.vecop(VecOp.at(axis)) _newSignalExpr([a asSignal, i asSignal]);
+fn at(a S, i AsSignal, axis Int = -1) S = SignalExprKind.vecop(VecOp.at(axis)) _newSignalExpr([a asSignal, i asSignal]);
+fn at(a AsSignal, i S, axis Int = -1) S = SignalExprKind.vecop(VecOp.at(axis)) _newSignalExpr([a asSignal, i asSignal]);
 
-fn put(a AsSignal, i AsSignal, v AsSignal) S {
-    SignalExprKind.vecop(VecOp.put) _newSignalExpr([a asSignal, i asSignal, v asSignal])
+-- put(a, i, v, axis): a with the elements along the axis at the indices i
+-- replaced by v (v shaped like at(a, i, axis); it cycles if smaller).
+fn put(a AsSignal, i AsSignal, v AsSignal, axis Int = -1) S {
+    SignalExprKind.vecop(VecOp.put(axis)) _newSignalExpr([a asSignal, i asSignal, v asSignal])
 }
 
 -- fn matmul(a S, b S) S        = SignalExprKind.vecop(VecOp.at) _newSignalExpr([a asSignal, i asSignal]);

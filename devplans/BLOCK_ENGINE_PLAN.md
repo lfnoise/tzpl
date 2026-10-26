@@ -1745,7 +1745,7 @@ Progress (2026-10-26; M8 is done; §4.8 tensor shape operations follow as M8b):
   regions; the per-ISA budget is M9's). Fixed rules rather than a cost function: the
   measured cases separate cleanly, so a weighted model was not needed yet.
 
-**M8b: Tensor shape operations (§4.8).**
+**M8b: Tensor shape operations (§4.8).** Done 2026-10-26.
 - `Shape.rank` in `synthdef.x`, synthc's IR and `tzpl_Shape`; rank through shape
   inference and broadcasting.
 - Axis arguments (outer to inner from 0, negative from the last, named constants) for
@@ -1792,7 +1792,11 @@ Progress (2026-10-26):
   whose feedback path rotates, 8.38 -> 7.78 ns/sample). Deviation: no channel-pointer
   table rebuilt per parameter-group change. With the gather inline, a table would save
   one `mod` per element; left for the cost table if a synth shows it.
-- **Not done:** `at`/`put` along an axis (they still index the flattening).
+- **`at`/`put` along an axis:** a scalar index picks one slice (the axis goes away), a row
+  of k indices makes the axis k long; `put` writes per outer block, index and inner
+  offset. Rows keep their old code (the dump goldens were unchanged).
+- **M8b is done.** Left as deviations: views in a voice body are still stored, and no
+  per-group pointer tables for the dynamic views (see above).
 
 **M9: Voicer block form (§4.6), portability and performance.**
 - Channel-vector loops over voices, skipping idle groups, per-voice parameter caches.

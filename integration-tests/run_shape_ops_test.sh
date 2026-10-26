@@ -45,7 +45,8 @@ ERR="$(SHAPE_OPS_MODE=errors "$APP" --nogui --no-audio "${MODS[@]}" "$SCRIPT" 2>
 for want in "axis 2 is outside a rank-2 signal" "axis -3 is outside a rank-2 signal" \
             "drop leaves no elements" "join: shapes 3x4 and 2x3 differ" \
             "stack: shapes 3x4 and 6 differ" "reshape: 12 channels do not divide by 5" \
-            "transpose: [0, 0, 1] is not a permutation"; do
+            "transpose: [0, 0, 1] is not a permutation" \
+            "at: the index must be a scalar or a row, not 2x2"; do
     if grep -qF "ERROR $want" <<< "$ERR"; then echo "PASS error: $want"
     else echo "FAIL error not reported: $want"; FAILED=1; fi
 done

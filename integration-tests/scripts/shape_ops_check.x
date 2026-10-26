@@ -272,6 +272,43 @@ add("rotate_stride_sum", fn() S { live(x6, d6) rotate(control("amt", lspec(-8.0,
 add("rotate_scan_r2", fn() S { live(x34, d34) rotate(1, -1) scan(BinaryOp.add, -1) },
 	refReduce(alongAxis(x34, d34, -1, 4, fn(i Int) Int { wrap(i + 1, 4) }).0, d34, -1, true));
 
+-- at / put along an axis.
+fn ints(xs [Int]) S = tensor(row(xs length), xs @ toFloat) * control("one", lspec(0.0, 2.0, 1.0)) i32;
+fn ctlIdx(name String, v Float) S = control(name, lspec(-8.0, 8.0, v)) i32;
+add("at_row_r2", fn() S { live(x34, d34) at(ctlIdx("i", 1.0), 0) }, (alongAxis(x34, d34, 0, 1, fn(i Int) Int { 1 }).0, [4]));
+add("at_col_r2", fn() S { live(x34, d34) at(ctlIdx("i", -1.0), -1) }, (alongAxis(x34, d34, -1, 1, fn(i Int) Int { 3 }).0, [3]));
+add("at_cols_r2", fn() S { live(x34, d34) at(ints([2, 0, 5]), -1) },
+	alongAxis(x34, d34, -1, 3, fn(i Int) Int { [2, 0, 1][i] }));
+add("at_planes_r3", fn() S { live(x234, d234) at(ints([1, 1, 0]), 0) },
+	alongAxis(x234, d234, 0, 3, fn(i Int) Int { [1, 1, 0][i] }));
+add("at_mid_r3", fn() S { live(x234, d234) at(ctlIdx("i", 2.0), 1) },
+	(alongAxis(x234, d234, 1, 1, fn(i Int) Int { 2 }).0, [2, 4]));
+-- put: row 1 of a 3x4 replaced by 101..104; columns 3 and 0 by a 3x2.
+fn refPut(xs [Float], dims [Int], k Int, idx [Int], vs [Float]) [Float] {
+	var out = xs copy;
+	var w = 0;
+	while (w < prod(dims)) {
+		let mi = multiIdx(dims, w);
+		var j = 0;
+		while (j < idx length) {
+			if (wrap(idx[j], dims[k]) == mi[k]) {
+				var vi = mi copy;
+				vi[k] = j;
+				var vd = dims copy;
+				vd[k] = idx length;
+				out[w] = vs[flatIdx(vd, vi)];
+			}
+			j = j + 1;
+		}
+		w = w + 1;
+	}
+	out
+}
+add("put_row_r2", fn() S { live(x34, d34) put(ctlIdx("i", 1.0), tensor(row(4), iota(4, 101.0)), 0) },
+	(refPut(x34, d34, 0, [1], iota(4, 101.0)), d34));
+add("put_cols_r2", fn() S { live(x34, d34) put(ints([3, 0]), tensor(matrix(3, 2), iota(6, 201.0)), -1) },
+	(refPut(x34, d34, 1, [3, 0], iota(6, 201.0)), d34));
+
 -- An axis op on a scalar treats it as a row.
 add("scalar_stutter", fn() S { live([5.0], [Int]()) stutter(3) }, ([5.0, 5.0, 5.0], [3]));
 
@@ -308,6 +345,10 @@ for (vc : [("v24", x24, d24), ("v34", x34, d34)]) {
 	voiced("vtrans_" $ tag, xs, dims, fn(x S) S { x transpose }, refPermute(xs, dims, [1, 0]));
 	voiced("vjoin1_" $ tag, xs, dims, fn(x S) S { [x, x] join(1) }, refJoin(xs, dims, xs, dims, 1));
 	voiced("vstack1_" $ tag, xs, dims, fn(x S) S { [x, x] stack(1) }, refStack(xs, xs, dims, 1));
+	voiced("vatcols_" $ tag, xs, dims, fn(x S) S { x at(tensor(row(2), [3.0, 1.0]) i32, -1) },
+		alongAxis(xs, dims, -1, 2, fn(i Int) Int { [3, 1][i] }));
+	voiced("vputrow_" $ tag, xs, dims, fn(x S) S { x put(1, tensor(row(4), iota(4, 101.0)), 0) },
+		(refPut(xs, dims, 0, [1], iota(4, 101.0)), dims));
 }
 
 -- Cases the compiler must refuse.
@@ -318,6 +359,7 @@ bad push!(("bad_drop", fn() S { live(x6, d6) drop(6) |> outlet }));
 bad push!(("bad_join", fn() S { [live(x34, d34), live(x6, [2, 3])] join(0) |> outlet }));
 bad push!(("bad_stack", fn() S { [live(x34, d34), live(x6, d6)] stack |> outlet }));
 bad push!(("bad_reshape", fn() S { live(x34, d34) reshape([5, -1]) |> outlet }));
+bad push!(("bad_at", fn() S { live(x34, d34) at(live([0.0, 1.0, 2.0, 0.0], [2, 2]) i32, 0) |> outlet }));
 bad push!(("bad_perm", fn() S { live(x234, d234) transpose([0, 0, 1]) |> outlet }));
 
 let mode = match (getEnv("SHAPE_OPS_MODE")) { some(m): m; none: "dump"; };

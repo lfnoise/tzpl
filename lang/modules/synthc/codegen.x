@@ -837,6 +837,32 @@ fn _reduceToInput(c VIdx, ins Shape, d Int) VIdx {
 	viAdd(viMul(o, VIdx.vc(alen * inner)), i)
 }
 
+-- Element (o, j, in) of at(a, i, axis) reads a[o, mod(i[j], A), in]: the
+-- output's layout is a's with the axis k long (k = the index's channels; a
+-- scalar index, k = 1, has the same flat layout as a without the axis).
+fn _genAtAxis(ctx Ctx, n NIdx, ax Int, cel String) String {
+	let a = ctx.ins[n][0];
+	let ix = ctx.ins[n][1];
+	let ash = ctx.shape[a];
+	let d = ash axisDim(ax);
+	let alen = ash.dims[d];
+	let local = ctx _isVoiceLocalStorage(a);
+	let c = viOf(!local ? cel : (`cgFlatChanShift == 0 ? "0" : "(%^ & %^)" fmt(cel, `cgFlatChanMask)));
+	let sp = _axisSplit(c, ash withDim(d, ctx.chans[ix]), d);
+	let wrapped = "synthdef::mod(isize(%^), isize(%^))" fmt(ctx _atIndex(ix, sp.a vxstr), alen);
+	let src = _axisJoin(sp, VIdx.vs(wrapped), alen) vxstr;
+	if (local) {
+		let voice = `cgFlatChanShift == 0 ? cel : "(%^ >> %^)" fmt(cel, `cgFlatChanShift);
+		return "%^[%^ * %^ + %^]" fmt(_varName(ctx, a), voice, ctx.chans[a], src);
+	}
+	"%^[%^]" fmt(_varName(ctx, a), src)
+}
+-- Index channel j of at's index input (read in its own shape).
+fn _atIndex(ctx Ctx, ix NIdx, j String) String {
+	var `cgDstShape Shape = ctx.shape[ix];
+	genExpr(ctx, ix, j)
+}
+
 fn _genVec(ctx Ctx, n NIdx, vop VecOp, cel String) String {
 	let inp = ctx.ins[n][0];
 	let inChans = ctx.chans[inp];
@@ -846,7 +872,8 @@ fn _genVec(ctx Ctx, n NIdx, vop VecOp, cel String) String {
 	-- at(a, i): a dynamic gather from the materialized array a by the index signal i
 	-- at channel cel, wrapped mod a.chans. Mirrors the C++ VecAt visitor.
 	match (vop) {
-		at: {
+		at(ax): {
+			if (ctx.shape[inp].rank >= 2) { return ctx _genAtAxis(n, ax, cel); }
 			-- In-place delay element read (inplaceDelayOps): the delay
 			-- read's materialization is suppressed, so load the state
 			-- directly. The fixReaders antecedents order this before the
@@ -952,6 +979,7 @@ fn _genVecPut(ctx Ctx, root NIdx) String {
 	let outv = _varName(ctx, root);
 	let a = ins[0]; let i = ins[1]; let v = ins[2];
 	let aChans = ctx.chans[a];
+	if (ctx.shape[a].rank >= 2) { return ctx _genVecPutAxis(root); }
 	let putCount = min(ctx.chans[i], ctx.chans[v]);
 	let t = _tabs(`cgIndent); let t1 = _tabs(`cgIndent + 1);
 	if (`cgFlatOwnLoop) {
@@ -972,6 +1000,37 @@ fn _genVecPut(ctx Ctx, root NIdx) String {
 	parts push!(t $ "memcpy(%^, %^, %^ * sizeof(%^));" fmt(outv, _varName(ctx, a), aChans, ty));
 	parts push!(t $ "for (usize _j = 0; _j < %^; ++_j) {" fmt(putCount));
 	parts push!(t1 $ "%^[synthdef::mod(isize(%^), isize(%^))] = %^;" fmt(outv, iref, aChans, vref));
+	parts push!(t $ "}");
+	parts join("\n")
+}
+
+-- put along an axis of a tensor: copy a, then for each outer block o, index
+-- j and inner offset: out[o, mod(i[j], A), in] = v[(o, j, in)] (v cycles).
+fn _genVecPutAxis(ctx Ctx, root NIdx) String {
+	let ins = ctx.ins[root];
+	let ty = cppType(ctx.typ[root]);
+	let a = ins[0]; let i = ins[1]; let v = ins[2];
+	let ash = ctx.shape[a];
+	let ax = match (ctx.kind[root]) { vecK(vop): match (vop) { put(x): x; _: -1; }; _: -1; };
+	let d = ash axisDim(ax);
+	let alen = ash.dims[d];
+	let inner = ash innerSize(d);
+	let outer = ash chans // (alen * inner);
+	let k = ctx.chans[i];
+	let vc = ctx.chans[v];
+	let t = _tabs(`cgIndent); let t1 = _tabs(`cgIndent + 1);
+	let outv = `cgFlatOwnLoop ? "%^ + i * %^" fmt(_varName(ctx, root), ash chans) : _varName(ctx, root);
+	let av = `cgFlatOwnLoop ? ctx _voiceArr(a) : _varName(ctx, a);
+	let iv = `cgFlatOwnLoop ? ctx _voiceArr(i) : _varName(ctx, i);
+	let vv = `cgFlatOwnLoop ? ctx _voiceArr(v) : _varName(ctx, v);
+	let iref = k == 1 ? (`cgFlatOwnLoop ? ctx _voiceElem(i) : ctx _scalarRef(i)) : "(%^)[_j]" fmt(iv);
+	let vflat = "(_o * %^ + _j * %^ + _n)" fmt(k * inner, inner);
+	let vref = vc == 1 ? (`cgFlatOwnLoop ? ctx _voiceElem(v) : ctx _scalarRef(v)) : "(%^)[%^ %% %^]" fmt(vv, vflat, vc);
+	var parts [String] = [];
+	parts push!(t $ "memcpy(%^, %^, %^ * sizeof(%^));" fmt(outv, av, ash chans, ty));
+	parts push!(t $ "for (usize _o = 0; _o < %^; ++_o) for (usize _j = 0; _j < %^; ++_j) for (usize _n = 0; _n < %^; ++_n) {" fmt(outer, k, inner));
+	parts push!(t1 $ "(%^)[_o * %^ + usize(synthdef::mod(isize(%^), isize(%^))) * %^ + _n] = %^;"
+		fmt(outv, alen * inner, iref, alen, inner, vref));
 	parts push!(t $ "}");
 	parts join("\n")
 }
@@ -2152,7 +2211,7 @@ fn genTree(ctx Ctx, treeIdx Int, cel String) String {
 		-- put/join build their output array in a block (gets_own_loop); at is a
 		-- normal inline gather and falls through.
 		vecK(vop): { match (vop) {
-			put:  { return ctx _genVecPut(root); }
+			put(_): { return ctx _genVecPut(root); }
 			join(_, _): { return ctx _genVecJoin(root); }
 			_:    {}
 		} }

@@ -726,8 +726,8 @@ urand() &lt; prob          <span class="cmt">-- Bernoulli trigger (see coin)</sp
                 <tr><td><code>reshape(a, dims)</code></td><td>The same channels in a new shape; one dimension may be &minus;1 (whatever is left). <code>reshape(a, shape)</code> takes a <code>Shape</code>.</td></tr>
                 <tr><td><code>join([a, b, ...], axis = -1)</code></td><td>Concatenation along an axis; the other dimensions must agree.</td></tr>
                 <tr><td><code>stack([a, b, ...], axis = 0)</code></td><td>Signals of one shape along a new axis: <code>[l, r] stack</code> of two n-channel signals is a 2&times;n matrix.</td></tr>
-                <tr><td><code>at(a, i)</code></td><td>Channel <code>i</code> (a signal or constant; cyclic). 1-channel result per index channel.</td></tr>
-                <tr><td><code>put(a, i, v)</code></td><td>Replace channel <code>i</code> of <code>a</code> with <code>v</code>.</td></tr>
+                <tr><td><code>at(a, i, axis = -1)</code></td><td>Elements along the axis at the integer index <code>i</code> (a signal or constant; cyclic). A scalar <code>i</code> picks one slice and the axis goes away (<code>m at(1, 0)</code> is row 1 of a matrix); a row of k indices makes the axis k long.</td></tr>
+                <tr><td><code>put(a, i, v, axis = -1)</code></td><td><code>a</code> with the elements along the axis at <code>i</code> replaced by <code>v</code> (shaped like <code>at(a, i, axis)</code>; it cycles if smaller).</td></tr>
                 <tr><td><code>reduce(a, op)</code> / <code>reduce(a, op, axis)</code></td><td>Combine with a <code>BinaryOp</code>: every channel into one, or along an axis, which goes away (a 3&times;4 matrix reduced along axis 0 is a row of 4).</td></tr>
                 <tr><td><code>sum(a)</code> / <code>sum(a, axis)</code></td><td><code>reduce</code> with add &mdash; the mixdown.</td></tr>
                 <tr><td><code>product</code>, <code>minOf</code>, <code>maxOf</code></td><td><code>reduce</code> with multiply, min, max; the same two forms.</td></tr>

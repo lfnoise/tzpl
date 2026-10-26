@@ -47,12 +47,12 @@ fn _noShape() Shape = shape([0]);
 -- vec op type helpers (factored out: the join arms accumulate over all
 -- inputs).
 fn _vecInputConstraint(vop VecOp, nodeTyp NumType, i Int) NumType = match (vop) {
-	put:  i == 1 ? ANY_INT : nodeTyp;
+	put(_):  i == 1 ? ANY_INT : nodeTyp;
 	join(_, _): nodeTyp;
 	_:    i == 0 ? nodeTyp : ANY_INT;
 };
 fn _vecNarrowType(ctx Ctx, n NIdx, vop VecOp, ins [Int]) NumType = match (vop) {
-	put:  ctx.typ[n] & ctx.typ[ins[0]] & ctx.typ[ins[2]];
+	put(_):  ctx.typ[n] & ctx.typ[ins[0]] & ctx.typ[ins[2]];
 	join(_, _): { var t = ctx.typ[n]; for (x : ins) { t = t & ctx.typ[x]; } t }
 	_:    ctx.typ[n] & ctx.typ[ins[0]];
 };
@@ -76,7 +76,7 @@ fn vecAxis(vop VecOp) Int = match (vop) {
 };
 
 fn _isAxisOp(vop VecOp) Bool = match (vop) {
-	at: false;  put: false;  permute(_): false;  reshape(_): false;
+	at(_): false;  put(_): false;  permute(_): false;  reshape(_): false;
 	join(_, _): false;  reduce(_): false;  _: true;
 };
 
@@ -84,14 +84,33 @@ fn _isAxisOp(vop VecOp) Bool = match (vop) {
 fn vecShape(vop VecOp, shs [Shape]) (Shape, String) {
 	let s = shs[0];
 	match (vop) {
-		at:            (chansShape(shs[1] chans), "");
-		put:           (chansShape(s chans), "");
+		at(ax):        _atShape(s, shs[1], ax);
+		put(ax):       _putShape(s, shs[1], ax);
 		reduce(_):     (scalarShape(), "");
 		join(ax, new): new ? _stackShape(shs, ax) : _joinShape(shs, ax);
 		permute(p):    _permuteShape(s, p);
 		reshape(dims): _reshapeShape(s, dims);
 		_:             _axisOpShape(vop, s);
 	}
+}
+
+-- at along an axis: a scalar index removes the axis, a row of k sets it to
+-- k. On a row (or scalar) a, the index's channel count, as before.
+fn _atShape(a Shape, ix Shape, ax Int) (Shape, String) {
+	if (a chans == 0 || ix chans == 0) { return (a, ""); }
+	if (a.rank <= 1) { return (chansShape(ix chans), ""); }
+	let d = a axisDim(ax);
+	if (d < 0) { return (a, _axisErr(ax, a)); }
+	if (ix.rank >= 2) { return (a, "at: the index must be a scalar or a row, not %^" fmt(ix toString)); }
+	if (ix.rank == 0) { return (a removeDim(d), ""); }
+	(a withDim(d, ix chans), "")
+}
+
+fn _putShape(a Shape, ix Shape, ax Int) (Shape, String) {
+	if (a chans == 0 || a.rank <= 1) { return (a, ""); }
+	if (a axisDim(ax) < 0) { return (a, _axisErr(ax, a)); }
+	if (ix.rank >= 2) { return (a, "put: the index must be a scalar or a row, not %^" fmt(ix toString)); }
+	(a, "")
 }
 
 fn _axisErr(ax Int, s Shape) String = "axis %^ is outside a rank-%^ signal" fmt(ax, max(s.rank, 1));
