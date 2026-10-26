@@ -1075,9 +1075,14 @@ void CodeGen::genVarDecl(VarDeclNode* decl) {
         reg = dst;
     }
 
+    // A top-level `var` is a global, and only the global: no register copy.
+    // Functions and lambdas read and write the global slot, so a copy here
+    // would go stale in both directions (a function's `count = count + 1`
+    // invisible at top level, a top-level assignment invisible to them).
     auto it = typeChecker_.globalVars().find(decl->name);
     if (it != typeChecker_.globalVars().end() && localScopes_.size() <= 1) {
         emitGlobalStore(reg, it->second.globalIndex, decl->resolvedType, /*init=*/true);
+        return;
     }
 
     declareLocal(decl->name, reg, decl->resolvedType, true);
@@ -2248,6 +2253,13 @@ void CodeGen::emitGlobalStoreIfNeeded(const std::string& name, u16 reg) {
     auto it = typeChecker_.globalVars().find(name);
     if (it != typeChecker_.globalVars().end() && localScopes_.size() <= 1) {
         emitGlobalStore(reg, it->second.globalIndex, it->second.type, /*init=*/true);
+        // A mutable binding (`var (a, b) = ...`) is the global only, as in
+        // genVarDecl: drop the register copy the pattern just declared.
+        if (!localScopes_.empty()) {
+            auto& scope = localScopes_.back();
+            auto lit = scope.find(name);
+            if (lit != scope.end() && lit->second.isMutable) scope.erase(lit);
+        }
     }
 }
 

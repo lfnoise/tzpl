@@ -53,6 +53,13 @@ sample at a time. Synths and effects use 1.3x to 3.5x less CPU (an echo
 
 **Fixed**
 
+- A top-level `var` is now one variable everywhere. Top-level code used to
+  read and write a private copy, so a function's `count = count + 1` was
+  invisible at top level, a top-level assignment was invisible to functions,
+  and a lambda saw the variable's first value. Scripts that count failures in
+  a function and test the count at top level now see the real count.
+  Closures over a `var` share it, at top level as inside functions; capture a
+  `let` copy for a snapshot.
 - Mixing `f32` and `f64` signals in a synthdef no longer fails with
   "intersected to empty". An `f64` phase minus an `f32` oscillator, an
   `f32` control times an `f64` playhead, a comparison or `select2` between

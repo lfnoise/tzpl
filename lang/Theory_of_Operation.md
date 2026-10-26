@@ -682,7 +682,7 @@ Numeric promotion instructions (`op_int_to_float`, `op_int_to_fraction`, etc.) a
 **Lambda expressions:** Compiled similarly to function declarations:
 1. Compile the lambda body into a new `CodeBlock`.
 2. Emit `op_make_lambda` with the code block and a register range containing the captured free variables.
-3. The `Lambda` object is created at runtime with copies of the captured values.
+3. The `Lambda` object is created at runtime with copies of the captured `let` values. A captured `var` is shared instead (Lua-style upvalues): the closure holds an `UpVar` cell that points into the declaring frame's register while that frame is live and is closed into the heap when it returns, so writes on either side are seen by the other. A top-level `var` is a global, never captured: closures and functions read and write its global slot, as top-level code does.
 
 **Auto-map calls (Array):** When a function call involves an auto-mapped Array argument:
 1. Emit code to determine the array length.

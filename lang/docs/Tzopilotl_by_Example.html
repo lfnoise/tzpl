@@ -968,7 +968,18 @@ d println;               <span class="cmt">-- [1, 2, 3]</span></code></pre>
 <span class="cmt">-- Lambdas capture from their lexical environment</span>
 <span class="kw">let</span> greeting = <span class="str">"hello"</span>;
 <span class="kw">let</span> greet = <span class="kw">fn</span>(name <span class="kw">String</span>) <span class="kw">String</span> { greeting $ <span class="str">" "</span> $ name };
-<span class="str">"world"</span> greet println;  <span class="cmt">-- "hello world"</span></code></pre>
+<span class="str">"world"</span> greet println;  <span class="cmt">-- "hello world"</span>
+
+<span class="cmt">-- A captured var is shared: the lambda sees later assignments, and its own</span>
+<span class="cmt">-- writes are seen outside. A captured let is the value it had.</span>
+<span class="kw">var</span> n = <span class="num">1</span>;
+<span class="kw">let</span> peek = <span class="kw">fn</span>() <span class="kw">Int</span> { n };
+n = <span class="num">5</span>;
+peek() println;            <span class="cmt">-- 5</span>
+<span class="kw">let</span> frozen = n;
+<span class="kw">let</span> peekFrozen = <span class="kw">fn</span>() <span class="kw">Int</span> { frozen };
+n = <span class="num">9</span>;
+peekFrozen() println;      <span class="cmt">-- 5</span></code></pre>
 
 <h3 id="operator-overloading">4.6 Operator Overloading</h3>
 <p>Define a function whose name is the operator symbol to overload it for custom types.

@@ -36,7 +36,8 @@ let isAbove = fn(n Int) Bool { n > threshold };
 isAbove(5) println;
 isAbove(15) println;
 
--- Value-capture semantics
+-- A `var` is shared with closures (Lua-style upvalues; see closure_upvar.x):
+-- the closure sees the later assignment. A `let` would be a snapshot.
 var y = 10;
 let captureY = fn() Int { y };
 y = 999;
