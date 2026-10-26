@@ -764,8 +764,23 @@ signal's row-major flattening and produce rows. With tensor signals they need an
   `rotate(amount, axis)`, `reduce(op, axis)`, `scan(op, axis)`; `join(axis)` concatenates
   along an axis, and `transpose` generalizes to a permutation of axes. `at`/`put` index
   along an axis.
-- **Default axis:** the last one (`dims[3]`, the columns). A one-dimensional signal is
-  a row, so every existing use keeps its meaning.
+- **Axis numbering (decided 2026-10-26), innermost first, as in APL and J cells:** axis 0
+  is the columns (`dims[3]`, the axis within 1-cells), axis 1 the rows (within 2-cells),
+  axis 2 the planes, axis 3 the outermost. An axis keeps its number at any rank: the row
+  axis is 1 for a matrix and for a cuboid alike, unlike NumPy, where it shifts with
+  rank. Named constants (`cols`, `rows`, `planes`, ...) make code read without numbers.
+  Broadcasting aligns trailing axes, so the same axis number names aligned axes of
+  operands of different ranks.
+- **Default axis:** 0, the columns. A one-dimensional signal is a row, so every existing
+  use keeps its meaning.
+- **`Shape` gets an explicit `rank`** (decided 2026-10-26). Today rank is inferred from
+  the first dimension that isn't 1, so `matrix(1, n)` and `row(n)` are the same shape.
+  With a rank member, a 1×n matrix stays rank 2: an axis beyond a value's rank is an
+  error, and shape operations keep or change rank explicitly (`reduce` removes an axis,
+  `join` along a new axis adds one). Broadcasting's result rank is the operands'
+  largest. The plugin ABI's `tzpl_Shape` (4 dims only) gets the rank too, for port
+  metadata (UI shape labels, `tapShape`): a layout change, so ABI v3's structs change
+  before v3 ships, with plugins regenerated.
 - **Shape inference** gives each result's shape from the operand's shape, the axis and
   the constant arguments (`take` shortens that axis to n, `reduce` removes it, ...).
 
@@ -788,9 +803,10 @@ axis.
   through it with no copy (D4: every channel is reached through a pointer).
 - **Offset at audio rate:** a per-sample gather, in the serial form or as 4-lane gathers.
 
-**Tests:** shape-inference goldens; each operation against a reference on the
-flattened layout (axis = last) and on explicit tensors (axis 0..3); the corpus
-unchanged, since existing uses act on rows.
+**Tests:** shape-inference goldens, including rank (a 1×n matrix stays rank 2); each
+operation against a reference on the flattened layout (axis 0) and on explicit tensors
+(axes 0–3); errors for an axis beyond a value's rank; the corpus unchanged, since
+existing uses act on rows.
 
 ## 5. Runtime support library (`shared/tzpl_dsp/`)
 
@@ -1719,8 +1735,10 @@ Progress (2026-10-26; M8 is done; §4.8 tensor shape operations follow as M8b):
   measured cases separate cleanly, so a weighted model was not needed yet.
 
 **M8b: Tensor shape operations (§4.8).**
-- Axis arguments for the shape operations in `synthdef.x` and the importer, with shape
-  inference.
+- `Shape.rank` in `synthdef.x`, synthc's IR and `tzpl_Shape`; rank through shape
+  inference and broadcasting.
+- Axis arguments (innermost first, named constants) for the shape operations in
+  `synthdef.x` and the importer, with shape inference.
 - Static operations as compile-time index maps folded into consumers' channel tables;
   `reduce` and `scan` per axis as folded op trees.
 - `slice` with a varying offset and `rotate` with a varying amount: pointer tables
