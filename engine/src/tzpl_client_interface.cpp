@@ -347,6 +347,16 @@ void safetyLimiter(Engine* e, Enable onoff) {
     e->enableSafetyLimiter_ = onoff;
 }
 
+void feedbackMode(Engine* e, int silo, FeedbackMode m) {
+    if (!e || silo < 0 || silo >= (int)e->silos_.size()) return;
+    e->silos_[silo].feedbackMode_.store((int)m, std::memory_order_relaxed);
+}
+
+FeedbackMode feedbackMode(Engine* e, int silo) {
+    if (!e || silo < 0 || silo >= (int)e->silos_.size()) return FeedbackMode::sample;
+    return (FeedbackMode)e->silos_[silo].feedbackMode_.load(std::memory_order_relaxed);
+}
+
 f32 masterGain(Engine* e) {
     return e ? e->masterGain_ : 1.f;
 }
@@ -1166,36 +1176,6 @@ static Node* stepFaderFor(Engine* e, Silo* s, tzpl_SignalType type) {
     return newXFaderNode(e, s, 0., fadeLinear, type);
 }
 
-// Would connecting srcNode -> dstNode close a cycle in the graph the bundle
-// sees: the silo's shadow with this bundle's edits so far applied? (The
-// shadow lags bundles still in flight; ConnectCmd re-checks on RT.)
-static bool shadowWouldCycle(Engine* e, Silo* s, ShadowEdits const& edits,
-                             i64 srcNode, i64 dstNode) {
-    if (srcNode == dstNode) return true;
-    GraphShadow g;
-    {
-        std::lock_guard<std::mutex> lck(e->shadowMtx_);
-        g = s->shadow_;
-    }
-    commitShadowEdits(g, edits);
-    // Reachability from dstNode along connections.
-    std::unordered_map<i64, std::vector<i64>> adj;
-    for (ShadowConn const& c : g.conns) adj[c.srcNode].push_back(c.dstNode);
-    std::vector<i64> stack{dstNode};
-    std::unordered_map<i64, bool> seen{{dstNode, true}};
-    while (!stack.empty()) {
-        i64 n = stack.back();
-        stack.pop_back();
-        auto it = adj.find(n);
-        if (it == adj.end()) continue;
-        for (i64 m : it->second) {
-            if (m == srcNode) return true;
-            if (!seen[m]) { seen[m] = true; stack.push_back(m); }
-        }
-    }
-    return false;
-}
-
 static tzpl_SErr applyNewNode(Engine* e, Silo* s, CommandList& out,
                               ShadowEdits& edits,
                               char const* name, i64 nodeID) {
@@ -1238,8 +1218,8 @@ static tzpl_SErr applyConnect(Engine* e, Silo* s, CommandList& out,
     err = connectableTypes(srcPort->type_, dstPort->type_);
     if (err != tzpl_errNone) return err;
 
-    // Feed-forward only (D1 phase 1).
-    if (shadowWouldCycle(e, s, edits, src.nodeID, dst.nodeID)) return tzpl_errCyclicConnection;
+    // A connection may close a cycle (MF): the silo runs it per its
+    // feedbackMode.
 
     // Pre-allocate the hidden nodes this connection may need. All of them are
     // built in NRT (allocation is forbidden on the RT thread) and whichever
@@ -1288,21 +1268,6 @@ static tzpl_SErr applyReconnectOutput(Engine* e, Silo* s, CommandList& out,
 
     err = compatibleTypes(oldSrcPort->type_, newSrcPort->type_);
     if (err != tzpl_errNone) return err;
-
-    // Every input oldSrc feeds will be fed by newSrc: none may reach it.
-    {
-        std::vector<i64> dsts;
-        {
-            std::lock_guard<std::mutex> lck(e->shadowMtx_);
-            for (ShadowConn const& c : s->shadow_.conns)
-                if (c.srcNode == oldSrc.nodeID && c.srcPort == oldSrc.index)
-                    dsts.push_back(c.dstNode);
-        }
-        for (i64 d : dsts) {
-            if (d != newSrc.nodeID && shadowWouldCycle(e, s, edits, newSrc.nodeID, d))
-                return tzpl_errCyclicConnection;
-        }
-    }
 
     Node* xfaderNode = nullptr;
     bool step = false;

@@ -27,6 +27,7 @@ For a single plugin's process loop without the engine, see
 | `bank` | `resonBank(8)` with four notes held throughout |
 | `pluck` | `ksPluck(12)`, a note every 0.5 s (about six strings ringing) |
 | `bankseq` | `resonBank(8)`, a note every second held for 0.5 s |
+| `cycle`, `cycleblk`, `chain` | a node pair (tanh shaper, one-pole) in a feedback loop, sample and block feedback mode, and without the loop; a "node" is one pair. Not in the default list: run them by name. On `main`, give `BENCH_X` a copy of `bench.x` without the `feedbackMode` line |
 
 ## Results (2026-10-26, Apple M-series, ms CPU per node-second)
 
@@ -44,3 +45,6 @@ For a single plugin's process loop without the engine, see
 | bank | 2.456 | 2.175 | 1.469 | 1.67x |
 | pluck | 0.652 | 0.526 | 0.260 | 2.51x |
 | bankseq | 1.427 | 1.249 | 0.644 | 2.22x |
+
+Feedback between nodes (MF): `chain` 0.153, `cycle` 0.782, `cycleblk` 0.114
+(`main`: `chain` 0.451, `cycle` 0.508).

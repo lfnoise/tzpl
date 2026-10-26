@@ -114,6 +114,11 @@ struct Silo
     i64 sampleTime_ = 0;
     int channelOffset_ = 0;
     bool needsSort_ = false;
+    // Feedback between nodes (MF): a cycle runs its nodes a sample at a time,
+    // its closing connections a sample late (0, the default, as the old
+    // per-sample engine did), or a block at a time with them a block late
+    // (1, cheaper). Set from any thread; read once per block.
+    std::atomic<int> feedbackMode_{0};
 
     // ---- The current block (RT) ----
     // Commands and tasks are applied in time order before any node runs.
@@ -133,8 +138,11 @@ struct Silo
     // Per-clock commands popped as due in this block, not yet run.
     std::vector<CommandList> dueLists_;
     u64 droppedNodeEvents_ = 0;
-    u32 visitStamp_ = 0;
     u32 sortGen_ = 0;
+    // Tarjan's walk (sortNodes): visit counter, finish counter, stack top.
+    int sccCounter_ = 0;
+    int finishCounter_ = 0;
+    Node* sccStack_ = nullptr;
 
     // Optional attached VM for event-driven scripting (opaque pointer to ts::VM).
     // Set from an NRT thread via command; only accessed by the Silo's RT thread.
@@ -216,12 +224,12 @@ struct Silo
     void disconnect(OutPort* port);
     void disconnectNode(Node* node);
     tzpl_SErr reconnectOutput(OutPort* oldSrc, OutPort* newSrc);
-    // True if connecting an outlet of srcNode to an inlet of dstNode would
-    // close a cycle (dstNode already reaches srcNode).
-    bool wouldCycle(Node* srcNode, Node* dstNode);
 
     void sortVisitNode(Node* node, Node*& lastSorted);
+    void sortAppend(Node* node, Node*& lastSorted);
     void sortNodes();
+    // A cycle's nodes (first and the len - 1 after it in the sorted list).
+    void runCycle(Node* first, int len, int n);
     void sortedListRemove(Node* node);
 
     void unlink(InPort* dst);

@@ -460,35 +460,52 @@ void Node::runBlock(Silo* s, int n) {
         funs.process(synth, 0, n);
         return;
     }
+    beginSpans(s, n);
+    runSpan(0, n);
+    endSpans();
+}
 
-    // Split the block at each event. A node starting mid-block outputs 0
-    // before its start; a node freed mid-block outputs 0 after it.
-    bool running = true;
-    for (int k = 0; k < numEvents_; ++k) {
-        if (events_[k].kind == nodeEvStart) { running = false; break; }
+void Node::beginSpans(Silo* s, int n) {
+    spanEv_ = 0;
+    spanN_ = n;
+    spanEvents_ = eventsStamp_ == s->blockStart_ && numEvents_ > 0;
+    // A node starting mid-block outputs 0 before its start; a node freed
+    // mid-block outputs 0 after it.
+    spanRunning_ = true;
+    if (spanEvents_) {
+        for (int k = 0; k < numEvents_; ++k) {
+            if (events_[k].kind == nodeEvStart) { spanRunning_ = false; break; }
+        }
     }
-    int pos = 0;
-    for (int k = 0; k < numEvents_; ++k) {
-        NodeEvent const& ev = events_[k];
-        int off = std::min(ev.offset, n);
+}
+
+// Split [lo, hi) at each event in it. An event at the block's end (offset
+// n) belongs to the last span.
+void Node::runSpan(int lo, int hi) {
+    int pos = lo;
+    while (spanEvents_ && spanEv_ < numEvents_) {
+        NodeEvent const& ev = events_[spanEv_];
+        int off = std::min(ev.offset, spanN_);
+        if (!(off < hi || (hi == spanN_ && off <= hi))) break;
+        ++spanEv_;
         switch (ev.kind) {
             case nodeEvStart:
-                if (!running) {
+                if (!spanRunning_) {
                     zeroOutputs(pos, off);
                     pos = off;
-                    running = true;
+                    spanRunning_ = true;
                 }
                 break;
             case nodeEvFree:
-                if (running && off > pos) funs.process(synth, pos, off - pos);
-                if (running) pos = off;
-                zeroOutputs(pos, n);
-                pos = n;
-                running = false;
+                if (spanRunning_ && off > pos) funs.process(synth, pos, off - pos);
+                if (spanRunning_) pos = off;
+                zeroOutputs(pos, spanN_);
+                pos = hi;
+                spanRunning_ = false;
                 break;
             case nodeEvResetVoice:
             case nodeEvReset:
-                if (running && off > pos) {
+                if (spanRunning_ && off > pos) {
                     funs.process(synth, pos, off - pos);
                     pos = off;
                 }
@@ -497,9 +514,8 @@ void Node::runBlock(Silo* s, int n) {
                 break;
         }
     }
-    if (running && pos < n) funs.process(synth, pos, n - pos);
-    else if (!running && pos < n) zeroOutputs(pos, n);
-    numEvents_ = 0;
+    if (spanRunning_ && pos < hi) funs.process(synth, pos, hi - pos);
+    else if (!spanRunning_ && pos < hi) zeroOutputs(pos, hi);
 }
 
 void deleteNodes(Node* node) {

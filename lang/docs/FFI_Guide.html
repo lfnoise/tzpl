@@ -3567,6 +3567,7 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
   <tr><td><code>getStreamTime() Float</code></td><td>Current audio stream time in seconds.</td></tr>
   <tr><td><code>masterGain(gain Float) Void</code></td><td>Set the master output gain. <code>1.0</code> = unity, <code>0.0</code> = silence. When the safety limiter is enabled, the master gain can reduce the limiter's gain but never increase it &mdash; it will not fight the limiter. When audio is below the limit, the master gain applies freely. When the limiter is disabled, the master gain is a simple multiply.</td></tr>
   <tr><td><code>safetyLimiter(on Bool) Void</code></td><td>Enable or disable the safety limiter on the master output. When enabled, output is hard-limited to prevent clipping/damage.</td></tr>
+  <tr><td><code>feedbackMode(silo Int, mode FeedbackMode) Void</code></td><td>How <code>silo</code> runs connections that form a cycle (a node feeding itself, directly or through others). <code>FeedbackMode.feedbackSample</code> (the default): the cycle&rsquo;s nodes run a sample at a time and the connection that closes the cycle delivers its source&rsquo;s previous sample, so a loop has a one-sample delay. <code>FeedbackMode.feedbackBlock</code>: the nodes run whole blocks and that connection is a block late &mdash; cheaper, as in SuperCollider. Nodes outside cycles run in blocks either way.</td></tr>
   <tr><td><code>inputChannels() Int</code></td><td>Number of active hardware input channels (<code>0</code> if audio input is disabled).</td></tr>
   <tr><td><code>panicSchedulers() Int</code></td><td>Emergency stop for scheduling (the app's &ldquo;clear schedulers&rdquo; panic button, scriptable). Clears the NRT tempo scheduler, every silo&rsquo;s pending beat-scheduled bundles, and every silo&rsquo;s tasks <em>and</em> delay-driven actors (a <code>spawn</code>ed actor looping on <code>await delay</code> stops). Awaitable top-level delays are kept. Returns the NRT scheduler&rsquo;s dropped-handler count.</td></tr>
 </table>
@@ -3848,7 +3849,7 @@ freeVmTaps();</code></pre>
   <tr><td><code>errCommandsQueuedButNotSent</code></td><td>Commands queued but <code>go(silo)</code>/<code>sched(silo, &hellip;)</code> not called before the next <code>begin()</code></td></tr>
   <tr><td><code>errNoActiveBundle</code></td><td>No <code>begin()</code> was called before commands &mdash; the only error the command builders themselves return; all other bundle-related codes come from the submit call</td></tr>
   <tr><td><code>errEngineInUse</code></td><td>Engine is already in use</td></tr>
-  <tr><td><code>errCyclicConnection</code></td><td>Connection would create a cycle</td></tr>
+  <tr><td><code>errCyclicConnection</code></td><td>Unused: connections may form cycles (see <code>feedbackMode</code>)</td></tr>
   <tr><td><code>errTypeMismatch</code></td><td>Port element types do not match</td></tr>
   <tr><td><code>errRateMismatch</code></td><td>Port signal rates do not match</td></tr>
   <tr><td><code>errChanMismatch</code></td><td>Port shapes are incompatible (<code>connect</code> adapts compatible shapes; this is for <code>replaceNode</code>, which does not)</td></tr>

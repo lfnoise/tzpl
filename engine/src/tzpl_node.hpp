@@ -137,6 +137,7 @@ struct ChanStage {
     int renderedTo = 0;    // samples [0, renderedTo) of the block are written
     bool touched = false;  // the buffer is not one value for this block
     bool dirty = true;     // the buffer must be refilled from sample 0
+    u64 fbLast = 0;        // feedback edge: the source's last sample (raw bits)
 };
 
 struct InPort {
@@ -160,6 +161,9 @@ struct InPort {
     bool* stageActive_ = nullptr;
 
     OutPort* srcPort_ = nullptr;
+    // The connection closes a cycle (MF): the input reads its own buffers,
+    // which the silo fills from the source a sample (or a block) late.
+    bool fbEdge_ = false;
     // doubly linked list of InPorts connected to same OutPort.
     InPort* prev_ = nullptr;
     InPort* next_ = nullptr;
@@ -241,7 +245,16 @@ struct Node {
     NodeLinks rt_list;
     Node* sorted_next = nullptr;
     u32 sortGen_ = 0;     // sort generation that last visited this node (RT)
-    u32 visitMark_ = 0;   // cycle-check traversal stamp (RT)
+    // Strongly connected components (MF), valid for sort generation sortGen_.
+    int sccIndex_ = 0;
+    int sccLow_ = 0;
+    int finishSeq_ = 0;
+    bool onStack_ = false;
+    bool visiting_ = false;   // on the depth-first path
+    Node* stackNext_ = nullptr;
+    // In the sorted list: the first node of a cycle's group holds the
+    // group's length (its members follow it); 0 elsewhere.
+    int sccLen_ = 0;
     NodeDef* def;
     tzpl_SynthFuns funs = {0};
     std::vector<OutPort> outs;
@@ -266,6 +279,11 @@ struct Node {
     i64 eventsStamp_ = -1;   // block start the events belong to
     bool started_ = false;   // has run (or been scheduled to start) a block
     bool freeing_ = false;   // a free event is pending in this block
+    // runSpan state for the current block
+    int spanEv_ = 0;
+    int spanN_ = 0;
+    bool spanRunning_ = true;
+    bool spanEvents_ = false;
     Node* pendingFreeNext_ = nullptr;
 
     // Voiced defs: the engine-side voice allocator and the `notes` input.
@@ -285,6 +303,12 @@ struct Node {
     // Run one block of n samples: render input stages, then process the
     // segments between this block's events.
     void runBlock(Silo* s, int n);
+    // runBlock in pieces (a cycle runs its nodes a sample at a time): after
+    // beginSpans, runSpan(lo, hi) processes samples [lo, hi) and the events
+    // in them; the spans must cover [0, n) in order.
+    void beginSpans(Silo* s, int n);
+    void runSpan(int lo, int hi);
+    void endSpans() { numEvents_ = 0; }
     // Zero samples [from, to) of every output.
     void zeroOutputs(int from, int to);
 

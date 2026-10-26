@@ -412,32 +412,72 @@ void testXFades() {
     }
 }
 
+// Feedback between nodes (MF). An integrator patched through its own
+// output: y = counter + y one sample late, so y[k] = k(k+1)/2, whatever the
+// block and device sizes. In block mode the late input is a block late.
 void testCycles() {
-    gCase = "cycle refusal";
-    Rig r(64, 64);
-    addRec(r, "rec", tzpl::shapeRow(1), 10);
-    addPass(r, "pa", tzpl::shapeRow(1), 11);
-    addPass(r, "pb", tzpl::shapeRow(1), 12);
-    addPass(r, "pc", tzpl::shapeRow(1), 13);
-    check(r.now([&] { connect({11, 0}, {12, 0}); connect({12, 0}, {10, 0}); }) == tzpl_errNone,
-          "A->B->rec");
-    r.renderTo(64);
-    check(r.now([&] { connect({12, 0}, {11, 0}); }) == tzpl_errCyclicConnection, "B->A refused");
-    check(r.now([&] { connect({11, 0}, {11, 0}); }) == tzpl_errCyclicConnection, "A->A refused");
-    // Both halves of a cycle in one bundle: the whole bundle aborts.
-    check(r.now([&] { connect({13, 0}, {11, 0}); connect({12, 0}, {13, 0}); }) == tzpl_errCyclicConnection,
-          "bundle closing a cycle refused");
-    r.renderTo(128);
-    check(r.e->silos_[0].nrt_getNode(11)->ins[0].srcPort_ == nullptr,
-          "aborted bundle left A's input alone");
-    // reconnectOutput that would make C feed itself through A.
-    check(r.now([&] { connect({13, 0}, {11, 0}); }) == tzpl_errNone, "C->A");
-    r.renderTo(192);
-    check(r.now([&] { reconnectOutput({12, 0}, {13, 0}); }) == tzpl_errNone,
-          "C takes over B's outputs (no cycle)");
-    r.renderTo(256);
-    check(r.now([&] { reconnectOutput({13, 0}, {12, 0}); }) == tzpl_errCyclicConnection,
-          "B taking over C's outputs (C->A->B) refused");
+    for (int block : {64, 7}) {
+        for (int dev : {64, 37}) {
+            gCase = std::format("cycle sample mode block {} device {}", block, dev);
+            Rig r(block, dev);
+            createAddOpNode(r.e);
+            addRec(r, "y", tzpl::shapeRow(2), 10);
+            check(r.now([&] {
+                newNode("counter", 11);
+                newNode("+", 12);
+                connect({11, 0}, {12, 0});
+                connect({12, 0}, {12, 1});   // closes the cycle
+                connect({12, 0}, {10, 0});
+            }) == tzpl_errNone, "a self-connection is accepted");
+            r.renderTo(400);
+            checkSeries(rec("y"), 0, 300, [](int k) { return 0.5 * k * (k + 1); }, 0., "y = k + y[k-1]");
+        }
+    }
+    {
+        gCase = "cycle through two nodes";
+        Rig r(64, 37);
+        createAddOpNode(r.e);
+        createPassNode(r.e, "p2", tzpl::shapeRow(2));
+        addRec(r, "y", tzpl::shapeRow(2), 10);
+        check(r.now([&] {
+            newNode("counter", 11);
+            newNode("+", 12);
+            newNode("p2", 13);
+            connect({11, 0}, {12, 0});
+            connect({12, 0}, {13, 0});
+            connect({13, 0}, {12, 1});
+            connect({13, 0}, {10, 0});
+        }) == tzpl_errNone, "a two-node cycle is accepted");
+        r.renderTo(400);
+        // the delay sits on one of the cycle's connections: either way the
+        // loop is one sample long and p2 carries the integral
+        auto const& y = rec("y");
+        bool lagged = y.size() > 2 && y[1] == 0.f;
+        checkSeries(y, 0, 300, [&](int k) { return lagged ? 0.5 * k * (k - 1) : 0.5 * k * (k + 1); }, 0.,
+                    "integral through + and pass");
+        // and it can be undone
+        check(r.now([&] { disconnectInput({12, 1}); }) == tzpl_errNone, "disconnect the cycle");
+        r.renderTo(500);
+        checkSeries(y, 450, 500, [](int k) { return (f64)k; }, 0., "after disconnecting: the counter alone");
+    }
+    {
+        gCase = "cycle block mode";
+        Rig r(64, 64);
+        feedbackMode(r.e, 0, FeedbackMode::block);
+        createAddOpNode(r.e);
+        addRec(r, "y", tzpl::shapeRow(2), 10);
+        r.now([&] {
+            newNode("counter", 11);
+            newNode("+", 12);
+            connect({11, 0}, {12, 0});
+            connect({12, 0}, {12, 1});
+            connect({12, 0}, {10, 0});
+        });
+        r.renderTo(400);
+        std::vector<f64> want(400);
+        for (int k = 0; k < 400; ++k) want[k] = k + (k >= 64 ? want[k - 64] : 0.);
+        checkSeries(rec("y"), 0, 384, [&](int k) { return want[k]; }, 0., "y = k + y[k-64]");
+    }
 }
 
 void testVoices() {

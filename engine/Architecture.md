@@ -136,10 +136,14 @@ Nodes are sorted via depth-first traversal starting from the `outputNode_`:
 - Follow each InPort's `srcPort_` connection upstream to the source node.
 - Recurse on the source node's inputs.
 - Append to the sorted list in post-order (dependencies before dependents).
-- **Cycles**: The graph is feed-forward. A connection that would close a cycle is refused
-  at connect time with `tzpl_errCyclicConnection` (`Silo::wouldCycle`), so the sort never
-  meets one. (One-sample feedback between nodes went away with block processing; feedback
-  belongs inside a synth, as `delayVar` relations.)
+- **Cycles** (feedback between nodes): the walk is Tarjan's strongly connected
+  components. A cycle's nodes come out together in the sorted list, the first holding
+  the group's length (`sccLen_`); an input whose source is still on the depth-first path
+  closes the cycle (`InPort::fbEdge_`) and reads its own buffers instead of the source's.
+  `Silo::runCycle` runs a cycle per the silo's `feedbackMode`: `sample` (default) runs its
+  nodes a sample at a time (`Node::runSpan`, events at their sample) and fills each
+  closing input with its source's previous sample, the per-sample engine's one-sample
+  delay; `block` runs whole blocks with the closing inputs a block late.
 
 The sort only runs when `needsSort_` is true (set by connect/disconnect operations).
 

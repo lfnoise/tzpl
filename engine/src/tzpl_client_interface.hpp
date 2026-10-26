@@ -138,6 +138,14 @@ void masterMute(Engine* e, bool mute);
 bool masterMuted(Engine* e);
 void safetyLimiter(Engine* e, Enable onoff); // default is on.
 
+// Feedback between nodes: how a silo runs a cycle of connections. sample (the
+// default): its nodes a sample at a time, the connections closing it a sample
+// late, as on the per-sample engine. block: whole blocks, those connections a
+// block late (cheaper; a SuperCollider-style one-block delay).
+enum class FeedbackMode { sample = 0, block = 1 };
+void feedbackMode(Engine* e, int silo, FeedbackMode m);
+FeedbackMode feedbackMode(Engine* e, int silo);
+
 // Current values, for UI that has to show what the engine is doing (a script
 // or an OSC message can set either at any time). Read-only and unsynchronized
 // -- fine for display, not for RT decisions.

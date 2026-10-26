@@ -14,6 +14,10 @@
 --   pluck     ksPluck(12), a note every 0.5 s: about six strings ringing,
 --             the rest done (idle voices)
 --   bankseq   resonBank(8), a note every second held for 0.5 s
+--   cycle     a node pair in a feedback loop (tanh shaper -> one-pole -> back),
+--             a sample at a time; a node here is one pair
+--   cycleblk  the same with feedbackMode block
+--   chain     the same pair without the loop (the shaper reads a constant)
 --
 -- Notes are scheduled up front on clock slot 0 (60 BPM: a beat is a second).
 
@@ -56,6 +60,15 @@ if (which == "pingpong") { fxPingPong defSynthX("b") await; }
 if (which == "bank" || which == "bankseq") { resonBank(8) defSynthX("b") await; }
 if (which == "pluck") { ksPluck(12) defSynthX("b") await; }
 
+fn shaper() S = (inlet(FLOAT32, 1, "in") * 0.97 + sinosc(3.0) * 0.2) tanh outlet;
+fn smooth() S = (inlet(FLOAT32, 1, "in") onepole(0.9) * 0.01) outlet;
+let pairs = which == "cycle" || which == "cycleblk" || which == "chain";
+if (pairs) {
+	shaper defSynthX("mfA") await;
+	smooth defSynthX("mfB") await;
+	if (which == "cycleblk") { feedbackMode(0, FeedbackMode.feedbackBlock); }
+}
+
 -- A note on `node` at `beat`, released at `beat + hold`.
 fn note(node Int, id Int, beat Float, hold Float, freq Float) Void {
 	begin(); noteOn(node, id, [freq, 0.001]); sched(0, 0, beat);
@@ -66,7 +79,14 @@ let ratios = [1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 1.125, 1.875];
 var k = 0;
 while (k < count) {
 	let node = 100 + k;
-	begin(); newNode("b", node); connect(node, 0, 0, 0); sched(0);
+	if (pairs) {
+		let a = 1000 + 2 * k;
+		begin(); newNode("mfA", a); newNode("mfB", a + 1); sched(0);
+		begin(); connect(a, 0, a + 1, 0); connect(a + 1, 0, 0, 0); sched(0);
+		if (which != "chain") { begin(); connect(a + 1, 0, a, 0); sched(0); }
+	} else {
+		begin(); newNode("b", node); connect(node, 0, 0, 0); sched(0);
+	}
 	let base = 110.0 * (1.0 + 0.03 * k toFloat);
 	if (which == "bank") {
 		var v = 0;

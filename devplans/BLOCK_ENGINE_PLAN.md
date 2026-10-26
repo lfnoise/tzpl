@@ -1876,6 +1876,35 @@ merge.
 - Test against the old one-sample semantics, using a corpus file from M0 that has
   inter-node feedback.
 
+Progress (2026-10-26):
+- **Sort:** `sortNodes` is Tarjan's SCC walk on the same depth-first visit from the
+  output. A cycle's nodes are contiguous in the sorted list in finish order, the first
+  holding the group length (`sccLen_`). The input whose source is still on the path
+  closes the cycle (`fbEdge_`); the sort points it at its own buffers and every other
+  connected input at its source (so a connection that stops closing a cycle reads its
+  source again).
+- **Running:** `runCycle` renders the members' inputs once (inputs fed from inside the
+  cycle are marked not constant). Sample mode: per sample, each closing input gets its
+  source's previous sample (the block's last sample carried in `ChanStage::fbLast`),
+  then each member runs `runSpan(k, k + 1)`; `runBlock` is now `beginSpans` +
+  `runSpan(0, n)`, so node events (start, free, resetVoice) land at their sample inside
+  a cycle too. Block mode: members run whole blocks; the closing inputs get the source's
+  block for the next one. No plugin changes: every synth handles `process(off, 1)`.
+- **API:** `feedbackMode(engine, silo, FeedbackMode)`; script
+  `feedbackMode(silo, FeedbackMode.feedbackSample | feedbackBlock)`. The refusals
+  (`wouldCycle`, `shadowWouldCycle`) are gone; `tzpl_errCyclicConnection` stays in the
+  ABI, unused.
+- **Tests:** `test_block_engine` (140): a self-patched `+` integrates the counter
+  exactly (y = k(k+1)/2) at block sizes 64 and 7 and device chunks 64 and 37; a
+  two-node cycle; disconnecting it; block mode (y = k + y[k-64]). A two-node nonlinear
+  loop (tanh shaper -> one-pole -> back) renders bit-identical to `main`'s per-sample
+  engine over 2 s. `run_live_test.sh` (proxy self-reference) passes and is back in CI.
+- **Cost** (`benchmarks/block_engine`, ms CPU per node-second, a node = the pair): open
+  chain 0.153, cycle sample mode 0.782, block mode 0.114; `main` 0.451 / 0.508. A cycle
+  in sample mode pays each plugin's per-call setup (parameter-group checks, gathers)
+  every sample: 1.5x `main` for this tiny pair. A cheaper per-sample entry point can
+  come later if real patches need it.
+
 **M10: Docs, cleanup, merge.**
 - Rewrite these docs:
   - `Writing_SynthDefs.html` §2 (rates and shapes), §5 (vec ops as views), §7 (inputs

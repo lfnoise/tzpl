@@ -148,10 +148,7 @@ struct ConnectCmd : Command
             InPort* dst;
             err_ = s->rt_getInPort(dst_, dst);
             if (err_ == tzpl_errNone) {
-                // Feed-forward only (D1 phase 1). The submit-time check runs on
-                // the graph shadow; this one sees the graph as it really is.
-                if (s->wouldCycle(src->node_, dst->node_)) err_ = tzpl_errCyclicConnection;
-                else connectTo(s, src, dst);
+                connectTo(s, src, dst);
             }
         }
         if (err_ != tzpl_errNone) discardAll(s);
@@ -273,14 +270,6 @@ struct ReconnectOutputCmd : Command
         OutPort* newSrc;
         err_ = s->rt_getOutPort(oldSrc_, oldSrc);
         if (err_ == tzpl_errNone) err_ = s->rt_getOutPort(newSrc_, newSrc);
-        if (err_ == tzpl_errNone) {
-            for (InPort* dst = oldSrc->dstList_; dst; dst = dst->next_) {
-                if (dst->node_ != newSrc->node_ && s->wouldCycle(newSrc->node_, dst->node_)) {
-                    err_ = tzpl_errCyclicConnection;
-                    break;
-                }
-            }
-        }
         if (err_ != tzpl_errNone) {
             if (xfaderNode_) s->pushDeadNode(xfaderNode_);
             xfaderNode_ = nullptr;

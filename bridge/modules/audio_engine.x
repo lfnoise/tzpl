@@ -9,6 +9,14 @@ export audio_engine_ffi.*;
 
 enum Enable { kOff, kOn }
 
+-- How a silo runs a cycle of connections between nodes. feedbackSample (the
+-- default): the cycle's nodes run a sample at a time, the connection that
+-- closes it a sample late, as on the per-sample engine. feedbackBlock: whole
+-- blocks, that connection a block late (cheaper).
+enum FeedbackMode { feedbackSample, feedbackBlock }
+
+fn feedbackMode(silo Int, mode FeedbackMode) Void { setFeedbackMode(silo, mode ordinal); }
+
 enum SchedPolicy {
     schedImmediate,
     schedBetterLateThanNever,

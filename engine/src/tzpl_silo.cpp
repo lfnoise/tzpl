@@ -167,8 +167,15 @@ void Silo::processTaps(int n) {
 }
 
 void Silo::runNodes(int n) {
-    for (Node* node = rt_sortedNodeList_; node; node = node->sorted_next) {
-        node->runBlock(this, n);
+    for (Node* node = rt_sortedNodeList_; node; ) {
+        if (node->sccLen_ > 0) {
+            int len = node->sccLen_;
+            runCycle(node, len, n);
+            for (int k = 0; k < len; ++k) node = node->sorted_next;
+        } else {
+            node->runBlock(this, n);
+            node = node->sorted_next;
+        }
     }
 }
 
@@ -460,34 +467,6 @@ tzpl_SErr connectableTypes(tzpl_SignalType const& a, tzpl_SignalType const& b) {
     return tzpl_errNone;
 }
 
-bool Silo::wouldCycle(Node* srcNode, Node* dstNode) {
-    if (srcNode == dstNode) return true;
-    // Does dstNode already reach srcNode downstream? Iterative DFS with a
-    // fixed stack: no allocation on the RT thread. Overflowing the stack is
-    // treated as a cycle (refused), the safe answer.
-    constexpr int kMaxStack = 4096;
-    static thread_local Node* stack[kMaxStack];
-    u32 mark = ++visitStamp_;
-    if (mark == 0) mark = ++visitStamp_;
-    int sp = 0;
-    stack[sp++] = dstNode;
-    dstNode->visitMark_ = mark;
-    while (sp > 0) {
-        Node* node = stack[--sp];
-        for (OutPort& out : node->outs) {
-            for (InPort* in = out.dstList_; in; in = in->next_) {
-                Node* next = in->node_;
-                if (next == srcNode) return true;
-                if (next->visitMark_ == mark) continue;
-                next->visitMark_ = mark;
-                if (sp >= kMaxStack) return true;
-                stack[sp++] = next;
-            }
-        }
-    }
-    return false;
-}
-
 tzpl_SErr Silo::connect(OutPort* src, InPort* dst) {
     if (!src || !dst) return tzpl_errNodeNotFound;
 
@@ -726,43 +705,151 @@ void Silo::sortNodes() {
     // sort may already have been deleted on the NRT side.
     if (++sortGen_ == 0) ++sortGen_;
 
-    // Perform a topological sort of the nodes in the silo.
+    // A topological sort of the nodes, depth first from the output through
+    // inputs, finding cycles as it goes (Tarjan's strongly connected
+    // components). Each cycle's nodes come out together, in the order they
+    // finished; a connection from a node still on the depth-first path is
+    // the one that closes a cycle (fbEdge_), read a sample (or block) late.
     rt_sortedNodeList_ = nullptr;
+    sccCounter_ = 0;
+    finishCounter_ = 0;
+    sccStack_ = nullptr;
     Node* lastSorted = nullptr;
     sortVisitNode(outputNode_, lastSorted);
 
     needsSort_ = false;
 }
 
-void Silo::sortVisitNode(Node* node, Node*& lastSorted) {
-    if (node->sortGen_ == sortGen_) {
-        // already visited.
-        return;
-    }
-    node->sortGen_ = sortGen_;
-    // Depth first visit of node inputs, after visiting all inputs, add node to
-    // sorted list. The graph is feed-forward (connections that would close a
-    // cycle are refused), so the visiting state never meets itself.
-    for (InPort& inPort : node->ins) {
-        OutPort* srcPort = inPort.srcPort_;
-        if (srcPort) {
-            Node* srcNode = srcPort->node_;
-            sortVisitNode(srcNode, lastSorted);
-        }
-    }
-    
+void Silo::sortAppend(Node* node, Node*& lastSorted) {
     node->sorted_next = nullptr;
-    // add to sorted list.
-    if (lastSorted) {
-        lastSorted->sorted_next = node;
-    } else {
-        // first node in sorted list.
-        node->silo_->rt_sortedNodeList_ = node;
-    }
+    if (lastSorted) lastSorted->sorted_next = node;
+    else rt_sortedNodeList_ = node;
     lastSorted = node;
 }
 
+void Silo::sortVisitNode(Node* node, Node*& lastSorted) {
+    node->sortGen_ = sortGen_;
+    node->sccIndex_ = node->sccLow_ = ++sccCounter_;
+    node->sccLen_ = 0;
+    node->visiting_ = true;
+    node->onStack_ = true;
+    node->stackNext_ = sccStack_;
+    sccStack_ = node;
+    bool selfLoop = false;
 
+    for (InPort& inPort : node->ins) {
+        OutPort* srcPort = inPort.srcPort_;
+        inPort.fbEdge_ = false;
+        if (!srcPort) continue;
+        Node* src = srcPort->node_;
+        if (src->sortGen_ != sortGen_) {
+            sortVisitNode(src, lastSorted);
+            node->sccLow_ = std::min(node->sccLow_, src->sccLow_);
+        } else if (src->onStack_) {
+            node->sccLow_ = std::min(node->sccLow_, src->sccIndex_);
+            // still on the path: this input closes a cycle
+            if (src->visiting_) inPort.fbEdge_ = true;
+            if (src == node) selfLoop = true;
+        }
+        // A closing input reads its own buffers; any other, its source's.
+        for (int c = 0; c < inPort.chans_; ++c)
+            inPort.chanPtrs_[c] = inPort.fbEdge_ ? inPort.ownBufs_[c] : srcPort->bufs_[inPort.srcMap_[c]];
+    }
+    node->visiting_ = false;
+    node->finishSeq_ = ++finishCounter_;
+    if (node->sccLow_ != node->sccIndex_) return;   // a member of an open cycle
+
+    // The root of a component: pop it, its members in finish order.
+    Node* members = nullptr;
+    int len = 0;
+    for (;;) {
+        Node* m = sccStack_;
+        sccStack_ = m->stackNext_;
+        m->onStack_ = false;
+        // insert by finish order (components are small)
+        Node** at = &members;
+        while (*at && (*at)->finishSeq_ < m->finishSeq_) at = &(*at)->stackNext_;
+        m->stackNext_ = *at;
+        *at = m;
+        ++len;
+        if (m == node) break;
+    }
+    Node* first = members;
+    for (Node* m = members; m; ) {
+        Node* next = m->stackNext_;
+        sortAppend(m, lastSorted);
+        m = next;
+    }
+    if (len > 1 || selfLoop) first->sccLen_ = len;
+}
+
+// A cycle (MF). Sample mode: every node runs one sample in turn, a closing
+// input receiving its source's previous sample just before. Block mode: the
+// nodes run whole blocks in order, a closing input holding its source's
+// previous block. Inputs fed from inside the cycle are not constant: their
+// sources have not run this block when the inputs render.
+void Silo::runCycle(Node* first, int len, int n) {
+    bool sampleMode = feedbackMode_.load(std::memory_order_relaxed) == 0;
+    Node* end = first;
+    for (int k = 0; k < len; ++k) end = end->sorted_next;
+    auto inCycle = [&](Node* x) {
+        for (Node* m = first; m != end; m = m->sorted_next) if (m == x) return true;
+        return false;
+    };
+    for (Node* m = first; m != end; m = m->sorted_next) {
+        for (InPort& p : m->ins) {
+            p.render(this, n);
+            if (p.srcPort_ && inCycle(p.srcPort_->node_))
+                for (int c = 0; c < p.chans_; ++c) p.isConst_[c] = 0;
+        }
+    }
+    if (!sampleMode) {
+        for (Node* m = first; m != end; m = m->sorted_next) {
+            if (m->eventsStamp_ != blockStart_ || m->numEvents_ == 0) {
+                m->funs.process(m->synth, 0, n);
+            } else {
+                m->beginSpans(this, n);
+                m->runSpan(0, n);
+                m->endSpans();
+            }
+        }
+        // the closing inputs' next block is this one
+        for (Node* m = first; m != end; m = m->sorted_next) {
+            for (InPort& p : m->ins) {
+                if (!p.fbEdge_) continue;
+                int es = elemSize(p.type_.elem);
+                for (int c = 0; c < p.chans_; ++c)
+                    std::memcpy(p.ownBufs_[c], p.srcPort_->bufs_[p.srcMap_[c]], (usize)n * es);
+            }
+        }
+        return;
+    }
+    for (Node* m = first; m != end; m = m->sorted_next) m->beginSpans(this, n);
+    for (int i = 0; i < n; ++i) {
+        for (Node* m = first; m != end; m = m->sorted_next) {
+            for (InPort& p : m->ins) {
+                if (!p.fbEdge_) continue;
+                int es = elemSize(p.type_.elem);
+                for (int c = 0; c < p.chans_; ++c) {
+                    u8* dst = static_cast<u8*>(p.ownBufs_[c]) + (usize)i * es;
+                    if (i == 0) std::memcpy(dst, &p.stages_[c].fbLast, es);
+                    else std::memcpy(dst, static_cast<u8 const*>(p.srcPort_->bufs_[p.srcMap_[c]]) + (usize)(i - 1) * es, es);
+                }
+            }
+            m->runSpan(i, i + 1);
+        }
+    }
+    for (Node* m = first; m != end; m = m->sorted_next) {
+        m->endSpans();
+        for (InPort& p : m->ins) {
+            if (!p.fbEdge_) continue;
+            int es = elemSize(p.type_.elem);
+            for (int c = 0; c < p.chans_; ++c)
+                std::memcpy(&p.stages_[c].fbLast,
+                            static_cast<u8 const*>(p.srcPort_->bufs_[p.srcMap_[c]]) + (usize)(n - 1) * es, es);
+        }
+    }
+}
 
 //=============================================================================================
 #pragma mark VALUE STAGES

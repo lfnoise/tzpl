@@ -191,6 +191,13 @@ static void ffi_safetyLimiter(ts::VM& vm, u16 dst, u16, u16 argBase) {
     engine::safetyLimiter(getEngine(vm), en);
 }
 
+// fn setFeedbackMode(silo: Int, mode: Int) -> Void
+// How the silo runs a cycle of connections (engine::FeedbackMode ordinal).
+static void ffi_setFeedbackMode(ts::VM& vm, u16, u16, u16 argBase) {
+    engine::feedbackMode(getEngine(vm), static_cast<int>(vm.reg(argBase).i),
+                         static_cast<engine::FeedbackMode>(vm.reg(argBase + 1).i));
+}
+
 // fn inputChannels() -> Int
 // Returns the number of hardware input channels (0 if input is disabled).
 static void ffi_inputChannels(ts::VM& vm, u16 dst, u16, u16) {
@@ -1944,6 +1951,7 @@ void registerAudioEngineFFI(ts::Compiler& compiler) {
     reg("getStreamTime",    Float, {},             ffi_getStreamTime);
     reg("masterGain",       Void, {Float},         ffi_masterGain);
     reg("safetyLimiter",    Void, {Bool},          ffi_safetyLimiter);
+    reg("setFeedbackMode",  Void, {Int, Int},      ffi_setFeedbackMode);
     reg("inputChannels",    Int, {},               ffi_inputChannels);
     reg("panicSchedulers",  Int, {},               ffi_panicSchedulers);
     reg("wireDef",          String, {Int},         ffi_wireDef);

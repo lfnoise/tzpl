@@ -14,6 +14,7 @@
 #   REPEAT    runs per case (default 3)
 #   TZPL_FORMS  passed through (e.g. novgroup, noidle) to time a form off
 #   WORK      scratch directory (default /tmp/tzpl_block_bench)
+#   BENCH_X   another bench.x (an older build may lack an API this one uses)
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 APP="${APP:-$ROOT/build/app/tzpl_app}"
@@ -21,7 +22,7 @@ MODROOT="${MODROOT:-$ROOT}"
 COUNT="${COUNT:-16}"
 REPEAT="${REPEAT:-3}"
 WORK="${WORK:-/tmp/tzpl_block_bench}"
-BENCH_X="$ROOT/benchmarks/block_engine/bench.x"
+BENCH_X="${BENCH_X:-$ROOT/benchmarks/block_engine/bench.x}"
 CASES=("$@")
 [ ${#CASES[@]} -gt 0 ] || CASES=(knobs sinlpf1 sinlpf16 chorus echo pingpong bank pluck bankseq)
 
