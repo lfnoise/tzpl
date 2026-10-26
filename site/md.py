@@ -2,8 +2,7 @@
 """Minimal markdown -> HTML converter for the TZPL docs site.
 
 Covers the subset the project's markdown actually uses (verified against
-lang/Theory_of_Operation.md, engine/Architecture.md, and
-synthdef-compiler/ARCHITECTURE.md): ATX headings (with generated anchor
+lang/Theory_of_Operation.md and engine/Architecture.md): ATX headings (with generated anchor
 ids), fenced code blocks, pipe tables, unordered/ordered lists with one
 nesting level, horizontal rules, paragraphs, and the inline forms `code`,
 **bold**, *italic*, [links](url), and bare-URL autolinks. Pure stdlib, so

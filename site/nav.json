@@ -104,12 +104,6 @@
           "md": "engine/Architecture.md",
           "title": "Engine Architecture",
           "description": "The real-time engine: silos, commands, plugin ABI, thread safety."
-        },
-        {
-          "file": "Synthdef_Compiler_Architecture.html",
-          "md": "synthdef-compiler/ARCHITECTURE.md",
-          "title": "Synthdef Compiler",
-          "description": "The 14-pass pipeline, expression graph, and code generation."
         }
       ]
     },

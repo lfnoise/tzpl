@@ -18,7 +18,7 @@
 #           -DTZPL_BUILD_APP=ON -DTZPL_BUILD_TESTS=ON
 #     cmake --build /build/rel -j$(nproc)
 #     TZPL_BIN=/build/rel/lang/tzpl bash /src/lang/tests/run_tests.sh
-#     /build/rel/synthdef-compiler/synthdef-compiler --test
+#     /build/rel/integration-tests/test_block_engine
 #
 # The first configure needs network access (FetchContent: sleef, JUCE, ...).
 FROM ubuntu:24.04

@@ -1,7 +1,7 @@
 -- synthc/passes.x
 -- Graph analysis passes for the Tzopilotl-hosted synthdef compiler.
 -- Each pass mirrors the same-named method of synthdef::Synth
--- (synthdef-compiler/src/synthdef_synth.cpp).
+-- (synthdef_synth.cpp of the retired C++ synthdef-compiler).
 --
 -- M0: topologicalSortExprs, collectConsumers.
 -- All traversals are iterative (explicit stacks) to keep recursion depth

@@ -38,7 +38,6 @@ find_package(Threads REQUIRED)
 # --- Options ----------------------------------------------------------------
 
 option(TZPL_BUILD_AUDIO_ENGINE      "Build the engine library and executable"             ON)
-option(TZPL_BUILD_SYNTHDEF_COMPILER "Build the frozen C++ synthdef-compiler (block-engine D9)" OFF)
 option(TZPL_BUILD_LANG              "Build the lang library and executable"                ON)
 option(TZPL_BUILD_BRIDGE            "Build the FFI bridge libraries"                      ON)
 option(TZPL_BUILD_APP               "Build the audio coding application"                  OFF)
@@ -73,10 +72,6 @@ endif()
 
 if(TZPL_BUILD_AUDIO_ENGINE)
     add_subdirectory(engine)
-endif()
-
-if(TZPL_BUILD_SYNTHDEF_COMPILER)
-    add_subdirectory(synthdef-compiler)
 endif()
 
 if(TZPL_BUILD_OSC AND TZPL_BUILD_AUDIO_ENGINE AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/osc/CMakeLists.txt)

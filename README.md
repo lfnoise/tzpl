@@ -20,43 +20,43 @@ A statically typed, real-time safe interpreted language designed for audio and s
 - File-based module system with selective imports
 - C/C++ embedding APIs and foreign function interface
 
-### Synthdef Compiler (`synthdef-compiler/`)
+### Synthdef Compiler (`synthc`, in `lang/modules/synthc/`)
 
-An audio signal flow graph compiler that takes graph descriptions and compiles them into optimized native plugins (`.dylib`). Features include:
+A signal-graph compiler written in Tzopilotl: synth graphs built with the `synthdef` module compile to native plugins (`.dylib`). Features include:
 
-- Two front-ends: S-expression parser and C++ DSL
-- ~200 audio operators (oscillators, filters, noise, envelopes, math, delays)
-- 14-pass graph analysis pipeline (topology sort, shape/type inference, constant folding, dead code removal, rate scheduling)
-- Algebraic rewrite engine (~100 optimization rules)
-- C++ code generation targeting the `tzpl_plugin_abi` interface
-- Full pipeline: parse → analyze → codegen → clang compile → link → dlopen
+- Tensor-shaped signals (scalars to rank-4), broadcasting, and shape operations along any axis
+- Graph analysis: shape and type inference, constant folding, rewrites, rate placement (constant, init, reset, block, audio), parameter groups that recompute only when their inputs change
+- Recurrences (`delayVar` feedback) recognised and run as block scans, block state space, or per-sample loops, with sample- and channel-vector SIMD forms
+- Voicers with idle-voice skipping and voice groups
+- C++ code generation targeting the `tzpl_plugin_abi` interface, compiled and linked by the system clang (`bridge/src/tzpl_synth_build.cpp`)
 
 ### Audio Engine (`engine/`)
 
 A real-time audio engine that loads native synth plugins and supports dynamic patching. Features include:
 
 - Plugin loading via `dlopen` of `.dylib` files conforming to `tzpl_plugin_abi.h`
-- Dynamic graph editing with on-demand topological sort (re-sorted only when connections change)
+- Block processing (`process(offset, n)`, 64 samples by default) with sample-accurate events: value changes render into input buffers at their sample, and node start, free and voice resets split a node's block
+- Dynamic graph editing with on-demand topological sort (re-sorted only when connections change); connections may form cycles, run a sample at a time (or a block at a time) like the old per-sample engine
 - Crossfading system (7 curves) for glitch-free connection changes
 - Lock-free SPSC FIFOs for RT-safe inter-thread communication
 - Multi-silo parallel worker threads with binary-tree mixdown
 - Sample-accurate scheduling queue
 - Command bundling API and S-expression command parser
-- Polyphonic voice management (`Voicer` template)
+- Polyphonic voice allocation in the engine, writing each voiced synth's `notes` input
 - Safety limiter on master output (lookahead, NaN zapping)
 
 ### Shared Headers (`shared/`)
 
 Common headers used by multiple sub-projects:
 
-- `tzpl_plugin_abi.h` — Pure C plugin ABI (the interface between engine and synthdef-compiler)
+- `tzpl_plugin_abi.h` — Pure C plugin ABI (the interface between the engine and compiled synths)
 - `tzpl_simd.hpp` — SIMD abstraction
 - `tzpl_random.hpp` — xoroshiro128++ PRNG (scalar and SIMD)
 - `tzpl_matrix_transform.hpp` — Compile-time matrix operations
 
 ### FFI Bridge (`bridge/`)
 
-Connects Tzopilotl to the engine and synthdef-compiler via the language's foreign function interface, with optional OSC and NATS messaging bridges. Includes Tzopilotl module files (e.g., `audio_engine.x`) that expose native functions to scripts.
+Connects Tzopilotl to the engine and to plugin building (compile and link of synthc's output) via the language's foreign function interface, with optional OSC and NATS messaging bridges. Includes Tzopilotl module files (e.g., `audio_engine.x`) that expose native functions to scripts.
 
 ### Application (`app/`)
 
@@ -75,8 +75,6 @@ tzpl/
 │   ├── modules/                Standard library modules
 │   ├── docs/                   Language documentation (HTML)
 │   └── editors/                Editor support packages
-├── synthdef-compiler/          Signal graph → plugin compiler
-│   └── src/                    Compiler source
 ├── engine/                     Real-time audio engine
 │   └── src/                    Engine source
 ├── bridge/                     FFI bridges between sub-projects
@@ -161,14 +159,13 @@ cmake --build build
 | `tzpl_lib` | Tzopilotl as a static library |
 | `engine` | Audio engine executable |
 | `audio_engine_lib` | Audio engine as a static library |
-| `synthdef-compiler` | Synthdef compiler executable |
-| `synthdef_compiler_lib` | Synthdef compiler as a static library |
 | `tzpl_audio_engine_bridge` | FFI bridge: Tzopilotl ↔ audio engine |
-| `tzpl_synthdef_compiler_bridge` | FFI bridge: Tzopilotl ↔ synthdef compiler |
+| `tzpl_synthdef_compiler_bridge` | FFI bridge: compile and link synthc's generated plugins |
 | `tzpl_app` | Dear ImGui desktop application (requires `-DTZPL_BUILD_APP=ON`) |
 | `tzpl_app_juce` | JUCE desktop application, the preferred version (requires `-DTZPL_BUILD_APP_JUCE=ON`) |
 | `test_audio_engine_ffi` | Audio engine FFI test executable |
-| `test_synthdef_compiler_ffi` | Synthdef compiler FFI test executable |
+| `test_synthdef_compiler_ffi` | Plugin-building FFI test executable |
+| `test_block_engine` | Block engine tests (hand-written plugins) |
 
 Build a specific target:
 
@@ -208,10 +205,12 @@ bash run_tests.sh -u              # Update golden files
 bash run_tests.sh -x              # Stop on first failure
 ```
 
-### Synthdef Compiler Tests
+### Synthdef Compiler and Engine Tests
 
 ```sh
-./build/synthdef-compiler/synthdef-compiler --test
+bash integration-tests/run_synthc_dump_test.sh        # analysis goldens (--update to regenerate)
+bash integration-tests/run_forms_equivalence_test.sh  # every code form agrees with the plain loops
+./build/integration-tests/test_block_engine           # the block engine
 ```
 
 ## Documentation
@@ -232,7 +231,6 @@ The language and library guides are rendered at **<https://lfnoise.github.io/tzp
 
 ### Architecture
 
-- [Synthdef Compiler Architecture](synthdef-compiler/ARCHITECTURE.md) — Compilation pipeline, expression graph, type system, and code generation
 - [Audio Engine Architecture](engine/Architecture.md) — Engine design, silos, commands, plugin ABI, and thread safety
 - [Tzopilotl Theory of Operation](lang/Theory_of_Operation.md) — Detailed design document for the language implementation
 - [Integration Plan](devplans/IMPLEMENTATION_PLAN.md) — Step-by-step roadmap for integrating the sub-projects

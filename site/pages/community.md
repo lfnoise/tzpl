@@ -21,7 +21,9 @@ request. In short:
 
 - Build from the project root with `./build.sh`.
 - Language tests: `cd lang/tests && bash run_tests.sh`.
-- Synthdef compiler tests: `./build/synthdef-compiler/synthdef-compiler --test`.
+- Synth compiler and engine tests: `bash integration-tests/run_synthc_dump_test.sh`,
+  `bash integration-tests/run_forms_equivalence_test.sh`, and
+  `./build/integration-tests/test_block_engine`.
 - The language VM, engine audio thread, and generated plugins must never
   call the system allocator or block -- patches that violate real-time
   safety will be declined regardless of how nice the feature is.

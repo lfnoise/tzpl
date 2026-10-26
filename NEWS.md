@@ -7,6 +7,49 @@ documentation site as the Changelog page.
 
 ## Unreleased
 
+**The block engine** -- the audio engine and the synth compiler were
+rebuilt to process audio in blocks (64 samples by default) instead of a
+sample at a time. Synths and effects use 1.3x to 3.5x less CPU (an echo
+3.5x, a 12-voice plucked string 2.5x, a chorus 1.9x;
+`benchmarks/block_engine/`), and timing stays sample-accurate.
+
+**Breaking**
+
+- Plugin ABI v3: synths compiled before this release must be recompiled
+  (`defSynthX` does it; the engine refuses old plugins). The ABI's
+  `process(synth, offset, n)` runs a block; ports are per-channel buffers.
+- `setControl` and control descriptions are gone. A synth's parameters are
+  inputs: `control(name, spec)` declares an input with a range and default,
+  set with `setInput` / `setInputAt` / `setInputBox` (stepped or ramped),
+  `setInputX` (crossfaded) or `impulseInput`, or fed by connecting another
+  node's output to it. `ui` widgets attach with `bindInput`.
+- Signals are tensors with a shape, and every integer argument of a shape
+  operation is an axis: `sum(n)` no longer folds a row into n groups, and
+  `transpose(n)` and `mixTo` are removed. A stereo mixdown is a sum along
+  an axis (`[l, r] stack sum(-1)`, or a voicer's voices `sum(0)`); `reshape`
+  gives a flat row the dims to fold.
+- The C++ `synthdef-compiler` is retired; synthc (`defSynthX`) is the only
+  synth compiler.
+
+**New**
+
+- Feedback between nodes: a connection may form a cycle (a node feeding
+  itself, directly or through others). The cycle runs a sample at a time
+  with a one-sample delay, as before, or a block at a time with
+  `feedbackMode(silo, FeedbackMode.feedbackBlock)`.
+- Voicers skip finished voices: a released voice stops costing CPU once its
+  body's `doneWhen(cond)` holds, or once its output has been silent for
+  `voicer(n, body, silence)` seconds (default 0.2; 0 turns skipping off).
+- Notes are a `notes` input on the voiced synth; `noteSetParams` can ramp a
+  sounding note's parameters.
+- Shape operations along any axis: `take`, `drop`, `stride`, `slice`,
+  `rotate`, `reverse`, `transpose`, `reshape`, `join`, `stack`, `reduce`,
+  `scan`, `sum` and kin, `at` and `put`.
+- Values computed from inputs (filter coefficients, pitches) are recomputed
+  only when the inputs change, and recurrences such as filters and phasors
+  run as block-wide scans or state-space forms; `TZPL_STRICT_RECURRENCES=1`
+  keeps every recurrence in its plain sample order for reference renders.
+
 **Fixed**
 
 - Mixing `f32` and `f64` signals in a synthdef no longer fails with

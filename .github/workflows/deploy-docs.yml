@@ -15,7 +15,6 @@ on:
       - 'NEWS.md'
       - 'lang/Theory_of_Operation.md'
       - 'engine/Architecture.md'
-      - 'synthdef-compiler/ARCHITECTURE.md'
       - 'examples/music_fx_demos.x'
       - '.github/workflows/deploy-docs.yml'
   workflow_dispatch:
@@ -44,7 +43,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build-nrt
-          key: nrt-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', '*/CMakeLists.txt', 'lang/src/**', 'engine/src/**', 'synthdef-compiler/src/**', 'bridge/**', 'app/src/**', 'shared/**') }}
+          key: nrt-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', '*/CMakeLists.txt', 'lang/src/**', 'engine/src/**', 'lang/modules/**', 'bridge/**', 'app/src/**', 'shared/**') }}
           restore-keys: nrt-${{ runner.os }}-
 
       - name: Build headless app

@@ -36,10 +36,12 @@ Useful flags: `-v` (verbose), `-f "pattern"` (filter), `-u` (update golden
 files), `-x` (stop on first failure). Always use this runner rather than
 executing test files ad hoc.
 
-Synthdef compiler self-tests:
+Synthdef compiler (synthc) and engine tests:
 
 ```sh
-./build/synthdef-compiler/synthdef-compiler --test
+bash integration-tests/run_synthc_dump_test.sh        # analysis goldens (--update to regenerate)
+bash integration-tests/run_forms_equivalence_test.sh  # compiled plugins, every code form
+./build/integration-tests/test_block_engine           # the block engine
 ```
 
 CI (`.github/workflows/tests.yml`) runs the golden-file suite and builds the
@@ -51,12 +53,13 @@ apps on every push and pull request.
 - East const: `Record const&`, not `const Record&`.
 - Prefer `std::print`/`std::format` over iostream and string concatenation.
 - Namespaces: `lang` (interpreter), `engine` (audio engine), `synthdef`
-  (compiler), `sexpr` (S-expression parser).
+  (helpers generated plugins use), `sexpr` (S-expression parser).
 - Real-time safety is a hard rule: the lang VM, the engine audio thread, and
   generated plugins must never call the system allocator or any potentially
   blocking system call. RT/NRT communication uses lock-free SPSC FIFOs.
 - Sub-project conventions are documented in `engine/Architecture.md`,
-  `synthdef-compiler/ARCHITECTURE.md`, and `lang/Theory_of_Operation.md`.
+  `lang/Theory_of_Operation.md`, and `devplans/BLOCK_ENGINE_PLAN.md` (the
+  synth compiler, synthc, in `lang/modules/synthc/`).
 - Commit messages: use `--` rather than em dashes.
 
 ## Submitting changes

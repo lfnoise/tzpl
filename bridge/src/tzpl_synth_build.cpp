@@ -728,6 +728,15 @@ optional<LoadedDef> loadDef(std::string path) {
         dlclose(handle);
         return {};
     }
+    // Before version 3 (the block engine) a plugin processed one sample per
+    // call through a different struct layout: a stale cached build.
+    if (abiVersion < TZPL_PLUGIN_ABI_MIN_VERSION) {
+        fprintf(stderr, "*** ERROR: plugin '%s' ABI version %lld predates the "
+                "block engine (%d); rebuild it\n",
+                path_c, (long long)abiVersion, TZPL_PLUGIN_ABI_MIN_VERSION);
+        dlclose(handle);
+        return {};
+    }
 
     void *ptr;
 

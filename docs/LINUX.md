@@ -37,8 +37,9 @@ Tests:
 
 ```sh
 bash lang/tests/run_tests.sh                        # interpreter golden suite
-./build/synthdef-compiler/synthdef-compiler --test  # plugin pipeline end-to-end
-bash integration-tests/run_synthc_render_ab.sh      # offline render A/B
+bash integration-tests/run_synthc_dump_test.sh        # synthc analysis goldens
+bash integration-tests/run_forms_equivalence_test.sh  # compiled plugins, every code form
+./build/integration-tests/test_block_engine           # the engine
 ```
 
 A few lang golden files have `.expected.linux` overrides: macOS-only libm

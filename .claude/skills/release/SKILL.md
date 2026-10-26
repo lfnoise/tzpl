@@ -21,7 +21,9 @@ GitHub release.
   `tests` and `deploy-docs` workflows).
 - Run the test suites locally if anything landed since the last green run:
   `cd lang/tests && bash run_tests.sh` and
-  `./build/synthdef-compiler/synthdef-compiler --test`.
+  `bash integration-tests/run_synthc_dump_test.sh`,
+  `bash integration-tests/run_forms_equivalence_test.sh` and
+  `./build/integration-tests/test_block_engine`.
 
 ## 2. Version bump
 

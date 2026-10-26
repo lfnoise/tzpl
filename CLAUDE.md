@@ -1,11 +1,11 @@
 # TZPL -- Audio Coding Platform
 
-A cross-platform audio coding platform combining three integrated C++23 sub-projects:
+A cross-platform audio coding platform combining these integrated sub-projects (C++23, plus the synth compiler written in Tzopilotl):
 
 - **`lang/`** -- Tzopilotl, a statically typed, real-time safe interpreted language with a direct-threaded VM, TLSF allocator, and incremental GC.
-- **`synthdef-compiler/`** -- Compiles audio signal flow graphs (from S-expressions or C++ DSL) into optimized `.dylib` plugins via a 14-pass analysis pipeline.
-- **`engine/`** -- Real-time audio engine with dynamic graph patching, lock-free threading, multi-silo parallelism, crossfading, and sample-accurate scheduling.
-- **`bridge/`** -- FFI bridges connecting Tzopilotl to the engine and synthdef-compiler, plus optional OSC and NATS support.
+- **`lang/modules/synthc/`** -- synthc, the synth compiler, written in Tzopilotl: compiles signal graphs built with the `synthdef` module (tensor-shaped signals, recurrences, voicers) into C++ that the system clang builds into `.dylib` plugins.
+- **`engine/`** -- Real-time block audio engine with dynamic graph patching (cycles allowed), lock-free threading, multi-silo parallelism, crossfading, and sample-accurate scheduling.
+- **`bridge/`** -- FFI bridges connecting Tzopilotl to the engine and to plugin building (compile and link of synthc's output), plus optional OSC and NATS support.
 - **`app/`** -- GUI application integrating all components: multi-tab code editor, output panel, REPL, notebooks. The JUCE version (`app/juce/`, target `tzpl_app_juce`) is preferred; the original Dear ImGui version (`tzpl_app`) is still available.
 - **`shared/`** -- Common headers: plugin ABI (`tzpl_plugin_abi.h`), SIMD, RNG, matrix ops.
 
@@ -23,7 +23,7 @@ AddressSanitizer build:
     cmake -B build-asan -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="-fsanitize=address"
     cmake --build build-asan -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
 
-The build directory is `build/` at the project root. Key targets: `tzpl`, `tzpl_lib`, `engine`, `audio_engine_lib`, `synthdef-compiler`, `synthdef_compiler_lib`, `tzpl_app`.
+The build directory is `build/` at the project root. Key targets: `tzpl`, `tzpl_lib`, `engine`, `audio_engine_lib`, `tzpl_app`, `tzpl_app_juce`.
 
 **Requirements**: Clang 19+ (Clang required: `ext_vector_type` swizzles and `[[clang::musttail]]`), CMake 3.21+, C++23. macOS (CoreAudio) or Linux (ALSA/JACK/Pulse; see `docs/LINUX.md`).
 
@@ -33,13 +33,14 @@ The build directory is `build/` at the project root. Key targets: `tzpl`, `tzpl_
 
 Flags: `--verbose`, `--filter <pattern>` (substring match on test path), `--update` (update golden files), `--stop-on-fail`.
 
-synthc (the synth compiler) analysis-dump goldens, and the block engine:
+synthc (the synth compiler) analysis-dump goldens, compiled plugins in every
+code form, and the block engine:
 
-    bash integration-tests/run_synthc_dump_test.sh      # --update to regenerate
+    bash integration-tests/run_synthc_dump_test.sh        # --update to regenerate
+    bash integration-tests/run_forms_equivalence_test.sh  # needs build/integration-tests/forms_equiv
     ./build/integration-tests/test_block_engine
 
-(The frozen C++ synthdef-compiler and its `--test` are retired on the
-block-engine branch; see devplans/BLOCK_ENGINE_PLAN.md D9.)
+Benchmarks: `bash benchmarks/block_engine/run.sh` (see its README).
 
 Always use the official test runner for lang tests -- do not use ad-hoc test loops.
 
@@ -118,10 +119,10 @@ Syntax essentials for reading and writing `.x` files:
 - **C++23** standard throughout.
 - **East const**: `Record const&` not `const Record&`.
 - **Formatting**: Prefer `std::print`/`std::format` over iostream/string concatenation.
-- **Namespaces**: `lang` (interpreter), `engine` (audio engine), `synthdef` (compiler), `sexpr` (S-expression parser).
-- **File naming**: Sub-project prefixes (`tzpl_` for engine, `synthdef_` for compiler). Snake_case filenames.
-- **Memory**: TLSF allocator in lang VM (never call system allocator during execution). Arena allocator in synthdef-compiler.
-- **Error handling**: `std::expected<T, std::string>` for recoverable errors in synthdef-compiler. Diagnostic system in lang.
+- **Namespaces**: `lang` (interpreter), `engine` (audio engine), `synthdef` (helpers generated plugins use, in `shared/`), `sexpr` (S-expression parser).
+- **File naming**: `tzpl_` prefix for engine and shared files. Snake_case filenames.
+- **Memory**: TLSF allocator in lang VM (never call system allocator during execution).
+- **Error handling**: `std::expected<T, std::string>` for recoverable errors in the bridge's plugin building. Diagnostic system in lang.
 - **No em dashes in commit messages** -- use `--` instead.
 
 ## Architecture Overview
@@ -129,7 +130,7 @@ Syntax essentials for reading and writing `.x` files:
 ### Integration Flow
 
     Tzopilotl code (.x) --> lang VM compiles + evaluates
-        --> synthdef-compiler FFI generates .dylib plugins
+        --> synthc (lang/modules/synthc) emits C++; the bridge compiles and links it into .dylib plugins
         --> engine loads plugins, builds audio graph
         --> real-time audio callback processes graph
 
@@ -137,15 +138,16 @@ Syntax essentials for reading and writing `.x` files:
 
 - **Real-time safety**: The lang VM, engine audio thread, and generated plugins never call the system allocator or any potentially blocking system call.
 - **Lock-free communication**: All RT/NRT thread communication uses SPSC atomic FIFOs.
-- **Sample-accurate scheduling**: The engine processes blocks (default 64 samples; `block-engine` branch, ABI v3). Scheduled commands are applied in time order before the block's nodes run: value changes are rendered into input buffers at their sample, and discrete events (node start/free, voice reset) split the node's block there.
+- **Sample-accurate scheduling**: The engine processes blocks (default 64 samples; plugin ABI v3). Scheduled commands are applied in time order before the block's nodes run: value changes are rendered into input buffers at their sample, and discrete events (node start/free, voice reset) split the node's block there.
 - **Untagged values**: The VM stores values in 64-bit `Word` unions; types are statically known at compile time.
 - **Direct-threaded dispatch**: VM opcodes are function pointers; each handler tail-calls the next via `[[clang::musttail]]`.
+- **Feedback between nodes**: a connection may close a cycle; the silo runs the cycle's nodes a sample at a time with the closing connection a sample late (`feedbackMode` sample, default) or a block at a time (`block`).
 - **Engines/silos have independent tempos** -- do not assume or enforce synchronization between them.
 - **GC heartbeat runs on a timed interval**, not just after function calls.
 
 ### Plugin ABI
 
-The plugin interface (`shared/tzpl_plugin_abi.h`) is a pure C ABI shared between the engine and synthdef-compiler. Plugins are `.dylib` files loaded via `dlopen`. Any plugin conforming to this ABI can be loaded, not just those generated by the synthdef-compiler.
+The plugin interface (`shared/tzpl_plugin_abi.h`) is a pure C ABI between the engine and plugins (ABI v3: `process(synth, offset, n)` over per-channel port buffers, `resetVoice`). Plugins are `.dylib` files loaded via `dlopen`. Any plugin conforming to this ABI can be loaded, not just those synthc generates.
 
 ## Sub-Project Documentation
 
@@ -153,8 +155,7 @@ Each sub-project has its own CLAUDE.md with detailed file layouts and convention
 
 - `engine/CLAUDE.md` -- Engine architecture, thread safety rules, plugin ABI
 - `engine/Architecture.md` -- Detailed engine design
-- `synthdef-compiler/CLAUDE.md` -- Compiler structure, code conventions
-- `synthdef-compiler/ARCHITECTURE.md` -- 14-pass pipeline, expression graph, codegen
+- `devplans/BLOCK_ENGINE_PLAN.md` -- Block engine and synthc design, with what landed per milestone
 - `lang/Theory_of_Operation.md` -- Detailed language design and implementation
 - `lang/docs/Tzopilotl_by_Example.html` -- Comprehensive syntax guide
 - `lang/docs/Builtin_Functions.html` -- Built-in function reference
@@ -183,15 +184,17 @@ Each sub-project has its own CLAUDE.md with detailed file layouts and convention
 - `engine/src/tzpl_command_subclasses.hpp` -- All concrete command types
 - `engine/src/tzpl_xfader.cpp` -- Crossfader system (7 curves)
 
-### Synthdef Compiler (~20K LOC)
-- `synthdef-compiler/src/synthdef_cpp_codegen.cpp` -- C++ code generation (2nd largest file)
-- `synthdef-compiler/src/synthdef_from_sexpr.cpp` -- S-expression graph builder
-- `synthdef-compiler/src/synthdef_synth.cpp` -- 14-pass analysis pipeline
-- `synthdef-compiler/src/synthdef_common_ops.cpp` -- ~200 audio operators
+### Synth Compiler (synthc, Tzopilotl, ~12K lines)
+- `lang/modules/synthdef.x` -- The front end: signals, shapes, inputs, delays, voicers
+- `lang/modules/synthc/importer.x` -- Graph to IR
+- `lang/modules/synthc/passes.x` -- Analysis passes (types, shapes, rates, cuts)
+- `lang/modules/synthc/recurrence.x`, `cycles.x`, `paramgroups.x` -- Recurrence forms, delay cycles, parameter groups
+- `lang/modules/synthc/codegen.x` -- C++ code generation (largest file)
+- `bridge/src/tzpl_synth_build.cpp` -- Compile and link of the generated C++
 
 ### Bridge
 - `bridge/src/tzpl_audio_engine_ffi.cpp` -- Tzopilotl to engine bridge
-- `bridge/src/tzpl_synthdef_compiler_ffi.cpp` -- Tzopilotl to synthdef-compiler bridge
+- `bridge/src/tzpl_synthdef_compiler_ffi.cpp` -- Tzopilotl to plugin building (synthc's output)
 - `bridge/modules/*.x` -- Tzopilotl module files exposing native functions
 
 ### App
