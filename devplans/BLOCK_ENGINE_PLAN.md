@@ -779,9 +779,10 @@ signal's row-major flattening and produce rows. With tensor signals they need an
   With a rank member, a 1×n matrix stays rank 2 (axis 0 is its single row): an axis
   outside −r..r − 1 is an error, and shape operations keep or change rank explicitly (`reduce` removes an axis,
   `join` along a new axis adds one). Broadcasting's result rank is the operands'
-  largest. The plugin ABI's `tzpl_Shape` (4 dims only) gets the rank too, for port
-  metadata (UI shape labels, `tapShape`): a layout change, so ABI v3's structs change
-  before v3 ships, with plugins regenerated.
+  largest. The plugin ABI's `tzpl_Shape` (4 dims only) gets the rank too (decided
+  2026-10-26), for port metadata (UI shape labels, `tapShape`) and the engine's
+  shape checks on connections: a layout change, made to ABI v3's structs before v3
+  ships, with every plugin regenerated.
 - **Shape inference** gives each result's shape from the operand's shape, the axis and
   the constant arguments (`take` shortens that axis to n, `reduce` removes it, ...).
 
