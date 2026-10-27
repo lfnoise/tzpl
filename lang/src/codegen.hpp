@@ -876,6 +876,13 @@ private:
 
     // --- Function body tracking (for dynamic scope push/pop) ---
     bool inFunctionBody_ = false;
+
+    // A declaration here binds a global: program top level, outside every
+    // function and lambda body. A function body's outermost scope is also
+    // localScopes_[0], so the depth test alone would make a function-local
+    // `let n` store into a same-named global's slot (and its GC root flag
+    // would then misread the value).
+    bool atTopLevel() const { return !inFunctionBody_ && localScopes_.size() <= 1; }
 };
 
 } // namespace ts

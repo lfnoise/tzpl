@@ -1033,7 +1033,7 @@ void CodeGen::genLetDecl(LetDeclNode* decl) {
 
     // Check if this is a global (no local scopes)
     auto it = typeChecker_.globalVars().find(decl->name);
-    if (it != typeChecker_.globalVars().end() && localScopes_.size() <= 1) {
+    if (it != typeChecker_.globalVars().end() && atTopLevel()) {
         emitGlobalStore(reg, it->second.globalIndex, decl->resolvedType, /*init=*/true);
     }
 
@@ -1080,7 +1080,7 @@ void CodeGen::genVarDecl(VarDeclNode* decl) {
     // would go stale in both directions (a function's `count = count + 1`
     // invisible at top level, a top-level assignment invisible to them).
     auto it = typeChecker_.globalVars().find(decl->name);
-    if (it != typeChecker_.globalVars().end() && localScopes_.size() <= 1) {
+    if (it != typeChecker_.globalVars().end() && atTopLevel()) {
         emitGlobalStore(reg, it->second.globalIndex, decl->resolvedType, /*init=*/true);
         return;
     }
@@ -1109,7 +1109,7 @@ void CodeGen::genConstDecl(ConstDeclNode* decl) {
 
     // Check if this is a global (no local scopes, e.g. REPL top level)
     auto it = typeChecker_.globalVars().find(decl->name);
-    if (it != typeChecker_.globalVars().end() && localScopes_.size() <= 1) {
+    if (it != typeChecker_.globalVars().end() && atTopLevel()) {
         emitGlobalStore(reg, it->second.globalIndex, decl->resolvedType, /*init=*/true);
     }
 
@@ -2251,7 +2251,7 @@ void CodeGen::genSwitchStmt(SwitchStmtNode* stmt) {
 
 void CodeGen::emitGlobalStoreIfNeeded(const std::string& name, u16 reg) {
     auto it = typeChecker_.globalVars().find(name);
-    if (it != typeChecker_.globalVars().end() && localScopes_.size() <= 1) {
+    if (it != typeChecker_.globalVars().end() && atTopLevel()) {
         emitGlobalStore(reg, it->second.globalIndex, it->second.type, /*init=*/true);
         // A mutable binding (`var (a, b) = ...`) is the global only, as in
         // genVarDecl: drop the register copy the pattern just declared.
@@ -10876,6 +10876,8 @@ void CodeGen::compileTemplateLambdaBody(LambdaExprNode* expr, LambdaType* lambda
     u16 savedNextReg = nextReg_;
     u16 savedMaxReg = maxReg_;
     bool savedTailPos = inTailPosition_;
+    bool savedInFunctionBody = inFunctionBody_;
+    inFunctionBody_ = true;
     auto savedScopes = std::move(localScopes_);
     auto savedFixups = std::move(jumpFixups_);
     auto savedConsts = std::move(constRegs_);
@@ -10981,6 +10983,7 @@ void CodeGen::compileTemplateLambdaBody(LambdaExprNode* expr, LambdaType* lambda
     maxReg_ = savedMaxReg;
     inTailPosition_ = savedTailPos;
     localScopes_ = std::move(savedScopes);
+    inFunctionBody_ = savedInFunctionBody;
     jumpFixups_ = std::move(savedFixups);
     constRegs_ = std::move(savedConsts);
     regPinned_ = std::move(savedPinned);
