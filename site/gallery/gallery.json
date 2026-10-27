@@ -29,11 +29,17 @@
       "duration_cap": 30
     },
     {
-      "id": "music_fx_demos",
-      "title": "Music Libraries Demo",
-      "description": "A demo of the music libraries: three instruments (wavetable lead, Karplus-Strong pluck, resonator bank) each through its own effect chain into a shared reverb bus, playing a multi-section piece in each composition dialect -- a weighted-random groove in music.pat, a six-section canon built by the temporal-media algebra of music.media, and Bohlen-Pierce euclidean patterns in music.spans. About 3.5 minutes.",
-      "script": "examples/music_fx_demos.x",
-      "excerpt_range": [235, 249],
+      "id": "music_media_piece",
+      "title": "A Minor Piece",
+      "description": "A short through-composed piece written with the music.media algebra: a fixed progression, a written melody, and four instruments (bass, Karplus-Strong arpeggios, a bowed resonator pad, a wavetable lead) each in its own register, in an intro, A, B, A', coda form. About 95 seconds.",
+      "script": "examples/music_media_piece.x",
+      "duration_cap": 0
+    },
+    {
+      "id": "music_job_piece",
+      "title": "Random Form",
+      "description": "A dissonant, distorted piece whose notes are all written but whose form is chosen anew on every run: a music.job hierarchy of four-bar sections picks their order, transpositions and climax. Distorted bass and lead, a drum kit defined in the example, plucked strings and bowed clusters. About 75 seconds; this rendering is one reading.",
+      "script": "examples/music_job_piece.x",
       "duration_cap": 0
     }
   ]

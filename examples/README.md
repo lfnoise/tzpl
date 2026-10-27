@@ -27,6 +27,17 @@ evaluate it (Cmd+Return), or paste it into a notebook code cell.
 - `instrumentTest.x` -- plays a short arpeggio phrase through every
   instrument in `instrument_synthdefs.x` in sequence. Run with audio on
   (needs `examples/` on the module path).
+- `music_media_piece.x` -- a short through-composed piece in A minor
+  written with the `music.media` algebra: a fixed progression, a written
+  melody, and four instruments from `instruments.x` each kept to its own
+  register, in an intro, A, B, A', coda form. Run with audio on, or
+  render it with `--nrt`.
+- `music_job_piece.x` -- a dissonant, distorted piece whose notes are
+  written but whose form is chosen on every run: a `music.job` hierarchy
+  of four-bar `music.shape` sections picks their order, transpositions and
+  climax (set `TZPL_LANG_SEED` to repeat a reading). Defines a small drum
+  kit voicer whose per-note params come from extra shape dimensions. Run
+  with audio on, or render it with `--nrt`.
 - `sc_conversions/` -- Tzopilotl translations of the SuperCollider 2
   example corpus in `sc-examples/SC2-examples/` (`examples-1.txt` through
   `examples-12.txt`), one file per source file (`sc2_examples_1.x` ...

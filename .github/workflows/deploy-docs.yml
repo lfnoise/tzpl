@@ -15,7 +15,8 @@ on:
       - 'NEWS.md'
       - 'lang/Theory_of_Operation.md'
       - 'engine/Architecture.md'
-      - 'examples/music_fx_demos.x'
+      - 'examples/music_media_piece.x'
+      - 'examples/music_job_piece.x'
       - '.github/workflows/deploy-docs.yml'
   workflow_dispatch:
 

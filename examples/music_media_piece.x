@@ -262,6 +262,7 @@ let melCoda = line([
 ---------------------------------------------------------------------------
 -- The parts, section by section: intro | A | B | A' | coda.
 
+-- gallery-excerpt-begin
 let leadPart =
     mrest(32.0)
     $ melA
@@ -289,6 +290,7 @@ let padPart =
     $ (bars(progB, fn(c Chord) Music<Pitch> { padChord(c, 4.0) }) dyn(0.7))
     $ (bars(progA, fn(c Chord) Music<Pitch> { padChord(c, 4.0) }) dyn(0.55))
     $ ((padChord(chF, 4.0) $ padChord(chE, 4.0) $ padChord(chAm, 8.0)) dyn(0.6));
+-- gallery-excerpt-end
 
 ---------------------------------------------------------------------------
 -- Play it on the clock; stop once the last chord has rung out.

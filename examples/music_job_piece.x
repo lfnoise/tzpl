@@ -481,6 +481,7 @@ const kCollapse = 6;
 fn blk(sec Int, tr Int) Coll =
     Coll.leaf(shape([[16.0, sec toFloat, tr toFloat]], ['dur, 'sec, 'tr]));
 
+-- gallery-excerpt-begin
 let form = Coll.seqc([
     blk(kDrone, 0),
     Coll.rpt((3, Coll.sel((Behavior.shuffled, [
@@ -492,6 +493,7 @@ let form = Coll.seqc([
         Coll.rpt((2, Coll.sel((Behavior.atRandom, [blk(kGrind, 0), blk(kMachine, 6)])))),
         Coll.seqc([blk(kDrift, 6), blk(kScream, 1)])])),
     blk(kCollapse, 0)]);
+-- gallery-excerpt-end
 
 fn param(e Event, k Symbol) Float {
     for (p : e.params) { if (p.0 == k) { return p.1; } }

@@ -7,6 +7,14 @@ documentation site as the Changelog page.
 
 ## Unreleased
 
+### Changed
+
+- The music libraries demo (`examples/music_fx_demos.x`) is replaced by
+  two pieces: `examples/music_media_piece.x`, a through-composed piece in A
+  minor written with `music.media`, and `examples/music_job_piece.x`, a
+  dissonant, distorted piece whose form `music.job` chooses anew on every
+  run, with a drum kit defined in the example.
+
 ### Fixed
 
 - Graph edits scheduled inside one block land at their exact sample in

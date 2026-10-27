@@ -69,7 +69,6 @@ pat_music	20	-	-	integration-tests/scripts/pat_audible.x	same
 media_music	20	-	-	integration-tests/scripts/media_audible.x	same	
 shape_music	20	-	-	integration-tests/scripts/shape_audible.x	same	
 spans_music	20	-	-	integration-tests/scripts/spans_audible.x	same	
-music_fx_demos	215	-	examples	examples/music_fx_demos.x	same	instruments.x (wtLead, ksPluck12, resonBank) through effects.x chains; three music dialects
 
 # --- silo tasks and actors: not in the corpus. silo_task_audible.x and the
 # other silo_*_audible.x scripts hang under --nrt (they need the live engine's
