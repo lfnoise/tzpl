@@ -2668,7 +2668,7 @@ println(<span class="hl-num">42</span>);                       <span class="cmt"
 [<span class="hl-num">1</span>, <span class="hl-num">2</span>, <span class="hl-num">3</span>] @ println;                <span class="cmt">-- 1  2  3  (each on its own line)</span></code></pre>
 
             <h3><code>panic(message)</code></h3>
-            <p>Print <code>Error: &lt;message&gt;</code> and halt execution &mdash; the same trap <code>unwrap</code> springs on a <code>none</code>, with a message of your choosing. Statements after the panic do not run; a script that panics exits with a nonzero status. Use it in library code that must not continue past a failure &mdash; for example, <code>defSynth</code>/<code>defSynthX</code> panic when a synthdef fails to compile.</p>
+            <p>Print <code>Error: &lt;message&gt;</code> and halt execution &mdash; the same trap <code>unwrap</code> springs on a <code>none</code>, with a message of your choosing. Statements after the panic do not run; a script that panics exits with a nonzero status. Use it in library code that must not continue past a failure &mdash; for example, <code>defSynth</code> panics when a synthdef fails to compile.</p>
             <table>
                 <tr><th>Signature</th><th>Description</th></tr>
                 <tr><td><code>panic(String) &rarr; Void</code></td><td>Print the message and halt execution.</td></tr>

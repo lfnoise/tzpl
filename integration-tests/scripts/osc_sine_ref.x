@@ -8,7 +8,7 @@ fn oscRef() S {
 	sinosc(440.0) outlet
 }
 
-defSynthX(oscRef, "oscSineRef");
+defSynth(oscRef, "oscSineRef");
 begin();
 newNode("oscSineRef", 100);
 connect(100, 0, 0, 0);

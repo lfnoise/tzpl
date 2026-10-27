@@ -367,7 +367,7 @@ static void ffi_newNode(ts::VM& vm, u16 dst, u16, u16 argBase) {
         if (!engine::getDefDesc(eng, defName, unused)) {
             std::fprintf(vm.errorOutput(),
                 "audio_engine.newNode: no synthdef named \"%s\" is loaded "
-                "(still compiling? `defSynthX(...) await`, or use `play`, "
+                "(still compiling? `defSynth(...) await`, or use `play`, "
                 "which waits for an in-flight compile)\n", defName);
         }
     }

@@ -22,11 +22,11 @@ import audio_engine.*;
 let fails = &0;
 
 async fn cc2(f GraphFn, name String) Void {
-	match (f defSynthXChecked(name $ "_cpp") await) {
+	match (f defSynthChecked(name $ "_cpp") await) {
 		ok(sx): { println("PASS " $ name $ " cpp"); }
 		err(m): { fails <- *fails + 1; println("FAIL " $ name $ " cpp: " $ m); }
 	}
-	match (f defSynthXChecked(name $ "_x") await) {
+	match (f defSynthChecked(name $ "_x") await) {
 		ok(cpp): { println("PASS " $ name $ " synthc"); }
 		err(m): { fails <- *fails + 1; println("FAIL " $ name $ " synthc: " $ m); }
 	}

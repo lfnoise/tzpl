@@ -55,7 +55,7 @@ fn lfoPulseRlpf() S {
 	(pulse rlpf(cutoff, 0.2)) combl([0.2, 0.25], 0.3, 2) gainOutlet
 }
 
-lfoPulseRlpf defSynthX("lfoPulseRlpf", tags) await;
+lfoPulseRlpf defSynth("lfoPulseRlpf", tags) await;
 
 ---------------------------------------------------------------------------
 -- The texture spawn loop shared by every OverlapTexture/XFadeTexture/Spawn
@@ -98,7 +98,7 @@ fn hellIsBusyVoice() S {
 -- which only the first two are ever heard.
 fn hellIsBusy() S = voicer(kHellVoices, hellIsBusyVoice) sum(0) gainOutlet;
 
-hellIsBusy defSynthX("hellIsBusy", tags) await;
+hellIsBusy defSynth("hellIsBusy", tags) await;
 
 ---------------------------------------------------------------------------
 -- 4. pond life (examples-1.txt:53-64)
@@ -135,7 +135,7 @@ fn pondLifeVoice() S {
 
 fn pondLife() S = voicer(kPondVoices, pondLifeVoice) sum(0) gainOutlet;
 
-pondLife defSynthX("pondLife", tags) await;
+pondLife defSynth("pondLife", tags) await;
 
 ---------------------------------------------------------------------------
 -- 5. alien froggies (examples-1.txt:68-76)
@@ -183,7 +183,7 @@ fn alienFroggiesVoice() S {
 
 fn alienFroggies() S = voicer(kFroggyVoices, alienFroggiesVoice) sum gainOutlet;
 
-alienFroggies defSynthX("alienFroggies", tags) await;
+alienFroggies defSynth("alienFroggies", tags) await;
 
 -- Carries `rate` as running script-side state across spawns.
 coro fn alienFroggiesSpawner(nodeID Int, totalDur Float) Float {
@@ -240,7 +240,7 @@ fn randomSineWavesVoice() S {
 
 fn randomSineWaves() S = voicer(kSineVoices, randomSineWavesVoice) sum(0) gainOutlet;
 
-randomSineWaves defSynthX("randomSineWaves", tags) await;
+randomSineWaves defSynth("randomSineWaves", tags) await;
 
 ---------------------------------------------------------------------------
 -- 7. random pulsations (examples-1.txt:95-106)
@@ -284,7 +284,7 @@ fn randomPulsationsVoice() S {
 
 fn randomPulsations() S = voicer(kPulseVoices, randomPulsationsVoice) sum(0) gainOutlet;
 
-randomPulsations defSynthX("randomPulsations", tags) await;
+randomPulsations defSynth("randomPulsations", tags) await;
 
 ---------------------------------------------------------------------------
 -- 8. moto rev (examples-1.txt:110-114)
@@ -299,7 +299,7 @@ fn motoRev() S =
 	rlpf(100, 0.1)
 	clip2(0.4) gainOutlet;
 
-motoRev defSynthX("motoRev", tags) await;
+motoRev defSynth("motoRev", tags) await;
 
 ---------------------------------------------------------------------------
 -- 9. scratchy (examples-1.txt:118-121)
@@ -315,7 +315,7 @@ fn scratchy() S =
 	|> max(0) * 20
 	|> rhpf(5000, 1) gainOutlet;
 
-scratchy defSynthX("scratchy", tags) await;
+scratchy defSynth("scratchy", tags) await;
 
 ---------------------------------------------------------------------------
 -- 10. tremulate (examples-1.txt:125-141)
@@ -361,7 +361,7 @@ fn tremulateVoice() S {
 
 fn tremulate() S = voicer(kTremVoices, tremulateVoice) sum(0) combn(0.1, 1) gainOutlet;
 
-tremulate defSynthX("tremulate", tags) await;
+tremulate defSynth("tremulate", tags) await;
 
 ---------------------------------------------------------------------------
 -- 11. reso-pulse (examples-1.txt:145-162)
@@ -413,7 +413,7 @@ fn resoPulse() S {
 	[left, right] join gainOutlet
 }
 
-resoPulse defSynthX("resoPulse", tags) await;
+resoPulse defSynth("resoPulse", tags) await;
 
 ---------------------------------------------------------------------------
 -- 12. sprinkler (examples-1.txt:167-176)
@@ -439,14 +439,14 @@ fn sprinkler() S {
 	(white() * burstGate) bpz2 gainOutlet
 }
 
-sprinkler defSynthX("sprinkler", tags) await;
+sprinkler defSynth("sprinkler", tags) await;
 
 fn sprinklerMouse() S {
 	let burstGate = (mouseX(0.2, 50) lfupulse(0.25)) * 0.1;
 	(white() * burstGate) bpz2 gainOutlet
 }
 
-sprinklerMouse defSynthX("sprinklerMouse", tags) await;
+sprinklerMouse defSynth("sprinklerMouse", tags) await;
 
 ---------------------------------------------------------------------------
 -- 13. harmonic swimming (examples-1.txt:181-202)
@@ -481,7 +481,7 @@ fn harmonicSwimming() S {
 	(freqs fsinosc) * ampEnv |> sum(cols) gainOutlet
 }
 
-harmonicSwimming defSynthX("harmonicSwimming", tags) await;
+harmonicSwimming defSynth("harmonicSwimming", tags) await;
 
 ---------------------------------------------------------------------------
 -- 14. harmonic tumbling (examples-1.txt:206-229)
@@ -506,7 +506,7 @@ fn harmonicTumbling() S {
 	(freqs fsinosc) * grain |> sum(cols) gainOutlet
 }
 
-harmonicTumbling defSynthX("harmonicTumbling", tags) await;
+harmonicTumbling defSynth("harmonicTumbling", tags) await;
 
 ---------------------------------------------------------------------------
 -- driver

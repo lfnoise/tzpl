@@ -170,7 +170,7 @@ static void ffi_loadSynthDylib(ts::VM& vm, u16 dst, u16, u16 argBase) {
 // ---------------------------------------------------------------------------
 // Async compile FFIs
 //
-// The clang subprocess behind defSynthX takes on the order of a
+// The clang subprocess behind defSynth takes on the order of a
 // second and used to run on the VM thread, stalling the NRT scheduler -- an
 // audible pause in any playing sequence. These variants run the compile on
 // the host's async I/O worker (async_io.hpp); the completion step loads the
@@ -197,7 +197,7 @@ static ts::Future* makePendingStringFuture(ts::VM& vm) {
 }
 
 // Def name -> the Future of its compile currently in flight, so `play` (via
-// synthDefReady) can wait for a def whose defSynth/defSynthX was not awaited
+// synthDefReady) can wait for a def whose defSynth was not awaited
 // instead of failing with errNodeDefNotFound. Only touched with the host
 // mutex held (FFI entry and the executor's complete step), so no lock of
 // its own. A future in here is rooted by the VM's external-future list for
@@ -252,7 +252,7 @@ static void finishAsyncCompile(ts::VM& vm,
 }
 
 // fn writeCompileAndLoadAsync(name String, cppSource String) Future<String>
-// Async backend of defSynthX: writes the synthc-generated C++, compiles and
+// Async backend of defSynth: writes the synthc-generated C++, compiles and
 // links it on the worker thread. Resolves to "" on success.
 static void ffi_writeCompileAndLoadAsync(ts::VM& vm, u16 dst, u16, u16 argBase) {
     auto st = std::make_shared<AsyncCompileState>();
@@ -295,7 +295,7 @@ static void ffi_writeCompileAndLoadAsync(ts::VM& vm, u16 dst, u16, u16 argBase) 
 // fn synthDefReady(name String) Future<String>
 // The future of the compile in flight for `name`, or an already-resolved
 // future ("") when none is. `play` awaits this before newNode, so a def
-// whose defSynth/defSynthX was not awaited is waited for at its first play
+// whose defSynth was not awaited is waited for at its first play
 // instead of the node silently failing with errNodeDefNotFound. Says nothing
 // about defs that were never compiled: those still fail at the bundle.
 static void ffi_synthDefReady(ts::VM& vm, u16 dst, u16, u16 argBase) {
@@ -404,7 +404,7 @@ void registerSynthdefCompilerFFI(ts::Compiler& compiler) {
                                                /*pure=*/false, /*rtSafe=*/false);
     };
 
-    // Async backend of defSynthX: the compile runs on the host's async I/O
+    // Async backend of defSynth: the compile runs on the host's async I/O
     // worker so the NRT scheduler keeps dispatching while clang runs.
     reg("writeCompileAndLoadAsync",    FutureString, {String, String},
         ffi_writeCompileAndLoadAsync);

@@ -33,7 +33,7 @@ file):
 
 ```
 import synthdef.*;
-import synthc.compile.*;   -- defSynthX
+import synthc.compile.*;   -- defSynth
 import common_ugens.*;
 import audio_engine as ae;
 
@@ -46,7 +46,7 @@ fn bubbles() S =
     |> nnhz sinosc * 0.04
     |> combn(0.2, 4) outlet;
 
-bubbles defSynthX("bubbles") await;
+bubbles defSynth("bubbles") await;
 ```
 
 The console prints the compile and link commands, then:
@@ -55,7 +55,7 @@ The console prints the compile and link commands, then:
 bubbles compiled successfully (synthc).
 ```
 
-`defSynthX` walked the signal graph your function returned, generated SIMD
+`defSynth` walked the signal graph your function returned, generated SIMD
 C++ for it, compiled and linked a native plugin in the background, and
 registered it with the running engine under the name `"bubbles"`. The
 `await` makes the script wait for the compile because the next step plays
@@ -79,7 +79,7 @@ stop(id);
 Start it again (`let id2 = play("bubbles");`), then edit the definition --
 change `combn(0.2, 4)` to `combn(0.4, 8)` for a slower, longer echo, or
 `* 0.04` to `* 0.08` for louder -- and re-evaluate the `fn bubbles` block
-*and* the `defSynthX` line (without the `await` this time). Compilation
+*and* the `defSynth` line (without the `await` this time). Compilation
 runs in the background, so the music never pauses. Then start another:
 
 ```

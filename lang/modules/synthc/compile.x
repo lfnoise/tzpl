@@ -1,8 +1,7 @@
 -- synthc/compile.x
 -- Driver for the Tzopilotl-hosted synthdef compiler: build the SignalGraph,
 -- import + analyze, generate C++, then compile to a .dylib and load it into the
--- engine via FFI. The public entry point is defSynthX, the synthc analogue of
--- synthdef.x's defSynth.
+-- engine via FFI. The public entry point is defSynth.
 
 import synthdef.*;
 import std.result.*;
@@ -43,7 +42,7 @@ fn dumpCorpus(entries [(String, GraphFn)]) Void {
 	let compile = match (getEnv("SYNTHC_CORPUS_MODE")) { some(m): m == "compile"; none: false; };
 	for (e : entries) {
 		if (compile) {
-			match (defSynthXChecked(e.1, "corpus_" $ e.0) await) {
+			match (defSynthChecked(e.1, "corpus_" $ e.0) await) {
 				ok(_): println("COMPILE OK " $ e.0);
 				err(msg): println("COMPILE FAIL " $ e.0 $ ": " $ msg);
 			}
@@ -79,9 +78,9 @@ fn compileAndLoadGraph(g SignalGraph, name String) String {
 	}
 }
 
--- Public entry point: the synthc analogue of defSynth. Builds the graph from a
--- synth function, compiles it with the Tzopilotl-hosted compiler, loads it, and
--- reports. Returns the generated C++ source (handy for inspection/testing).
+-- Public entry point: builds the graph from a synth function, compiles it
+-- with synthc, loads it, and reports. Returns the generated C++ source (handy
+-- for inspection/testing).
 --
 -- Async: the graph analysis and C++ generation run here (fast), but the clang
 -- compile + dylib load run on a worker thread so playing sequences keep
@@ -94,13 +93,13 @@ fn compileAndLoadGraph(g SignalGraph, name String) String {
 --
 -- A failed compile PANICS (prints the error and halts) -- a script must not
 -- sail past a def that never loaded. Harnesses that need to tolerate and
--- report failures use defSynthXChecked, which returns ok(cpp) / err(message)
+-- report failures use defSynthChecked, which returns ok(cpp) / err(message)
 -- instead of halting.
-fn defSynthX(synthFun GraphFn, synthName String) Future<String> =
-	defSynthX(synthFun, synthName, [String]());
+fn defSynth(synthFun GraphFn, synthName String) Future<String> =
+	defSynth(synthFun, synthName, [String]());
 
-async fn defSynthX(synthFun GraphFn, synthName String, tags [String]) String {
-	match (defSynthXChecked(synthFun, synthName, tags) await) {
+async fn defSynth(synthFun GraphFn, synthName String, tags [String]) String {
+	match (defSynthChecked(synthFun, synthName, tags) await) {
 		ok(cpp): {
 			println(synthName $ " compiled successfully (synthc).");
 			cpp
@@ -109,29 +108,44 @@ async fn defSynthX(synthFun GraphFn, synthName String, tags [String]) String {
 	}
 }
 
--- defSynthX with strict recurrences: every recurrence (filters, phasors,
+-- defSynth with strict recurrences: every recurrence (filters, phasors,
 -- envelopes) runs in its plain sample order instead of a block form, so the
 -- synth matches its per-sample definition exactly rather than within
 -- rounding. For reference renders; slower. TZPL_STRICT_RECURRENCES=1 does
 -- the same for every compile.
-fn defSynthXStrict(synthFun GraphFn, synthName String) Future<String> =
-	defSynthXStrict(synthFun, synthName, [String]());
+fn defSynthStrict(synthFun GraphFn, synthName String) Future<String> =
+	defSynthStrict(synthFun, synthName, [String]());
 
-async fn defSynthXStrict(synthFun GraphFn, synthName String, tags [String]) String {
+async fn defSynthStrict(synthFun GraphFn, synthName String, tags [String]) String {
 	var `scStrictRecurrences Bool = true;
-	defSynthX(synthFun, synthName, tags) await
+	defSynth(synthFun, synthName, tags) await
 }
 
--- Fallible form of defSynthX: ok(generated C++ source) on success,
+-- Fallible form of defSynth: ok(generated C++ source) on success,
 -- err(message) on a failed analysis, compile, or load. Never halts and
 -- prints nothing.
-fn defSynthXChecked(synthFun GraphFn, synthName String) Future<Result<String, String>> =
-	defSynthXChecked(synthFun, synthName, [String]());
+fn defSynthChecked(synthFun GraphFn, synthName String) Future<Result<String, String>> =
+	defSynthChecked(synthFun, synthName, [String]());
 
-async fn defSynthXChecked(synthFun GraphFn, synthName String, tags [String]) Result<String, String> {
+async fn defSynthChecked(synthFun GraphFn, synthName String, tags [String]) Result<String, String> {
 	let g = makeGraph(synthFun);
 	defSynthGraphChecked(g, synthName, tags) await
 }
+
+-- The names from when defSynth was the retired C++ compiler's entry point
+-- and synthc's was defSynthX; kept so existing scripts still run.
+fn defSynthX(synthFun GraphFn, synthName String) Future<String> =
+	defSynth(synthFun, synthName);
+fn defSynthX(synthFun GraphFn, synthName String, tags [String]) Future<String> =
+	defSynth(synthFun, synthName, tags);
+fn defSynthXStrict(synthFun GraphFn, synthName String) Future<String> =
+	defSynthStrict(synthFun, synthName);
+fn defSynthXStrict(synthFun GraphFn, synthName String, tags [String]) Future<String> =
+	defSynthStrict(synthFun, synthName, tags);
+fn defSynthXChecked(synthFun GraphFn, synthName String) Future<Result<String, String>> =
+	defSynthChecked(synthFun, synthName);
+fn defSynthXChecked(synthFun GraphFn, synthName String, tags [String]) Future<Result<String, String>> =
+	defSynthChecked(synthFun, synthName, tags);
 
 -- Graph-level fallible entry: compile and load an already-built SignalGraph.
 -- For callers (like live.proxy) that build the graph themselves in order to

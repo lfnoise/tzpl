@@ -77,7 +77,7 @@ EOF
 }
 
 check_mode cpp "C++ compiler (defSynth)"
-check_mode x   "synthc (defSynthX)"
+check_mode x   "synthc (defSynth)"
 
 if [ "$FAILED" -ne 0 ]; then
     echo "FAIL: constant-only graphs do not patch into the audio graph"

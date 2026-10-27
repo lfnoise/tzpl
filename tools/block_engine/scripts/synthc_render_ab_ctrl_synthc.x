@@ -1,6 +1,6 @@
 -- Tier-3 A/B control half (synthc): the SAME control-bearing synth as
 -- synthc_render_ab_ctrl_ref.x, compiled with the Tzopilotl-hosted compiler
--- (defSynthX) and driven by the identical scheduled control changes. The
+-- (defSynth) and driven by the identical scheduled control changes. The
 -- rendered audio must be bit-identical to the reference half.
 import synthdef.*;
 import common_ugens.*;
@@ -12,7 +12,7 @@ fn ctrlVoice() S {
 	let amp = control("amp", ControlSpec { lo: 0.0, hi: 1.0, init: 0.2, warp: ControlWarp.linear });
 	(sinosc(freq) * amp) outlet
 }
-defSynthX(ctrlVoice, "ab_ctrl");
+defSynth(ctrlVoice, "ab_ctrl");
 
 begin();
 newNode("ab_ctrl", 100);

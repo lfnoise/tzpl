@@ -9,7 +9,7 @@ fn sineLo() S {
 	sinosc(440.0) outlet
 }
 
-defSynthX(sineLo, "sbFixLo");
+defSynth(sineLo, "sbFixLo");
 begin();
 newNode("sbFixLo", 100);
 connect(100, 0, 0, 0);

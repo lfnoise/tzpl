@@ -30,14 +30,14 @@ let mode = match (getEnv("TZPL_CONST_MODE")) {
 };
 
 if (mode == "x") {
-	dc defSynthX("const_dc_x") await;
+	dc defSynth("const_dc_x") await;
 	safetyLimiter(false);
 	begin();
 	newNode("const_dc_x", 100);
 	connect(100, 0, 0, 0);
 	sched(0);
 } else {
-	dc defSynthX("const_dc_cpp") await;
+	dc defSynth("const_dc_cpp") await;
 	safetyLimiter(false);
 	begin();
 	newNode("const_dc_cpp", 100);

@@ -67,7 +67,7 @@ EOF
 }
 
 for mode in cpp x; do
-    [ "$mode" = cpp ] && who="C++ compiler (defSynth)" || who="synthc (defSynthX)"
+    [ "$mode" = cpp ] && who="synthc (defSynth), mode cpp" || who="synthc (defSynth), mode x"
     check_case "$mode" negconst -1 0.2 "$who, -2 * abs(x)"
     check_case "$mode" negctl   -1 0.2 "$who, control(-2) * abs(x)"
     check_case "$mode" posconst  1 0.3 "$who, 3 * abs(x)"

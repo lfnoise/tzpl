@@ -23,7 +23,7 @@ fn wobble() S {
 	freq add(vib) sinosc(0) mul(amp) outlet
 }
 
-wobble defSynthX("wobble") await;
+wobble defSynth("wobble") await;
 masterGain(0.2);
 
 let node = play("wobble");

@@ -17,7 +17,7 @@ sample at a time. Synths and effects use 1.3x to 3.5x less CPU (an echo
 for what changed and the code to change.
 
 - Plugin ABI v3: synths compiled before this release must be recompiled
-  (`defSynthX` does it; the engine refuses old plugins). The ABI's
+  (`defSynth` does it; the engine refuses old plugins). The ABI's
   `process(synth, offset, n)` runs a block; ports are per-channel buffers.
 - `setControl` and control descriptions are gone. A synth's parameters are
   inputs: `control(name, spec)` declares an input with a range and default,
@@ -29,8 +29,11 @@ for what changed and the code to change.
   `transpose(n)` and `mixTo` are removed. A stereo mixdown is a sum along
   an axis (`[l, r] stack sum(-1)`, or a voicer's voices `sum(0)`); `reshape`
   gives a flat row the dims to fold.
-- The C++ `synthdef-compiler` is retired; synthc (`defSynthX`) is the only
-  synth compiler.
+- The C++ `synthdef-compiler` is retired, and synthc is the only synth
+  compiler. Its entry point takes the plain name: `defSynth` (with
+  `defSynthStrict` and `defSynthChecked`) compiles with synthc, as
+  `defSynthX` did. `defSynthX`, `defSynthXStrict` and `defSynthXChecked`
+  still work and do the same.
 
 **New**
 
@@ -57,7 +60,7 @@ for what changed and the code to change.
   `tensor([1.0, 2.0; 3.0, 4.0])` is a 2x2.
 - Values computed from inputs (filter coefficients, pitches) are recomputed
   only when the inputs change, and recurrences such as filters and phasors
-  run as block-wide scans or state-space forms; `defSynthXStrict` (or
+  run as block-wide scans or state-space forms; `defSynthStrict` (or
   `TZPL_STRICT_RECURRENCES=1` for every synth) keeps every recurrence in its
   plain sample order for reference renders.
 

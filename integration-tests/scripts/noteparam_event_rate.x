@@ -17,7 +17,7 @@ fn npVoice() S {
 		v * gate()
 	}) sum outlet
 }
-npVoice defSynthX("np_event") await;
+npVoice defSynth("np_event") await;
 
 safetyLimiter(false);
 begin();

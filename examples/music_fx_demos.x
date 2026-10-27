@@ -77,15 +77,15 @@ fn fxGain() S {
 ---------------------------------------------------------------------------
 -- Compile the instrument and effect defs (async; await before first play).
 
-let cGain   = fxGain defSynthX("fxGain");
-let cLead   = wtLead() defSynthX("wtLead");
-let cPluck  = ksPluck(12) defSynthX("ksPluck12");
-let cBank   = resonBank() defSynthX("resonBank");
-let cChorus = fxChorus defSynthX("fxChorus");
-let cEcho   = fxEcho defSynthX("fxEcho");
-let cPong   = fxPingPong defSynthX("fxPingPong");
-let cPhase  = fxPhaser defSynthX("fxPhaser");
-let cVerb   = fxReverb defSynthX("fxReverb");
+let cGain   = fxGain defSynth("fxGain");
+let cLead   = wtLead() defSynth("wtLead");
+let cPluck  = ksPluck(12) defSynth("ksPluck12");
+let cBank   = resonBank() defSynth("resonBank");
+let cChorus = fxChorus defSynth("fxChorus");
+let cEcho   = fxEcho defSynth("fxEcho");
+let cPong   = fxPingPong defSynth("fxPingPong");
+let cPhase  = fxPhaser defSynth("fxPhaser");
+let cVerb   = fxReverb defSynth("fxReverb");
 await cGain; await cLead; await cPluck; await cBank;
 await cChorus; await cEcho; await cPong; await cPhase; await cVerb;
 

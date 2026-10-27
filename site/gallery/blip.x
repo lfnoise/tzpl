@@ -14,7 +14,7 @@ fn blipTest() S {
 }
 -- gallery-excerpt-end
 
-blipTest defSynthX("blipTest") await;
+blipTest defSynth("blipTest") await;
 
 go(coro fn() Float {
     "blipTest" playFor(20.0) yieldAll;

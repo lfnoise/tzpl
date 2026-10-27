@@ -20,7 +20,7 @@ fn seqTest() S {
 }
 -- gallery-excerpt-end
 
-seqTest defSynthX("seqTest") await;
+seqTest defSynth("seqTest") await;
 
 go(coro fn() Float {
     "seqTest" playFor(24.0) yieldAll;

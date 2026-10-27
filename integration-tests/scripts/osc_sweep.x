@@ -16,7 +16,7 @@ fn oscSweep() S {
 	b osc(freq, 0, 2048, 24) outlet
 }
 
-defSynthX(oscSweep, "oscSweep");
+defSynth(oscSweep, "oscSweep");
 begin();
 newNode("oscSweep", 100);
 fillBuffer(100, 0, 1, bank);

@@ -122,7 +122,7 @@ fn itdPanning() S {
 	([left, right] join) gainOutlet
 }
 
-itdPanning defSynthX("itdPanning", tags) await;
+itdPanning defSynth("itdPanning", tags) await;
 
 ---------------------------------------------------------------------------
 -- 2. aleatoric quartet (examples-7.txt:81-123)
@@ -152,7 +152,7 @@ fn aleatoricQuartet() S {
 	(sig leakdc(0.995)) gainOutlet
 }
 
-aleatoricQuartet defSynthX("aleatoricQuartet", tags) await;
+aleatoricQuartet defSynth("aleatoricQuartet", tags) await;
 
 ---------------------------------------------------------------------------
 -- 3. ritual hymn in praise of the god of the LS-3000 (examples-7.txt:127-156)
@@ -186,7 +186,7 @@ fn ritualHymnVoice() S {
 
 fn ritualHymn() S = voicer(kXfVoices, ritualHymnVoice) sum(0) gainOutlet;
 
-ritualHymn defSynthX("ritualHymn", tags) await;
+ritualHymn defSynth("ritualHymn", tags) await;
 
 ---------------------------------------------------------------------------
 -- 4. the church of chance (examples-7.txt:160-196)
@@ -219,7 +219,7 @@ fn churchVoice() S {
 
 fn churchOfChance() S = voicer(kXfVoices, churchVoice) sum(0) gainOutlet;
 
-churchOfChance defSynthX("churchOfChance", tags) await;
+churchOfChance defSynth("churchOfChance", tags) await;
 
 ---------------------------------------------------------------------------
 -- 5. a variant of "analog daze" that changes the pattern (examples-7.txt:200-242)
@@ -251,7 +251,7 @@ fn analogDazeVariant() S {
 	(0.4 * ((g combn(0.375, 4)) + (g reverse))) gainOutlet
 }
 
-analogDazeVariant defSynthX("analogDazeVariant", tags) await;
+analogDazeVariant defSynth("analogDazeVariant", tags) await;
 
 -- Rewrites the 8 pattern slots every 8 s for `totalDur` seconds.
 coro fn patternTask(totalDur Float) Float {
@@ -307,7 +307,7 @@ fn berlinBass() S {
 	(wet + sig) gainOutlet
 }
 
-berlinBass defSynthX("berlinBass", tags) await;
+berlinBass defSynth("berlinBass", tags) await;
 
 ---------------------------------------------------------------------------
 -- 7. yet another "Griot modeling" variant: a duet (examples-7.txt:310-376)
@@ -339,7 +339,7 @@ fn duetInstrument() S {
 -- with its own spawner (noteOn addresses a node's single voicer).
 fn griotDuet() S = duetInstrument() gainOutlet;
 
-griotDuet defSynthX("griotDuet", tags) await;
+griotDuet defSynth("griotDuet", tags) await;
 
 ---------------------------------------------------------------------------
 -- 8. tapping tools (examples-7.txt:380-413)
@@ -369,7 +369,7 @@ fn tappingTools() S {
 	sound gainOutlet
 }
 
-tappingTools defSynthX("tappingTools", tags) await;
+tappingTools defSynth("tappingTools", tags) await;
 
 ---------------------------------------------------------------------------
 -- driver

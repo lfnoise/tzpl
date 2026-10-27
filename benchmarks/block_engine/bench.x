@@ -51,21 +51,21 @@ fn sinlpf16() S {
 	(sinosc(f) lpf(1000.0) * 0.01) outlet
 }
 
-if (which == "knobs") { knobs defSynthX("b") await; }
-if (which == "sinlpf1") { sinlpf1 defSynthX("b") await; }
-if (which == "sinlpf16") { sinlpf16 defSynthX("b") await; }
-if (which == "chorus") { fxChorus defSynthX("b") await; }
-if (which == "echo") { fxEcho defSynthX("b") await; }
-if (which == "pingpong") { fxPingPong defSynthX("b") await; }
-if (which == "bank" || which == "bankseq") { resonBank(8) defSynthX("b") await; }
-if (which == "pluck") { ksPluck(12) defSynthX("b") await; }
+if (which == "knobs") { knobs defSynth("b") await; }
+if (which == "sinlpf1") { sinlpf1 defSynth("b") await; }
+if (which == "sinlpf16") { sinlpf16 defSynth("b") await; }
+if (which == "chorus") { fxChorus defSynth("b") await; }
+if (which == "echo") { fxEcho defSynth("b") await; }
+if (which == "pingpong") { fxPingPong defSynth("b") await; }
+if (which == "bank" || which == "bankseq") { resonBank(8) defSynth("b") await; }
+if (which == "pluck") { ksPluck(12) defSynth("b") await; }
 
 fn shaper() S = (inlet(FLOAT32, 1, "in") * 0.97 + sinosc(3.0) * 0.2) tanh outlet;
 fn smooth() S = (inlet(FLOAT32, 1, "in") onepole(0.9) * 0.01) outlet;
 let pairs = which == "cycle" || which == "cycleblk" || which == "chain";
 if (pairs) {
-	shaper defSynthX("mfA") await;
-	smooth defSynthX("mfB") await;
+	shaper defSynth("mfA") await;
+	smooth defSynth("mfB") await;
 	if (which == "cycleblk") { feedbackMode(0, FeedbackMode.feedbackBlock); }
 }
 

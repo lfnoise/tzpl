@@ -4,7 +4,7 @@
 #
 # 1. Renders two sine fixtures (440 Hz and 660 Hz) to wav.
 # 2. Loads them as the low/high pitch zones of a sample bank on a voicer
-#    sampler synth (compiled by synthc via defSynthX), whose per-note lookup
+#    sampler synth (compiled by synthc via defSynth), whose per-note lookup
 #    resolves (pitch, velocity) -> sample and plays it back at the rate
 #    derived from the resolved rootKey and source sample rate.
 # 3. Renders a note in each zone: at the zone's root key the playback rate

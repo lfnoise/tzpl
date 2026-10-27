@@ -9,7 +9,7 @@ fn sineRef() S {
 	sinosc(440.0) outlet
 }
 
-defSynthX(sineRef, "fbSineRef");
+defSynth(sineRef, "fbSineRef");
 begin();
 newNode("fbSineRef", 100);
 connect(100, 0, 0, 0);

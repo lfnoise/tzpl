@@ -3,7 +3,7 @@
 -- The byte-diff suites (effects_prod_diff.x, synthc_prod_diff.x) prove the
 -- two compilers agree, but agreement is not validity: both can emit the SAME
 -- invalid C++ and still pass. This test closes that gap by pushing every
--- library def through defSynthX -- clang compile, link, dlopen -- and
+-- library def through defSynth -- clang compile, link, dlopen -- and
 -- asserting each def actually registers.
 --
 -- Regression: fxSympathetic once emitted an event-loop reference to a local
@@ -20,10 +20,10 @@ import audio_engine.*;
 
 let fails = &0;
 
--- defSynthXChecked, not defSynthX: a failed compile must be REPORTED and
--- counted, not halt the sweep (defSynthX panics on failure).
+-- defSynthChecked, not defSynth: a failed compile must be REPORTED and
+-- counted, not halt the sweep (defSynth panics on failure).
 async fn cc(f GraphFn, name String) Void {
-	match (f defSynthXChecked(name) await) {
+	match (f defSynthChecked(name) await) {
 		ok(cpp): {
 			if (listSynthDefs() contains(name)) { println("PASS " $ name); }
 			else { fails <- *fails + 1; println("FAIL " $ name $ " (compiled but not registered)"); }

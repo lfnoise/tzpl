@@ -16,18 +16,18 @@
 --
 -- Each def is a factory taking maxVoices (default kMaxVoices = 8) and
 -- returning the graph function, so a different voice count is just
---     ksPluck(16) defSynthX("ksPluck16", ["note"]) await;
+--     ksPluck(16) defSynth("ksPluck16", ["note"]) await;
 
 import synthdef.*;
 import synthc.compile.*;
 import instruments.*;
 
-smpPerc() defSynthX("smpPerc", ["note"]) await;
-smpLoopTail() defSynthX("smpLoopTail", ["note"]) await;
-smpLoopEnv() defSynthX("smpLoopEnv", ["note"]) await;
-wtLead() defSynthX("wtLead", ["note"]) await;
-resonBank() defSynthX("resonBank", ["note"]) await;
-ksPluck() defSynthX("ksPluck", ["note"]) await;
+smpPerc() defSynth("smpPerc", ["note"]) await;
+smpLoopTail() defSynth("smpLoopTail", ["note"]) await;
+smpLoopEnv() defSynth("smpLoopEnv", ["note"]) await;
+wtLead() defSynth("wtLead", ["note"]) await;
+resonBank() defSynth("resonBank", ["note"]) await;
+ksPluck() defSynth("ksPluck", ["note"]) await;
 
 let kNoteSynths = [
 	"smpPerc",

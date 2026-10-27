@@ -16,7 +16,7 @@ fn bubbles() S =
     |> combn(0.2, 4) outlet;
 -- gallery-excerpt-end
 
-bubbles defSynthX("bubbles") await;
+bubbles defSynth("bubbles") await;
 
 go(coro fn() Float {
     "bubbles" playFor(16.0) yieldAll;

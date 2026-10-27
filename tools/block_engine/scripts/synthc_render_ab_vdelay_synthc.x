@@ -1,6 +1,6 @@
 -- Tier-3 A/B variable-delay half (synthc): the SAME variable-delay synth as
 -- synthc_render_ab_vdelay_ref.x, compiled with the Tzopilotl-hosted compiler
--- (defSynthX). The rendered audio must be bit-identical to the reference half.
+-- (defSynth). The rendered audio must be bit-identical to the reference half.
 import synthdef.*;
 import common_ugens.*;
 import synthc.compile.*;
@@ -18,7 +18,7 @@ fn vdelayVoice() S {
 	d write(osc * 0.5 + r * 0.4);
 	r outlet
 }
-defSynthX(vdelayVoice, "ab_vdelay");
+defSynth(vdelayVoice, "ab_vdelay");
 
 begin();
 newNode("ab_vdelay", 100);

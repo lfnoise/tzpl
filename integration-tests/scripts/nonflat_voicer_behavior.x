@@ -28,7 +28,7 @@ fn nfProbe() S {
 		g pause(fn() S { (ph + 1.0) * amp })
 	}) outlet
 }
-nfProbe defSynthX("nfprobe") await;
+nfProbe defSynth("nfprobe") await;
 
 fn nfSeq() S {
 	voicer(4, fn() S {
@@ -38,7 +38,7 @@ fn nfSeq() S {
 		g pause(fn() S { (0.5 lfimp seq(pattern * f, 8)) })
 	}) outlet
 }
-nfSeq defSynthX("nfseq") await;
+nfSeq defSynth("nfseq") await;
 
 let t = allocTapID();
 begin(); tapMaster(t, TapMode.tapMeter); go(0);

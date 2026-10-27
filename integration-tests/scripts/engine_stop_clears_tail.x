@@ -18,7 +18,7 @@ fn tailVoice() S {
 	(sinosc(440.0) * amp) echo(0.4, 0.9, 1.0, 1.0) outlet
 }
 
-tailVoice defSynthX("tailtest") await;
+tailVoice defSynth("tailtest") await;
 
 begin();
 newNode("tailtest", 100);

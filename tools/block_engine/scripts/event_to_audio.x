@@ -16,7 +16,7 @@ fn e2aDemo() S {
 	let kick = control("kick", ControlSpec { lo: 0.0, hi: 10.0, init: 0.0, warp: ControlWarp.linear });
 	[c tr, kick] join outlet
 }
-e2aDemo defSynthX("e2a_demo") await;
+e2aDemo defSynth("e2a_demo") await;
 
 safetyLimiter(false);
 begin();

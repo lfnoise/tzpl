@@ -79,7 +79,7 @@ fn mixSweepersVoice() S {
 
 fn mixSweepers() S = voicer(kSwVoices, mixSweepersVoice) sum(0) gainOutlet;
 
-mixSweepers defSynthX("mixSweepers", tags) await;
+mixSweepers defSynth("mixSweepers", tags) await;
 
 -- 1b: OverlapTexture(.., 4, 4, 4, 2)
 const kRkTrans = 4.0;
@@ -98,7 +98,7 @@ fn mixRingKlanksVoice() S {
 
 fn mixRingKlanks() S = voicer(kRkVoices, mixRingKlanksVoice) sum(0) gainOutlet;
 
-mixRingKlanks defSynthX("mixRingKlanks", tags) await;
+mixRingKlanks defSynth("mixRingKlanks", tags) await;
 
 -- 1c: OverlapTexture(.., 10, 1, 4, 2): Resonz(ClipNoise * LFPulse(4 + linrand 15,
 -- width rand 0.7, 5/4), 80 + linrand 900, 0.01), panned by a slow SinOsc.
@@ -116,7 +116,7 @@ fn mixBottlesVoice() S {
 
 fn mixBottles() S = voicer(kBtVoices, mixBottlesVoice) sum(0) gainOutlet;
 
-mixBottles defSynthX("mixBottles", tags) await;
+mixBottles defSynth("mixBottles", tags) await;
 
 ---------------------------------------------------------------------------
 -- 2. pentatonic pipes and bells (examples-10.txt:55-113)
@@ -168,7 +168,7 @@ fn pentatonic() S {
 	(m1 + m2) gainOutlet
 }
 
-pentatonic defSynthX("pentatonic", tags) await;
+pentatonic defSynth("pentatonic", tags) await;
 
 ---------------------------------------------------------------------------
 -- 3. tarmac (examples-10.txt:117-176)
@@ -228,7 +228,7 @@ fn allpassTail6(z S, decayTime Float) S {
 
 fn tarmacA() S = allpassTail6(voicer(kTarAVoices, tarmacAVoice) sum(0), 16) gainOutlet;
 
-tarmacA defSynthX("tarmacA", tags) await;
+tarmacA defSynth("tarmacA", tags) await;
 
 fn tarmacBVoice() S {
 	let bank = klank(pink() * 0.0008, linrandv(700, 6000, 4, Rate.reset), 1, linrandv(0.2, 12, 4, Rate.reset));
@@ -239,7 +239,7 @@ fn tarmacBVoice() S {
 
 fn tarmacB() S = allpassTail6(voicer(kTarBVoices, tarmacBVoice) sum(0), 16) gainOutlet;
 
-tarmacB defSynthX("tarmacB", tags) await;
+tarmacB defSynth("tarmacB", tags) await;
 
 ---------------------------------------------------------------------------
 -- 4. dancing shadows (examples-10.txt:180-244)
@@ -301,7 +301,7 @@ fn dancingShadowsVoice() S {
 
 fn dancingShadows() S = voicer(kDsVoices, dancingShadowsVoice) sum(0) gainOutlet;
 
-dancingShadows defSynthX("dancingShadows", tags) await;
+dancingShadows defSynth("dancingShadows", tags) await;
 
 ---------------------------------------------------------------------------
 -- 5. choip choip choip (examples-10.txt:248-271)
@@ -336,7 +336,7 @@ fn choip() S {
 	z gainOutlet
 }
 
-choip defSynthX("choip", tags) await;
+choip defSynth("choip", tags) await;
 
 ---------------------------------------------------------------------------
 -- driver

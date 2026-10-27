@@ -1,5 +1,5 @@
 -- Tier-3 A/B merge half (synthc): the SAME two-delay synth compiled by synthc
--- (defSynthX). synthc keys delay allocation on the written signal, so the two
+-- (defSynth). synthc keys delay allocation on the written signal, so the two
 -- identical lines collapse to ONE ring buffer with two read taps. The rendered
 -- audio must be bit-identical to the C++ two-buffer reference -- a content-
 -- preserving optimization.
@@ -15,7 +15,7 @@ fn mergesyn() S {
 	a write(sig); b write(sig);
 	(a read(1) * 0.6 + b read(4) * 0.4) outlet
 }
-defSynthX(mergesyn, "ab_merge");
+defSynth(mergesyn, "ab_merge");
 
 begin();
 newNode("ab_merge", 100);

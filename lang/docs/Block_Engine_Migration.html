@@ -332,9 +332,10 @@
         <div class="section" id="checklist">
             <h2>1. Checklist</h2>
             <ol>
-                <li><strong>Recompile every synth.</strong> Run your <code>defSynthX</code> calls
+                <li><strong>Recompile every synth.</strong> Run your <code>defSynth</code> calls
                 again. The engine refuses plugins built for the old engine. <code>defSynth</code>
-                (the old C++ compiler) is gone: use <code>defSynthX</code>.</li>
+                now runs synthc; the old C++ compiler it used to run is gone. Scripts that
+                call <code>defSynthX</code>, synthc's former name, still work.</li>
                 <li><strong>Replace <code>setControl</code></strong> with <code>setInput</code>
                 (<a href="#ex-controls">&sect;4.1</a>), and <code>bindControl</code> with
                 <code>bindInput</code>.</li>
@@ -373,7 +374,7 @@
                 <tr><td>Recurrences (filters, phasors, envelopes)</td><td>Run sample by sample.</td>
                     <td>Recognised by the compiler and run as block-wide scans or state-space forms
                     where they can be, with the same results to within rounding.
-                    <code>defSynthXStrict</code> keeps the sample-by-sample order.</td></tr>
+                    <code>defSynthStrict</code> keeps the sample-by-sample order.</td></tr>
                 <tr><td>Voices</td><td>Allocated inside each compiled synth.</td>
                     <td>Allocated by the engine, which writes each note's row of the synth's
                     <code>notes</code> input. A released voice that has finished is skipped.</td></tr>
@@ -383,7 +384,9 @@
                     one-block delay, cheaper, with <code>feedbackMode</code>.</td></tr>
                 <tr><td>Synth compiler</td><td>Two: a C++ compiler (<code>defSynth</code>) and
                     synthc (<code>defSynthX</code>).</td>
-                    <td>synthc only, written in Tzopilotl (<code>lang/modules/synthc/</code>).</td></tr>
+                    <td>synthc only, written in Tzopilotl (<code>lang/modules/synthc/</code>),
+                    run by <code>defSynth</code>. <code>defSynthX</code> still works and does the
+                    same.</td></tr>
                 <tr><td>Plugin interface</td><td>ABI v2: per-sample calls.</td>
                     <td>ABI v3 (<a href="#plugins">&sect;7</a>).</td></tr>
             </table>
@@ -408,7 +411,7 @@
                     <code>setInput(node, port, [v0, v1, &hellip;])</code>, plus
                     <code>setInputAt</code> and <code>setInputBox</code> for part of an input.</td></tr>
                 <tr><td><code>bindControl(w, node, "name")</code></td><td><code>bindInput(w, node, "name")</code>, optionally one element: <code>bindInput(w, node, "name", element)</code>.</td></tr>
-                <tr><td><code>defSynth(f, "name")</code></td><td><code>defSynthX(f, "name")</code>.</td></tr>
+                <tr><td><code>defSynth(f, "name")</code> (C++ compiler), <code>defSynthX(f, "name")</code> (synthc)</td><td><code>defSynth(f, "name")</code>, which runs synthc. Rerun it so the synth is rebuilt for the block engine.</td></tr>
                 <tr><td><code>Rate.event</code></td><td><code>Rate.block</code>. Usually you need neither: a value
                     computed from controls is recomputed only when they change.</td></tr>
                 <tr><td><code>sum(n)</code>, <code>product(n)</code>, <code>minOf(n)</code>, <code>maxOf(n)</code> folding to n channels</td>
@@ -440,7 +443,7 @@
                     values: <code>impulseInput</code></td><td><a href="#ex-controls">&sect;4.1</a></td></tr>
                 <tr><td>Gliding a sounding note's parameters: <code>noteSetParams(&hellip;, rampTime)</code></td><td><a href="#ex-voices">&sect;4.3</a></td></tr>
                 <tr><td>Skipping finished voices: <code>voicer(n, body, silence)</code>, <code>doneWhen</code></td><td><a href="#ex-voices">&sect;4.3</a></td></tr>
-                <tr><td><code>feedbackMode(silo, mode)</code>, <code>defSynthXStrict</code>, <code>--block-size</code></td><td><a href="#new">&sect;6</a></td></tr>
+                <tr><td><code>feedbackMode(silo, mode)</code>, <code>defSynthStrict</code>, <code>--block-size</code></td><td><a href="#new">&sect;6</a></td></tr>
             </table>
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
@@ -473,7 +476,7 @@ begin(); setControl(<span class="hl-num">100</span>, <span class="hl-num">1</spa
     <span class="hl-kw">let</span> amp = control(<span class="hl-str">"amp"</span>, ControlSpec { lo: <span class="hl-num">0.0</span>, hi: <span class="hl-num">1.0</span>, init: <span class="hl-num">0.1</span>, warp: ControlWarp.linear });
     <span class="hl-num">110.0</span> lfsaw rlpf(cutoff, <span class="hl-num">0.3</span>) * amp |&amp;gt; outlet
 }
-filtered defSynthX(<span class="hl-str">"filtered"</span>) <span class="hl-kw">await</span>;
+filtered defSynth(<span class="hl-str">"filtered"</span>) <span class="hl-kw">await</span>;
 begin(); newNode(<span class="hl-str">"filtered"</span>, <span class="hl-num">100</span>); connect(<span class="hl-num">100</span>, <span class="hl-num">0</span>, <span class="hl-num">0</span>, <span class="hl-num">0</span>); go(<span class="hl-num">0</span>);
 
 begin(); setInput(<span class="hl-num">100</span>, <span class="hl-str">"cutoff"</span>, <span class="hl-num">800.0</span>); go(<span class="hl-num">0</span>);         <span class="cmt">-- a step</span>
@@ -486,7 +489,7 @@ begin(); setInput(<span class="hl-num">100</span>, <span class="hl-num">1</span>
     <span class="hl-kw">let</span> freqs = control(<span class="hl-str">"freqs"</span>, ControlSpec { lo: <span class="hl-num">50.0</span>, hi: <span class="hl-num">2000.0</span>, init: <span class="hl-num">220.0</span>, warp: ControlWarp.exponential }, <span class="hl-num">3</span>);
     freqs sinosc sum * <span class="hl-num">0.05</span> |&amp;gt; outlet
 }
-chord defSynthX(<span class="hl-str">"chord"</span>) <span class="hl-kw">await</span>;
+chord defSynth(<span class="hl-str">"chord"</span>) <span class="hl-kw">await</span>;
 begin(); newNode(<span class="hl-str">"chord"</span>, <span class="hl-num">101</span>); connect(<span class="hl-num">101</span>, <span class="hl-num">0</span>, <span class="hl-num">0</span>, <span class="hl-num">0</span>); go(<span class="hl-num">0</span>);
 begin(); setInput(<span class="hl-num">101</span>, <span class="hl-str">"freqs"</span>, [<span class="hl-num">220.0</span>, <span class="hl-num">277.2</span>, <span class="hl-num">329.6</span>]); go(<span class="hl-num">0</span>);
 begin(); setInputAt(<span class="hl-num">101</span>, <span class="hl-str">"freqs"</span>, <span class="hl-num">2</span>, <span class="hl-num">392.0</span>, <span class="hl-num">0.5</span>); go(<span class="hl-num">0</span>);   <span class="cmt">-- element 2 only, gliding</span></code></pre>
@@ -511,7 +514,7 @@ exprand(<span class="hl-num">200</span>, <span class="hl-num">2000</span>, <span
 <span class="hl-kw">fn</span> shimmer() S {
     exprand(<span class="hl-num">200</span>, <span class="hl-num">2000</span>, <span class="hl-num">16</span>, Rate.init) reshape([<span class="hl-num">8</span>, <span class="hl-num">2</span>]) sinosc sum(<span class="hl-num">0</span>) * <span class="hl-num">0.05</span> |&amp;gt; outlet
 }
-shimmer defSynthX(<span class="hl-str">"shimmer"</span>) <span class="hl-kw">await</span>;</code></pre>
+shimmer defSynth(<span class="hl-str">"shimmer"</span>) <span class="hl-kw">await</span>;</code></pre>
 
             <p><code>reshape([8, 2])</code> keeps the channels in order and reads them as 8 rows of
             2, so channel 0 goes left, 1 right, 2 left, and so on: exactly the old fold. One
@@ -543,7 +546,7 @@ voicer(<span class="hl-num">8</span>, stereoVoice) sum(<span class="hl-num">2</s
         [f, f * <span class="hl-num">1.003</span>] stack sinosc * env * <span class="hl-num">0.1</span>     <span class="cmt">-- 2 channels per voice</span>
     }) sum(<span class="hl-num">0</span>) |&amp;gt; outlet                             <span class="cmt">-- 8x2 summed over the voices</span>
 }
-stereoPad defSynthX(<span class="hl-str">"stereoPad"</span>) <span class="hl-kw">await</span>;
+stereoPad defSynth(<span class="hl-str">"stereoPad"</span>) <span class="hl-kw">await</span>;
 begin(); newNode(<span class="hl-str">"stereoPad"</span>, <span class="hl-num">102</span>); connect(<span class="hl-num">102</span>, <span class="hl-num">0</span>, <span class="hl-num">0</span>, <span class="hl-num">0</span>); go(<span class="hl-num">0</span>);
 begin(); noteOn(<span class="hl-num">102</span>, <span class="hl-num">1</span>, [<span class="hl-num">220.0</span>]); go(<span class="hl-num">0</span>);
 begin(); noteSetParams(<span class="hl-num">102</span>, <span class="hl-num">1</span>, <span class="hl-num">0</span>, [<span class="hl-num">330.0</span>], <span class="hl-num">1.0</span>); go(<span class="hl-num">0</span>);   <span class="cmt">-- new: glide the note's freq over 1 s</span>
@@ -620,7 +623,7 @@ begin(); noteOff(<span class="hl-num">102</span>, <span class="hl-num">1</span>)
     <span class="hl-kw">let</span> half = fill([<span class="hl-num">4</span>, <span class="hl-num">2</span>], <span class="hl-num">0.5</span>);                   <span class="cmt">-- a 4x2 constant</span>
     noise * gains * half * <span class="hl-num">0.1</span> |&amp;gt; sum(<span class="hl-num">0</span>) outlet    <span class="cmt">-- mixed to 2 channels</span>
 }
-shapes defSynthX(<span class="hl-str">"shapes"</span>) <span class="hl-kw">await</span>;</code></pre>
+shapes defSynth(<span class="hl-str">"shapes"</span>) <span class="hl-kw">await</span>;</code></pre>
 
             <p>(The music libraries have an unrelated <code>Shape</code> type for note shapes; the
             one meant here is <code>synthdef</code>'s.)</p>
@@ -644,7 +647,7 @@ tensor([<span class="hl-num">4</span>, <span class="hl-num">4</span>], [<span cl
     <span class="hl-kw">let</span> tones = [<span class="hl-num">220.0</span>, <span class="hl-num">277.2</span>, <span class="hl-num">329.6</span>] sinosc;   <span class="cmt">-- a row of 3</span>
     tones * gains * <span class="hl-num">0.05</span> |&amp;gt; sum(cols) outlet     <span class="cmt">-- 2x3, each row summed: stereo</span>
 }
-panned defSynthX(<span class="hl-str">"panned"</span>) <span class="hl-kw">await</span>;</code></pre>
+panned defSynth(<span class="hl-str">"panned"</span>) <span class="hl-kw">await</span>;</code></pre>
 
             <p>Nested arrays may be up to 4 deep, and every row at a level must be the same length.
             Integer values make integer constants that take the type of whatever they combine with.</p>
@@ -678,7 +681,7 @@ panned defSynthX(<span class="hl-str">"panned"</span>) <span class="hl-kw">await
     <span class="hl-kw">let</span> detune = [<span class="hl-num">1.0</span>, <span class="hl-num">1.004</span>];                            <span class="cmt">-- row of 2</span>
     (pitches * detune) sinosc sum(<span class="hl-num">0</span>) * <span class="hl-num">0.05</span> |&amp;gt; outlet  <span class="cmt">-- 3x2, summed over the pitches: stereo</span>
 }
-detunedChord defSynthX(<span class="hl-str">"detunedChord"</span>) <span class="hl-kw">await</span>;</code></pre>
+detunedChord defSynth(<span class="hl-str">"detunedChord"</span>) <span class="hl-kw">await</span>;</code></pre>
 
             <h3 id="axes">5.4 Axes</h3>
 
@@ -733,7 +736,7 @@ detunedChord defSynthX(<span class="hl-str">"detunedChord"</span>) <span class="
                 <li><strong>Exact recurrences.</strong> Filters and other feedback inside a synth may run
                 in block forms that round differently from a sample-by-sample loop (by about 2&times;10<sup>&minus;5</sup>
                 relative in <code>f32</code>). For a reference render, compile with
-                <code>defSynthXStrict(f, "name")</code>, or set <code>TZPL_STRICT_RECURRENCES=1</code>
+                <code>defSynthStrict(f, "name")</code>, or set <code>TZPL_STRICT_RECURRENCES=1</code>
                 for every synth.</li>
                 <li><strong>Block size.</strong> 64 samples by default; <code>--block-size n</code> or
                 <code>blockSize = n</code> in the project config (4 to 1024). Timing is sample-accurate at

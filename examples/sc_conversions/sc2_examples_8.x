@@ -69,7 +69,7 @@ fn modalSpace() S {
 	((mix combn(0.31, 2)) + mix) gainOutlet
 }
 
-modalSpace defSynthX("modalSpace", tags) await;
+modalSpace defSynth("modalSpace", tags) await;
 
 ---------------------------------------------------------------------------
 -- 2. algorhythmic rhythms (examples-8.txt:44-76)
@@ -98,7 +98,7 @@ fn algoRhythms() S {
 	(mix + shaker + bass) gainOutlet
 }
 
-algoRhythms defSynthX("algoRhythms", tags) await;
+algoRhythms defSynth("algoRhythms", tags) await;
 
 ---------------------------------------------------------------------------
 -- 3. wolf tones (examples-8.txt:80-102)
@@ -123,7 +123,7 @@ fn wolfTones() S {
 	(0.5 * (mix comb([0.09, 0.08] vec, 0.1, 1.0, Interpolation.none)) + mix) gainOutlet
 }
 
-wolfTones defSynthX("wolfTones", tags) await;
+wolfTones defSynth("wolfTones", tags) await;
 
 ---------------------------------------------------------------------------
 -- 4. Landon Rose Klank spawn (examples-8.txt:106-133)
@@ -154,7 +154,7 @@ fn klankSpawnVoice() S {
 
 fn klankSpawn() S = voicer(kLrVoices, klankSpawnVoice) sum(0) gainOutlet;
 
-klankSpawn defSynthX("klankSpawn", tags) await;
+klankSpawn defSynth("klankSpawn", tags) await;
 
 coro fn klankSpawner(nodeID Int, totalDur Float) Float {
 	var i = 0;
@@ -196,7 +196,7 @@ fn screenZones() S {
 	(z1 + z2 + z3 + z4) gainOutlet
 }
 
-screenZones defSynthX("screenZones", tags) await;
+screenZones defSynth("screenZones", tags) await;
 
 ---------------------------------------------------------------------------
 -- 6. slight mod of "phase mod with slow beats" (examples-8.txt:165-191)
@@ -230,7 +230,7 @@ fn phaseModAdsrVoice() S {
 
 fn phaseModAdsr() S = voicer(kPmVoices, phaseModAdsrVoice) sum(0) gainOutlet;
 
-phaseModAdsr defSynthX("phaseModAdsr", tags) await;
+phaseModAdsr defSynth("phaseModAdsr", tags) await;
 
 coro fn phaseModSpawner(nodeID Int, totalDur Float) Float {
 	var id = 0;
@@ -266,7 +266,7 @@ fn chaoticSequencer() S {
 	((seqv - 0.72) lpf(f)) gainOutlet
 }
 
-chaoticSequencer defSynthX("chaoticSequencer", tags) await;
+chaoticSequencer defSynth("chaoticSequencer", tags) await;
 
 ---------------------------------------------------------------------------
 -- driver

@@ -22,7 +22,7 @@ fn sineTab() S {
 	b vread(phasor(440.0) f64 * 512.0, Interpolation.cubic) f32 outlet
 }
 
-defSynthX(sineTab, "fbSineTab");
+defSynth(sineTab, "fbSineTab");
 begin();
 newNode("fbSineTab", 100);
 fillBuffer(100, 0, 1, table);

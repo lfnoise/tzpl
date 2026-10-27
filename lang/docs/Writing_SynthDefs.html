@@ -376,7 +376,7 @@
             analyzes it (rates, types, channel counts, common subexpressions, SIMD) and generates a native
             <code>.dylib</code> plugin that the engine loads and can instantiate as nodes.</p>
 
-<pre><code>your synth fn (.x) &mdash;runs once&rarr; SignalGraph &mdash;defSynthX&rarr; compiled .dylib plugin
+<pre><code>your synth fn (.x) &mdash;runs once&rarr; SignalGraph &mdash;defSynth&rarr; compiled .dylib plugin
                                                         &darr;
                                        engine loads it; newNode() makes instances</code></pre>
 
@@ -398,7 +398,7 @@
             <p>A minimal synthdef, defined and played:</p>
 
 <pre><code><span class="hl-kw">import</span> synthdef.*;
-<span class="hl-kw">import</span> synthc.compile.*;   <span class="cmt">-- provides defSynthX, the production compile path</span>
+<span class="hl-kw">import</span> synthc.compile.*;   <span class="cmt">-- provides defSynth, the production compile path</span>
 <span class="hl-kw">import</span> common_ugens.*;
 
 <span class="hl-kw">fn</span> beep() S =
@@ -407,7 +407,7 @@
     * <span class="hl-num">0.2</span>
     |&gt; outlet;                     <span class="cmt">-- the graph's output sink</span>
 
-beep defSynthX(<span class="hl-str">"beep"</span>) await;      <span class="cmt">-- compile + load into the engine</span>
+beep defSynth(<span class="hl-str">"beep"</span>) await;      <span class="cmt">-- compile + load into the engine</span>
 <span class="hl-str">"beep"</span> play;                       <span class="cmt">-- make a node and connect it to audio out</span></code></pre>
 
             <p>The compile itself runs in the background, so any music already playing keeps
@@ -416,7 +416,7 @@ beep defSynthX(<span class="hl-str">"beep"</span>) await;      <span class="cmt"
             flight, so the example would work without it; the <code>await</code> is what
             makes a following <code>newNode</code> in a hand-built bundle, or a
             <code>ui.control(node, ...)</code>, safe as well, and it surfaces a failed compile
-            where you can see it. When you re-evaluate a <code>defSynthX</code> call for a def
+            where you can see it. When you re-evaluate a <code>defSynth</code> call for a def
             that is already playing you can drop the <code>await</code>: players keep using
             the old version and switch to the new one the moment it finishes loading.</p>
 
@@ -601,7 +601,7 @@ c &lt;- (c1 + t) i32 % n;</code></pre>
     <span class="hl-kw">let</span> level = control(<span class="hl-str">"level"</span>, spec, <span class="hl-num">2</span>);        <span class="cmt">-- a row of 2 (a count)</span>
     (noise * gains) sum(<span class="hl-num">0</span>) * level * <span class="hl-num">0.1</span> |&gt; outlet  <span class="cmt">-- summed over the 4 rows: 2 channels</span>
 }
-gainsAndNoise defSynthX(<span class="hl-str">"gainsAndNoise"</span>) <span class="hl-kw">await</span>;</code></pre>
+gainsAndNoise defSynth(<span class="hl-str">"gainsAndNoise"</span>) <span class="hl-kw">await</span>;</code></pre>
 
             <h4 id="axes">Axes</h4>
 
@@ -679,7 +679,7 @@ gainsAndNoise defSynthX(<span class="hl-str">"gainsAndNoise"</span>) <span class
     <span class="hl-kw">let</span> pan = [<span class="hl-num">0.8</span>, <span class="hl-num">0.2</span>];                                 <span class="cmt">-- applies to each row</span>
     osc * pan * <span class="hl-num">0.05</span> |&gt; sum(<span class="hl-num">0</span>) outlet                    <span class="cmt">-- summed over the pitches: stereo</span>
 }
-broadcasts defSynthX(<span class="hl-str">"broadcasts"</span>) <span class="hl-kw">await</span>;</code></pre>
+broadcasts defSynth(<span class="hl-str">"broadcasts"</span>) <span class="hl-kw">await</span>;</code></pre>
 
             <p>Unary operations and ugens are per channel, and the ugens are built from these same
             operators, so they broadcast too: feeding a 2&times;3 frequency into
@@ -949,7 +949,7 @@ x reshape([<span class="hl-num">6</span>, -<span class="hl-num">1</span>])  <spa
     <span class="hl-kw">let</span> cutoff = control(<span class="hl-str">"cutoff"</span>, espec(<span class="hl-num">100.0</span>, <span class="hl-num">8000.0</span>, <span class="hl-num">800.0</span>));
     freqs smoothSaw(<span class="hl-num">4</span>) sum lpf(cutoff) * <span class="hl-num">0.1</span> |&gt; outlet
 }
-triad defSynthX(<span class="hl-str">"triad"</span>) await;
+triad defSynth(<span class="hl-str">"triad"</span>) await;
 <span class="hl-kw">let</span> n = <span class="hl-str">"triad"</span> play;
 
 begin(); setInput(n, <span class="hl-str">"freqs"</span>, [<span class="hl-num">220.0</span>, <span class="hl-num">277.2</span>, <span class="hl-num">330.0</span>]); sched(<span class="hl-num">0</span>);   <span class="cmt">-- a chord</span>
@@ -1169,8 +1169,8 @@ freqs fsinosc * (amps reshape([<span class="hl-num">4</span>, <span class="hl-nu
             but where a fed-back value drives a decision (a gate threshold, a sequencer step, a
             quantizer, a delay time, a very resonant filter) the difference can grow. To compile
             every loop of one synth in plain sample order &mdash; for a reference render to compare
-            against &mdash; compile it with <code>defSynthXStrict(synthFun, name)</code> instead of
-            <code>defSynthX</code>. To do that for every synth, start the app with the environment
+            against &mdash; compile it with <code>defSynthStrict(synthFun, name)</code> instead of
+            <code>defSynth</code>. To do that for every synth, start the app with the environment
             variable <code>TZPL_STRICT_RECURRENCES=1</code>. To see which form each loop got, print the graph's analysis: each
             <code>CYCLE</code> line is followed by its <code>CLASS</code> and
             <code>STRATEGY</code>.</p>
@@ -1210,7 +1210,7 @@ makeGraph(tone) analysisDump(<span class="hl-str">"tone"</span>) println;</code>
     <span class="hl-kw">let</span> fb = inlet(FLOAT32, <span class="hl-num">1</span>, <span class="hl-str">"fb"</span>);
     sinosc(<span class="hl-num">220</span> + fb * <span class="hl-num">1500</span>) * <span class="hl-num">0.2</span> |&gt; outlet
 }
-selfFM defSynthX(<span class="hl-str">"selfFM"</span>) await;
+selfFM defSynth(<span class="hl-str">"selfFM"</span>) await;
 <span class="hl-kw">let</span> n = <span class="hl-str">"selfFM"</span> play;                          <span class="cmt">-- a plain sine at first</span>
 begin(); connect(n, <span class="hl-num">0</span>, n, <span class="hl-num">0</span>); sched(<span class="hl-num">0</span>);        <span class="cmt">-- its output into its own input</span>
 
@@ -1268,7 +1268,7 @@ n stop;</code></pre>
     pos &lt;- newPos;
     buf vread(newPos, Interpolation.cubic, <span class="hl-num">2</span>) |&gt; outlet
 }
-samplePlayer defSynthX(<span class="hl-str">"samplePlayer"</span>) await;
+samplePlayer defSynth(<span class="hl-str">"samplePlayer"</span>) await;
 
 <span class="cmt">-- engine side, after newNode("samplePlayer", 100):</span>
 loadBuffer(<span class="hl-num">100</span>, <span class="hl-num">0</span>, <span class="hl-str">"samples/kick.wav"</span>);</code></pre>
@@ -1341,7 +1341,7 @@ loadBuffer(<span class="hl-num">100</span>, <span class="hl-num">0</span>, <span
         h vread(pos, Interpolation.cubic) f32 * g
     }) sum outlet
 }
-sampler defSynthX(<span class="hl-str">"sampler"</span>) await;
+sampler defSynth(<span class="hl-str">"sampler"</span>) await;
 
 <span class="cmt">-- engine side, after newNode("sampler", 100):</span>
 loadSampleBank(<span class="hl-num">100</span>, <span class="hl-num">0</span>, [
@@ -1474,7 +1474,7 @@ loadSampleBank(<span class="hl-num">100</span>, <span class="hl-num">0</span>, [
 }
 
 <span class="hl-kw">fn</span> organ() S = voicer(<span class="hl-num">8</span>, organVoice) sum outlet;
-organ defSynthX(<span class="hl-str">"organ"</span>) await;
+organ defSynth(<span class="hl-str">"organ"</span>) await;
 <span class="hl-kw">let</span> n = <span class="hl-str">"organ"</span> play;
 
 <span class="cmt">-- params are [freq, amp] -- declaration order; the engine sets gate</span>
@@ -1539,15 +1539,15 @@ n stop;</code></pre>
         <div class="section" id="compile">
             <h2>14. Compiling, Tagging, and Playing</h2>
 
-            <h3>defSynthX</h3>
+            <h3>defSynth</h3>
 
-            <p><code>defSynthX(synthFun, name)</code> and
-            <code>defSynthX(synthFun, name, tags)</code> (from <code>synthc.compile</code>) run your
+            <p><code>defSynth(synthFun, name)</code> and
+            <code>defSynth(synthFun, name, tags)</code> (from <code>synthc.compile</code>) run your
             graph function, compile the graph with <strong>synthc</strong> &mdash; the Tzopilotl-hosted
             synthdef compiler &mdash; and load the resulting plugin into the engine under
             <code>name</code>. This is the production path.</p>
 
-            <p><code>defSynthX</code> is <strong>async</strong>: the <code>clang</code> invocation
+            <p><code>defSynth</code> is <strong>async</strong>: the <code>clang</code> invocation
             that builds the <code>.dylib</code> runs on a background worker, so sequences that are
             already playing keep playing while a def compiles. The call returns a
             <code>Future&lt;String&gt;</code> holding the generated C++ source; when it resolves, the
@@ -1557,7 +1557,7 @@ n stop;</code></pre>
 
             <ul>
                 <li><strong>First definition:</strong> <code>await</code> before playing the def
-                &mdash; <code>mySynth defSynthX(<span class="hl-str">"mySynth"</span>) await;</code> &mdash;
+                &mdash; <code>mySynth defSynth(<span class="hl-str">"mySynth"</span>) await;</code> &mdash;
                 so the def exists when the first note asks for it.</li>
                 <li><strong>Redefinition:</strong> just call it, no <code>await</code>. Nodes
                 already running the def keep the code they were created with (the engine keeps
@@ -1572,7 +1572,7 @@ n stop;</code></pre>
             <p>Inside a non-real-time render script the compile runs synchronously (the render
             cannot proceed without the def), so the returned future is already resolved.</p>
 
-            <p><code>defSynthXChecked</code> is the fallible form for code that must tolerate and
+            <p><code>defSynthChecked</code> is the fallible form for code that must tolerate and
             report failures rather than halt (test harnesses that sweep many defs): it returns a
             <code>Future&lt;Result&lt;String, String&gt;&gt;</code> &mdash; <code>ok(cpp)</code> on
             success, <code>err(message)</code> on a failed analysis, compile, or load &mdash; and
@@ -1585,7 +1585,7 @@ n stop;</code></pre>
             <h3>Tags</h3>
 
             <p>Tags are free-form category strings attached to a def
-            (<code>defSynthX(f, <span class="hl-str">"name"</span>, [<span class="hl-str">"example"</span>])</code>)
+            (<code>defSynth(f, <span class="hl-str">"name"</span>, [<span class="hl-str">"example"</span>])</code>)
             that the plugin browser uses for filtering. The <code>TZPL_DEFAULT_TAGS</code> environment
             variable (comma-separated) appends session-wide default tags to everything compiled &mdash;
             test harnesses set <code>TZPL_DEFAULT_TAGS=test</code> so their defs are born filtered
@@ -1938,7 +1938,7 @@ linen(gate(), <span class="hl-num">0.05</span>, <span class="hl-num">0.5</span>)
     <span class="hl-kw">let</span> f = control(<span class="hl-str">"freq"</span>, ControlSpec { lo: <span class="hl-num">20.0</span>, hi: <span class="hl-num">10000.0</span>, init: <span class="hl-num">110.0</span>, warp: ControlWarp.exponential });
     b osc(f) * <span class="hl-num">0.2</span> |&gt; outlet
 }
-sawOsc defSynthX(<span class="hl-str">"sawOsc"</span>) await;
+sawOsc defSynth(<span class="hl-str">"sawOsc"</span>) await;
 
 <span class="cmt">-- engine side, after newNode("sawOsc", 100):</span>
 <span class="hl-kw">import</span> wavetables.*;

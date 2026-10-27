@@ -56,7 +56,7 @@ fn berlin1977() S {
 	(filtered comb([0.2, 0.17] vec, 0.2, 1.5, Interpolation.none)) gainOutlet
 }
 
-berlin1977 defSynthX("berlin1977", tags) await;
+berlin1977 defSynth("berlin1977", tags) await;
 
 ---------------------------------------------------------------------------
 -- 2. metal plate (examples-4.txt:60-91)
@@ -77,7 +77,7 @@ fn metalPlate() S {
 	(filt sum) gainOutlet
 }
 
-metalPlate defSynthX("metalPlate", tags) await;
+metalPlate defSynth("metalPlate", tags) await;
 
 ---------------------------------------------------------------------------
 -- 3. Griot modeling (examples-4.txt:95-146)
@@ -118,7 +118,7 @@ fn griot() S {
 	([out, out] join) gainOutlet
 }
 
-griot defSynthX("griot", tags) await;
+griot defSynth("griot", tags) await;
 
 -- A 12-note melody of string numbers: a random walk that moves (with
 -- probability 0.4) by -1, 0 or +1 and wraps 0..4.
@@ -176,7 +176,7 @@ fn liquidities() S {
 	((sig pan(panPos) join) combn(0.3, 2)) gainOutlet
 }
 
-liquidities defSynthX("liquidities", tags) await;
+liquidities defSynth("liquidities", tags) await;
 
 ---------------------------------------------------------------------------
 -- 5. random panning sines (examples-4.txt:180-193)
@@ -200,7 +200,7 @@ fn randomPanningVoice() S {
 
 fn randomPanningSines() S = voicer(kRpVoices, randomPanningVoice) sum(0) gainOutlet;
 
-randomPanningSines defSynthX("randomPanningSines", tags) await;
+randomPanningSines defSynth("randomPanningSines", tags) await;
 
 ---------------------------------------------------------------------------
 -- driver

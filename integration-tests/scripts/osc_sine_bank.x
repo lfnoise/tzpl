@@ -15,7 +15,7 @@ fn oscSine() S {
 	b osc(440.0, 0, 2048, 8) outlet
 }
 
-defSynthX(oscSine, "oscSineBank");
+defSynth(oscSine, "oscSineBank");
 begin();
 newNode("oscSineBank", 100);
 fillBuffer(100, 0, 1, bank);

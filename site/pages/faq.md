@@ -33,7 +33,7 @@ module's documentation states whether it is RT-safe.
 
 ## Sound & synthdefs
 
-**`defSynthX` fails with a compiler error about clang.**
+**`defSynth` fails with a compiler error about clang.**
 Synthdef compilation emits C++ and compiles it with the system toolchain,
 so a working `clang` must be on `PATH`. On macOS:
 `xcode-select --install`.

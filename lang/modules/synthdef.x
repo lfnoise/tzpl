@@ -1,7 +1,7 @@
 -- synthdef.x
 -- The graph construction API for synths, plus playback helpers. Re-exports
 -- `synthdef_ffi.*` (the synthc build and load FFIs) so `import synthdef.*;`
--- brings both. Synths are compiled by synthc: `defSynthX` in synthc/compile.x.
+-- brings both. Synths are compiled by synthc: `defSynth` in synthc/compile.x.
 
 export synthdef_ffi.*;
 
@@ -330,12 +330,12 @@ fn _nextDelayVarId() ID {
 	out
 }
 
--- Signals exist only inside a graph function (the one given to defSynthX
+-- Signals exist only inside a graph function (the one given to defSynth
 -- or makeGraph), whose graph records them. Built anywhere else (a `let` at
 -- top level), the graph state is unbound: say so, rather than crash on it.
 fn _requireGraph() Void {
 	if (!`buildingGraph) {
-		panic("a signal was built outside a graph function: build signals inside the function given to defSynthX (or makeGraph), e.g. fn mySynth() S { ... }");
+		panic("a signal was built outside a graph function: build signals inside the function given to defSynth (or makeGraph), e.g. fn mySynth() S { ... }");
 	}
 }
 
@@ -1463,7 +1463,7 @@ fn makeGraph(synthFun GraphFn) SignalGraph = synthFun _makeTopGraph;
 -- Category tags
 
 -- Session-default tags from the TZPL_DEFAULT_TAGS environment variable
--- (comma-separated), appended to every synthdef compiled via defSynthX. Test harnesses set TZPL_DEFAULT_TAGS=test so everything they
+-- (comma-separated), appended to every synthdef compiled via defSynth. Test harnesses set TZPL_DEFAULT_TAGS=test so everything they
 -- compile is born tagged and the plugin browser can filter it out.
 fn defaultSynthTags() [String] {
 	match (getEnv("TZPL_DEFAULT_TAGS")) {
@@ -1496,7 +1496,7 @@ import audio_engine as ae;
 var _nextNodeID = 1000;
 
 fn play(defName String, nodeID Int) Int {
-	-- A defSynthX of this name still compiling in the background
+	-- A defSynth of this name still compiling in the background
 	-- (its Future not awaited) is waited for here, so the node is created
 	-- against a def that exists rather than failing with errNodeDefNotFound.
 	-- Already-loaded or never-compiled defs pass straight through.

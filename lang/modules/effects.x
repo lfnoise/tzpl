@@ -11,9 +11,9 @@
 --
 --   2. Synthdef layer: pure graph functions `fxTremolo()`, `fxEcho()`, ...
 --      each declaring a stereo inlet, named controls, and an outlet.
---      They have no side effects; compile them with defSynthX, e.g.
+--      They have no side effects; compile them with defSynth, e.g.
 --          import effects.*;
---          fxEcho defSynthX("fxEcho");
+--          fxEcho defSynth("fxEcho");
 --      or import examples/effect_synthdefs.x which registers them all.
 
 import synthdef.*;
@@ -425,7 +425,7 @@ fn formant(x S, vowel AsSignal = 0.0, m AsSignal = 1.0) S {
 -- Synthdef layer: ready-made stereo effect defs.
 --
 -- Each is a pure graph function: stereo inlet -> effect -> outlet, with
--- controls for the interesting parameters. Compile with defSynthX.
+-- controls for the interesting parameters. Compile with defSynth.
 
 fn _fxIn() S = inlet(FLOAT32, 2);
 

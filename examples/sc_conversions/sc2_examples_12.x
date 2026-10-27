@@ -148,7 +148,7 @@ fn arachnidEspresso() S {
 	allpassChain(sig, 6, 0.03, 3.0) gainOutlet
 }
 
-arachnidEspresso defSynthX("arachnidEspresso", tags) await;
+arachnidEspresso defSynth("arachnidEspresso", tags) await;
 
 ---------------------------------------------------------------------------
 -- 2. inharmonic warbulence (examples-12.txt:31-51)
@@ -183,7 +183,7 @@ fn inharmonicWarbulence() S {
 	(combCloud(sig, 5, 8.0) * 0.3) gainOutlet
 }
 
-inharmonicWarbulence defSynthX("inharmonicWarbulence", tags) await;
+inharmonicWarbulence defSynth("inharmonicWarbulence", tags) await;
 
 ---------------------------------------------------------------------------
 -- 3. clipped inharmonic warbulence (examples-12.txt:56-76)
@@ -206,7 +206,7 @@ fn clippedWarbulence() S {
 	(combCloud(sig, 8, 20.0) * 0.3) gainOutlet
 }
 
-clippedWarbulence defSynthX("clippedWarbulence", tags) await;
+clippedWarbulence defSynth("clippedWarbulence", tags) await;
 
 ---------------------------------------------------------------------------
 -- 4. pulse harmonic warbulence (examples-12.txt:83-100)
@@ -232,7 +232,7 @@ fn pulseWarbulence() S {
 	(combCloud(sig, 5, 8.0) * 0.5) gainOutlet
 }
 
-pulseWarbulence defSynthX("pulseWarbulence", tags) await;
+pulseWarbulence defSynth("pulseWarbulence", tags) await;
 
 ---------------------------------------------------------------------------
 -- 5. drone + rhythm (examples-12.txt:105-130)
@@ -270,7 +270,7 @@ fn drone() S {
 	((a combn(0.5, 6)) + (a reverse)) gainOutlet
 }
 
-drone defSynthX("drone", tags) await;
+drone defSynth("drone", tags) await;
 
 const kChordTrans = 6.0;
 const kChordHold = 10.0;
@@ -289,7 +289,7 @@ fn droneChordVoice() S {
 
 fn droneChords() S = voicer(kChordVoices, droneChordVoice) sum(0) gainOutlet;
 
-droneChords defSynthX("droneChords", tags) await;
+droneChords defSynth("droneChords", tags) await;
 
 const kRhyTrans = 6.0;
 const kRhyHold = 12.0;
@@ -312,7 +312,7 @@ fn droneRhythmVoice() S {
 
 fn droneRhythm() S = voicer(kRhyVoices, droneRhythmVoice) sum(0) gainOutlet;
 
-droneRhythm defSynthX("droneRhythm", tags) await;
+droneRhythm defSynth("droneRhythm", tags) await;
 
 ---------------------------------------------------------------------------
 -- 6. early space music LP, side 1 (examples-12.txt:135-171)
@@ -371,7 +371,7 @@ fn spaceMusic1() S {
 	((a comb([0.5, 0.47] vec, 0.5, 7, Interpolation.none)) + (a reverse)) gainOutlet
 }
 
-spaceMusic1 defSynthX("spaceMusic1", tags) await;
+spaceMusic1 defSynth("spaceMusic1", tags) await;
 
 ---------------------------------------------------------------------------
 -- 7. early space music LP, side 2 (examples-12.txt:176-253)
@@ -463,7 +463,7 @@ fn spaceMusic2() S {
 	(combCloud(sig, 5, 8.0) * 0.3) gainOutlet
 }
 
-spaceMusic2 defSynthX("spaceMusic2", tags) await;
+spaceMusic2 defSynth("spaceMusic2", tags) await;
 
 ---------------------------------------------------------------------------
 -- 8. hocketuplets (examples-12.txt:259-288)
@@ -499,7 +499,7 @@ fn hocketuplets() S {
 	allpassChain(z, 6, 0.04, 4.0) gainOutlet
 }
 
-hocketuplets defSynthX("hocketuplets", tags) await;
+hocketuplets defSynth("hocketuplets", tags) await;
 
 ---------------------------------------------------------------------------
 -- 9. the ugly part of town (examples-12.txt:295-334)
@@ -533,7 +533,7 @@ fn uglyTown() S {
 	(in + 0.5 * (signal - in)) gainOutlet
 }
 
-uglyTown defSynthX("uglyTown", tags) await;
+uglyTown defSynth("uglyTown", tags) await;
 
 fn uglyFold(x Float) Float {
 	var y = x;

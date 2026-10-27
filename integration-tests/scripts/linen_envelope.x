@@ -19,7 +19,7 @@ fn linenShapes() S {
 	let early = linen(t(0) < 0.1, 0.2, 0.4);
 	[full, early] join outlet
 }
-linenShapes defSynthX("linen_shapes");
+linenShapes defSynth("linen_shapes");
 
 safetyLimiter(false);
 begin();

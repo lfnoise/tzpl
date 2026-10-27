@@ -21,8 +21,8 @@
 --      (default kMaxVoices = 8) and returning the graph function, so a
 --      def can be compiled with more or fewer voices:
 --          import instruments.*;
---          ksPluck() defSynthX("ksPluck");
---          ksPluck(16) defSynthX("ksPluck16");
+--          ksPluck() defSynth("ksPluck");
+--          ksPluck(16) defSynth("ksPluck16");
 --      or import examples/note_synthdefs.x which registers them all at
 --      the default voice count.
 --
@@ -145,7 +145,7 @@ fn ringBank(exc S, freq AsSignal, decayTime AsSignal = 2.5) S {
 -- Synthdef layer: ready-made note-playing defs.
 --
 -- Each def is a factory: call it (optionally with a voice count) to get
--- the pure graph function, and compile that with defSynthX. The sample
+-- the pure graph function, and compile that with defSynth. The sample
 -- players are stereo out; the synthesis models are mono out. Controls are
 -- declared in the graph function (outside the voice body) and read by the
 -- voices as free variables.

@@ -405,7 +405,7 @@ if (localStorage.getItem('tzpl-docs-theme') === 'light') document.documentElemen
     freq sinosc(<span class="num">0</span>) mul(amp) outlet
 }
 
-demo defSynthX(<span class="str">"demo"</span>) await;
+demo defSynth(<span class="str">"demo"</span>) await;
 <span class="kw">let</span> node = play(<span class="str">"demo"</span>);
 
 <span class="cmt">-- One line: a slider per control, named, ranged, warped, and bound</span>
@@ -491,7 +491,7 @@ pitch onChange(<span class="kw">fn</span>(v <span class="typ">Float</span>) <spa
     <span class="kw">let</span> f = control(<span class="str">"freq"</span>, <span class="typ">ControlSpec</span> { lo: <span class="num">100.0</span>, hi: <span class="num">1000.0</span>, init: <span class="num">220.0</span>, warp: <span class="typ">ControlWarp</span>.exponential }, <span class="num">2</span>);
     f sinosc(<span class="num">0</span>) mul(<span class="num">0.2</span>) outlet
 }
-pair defSynthX(<span class="str">"pair"</span>) await;
+pair defSynth(<span class="str">"pair"</span>) await;
 <span class="kw">let</span> pn = play(<span class="str">"pair"</span>);
 
 <span class="cmt">-- x drives element 0 (left), y drives element 1 (right)</span>

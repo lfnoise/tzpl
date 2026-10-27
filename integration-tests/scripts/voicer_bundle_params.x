@@ -23,7 +23,7 @@ fn dcVoice() S {
 		v * gate()
 	}) outlet
 }
-dcVoice defSynthX("dcvoicer") await;
+dcVoice defSynth("dcvoicer") await;
 
 let t = allocTapID();
 begin(); tapMaster(t, TapMode.tapMeter); go(0);
@@ -79,7 +79,7 @@ fn seqVoice() S {
 		(0.5 lfimp seq(ones * f, 8)) * gate() * 0.0001
 	}) outlet
 }
-seqVoice defSynthX("seqvoicer") await;
+seqVoice defSynth("seqvoicer") await;
 
 begin(); freeNode(101); sched(0);
 await delayReal(0.2);
@@ -104,7 +104,7 @@ fn putVoice() S {
 		((ones * f) put(k, f * 2.0)) at(k) * gate()
 	}) outlet
 }
-putVoice defSynthX("putvoicer") await;
+putVoice defSynth("putvoicer") await;
 
 begin(); freeNode(102); sched(0);
 await delayReal(0.2);
@@ -128,7 +128,7 @@ fn seqInitVoice() S {
 		(0.5 lfimp seq(pattern * f, 8)) * gate()
 	}) outlet
 }
-seqInitVoice defSynthX("seqinitvoicer") await;
+seqInitVoice defSynth("seqinitvoicer") await;
 
 begin(); freeNode(103); sched(0);
 await delayReal(0.2);
@@ -152,7 +152,7 @@ fn bleedVoice() S {
 		tap
 	}) outlet
 }
-bleedVoice defSynthX("bleedvoicer") await;
+bleedVoice defSynth("bleedvoicer") await;
 
 begin(); freeNode(104); sched(0);
 await delayReal(0.2);

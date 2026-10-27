@@ -54,7 +54,7 @@ fn analogueDaze() S {
 	((z fadein(2)) fadeout(58, 2)) gainOutlet
 }
 
-analogueDaze defSynthX("analogueDaze", tags) await;
+analogueDaze defSynth("analogueDaze", tags) await;
 
 ---------------------------------------------------------------------------
 -- 3. native algorhythms (examples-3.txt:123-170)
@@ -96,7 +96,7 @@ fn nativeVoice() S {
 
 fn nativeAlgorhythms() S = voicer(kNativeVoices, nativeVoice) sum(0) gainOutlet;
 
-nativeAlgorhythms defSynthX("nativeAlgorhythms", tags) await;
+nativeAlgorhythms defSynth("nativeAlgorhythms", tags) await;
 
 ---------------------------------------------------------------------------
 -- 4. synthetic piano (examples-3.txt:177-206)
@@ -124,7 +124,7 @@ fn syntheticPiano() S {
 	(strings pan(panPos) stack) sum(cols) gainOutlet
 }
 
-syntheticPiano defSynthX("syntheticPiano", tags) await;
+syntheticPiano defSynth("syntheticPiano", tags) await;
 
 ---------------------------------------------------------------------------
 -- 6. reverberated sine percussion (examples-3.txt:224-245)
@@ -142,7 +142,7 @@ fn sinePercolation() S {
 	(s + 0.2 * y) gainOutlet
 }
 
-sinePercolation defSynthX("sinePercolation", tags) await;
+sinePercolation defSynth("sinePercolation", tags) await;
 
 ---------------------------------------------------------------------------
 -- 7. reverberated noise bursts (examples-3.txt:249-267)
@@ -155,7 +155,7 @@ fn noiseBurstsReverb() S {
 	(s + y) gainOutlet
 }
 
-noiseBurstsReverb defSynthX("noiseBurstsReverb", tags) await;
+noiseBurstsReverb defSynth("noiseBurstsReverb", tags) await;
 
 ---------------------------------------------------------------------------
 -- 8. Mouse control (examples-3.txt:271-275)
@@ -163,7 +163,7 @@ noiseBurstsReverb defSynthX("noiseBurstsReverb", tags) await;
 
 fn mouseSine() S = ((mouseXExp(200, 2000) sinosc) * 0.4) gainOutlet;
 
-mouseSine defSynthX("mouseSine", tags) await;
+mouseSine defSynth("mouseSine", tags) await;
 
 ---------------------------------------------------------------------------
 -- 9. analog bubbles - with mouse control (examples-3.txt:279-293)
@@ -177,7 +177,7 @@ fn mouseBubbles() S {
 	(((freq sinosc) * 0.04) combn(0.2, 2)) gainOutlet
 }
 
-mouseBubbles defSynthX("mouseBubbles", tags) await;
+mouseBubbles defSynth("mouseBubbles", tags) await;
 
 ---------------------------------------------------------------------------
 -- driver

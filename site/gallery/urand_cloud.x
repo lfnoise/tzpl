@@ -21,7 +21,7 @@ fn sineCloud() S {
 }
 -- gallery-excerpt-end
 
-sineCloud defSynthX("sineCloud") await;
+sineCloud defSynth("sineCloud") await;
 
 go(coro fn() Float {
     "sineCloud" playFor(16.0) yieldAll;

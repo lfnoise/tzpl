@@ -16,7 +16,7 @@ fn wrapRead() S {
 	b vread(t(1), Interpolation.none) f32 outlet
 }
 
-defSynthX(wrapRead, "fbWrap6");
+defSynth(wrapRead, "fbWrap6");
 begin();
 newNode("fbWrap6", 100);
 fillBuffer(100, 0, 1, [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);

@@ -1,5 +1,5 @@
 -- Tier-3 A/B (synthc half): compile the SAME synth with the Tzopilotl-hosted
--- compiler (defSynthX) and play it. The rendered audio must be bit-identical to
+-- compiler (defSynth) and play it. The rendered audio must be bit-identical to
 -- the reference half.
 import synthdef.*;
 import synthc.compile.*;
@@ -10,7 +10,7 @@ fn voice() S {
 	let fb = y read(1) * 0.95 + drive;
 	y write(fb); fb outlet
 }
-defSynthX(voice, "ab_voice");
+defSynth(voice, "ab_voice");
 begin();
 newNode("ab_voice", 100);
 connect(100, 0, 0, 0);

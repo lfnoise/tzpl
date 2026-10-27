@@ -1,5 +1,5 @@
 -- Renders one f32/f64 mixing case (issue #16), selected by environment:
---   TZPL_WIDEN_MODE  cpp | x          -- C++ compiler (defSynth) or synthc (defSynthX)
+--   TZPL_WIDEN_MODE  cpp | x          -- both compile with synthc (defSynth); cpp named the retired C++ compiler
 --   TZPL_WIDEN_FORM  widened | cast   -- implicit widening, or the same graph
 --                                        with the casts written out by hand
 --   TZPL_WIDEN_CASE  index into the case table below
@@ -66,7 +66,7 @@ fn graph() S {
 }
 
 let name = "widen_%^_%^_%^" fmt(mode, form, idx);
-if (mode == "x") { graph defSynthX(name) await; } else { graph defSynthX(name) await; }
+if (mode == "x") { graph defSynth(name) await; } else { graph defSynth(name) await; }
 safetyLimiter(false);
 begin();
 newNode(name, 100);

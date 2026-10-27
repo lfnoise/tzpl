@@ -390,7 +390,7 @@ static void test_malformed_def_refusal() {
 }
 
 static void test_synthc_compile_and_load() {
-    std::print("Test: synthc defSynthX compiles a synth to a dylib and loads it\n");
+    std::print("Test: synthc defSynth compiles a synth to a dylib and loads it\n");
 
     ts::TypeUniverse types;
     ts::Compiler compiler(types);
@@ -409,7 +409,7 @@ static void test_synthc_compile_and_load() {
     FILE* devnull = fopen("/dev/null", "w");
     vm.setPrintOutput(devnull);
 
-    // defSynthX runs the Tzopilotl-hosted compiler end to end: graph -> import
+    // defSynth runs the Tzopilotl-hosted compiler end to end: graph -> import
     // -> analyze -> codegen -> clang -> dylib -> load into the engine.
     const char* source = R"LANG(
         import synthc.compile.*;
@@ -419,23 +419,27 @@ static void test_synthc_compile_and_load() {
             let d = delayVar(); d init(1, 0.0); let r = d read(1);
             let mixed = osc * 0.5 + r; d write(mixed); mixed outlet
         }
-        defSynthX(integ, "synthc_integ");
+        defSynth(integ, "synthc_integ");
+        defSynthX(integ, "synthc_integ_x");   -- the former name still works
     )LANG";
 
     bool ok = compileAndRun(compiler, vm, source, "synthc_compile.x", &moduleCompiler);
-    check(ok, "synthc defSynthX source compiles and runs");
+    check(ok, "synthc defSynth source compiles and runs");
 
     std::vector<std::string> names;
     engine::listNodeDefs(eng, names);
     bool found = false;
     for (auto const& n : names) if (n == "synthc_integ") found = true;
-    check(found, "synthc_integ def registered in engine after defSynthX");
+    check(found, "synthc_integ def registered in engine after defSynth");
+    bool foundX = false;
+    for (auto const& n : names) if (n == "synthc_integ_x") foundX = true;
+    check(foundX, "defSynthX (the former name) still compiles and registers a def");
 
-    // main() sets TZPL_DEFAULT_TAGS=test, so defSynthX should have tagged it.
+    // main() sets TZPL_DEFAULT_TAGS=test, so defSynth should have tagged it.
     engine::DefDesc desc;
     check(engine::getDefDesc(eng, "synthc_integ", desc)
           && desc.tags.size() == 1 && desc.tags[0] == "test",
-          "defSynthX applied the TZPL_DEFAULT_TAGS session tag via synthc");
+          "defSynth applied the TZPL_DEFAULT_TAGS session tag via synthc");
 
     // synthDefReady: an already-resolved future for a name with no compile in
     // flight -- both a loaded def and one that never existed -- so `play` on
@@ -467,7 +471,7 @@ static void test_synthc_compile_and_load() {
 int main(int argc, char const* argv[]) {
     std::print("=== Synthdef Compiler FFI Integration Tests ===\n\n");
 
-    // Everything this harness compiles via defSynth/defSynthX is born tagged
+    // Everything this harness compiles via defSynth is born tagged
     // "test" so the plugin browser can filter it out of user-facing lists.
     setenv("TZPL_DEFAULT_TAGS", "test", /*overwrite=*/0);
 

@@ -77,7 +77,7 @@ fn deepTripVoice() S {
 
 fn deepTrip() S = voicer(kTripVoices, deepTripVoice) sum(0) gainOutlet;
 
-deepTrip defSynthX("deepTrip", tags) await;
+deepTrip defSynth("deepTrip", tags) await;
 
 ---------------------------------------------------------------------------
 -- 2. percussion solo in 10/8 (examples-9.txt:24-83)
@@ -105,7 +105,7 @@ fn percussionSolo() S {
 	(hits + drone) gainOutlet
 }
 
-percussionSolo defSynthX("percussionSolo", tags) await;
+percussionSolo defSynth("percussionSolo", tags) await;
 
 fn percussionStream() [Float] {
 	var s [Float] = [];
@@ -184,7 +184,7 @@ fn sawedCymbalsVoice() S {
 
 fn sawedCymbals() S = voicer(kCymVoices, sawedCymbalsVoice) sum(0) gainOutlet;
 
-sawedCymbals defSynthX("sawedCymbals", tags) await;
+sawedCymbals defSynth("sawedCymbals", tags) await;
 
 ---------------------------------------------------------------------------
 -- 4. sidereal time (examples-9.txt:109-131)
@@ -207,7 +207,7 @@ fn siderealVoice() S {
 
 fn siderealTime() S = voicer(kCymVoices, siderealVoice) sum(0) gainOutlet;
 
-siderealTime defSynthX("siderealTime", tags) await;
+siderealTime defSynth("siderealTime", tags) await;
 
 ---------------------------------------------------------------------------
 -- 5. pentatonic pipes (examples-9.txt:135-164)
@@ -240,7 +240,7 @@ fn pentatonicPipes() S {
 	((pulsed combn(0.3, 8)) + (pulsed reverse)) gainOutlet
 }
 
-pentatonicPipes defSynthX("pentatonicPipes", tags) await;
+pentatonicPipes defSynth("pentatonicPipes", tags) await;
 
 coro fn pentatonicSpawner(nodeID Int, totalDur Float) Float {
 	let mode = [0, 3, 5, 7, 10];
@@ -292,7 +292,7 @@ fn ostinoodlesVoice() S {
 
 fn ostinoodles() S = allpassChain6(voicer(kOstVoices, ostinoodlesVoice) sum(0)) gainOutlet;
 
-ostinoodles defSynthX("ostinoodles", tags) await;
+ostinoodles defSynth("ostinoodles", tags) await;
 
 coro fn ostinoodlesSpawner(nodeID Int, totalDur Float) Float {
 	let major = [0, 2, 4, 5, 7, 9, 11];
@@ -348,7 +348,7 @@ fn garageSpringsVoice() S {
 
 fn garageSprings() S = allpassChain6(voicer(kSpringVoices, garageSpringsVoice) sum(0)) gainOutlet;
 
-garageSprings defSynthX("garageSprings", tags) await;
+garageSprings defSynth("garageSprings", tags) await;
 
 ---------------------------------------------------------------------------
 -- 8. contamination zone (examples-9.txt:222-252)
@@ -368,7 +368,7 @@ fn contaminationVoice() S {
 
 fn contaminationZone() S = allpassChain6(voicer(kSpringVoices, contaminationVoice) sum(0)) gainOutlet;
 
-contaminationZone defSynthX("contaminationZone", tags) await;
+contaminationZone defSynth("contaminationZone", tags) await;
 
 ---------------------------------------------------------------------------
 -- 9. array manipulation of multi channel audio (examples-9.txt:256-303)
@@ -400,7 +400,7 @@ fn arrayVoice() S {
 
 fn arrayManipulation() S = voicer(kArrVoices, arrayVoice) sum(0) gainOutlet;
 
-arrayManipulation defSynthX("arrayManipulation", tags) await;
+arrayManipulation defSynth("arrayManipulation", tags) await;
 
 ---------------------------------------------------------------------------
 -- driver

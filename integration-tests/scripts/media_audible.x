@@ -23,7 +23,7 @@ fn sineVoice() S {
     pch nnhz sinosc cb * env * amp
 }
 fn sineSynth() S = voicer(16, sineVoice) sum outlet;
-sineSynth defSynthX("media_sine") await;
+sineSynth defSynth("media_sine") await;
 
 engineStart();
 masterGain(0.2);

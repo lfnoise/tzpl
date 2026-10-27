@@ -61,8 +61,8 @@ fn fxGraph(name String) () S = match (name) {
 };
 
 let name = envOr("CORPUS_ITEM", "fxEcho");
-corpusSrc defSynthX("corpusSrc") await;
-fxGraph(name) defSynthX(name) await;
+corpusSrc defSynth("corpusSrc") await;
+fxGraph(name) defSynth(name) await;
 
 safetyLimiter(false);
 begin();

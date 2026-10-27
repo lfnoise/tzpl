@@ -29,7 +29,7 @@ fn loopSampler() S {
 	}) sum outlet
 }
 
-defSynthX(loopSampler, "sblSampler");
+defSynth(loopSampler, "sblSampler");
 
 fn envFloat(name String, dflt Float) Float {
 	match (getEnv(name)) {

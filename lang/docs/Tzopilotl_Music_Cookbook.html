@@ -517,7 +517,7 @@ messages).</div>
 returns it. Every audio expression has type <code>S</code> (an alias for
 <code>SignalExpr</code>). You compose unit generators (UGens) with ordinary
 operators and the pipe operator <code>|&gt;</code>, and you mark the graph's
-output with <code>outlet</code>. The graph is then handed to <code>defSynthX</code>,
+output with <code>outlet</code>. The graph is then handed to <code>defSynth</code>,
 which compiles it to a native plugin and registers it with the engine under a
 name you choose.</p>
 <p>Numbers auto-lift to constant signals, arrays of signals become multichannel
@@ -531,11 +531,11 @@ the full guide &mdash; signal rates, element types, channel broadcasting,
 delays, buffers, voicers, and a complete UGen reference &mdash; is
 <a href="Writing_SynthDefs.html">Writing SynthDefs</a>.</p>
 <div class="note"><strong>Compiling</strong>
-<code>defSynthX</code> runs the compiler, <code>synthc</code>. It needs a working
+<code>defSynth</code> runs the compiler, <code>synthc</code>. It needs a working
 <code>clang</code> toolchain on <code>PATH</code> &mdash; it emits C++, compiles it
 to a <code>.dylib</code>, and <code>dlopen</code>s it. It is
 <strong>async</strong>: the clang step runs in the background so music that is
-already playing never pauses. Write <code>mySynth defSynthX(<span
+already playing never pauses. Write <code>mySynth defSynth(<span
 class="str">"mySynth"</span>) await;</code> when the next line needs the def
 (<code>play</code> itself waits for a compile of that name still in flight, but a
 hand-built bundle's <code>newNode</code> does not); when redefining a def that is
@@ -551,7 +551,7 @@ moment its node is created, with no notes to trigger &mdash; the contrast with
 the polyphonic voice in the next section. Here is a burbling sine, compiled and
 registered as <code>"bubbles"</code>:</p>
 <pre><code><span class="kw">import</span> synthdef.*;
-<span class="kw">import</span> synthc.compile.*;   <span class="cmt">-- defSynthX</span>
+<span class="kw">import</span> synthc.compile.*;   <span class="cmt">-- defSynth</span>
 <span class="kw">import</span> common_ugens.*;
 <span class="kw">import</span> audio_engine.*;     <span class="cmt">-- listSynthDefs</span>
 
@@ -564,13 +564,13 @@ registered as <code>"bubbles"</code>:</p>
     |&gt; nnhz sinosc * <span class="num">0.04</span>
     |&gt; combn(<span class="num">0.2</span>, <span class="num">4</span>) outlet;
 
-bubbles <span class="fn">defSynthX</span>(<span class="str">"bubbles"</span>) await;
+bubbles <span class="fn">defSynth</span>(<span class="str">"bubbles"</span>) await;
 <span class="str">"defs: "</span> print; <span class="fn">listSynthDefs</span>() println;</code></pre>
 <p>Evaluating this (<kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd>) prints the
 compile/link commands to the output panel and then:</p>
 <pre><code>bubbles compiled successfully (synthc).
 defs: [+, voicer, Audio In, bubbles, Audio Out, *, sinosc]</code></pre>
-<p><strong>How it works.</strong> <code>defSynthX</code> walks the returned
+<p><strong>How it works.</strong> <code>defSynth</code> walks the returned
 <code>S</code> graph, generates SIMD C++ for it, compiles and links a
 <code>.dylib</code>, and registers it as a node def named <code>"bubbles"</code>.
 <code>listSynthDefs()</code> now shows it alongside the engine's built-in defs
@@ -599,7 +599,7 @@ trigger with <code>gate()</code> (the gate is set by the engine at note on and n
 <span class="cmt">-- 16-voice polyphonic synth; `sum` mixes the voices, `outlet` is the sink.</span>
 <span class="kw">fn</span> <span class="fn">sineSynth</span>() <span class="typ">S</span> = <span class="fn">voicer</span>(<span class="num">16</span>, sineVoice) sum outlet;
 
-sineSynth <span class="fn">defSynthX</span>(<span class="str">"sine_voice"</span>) await;</code></pre>
+sineSynth <span class="fn">defSynth</span>(<span class="str">"sine_voice"</span>) await;</code></pre>
 <p><strong>How it works.</strong> <code>voicer(16, sineVoice)</code> instantiates the
 voice graph 16 times with independent note state; <code>sum</code> mixes them down
 to one channel. <code>noteParam</code>s become columns of the synth's
@@ -648,7 +648,7 @@ on the engine side by the <code>wavetables</code> module and pushed in with
     <span class="kw">let</span> f = control(<span class="str">"freq"</span>, ControlSpec { lo: <span class="num">20.0</span>, hi: <span class="num">8000.0</span>, init: <span class="num">110.0</span>, warp: ControlWarp.exponential });
     b <span class="fn">osc</span>(f) * <span class="num">0.2</span> |&gt; outlet
 }
-wtsaw <span class="fn">defSynthX</span>(<span class="str">"wtsaw"</span>) await;
+wtsaw <span class="fn">defSynth</span>(<span class="str">"wtsaw"</span>) await;
 
 <span class="fn">engineStart</span>();
 <span class="fn">begin</span>();
@@ -843,9 +843,9 @@ model:</p>
 <ul>
   <li><strong>Each def is a factory.</strong> <code>ksPluck</code> is not the
   graph function &mdash; <code>ksPluck()</code> returns it, with an optional
-  voice count (default 8): <code>ksPluck() defSynthX(<span
+  voice count (default 8): <code>ksPluck() defSynth(<span
   class="str">"ksPluck"</span>)</code> compiles the standard def,
-  <code>ksPluck(<span class="num">16</span>) defSynthX(<span
+  <code>ksPluck(<span class="num">16</span>) defSynth(<span
   class="str">"ksPluck16"</span>)</code> a 16-voice variant. Running the file
   <code>examples/note_synthdefs.x</code> registers all six at the default
   voice count.</li>
@@ -864,7 +864,7 @@ then turn the panel:</p>
 <span class="kw">import</span> instruments.*;
 <span class="kw">import</span> audio_engine.*;
 
-<span class="fn">ksPluck</span>() <span class="fn">defSynthX</span>(<span class="str">"ksPluck"</span>) <span class="kw">await</span>;
+<span class="fn">ksPluck</span>() <span class="fn">defSynth</span>(<span class="str">"ksPluck"</span>) <span class="kw">await</span>;
 
 <span class="fn">engineStart</span>();
 <span class="fn">masterGain</span>(<span class="num">0.2</span>);
@@ -919,7 +919,7 @@ bank (buffer&nbsp;0) built by the <code>wavetables</code> module, as in
 <span class="kw">import</span> wavetables.*;
 <span class="kw">import</span> audio_engine.*;
 
-<span class="fn">wtLead</span>() <span class="fn">defSynthX</span>(<span class="str">"wtLead"</span>) <span class="kw">await</span>;
+<span class="fn">wtLead</span>() <span class="fn">defSynth</span>(<span class="str">"wtLead"</span>) <span class="kw">await</span>;
 
 <span class="fn">engineStart</span>();
 <span class="fn">masterGain</span>(<span class="num">0.2</span>);
@@ -1465,7 +1465,7 @@ completion.</p>
 <span class="kw">import</span> std.futures.*;
 
 <span class="kw">fn</span> <span class="fn">beep</span>() <span class="typ">S</span> = [<span class="num">330.0</span>, <span class="num">331.0</span>] sinosc * (<span class="num">1.0</span> lfimp decay(<span class="num">0.25</span>)) * <span class="num">0.2</span> |&gt; outlet;
-beep <span class="fn">defSynthX</span>(<span class="str">"beep"</span>) await;
+beep <span class="fn">defSynth</span>(<span class="str">"beep"</span>) await;
 
 <span class="cmt">-- Render two seconds of beeps to a WAV file.</span>
 <span class="kw">let</span> h = <span class="fn">renderNRT</span>(<span class="str">"out.wav"</span>, <span class="num">2.0</span>, <span class="kw">fn</span>() <span class="typ">Void</span> {
@@ -1700,7 +1700,7 @@ taking Hz directly, like the instruments-library models of
     pch nnhz sinosc * env * amp
 }
 <span class="kw">fn</span> <span class="fn">sineSynth</span>() <span class="typ">S</span> = voicer(<span class="num">16</span>, sineVoice) sum outlet;
-sineSynth <span class="fn">defSynthX</span>(<span class="str">"sine_voice"</span>) await;
+sineSynth <span class="fn">defSynth</span>(<span class="str">"sine_voice"</span>) await;
 
 engineStart();
 masterGain(<span class="num">0.2</span>);
@@ -1908,7 +1908,7 @@ drone free;</code></pre>
   <tr><td><code>feedbackMode(silo, FeedbackMode)</code></td><td>audio_engine</td><td>NRT</td></tr>
   <tr><td><code>setTempo(clock,bpm) / clockBeats / clockTempo</code></td><td>audio_engine</td><td>NRT</td></tr>
   <tr><td><code>attachVM / siloLoad / siloStartAt / detachVM</code></td><td>audio_engine</td><td>NRT</td></tr>
-  <tr><td><code>defSynthX / listSynthDefs</code></td><td>synthc.compile / audio_engine</td><td>NRT</td></tr>
+  <tr><td><code>defSynth / listSynthDefs</code></td><td>synthc.compile / audio_engine</td><td>NRT</td></tr>
   <tr><td><code>loadBuffer / fillBuffer / resizeBuffer</code></td><td>audio_engine</td><td>NRT</td></tr>
   <tr><td><code>loadSampleBank / sampleZone</code></td><td>audio_engine</td><td>NRT</td></tr>
   <tr><td><code>oscTables / sawTables / squareTables / triTables</code></td><td>wavetables</td><td>NRT</td></tr>

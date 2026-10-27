@@ -72,7 +72,7 @@ fn rocksVoice() S {
 
 fn rocksOnRails() S = voicer(kRocksVoices, rocksVoice) sum(0) gainOutlet;
 
-rocksOnRails defSynthX("rocksOnRails", tags) await;
+rocksOnRails defSynth("rocksOnRails", tags) await;
 
 ---------------------------------------------------------------------------
 -- 2. bouncing lightbulbs, pencils, cans (examples-2.txt:42-70)
@@ -98,7 +98,7 @@ fn bouncingVoice() S {
 
 fn bouncing() S = voicer(kBounceVoices, bouncingVoice) sum(0) gainOutlet;
 
-bouncing defSynthX("bouncing", tags) await;
+bouncing defSynth("bouncing", tags) await;
 
 ---------------------------------------------------------------------------
 -- 3. Klang - lots-o-sines (examples-2.txt:74-86)
@@ -118,7 +118,7 @@ fn klangSinesVoice() S {
 
 fn klangSines() S = voicer(kXfVoices, klangSinesVoice) sum(0) gainOutlet;
 
-klangSines defSynthX("klangSines", tags) await;
+klangSines defSynth("klangSines", tags) await;
 
 ---------------------------------------------------------------------------
 -- 4. clustered sines (examples-2.txt:90-108)
@@ -134,7 +134,7 @@ fn clusteredSinesVoice() S {
 
 fn clusteredSines() S = voicer(kXfVoices, clusteredSinesVoice) sum(0) gainOutlet;
 
-clusteredSines defSynthX("clusteredSines", tags) await;
+clusteredSines defSynth("clusteredSines", tags) await;
 
 ---------------------------------------------------------------------------
 -- 5. Klank - bank of resonators excited by impulses (examples-2.txt:112-130)
@@ -157,7 +157,7 @@ fn klankImpulsesVoice() S {
 
 fn klankImpulses() S = voicer(kK5Voices, klankImpulsesVoice) sum(0) gainOutlet;
 
-klankImpulses defSynthX("klankImpulses", tags) await;
+klankImpulses defSynth("klankImpulses", tags) await;
 
 ---------------------------------------------------------------------------
 -- 6. Klank - excited by noise bursts (examples-2.txt:134-152)
@@ -179,7 +179,7 @@ fn klankBurstsVoice() S {
 
 fn klankBursts() S = voicer(kK6Voices, klankBurstsVoice) sum(0) gainOutlet;
 
-klankBursts defSynthX("klankBursts", tags) await;
+klankBursts defSynth("klankBursts", tags) await;
 
 ---------------------------------------------------------------------------
 -- 7. resonators at random frequencies excited by BrownNoise (examples-2.txt:156-173)
@@ -200,7 +200,7 @@ fn brownResonatorsVoice() S {
 
 fn brownResonators() S = voicer(kXfVoices, brownResonatorsVoice) sum(0) gainOutlet;
 
-brownResonators defSynthX("brownResonators", tags) await;
+brownResonators defSynth("brownResonators", tags) await;
 
 ---------------------------------------------------------------------------
 -- 8. resonators tuned in a harmonic series from a just scale (examples-2.txt:177-200)
@@ -237,7 +237,7 @@ fn justResonatorsVoice() S {
 
 fn justResonators() S = voicer(kXfVoices, justResonatorsVoice) sum(0) gainOutlet;
 
-justResonators defSynthX("justResonators", tags) await;
+justResonators defSynth("justResonators", tags) await;
 
 ---------------------------------------------------------------------------
 -- 9. same, odd harmonics only, shorter rings, LFNoise2 exciter (examples-2.txt:204-228)
@@ -256,7 +256,7 @@ fn oddResonatorsVoice() S {
 
 fn oddResonators() S = voicer(kXfVoices, oddResonatorsVoice) sum(0) gainOutlet;
 
-oddResonators defSynthX("oddResonators", tags) await;
+oddResonators defSynth("oddResonators", tags) await;
 
 ---------------------------------------------------------------------------
 -- 10. swept resonant noise band exciting a resonator bank (examples-2.txt:232-253)
@@ -280,7 +280,7 @@ fn sweptResonatorsVoice() S {
 
 fn sweptResonators() S = voicer(kSweptVoices, sweptResonatorsVoice) sum(0) gainOutlet;
 
-sweptResonators defSynthX("sweptResonators", tags) await;
+sweptResonators defSynth("sweptResonators", tags) await;
 
 ---------------------------------------------------------------------------
 -- 11. coolant (examples-2.txt:258-275)
@@ -297,7 +297,7 @@ fn coolantVoice() S {
 
 fn coolant() S = voicer(kXfVoices, coolantVoice) sum(0) gainOutlet;
 
-coolant defSynthX("coolant", tags) await;
+coolant defSynth("coolant", tags) await;
 
 ---------------------------------------------------------------------------
 -- 12. pulsing bottles (examples-2.txt:279-296)
@@ -318,7 +318,7 @@ fn pulsingBottles() S {
 	(sig pan(panF sinosc(panPh)) stack) sum(cols) gainOutlet
 }
 
-pulsingBottles defSynthX("pulsingBottles", tags) await;
+pulsingBottles defSynth("pulsingBottles", tags) await;
 
 ---------------------------------------------------------------------------
 -- 13. what was I thinking? (examples-2.txt:300-320)
@@ -343,7 +343,7 @@ fn whatWasIThinking() S {
 	(z + (combs sum(cols))) gainOutlet
 }
 
-whatWasIThinking defSynthX("whatWasIThinking", tags) await;
+whatWasIThinking defSynth("whatWasIThinking", tags) await;
 
 ---------------------------------------------------------------------------
 -- 14. narrow band filtered Crackle noise (examples-2.txt:325-338)
@@ -365,7 +365,7 @@ fn crackleBandVoice() S {
 
 fn crackleBand() S = voicer(kSpawnLinenVoices, crackleBandVoice) sum(0) gainOutlet;
 
-crackleBand defSynthX("crackleBand", tags) await;
+crackleBand defSynth("crackleBand", tags) await;
 
 ---------------------------------------------------------------------------
 -- 15. resonant dust (examples-2.txt:342-354)
@@ -381,7 +381,7 @@ fn resonantDustVoice() S {
 
 fn resonantDust() S = voicer(kSpawnLinenVoices, resonantDustVoice) sum(0) gainOutlet;
 
-resonantDust defSynthX("resonantDust", tags) await;
+resonantDust defSynth("resonantDust", tags) await;
 
 ---------------------------------------------------------------------------
 -- 16. police state (examples-2.txt:358-376)
@@ -405,7 +405,7 @@ fn policeState() S {
 	((sirens + noise) combn(0.3, 3)) gainOutlet
 }
 
-policeState defSynthX("policeState", tags) await;
+policeState defSynth("policeState", tags) await;
 
 ---------------------------------------------------------------------------
 -- 17. uplink (examples-2.txt:380-393)
@@ -432,7 +432,7 @@ fn uplinkVoice() S {
 
 fn uplink() S = voicer(kUplinkVoices, uplinkVoice) sum(0) gainOutlet;
 
-uplink defSynthX("uplink", tags) await;
+uplink defSynth("uplink", tags) await;
 
 ---------------------------------------------------------------------------
 -- 18. data space (examples-2.txt:399-412)
@@ -456,7 +456,7 @@ fn dataSpaceVoice() S {
 
 fn dataSpace() S = voicer(kDataVoices, dataSpaceVoice) sum(0) gainOutlet;
 
-dataSpace defSynthX("dataSpace", tags) await;
+dataSpace defSynth("dataSpace", tags) await;
 
 ---------------------------------------------------------------------------
 -- 19. cymbalism (examples-2.txt:416-434)
@@ -478,7 +478,7 @@ fn cymbalismVoice() S = cymbalVoice(0.5 + urand(1, Rate.reset) * 3);
 
 fn cymbalism() S = voicer(kXfVoices, cymbalismVoice) sum(0) gainOutlet;
 
-cymbalism defSynthX("cymbalism", tags) await;
+cymbalism defSynth("cymbalism", tags) await;
 
 ---------------------------------------------------------------------------
 -- 20. cymbalism accellerando (examples-2.txt:438-457)
@@ -489,7 +489,7 @@ fn cymbalismAccelVoice() S =
 
 fn cymbalismAccel() S = voicer(kXfVoices, cymbalismAccelVoice) sum(0) gainOutlet;
 
-cymbalismAccel defSynthX("cymbalismAccel", tags) await;
+cymbalismAccel defSynth("cymbalismAccel", tags) await;
 
 ---------------------------------------------------------------------------
 -- 21. ring modulated Klank (examples-2.txt:461-472)
@@ -513,7 +513,7 @@ fn ringModKlankVoice() S {
 
 fn ringModKlank() S = voicer(kRmVoices, ringModKlankVoice) sum(0) gainOutlet;
 
-ringModKlank defSynthX("ringModKlank", tags) await;
+ringModKlank defSynth("ringModKlank", tags) await;
 
 ---------------------------------------------------------------------------
 -- driver

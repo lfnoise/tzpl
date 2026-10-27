@@ -24,7 +24,7 @@ fn sineVoice() S {
 -- 16-voice polyphonic synth; `sum` mixes the voices, `outlet` is the sink.
 fn sineSynth() S = voicer(16, sineVoice) sum outlet;
 
-sineSynth defSynthX("sine_voice");
+sineSynth defSynth("sine_voice");
 
 %%
 import audio_engine.*;

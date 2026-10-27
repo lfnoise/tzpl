@@ -25,7 +25,7 @@ fn samplerAoS() S {
 	}) sum outlet
 }
 
-defSynthX(samplerAoS, "sbSamplerAoS");
+defSynth(samplerAoS, "sbSamplerAoS");
 
 let pitch = match (getEnv("SB_PITCH")) {
 	some(s): s parseInt unwrap toFloat;

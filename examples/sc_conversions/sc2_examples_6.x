@@ -139,7 +139,7 @@ fn sweepyNoise() S {
 	((filtered combn(0.3, 2)) + filtered) gainOutlet
 }
 
-sweepyNoise defSynthX("sweepyNoise", tags) await;
+sweepyNoise defSynth("sweepyNoise", tags) await;
 
 ---------------------------------------------------------------------------
 -- 2. string wander-cluster (examples-6.txt:29-43)
@@ -156,7 +156,7 @@ fn stringWanderVoice() S {
 
 fn stringWander() S = voicer(kWanderVoices, stringWanderVoice) sum(0) gainOutlet;
 
-stringWander defSynthX("stringWander", tags) await;
+stringWander defSynth("stringWander", tags) await;
 
 ---------------------------------------------------------------------------
 -- 3. string wander-cluster with vibrato (examples-6.txt:47-64)
@@ -174,7 +174,7 @@ fn stringWanderVibratoVoice() S {
 
 fn stringWanderVibrato() S = voicer(kWanderVoices, stringWanderVibratoVoice) sum(0) gainOutlet;
 
-stringWanderVibrato defSynthX("stringWanderVibrato", tags) await;
+stringWanderVibrato defSynth("stringWanderVibrato", tags) await;
 
 ---------------------------------------------------------------------------
 -- 4. pipe wander-cluster (examples-6.txt:68-82)
@@ -190,7 +190,7 @@ fn pipeWanderVoice() S {
 
 fn pipeWander() S = voicer(kWanderVoices, pipeWanderVoice) sum(0) gainOutlet;
 
-pipeWander defSynthX("pipeWander", tags) await;
+pipeWander defSynth("pipeWander", tags) await;
 
 ---------------------------------------------------------------------------
 -- 5. comb delay sweeps (examples-6.txt:86-105)
@@ -209,7 +209,7 @@ fn combSweepsVoice() S {
 
 fn combSweeps() S = voicer(kWanderVoices, combSweepsVoice) sum(0) gainOutlet;
 
-combSweeps defSynthX("combSweeps", tags) await;
+combSweeps defSynth("combSweeps", tags) await;
 
 ---------------------------------------------------------------------------
 -- 6. repeating harmonic Klank (examples-6.txt:109-129)
@@ -234,7 +234,7 @@ fn harmonicKlankVoice() S {
 
 fn harmonicKlank() S = voicer(kHkVoices, harmonicKlankVoice) sum(0) gainOutlet;
 
-harmonicKlank defSynthX("harmonicKlank", tags) await;
+harmonicKlank defSynth("harmonicKlank", tags) await;
 
 ---------------------------------------------------------------------------
 -- 7. repeating inharmonic Klank (examples-6.txt:133-152)
@@ -256,7 +256,7 @@ fn inharmonicKlankVoice() S {
 
 fn inharmonicKlank() S = voicer(kIkVoices, inharmonicKlankVoice) sum(0) gainOutlet;
 
-inharmonicKlank defSynthX("inharmonicKlank", tags) await;
+inharmonicKlank defSynth("inharmonicKlank", tags) await;
 
 ---------------------------------------------------------------------------
 -- 8. noise burst sweep (examples-6.txt:156-167)
@@ -272,7 +272,7 @@ fn noiseBurstSweep() S {
 	(resonz(white() * amp, cfreq, 0.1)) gainOutlet
 }
 
-noiseBurstSweep defSynthX("noiseBurstSweep", tags) await;
+noiseBurstSweep defSynth("noiseBurstSweep", tags) await;
 
 ---------------------------------------------------------------------------
 -- 9. saucer base (examples-6.txt:171-184)
@@ -295,7 +295,7 @@ fn saucerVoice() S {
 
 fn saucerBase() S = voicer(kSaucerVoices, saucerVoice) sum(0) gainOutlet;
 
-saucerBase defSynthX("saucerBase", tags) await;
+saucerBase defSynth("saucerBase", tags) await;
 
 ---------------------------------------------------------------------------
 -- 10. alien meadow (examples-6.txt:188-201)
@@ -316,7 +316,7 @@ fn meadowVoice() S {
 
 fn alienMeadow() S = voicer(kMeadowVoices, meadowVoice) sum(0) gainOutlet;
 
-alienMeadow defSynthX("alienMeadow", tags) await;
+alienMeadow defSynth("alienMeadow", tags) await;
 
 ---------------------------------------------------------------------------
 -- 11. fast LFOs with slow beats (examples-6.txt:205-219)
@@ -342,7 +342,7 @@ fn fastLfoVoice() S {
 
 fn fastLfoBeats() S = voicer(kFastVoices, fastLfoVoice) sum(0) gainOutlet;
 
-fastLfoBeats defSynthX("fastLfoBeats", tags) await;
+fastLfoBeats defSynth("fastLfoBeats", tags) await;
 
 ---------------------------------------------------------------------------
 -- 12. birdies (examples-6.txt:223-236)
@@ -367,7 +367,7 @@ fn birdiesVoice() S {
 
 fn birdies() S = voicer(kBirdVoices, birdiesVoice) sum(0) gainOutlet;
 
-birdies defSynthX("birdies", tags) await;
+birdies defSynth("birdies", tags) await;
 
 ---------------------------------------------------------------------------
 -- 13. phase modulation with slow beats (examples-6.txt:240-261)
@@ -399,7 +399,7 @@ fn phaseModVoice() S {
 
 fn phaseModBeats() S = voicer(kPmVoices, phaseModVoice) sum(0) gainOutlet;
 
-phaseModBeats defSynthX("phaseModBeats", tags) await;
+phaseModBeats defSynth("phaseModBeats", tags) await;
 
 coro fn phaseModSpawner(nodeID Int, totalDur Float) Float {
 	var id = 0;
@@ -442,7 +442,7 @@ fn hardSyncSaw() S {
 	((a combn(0.3, 4)) + (a reverse)) gainOutlet
 }
 
-hardSyncSaw defSynthX("hardSyncSaw", tags) await;
+hardSyncSaw defSynth("hardSyncSaw", tags) await;
 
 ---------------------------------------------------------------------------
 -- 15. noise modulated sines (examples-6.txt:280-291)
@@ -462,7 +462,7 @@ fn noiseModSines() S {
 	((a combn(0.3, 4)) + (a reverse)) gainOutlet
 }
 
-noiseModSines defSynthX("noiseModSines", tags) await;
+noiseModSines defSynth("noiseModSines", tags) await;
 
 ---------------------------------------------------------------------------
 -- 16. noise modulated sawtooths (examples-6.txt:295-306)
@@ -480,7 +480,7 @@ fn noiseModSaws() S {
 	((a combn(0.5, 4)) + (a reverse)) gainOutlet
 }
 
-noiseModSaws defSynthX("noiseModSaws", tags) await;
+noiseModSaws defSynth("noiseModSaws", tags) await;
 
 ---------------------------------------------------------------------------
 -- 17. RLPF4 - 4th order resonant lowpass filter (examples-6.txt:310-325)
@@ -500,7 +500,7 @@ fn rlpf4Sweep() S {
 	(pingPong(z, 0.16, 0.6)) gainOutlet
 }
 
-rlpf4Sweep defSynthX("rlpf4Sweep", tags) await;
+rlpf4Sweep defSynth("rlpf4Sweep", tags) await;
 
 ---------------------------------------------------------------------------
 -- driver

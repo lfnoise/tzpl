@@ -1,5 +1,5 @@
 -- Tier-3 A/B voicer12 half (synthc): the identical 12-voice Karplus-Strong
--- pluck compiled by synthc (defSynthX). Must render bit-identically to
+-- pluck compiled by synthc (defSynth). Must render bit-identically to
 -- synthc_render_ab_voicer12_ref.x. See that file and run_synthc_render_ab.sh.
 import synthdef.*;
 import synthc.compile.*;
@@ -7,7 +7,7 @@ import common_ugens.*;
 import instruments.*;
 import audio_engine.*;
 
-ksPluck(12) defSynthX("ab_voicer12") await;
+ksPluck(12) defSynth("ab_voicer12") await;
 
 begin();
 newNode("ab_voicer12", 100);

@@ -2711,7 +2711,7 @@ module's internal timeline.</p>
 
 <p>Synth definitions are compiled by <strong>synthc</strong>, a compiler written in Tzopilotl (<code>lang/modules/synthc/</code>). It builds the signal graph from a synth function, analyses it, and generates C++ source. The bridge then writes that source to the build directory, compiles and links it with the system clang into a plugin library, and loads it into the engine (<code>bridge/src/tzpl_synth_build.cpp</code>). The C++ synthdef compiler and its s-expression input are retired.</p>
 
-<p>The normal entry point is <code>defSynthX</code> from <code>synthc.compile</code> (see <em>Writing SynthDefs</em>). It calls the foreign functions below, which are registered in the foreign module <code>synthdef_ffi</code> and re-exported by the <code>synthdef</code> module:</p>
+<p>The normal entry point is <code>defSynth</code> from <code>synthc.compile</code> (see <em>Writing SynthDefs</em>). It calls the foreign functions below, which are registered in the foreign module <code>synthdef_ffi</code> and re-exported by the <code>synthdef</code> module:</p>
 
 <pre><code><span class="kw">import</span> synthdef.*;
 <span class="kw">import</span> synthc.compile.*;</code></pre>
@@ -2723,10 +2723,11 @@ module's internal timeline.</p>
 
 <table>
   <tr><th>Function</th><th>Description</th></tr>
-  <tr><td><code>defSynthX(synthFun, name String) Future&lt;String&gt;</code></td><td>(<code>synthc.compile</code>) Build the graph from <code>synthFun</code>, generate C++ with synthc, compile it on a background thread, and load the def into the engine. Resolves to the generated C++ source. A failed compile prints the error and halts the script. Await it before the def's first <code>newNode</code>; redefining a def that is playing can be left unawaited (nodes already running keep their old code).</td></tr>
-  <tr><td><code>defSynthXChecked(synthFun, name String) Future&lt;Result&lt;String, String&gt;&gt;</code></td><td>(<code>synthc.compile</code>) The same, but never halts: <code>ok(cpp)</code> on success, <code>err(message)</code> on a failed analysis, compile or load.</td></tr>
-  <tr><td><code>writeCompileAndLoadAsync(name String, cppSource String) Future&lt;String&gt;</code></td><td>The async backend of <code>defSynthX</code>: writes already-generated C++ source, compiles and links it on the VM's background I/O worker, so scheduled music keeps playing while clang runs, then loads and registers the def. Resolves to <code>""</code> on success or an error message. Inside an NRT render the job runs synchronously and the future is returned already resolved.</td></tr>
-  <tr><td><code>synthDefReady(name String) Future&lt;String&gt;</code></td><td>The future of the compile of <code>name</code> currently in flight, or an already-resolved future (<code>""</code>) when there is none. The music player awaits it before creating a node, so a def whose <code>defSynthX</code> was not awaited is waited for at its first play.</td></tr>
+  <tr><td><code>defSynth(synthFun, name String) Future&lt;String&gt;</code></td><td>(<code>synthc.compile</code>) Build the graph from <code>synthFun</code>, generate C++ with synthc, compile it on a background thread, and load the def into the engine. Resolves to the generated C++ source. A failed compile prints the error and halts the script. Await it before the def's first <code>newNode</code>; redefining a def that is playing can be left unawaited (nodes already running keep their old code).</td></tr>
+  <tr><td><code>defSynthChecked(synthFun, name String) Future&lt;Result&lt;String, String&gt;&gt;</code></td><td>(<code>synthc.compile</code>) The same, but never halts: <code>ok(cpp)</code> on success, <code>err(message)</code> on a failed analysis, compile or load.</td></tr>
+  <tr><td><code>defSynthX</code>, <code>defSynthXStrict</code>, <code>defSynthXChecked</code></td><td>(<code>synthc.compile</code>) Former names of <code>defSynth</code>, <code>defSynthStrict</code> and <code>defSynthChecked</code>, from when <code>defSynth</code> ran the retired C++ compiler. They do the same thing, so older scripts still run.</td></tr>
+  <tr><td><code>writeCompileAndLoadAsync(name String, cppSource String) Future&lt;String&gt;</code></td><td>The async backend of <code>defSynth</code>: writes already-generated C++ source, compiles and links it on the VM's background I/O worker, so scheduled music keeps playing while clang runs, then loads and registers the def. Resolves to <code>""</code> on success or an error message. Inside an NRT render the job runs synchronously and the future is returned already resolved.</td></tr>
+  <tr><td><code>synthDefReady(name String) Future&lt;String&gt;</code></td><td>The future of the compile of <code>name</code> currently in flight, or an already-resolved future (<code>""</code>) when there is none. The music player awaits it before creating a node, so a def whose <code>defSynth</code> was not awaited is waited for at its first play.</td></tr>
   <tr><td><code>writeAndCompileCpp(name String, cppSource String) String</code></td><td>Synchronous: write the source, compile and link it. Returns the library path, or a string starting with <code>"error:"</code>. Does not load it.</td></tr>
   <tr><td><code>loadSynthDylib(path String) String</code></td><td>Load a compiled plugin library and register its def with the engine (the render's engine inside an NRT render). Returns <code>""</code> on success or an error message.</td></tr>
   <tr><td><code>compareAudioFiles(pathA String, pathB String) Float</code>, <code>audioFileMaxAbs(path String) Float</code>, <code>ftosF32Cpp(x Float) String</code></td><td>Test helpers: the largest sample difference between two float WAV files, the largest absolute sample in one, and a float formatted as a C++ <code>f32</code> literal the way the code generator writes it.</td></tr>
@@ -2739,7 +2740,7 @@ module's internal timeline.</p>
 <!-- -------------------------------- -->
 <h3 id="synthdef-caching">12.3 Build Directory and Revisions</h3>
 
-<p>Generated source and libraries go in the build directory: <code>$TZPL_BUILD</code> if set, else <code>~/tzpl-build/</code>, with the libraries in its <code>dylib/</code> subdirectory. There is no in-memory cache: every <code>defSynthX</code> compiles. Each build of a name gets a new revision, <code>&lt;name&gt;_synth_rN.dylib</code>, so loading it never disturbs nodes still running an earlier revision. The newest three revisions of each name are kept on disk (<code>$TZPL_KEEP_REVISIONS</code> changes the count). The compiler is <code>$TZPL_CC</code> if set, else <code>clang</code> on macOS and the C++ compiler the build was configured with elsewhere.</p>
+<p>Generated source and libraries go in the build directory: <code>$TZPL_BUILD</code> if set, else <code>~/tzpl-build/</code>, with the libraries in its <code>dylib/</code> subdirectory. There is no in-memory cache: every <code>defSynth</code> compiles. Each build of a name gets a new revision, <code>&lt;name&gt;_synth_rN.dylib</code>, so loading it never disturbs nodes still running an earlier revision. The newest three revisions of each name are kept on disk (<code>$TZPL_KEEP_REVISIONS</code> changes the count). The compiler is <code>$TZPL_CC</code> if set, else <code>clang</code> on macOS and the C++ compiler the build was configured with elsewhere.</p>
 
 <!-- -------------------------------- -->
 <h3 id="synthdef-examples">12.4 Examples</h3>
@@ -2753,7 +2754,7 @@ module's internal timeline.</p>
 
 <span class="kw">fn</span> mySine() S = <span class="num">440.0</span> <span class="fn">sinosc</span> * <span class="num">0.1</span> |&gt; <span class="fn">outlet</span>;
 
-mySine <span class="fn">defSynthX</span>(<span class="str">"mySine"</span>) <span class="kw">await</span>;   <span class="cmt">-- compile and load</span>
+mySine <span class="fn">defSynth</span>(<span class="str">"mySine"</span>) <span class="kw">await</span>;   <span class="cmt">-- compile and load</span>
 
 <span class="fn">begin</span>();
 <span class="fn">newNode</span>(<span class="str">"mySine"</span>, <span class="num">101</span>);
@@ -2762,7 +2763,7 @@ mySine <span class="fn">defSynthX</span>(<span class="str">"mySine"</span>) <spa
 
 <h4>Report a failed compile instead of halting</h4>
 
-<pre><code><span class="kw">match</span> (mySine <span class="fn">defSynthXChecked</span>(<span class="str">"mySine"</span>) <span class="kw">await</span>) {
+<pre><code><span class="kw">match</span> (mySine <span class="fn">defSynthChecked</span>(<span class="str">"mySine"</span>) <span class="kw">await</span>) {
     ok(cpp): { <span class="fn">println</span>(<span class="str">"compiled"</span>); }
     err(msg): { <span class="fn">println</span>(<span class="str">"ERROR: "</span> $ msg); }
 }</code></pre>

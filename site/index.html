@@ -213,7 +213,7 @@ in the assembled site. Run <code>python3 site/build.py</code> and open
 
   <div class="sample">
 <pre><code><span class="kw">import</span> synthdef.*;
-<span class="kw">import</span> synthc.compile.*;   <span class="cmt">-- defSynthX</span>
+<span class="kw">import</span> synthc.compile.*;   <span class="cmt">-- defSynth</span>
 <span class="kw">import</span> common_ugens.*;
 
 <span class="cmt">-- An LFO-driven sine through a comb filter. `nnhz` converts a MIDI-style</span>
@@ -225,9 +225,9 @@ in the assembled site. Run <code>python3 site/build.py</code> and open
     |&gt; nnhz sinosc * <span class="num">0.04</span>
     |&gt; combn(<span class="num">0.2</span>, <span class="num">4</span>) outlet;
 
-bubbles <span class="fnm">defSynthX</span>(<span class="str">"bubbles"</span>) <span class="kw">await</span>;</code></pre>
+bubbles <span class="fnm">defSynth</span>(<span class="str">"bubbles"</span>) <span class="kw">await</span>;</code></pre>
     <!-- tzpl:hero-audio -->
-    <p class="caption">Evaluate this in the app and <code>defSynthX</code> walks the
+    <p class="caption">Evaluate this in the app and <code>defSynth</code> walks the
     signal graph, generates SIMD C++, compiles and links a native plugin in the
     background, and registers it with the running engine — music that is already
     playing never pauses.</p>

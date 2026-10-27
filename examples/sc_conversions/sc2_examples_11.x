@@ -94,7 +94,7 @@ fn strummableGuitar() S {
 	(((strings pan(stringPans(n, 0.2, -0.5)) stack) sum(cols)) leakdc(0.995)) gainOutlet
 }
 
-strummableGuitar defSynthX("strummableGuitar", tags) await;
+strummableGuitar defSynth("strummableGuitar", tags) await;
 
 ---------------------------------------------------------------------------
 -- 2. strummable 12 string guitar (examples-11.txt:29-56)
@@ -112,7 +112,7 @@ fn twelveString() S {
 	((((string1 + string2) pan(stringPans(n, 0.2, -0.5)) stack) sum(cols)) leakdc(0.995)) gainOutlet
 }
 
-twelveString defSynthX("twelveString", tags) await;
+twelveString defSynth("twelveString", tags) await;
 
 ---------------------------------------------------------------------------
 -- 3. bidirectional strummable guitar (examples-11.txt:60-87)
@@ -132,7 +132,7 @@ fn bidirectionalGuitar() S {
 	((((string1 + string2) pan(stringPans(n, 0.2, -0.5)) stack) sum(cols)) leakdc(0.995)) gainOutlet
 }
 
-bidirectionalGuitar defSynthX("bidirectionalGuitar", tags) await;
+bidirectionalGuitar defSynth("bidirectionalGuitar", tags) await;
 
 ---------------------------------------------------------------------------
 -- 4. harmonic zither (examples-11.txt:91-114)
@@ -148,7 +148,7 @@ fn harmonicZither() S {
 	(((strings pan(stringPans(n, 1.5 / 11.0, -0.75)) stack) sum(cols)) leakdc(0.995)) gainOutlet
 }
 
-harmonicZither defSynthX("harmonicZither", tags) await;
+harmonicZither defSynth("harmonicZither", tags) await;
 
 ---------------------------------------------------------------------------
 -- 5. strummable metals (examples-11.txt:118-142)
@@ -169,7 +169,7 @@ fn strummableMetals() S {
 	(((metal pan(stringPans(n, 0.2, -0.5)) stack) sum(cols)) leakdc(0.995)) gainOutlet
 }
 
-strummableMetals defSynthX("strummableMetals", tags) await;
+strummableMetals defSynth("strummableMetals", tags) await;
 
 ---------------------------------------------------------------------------
 -- 6. strummable pipes (examples-11.txt:146-171)
@@ -194,7 +194,7 @@ fn breath(trigger S) S = pink(8) * ((trigger timedGate(1)) lag(0.2) * 0.01);
 
 fn strummablePipes() S = pipesLike([0, 3, 5, 7, 10, 12, 15, 17] vec, 0.0, 0.2, breath);
 
-strummablePipes defSynthX("strummablePipes", tags) await;
+strummablePipes defSynth("strummablePipes", tags) await;
 
 ---------------------------------------------------------------------------
 -- 7. strummable silk (examples-11.txt:175-200)
@@ -207,7 +207,7 @@ fn silkPluck(trigger S) S =
 
 fn strummableSilk() S = pipesLike([-2, 0, 3, 5, 7, 10, 12, 15] vec, 0.3, 1.0, silkPluck);
 
-strummableSilk defSynthX("strummableSilk", tags) await;
+strummableSilk defSynth("strummableSilk", tags) await;
 
 ---------------------------------------------------------------------------
 -- driver

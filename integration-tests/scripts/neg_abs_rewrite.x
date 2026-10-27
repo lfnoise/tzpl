@@ -42,9 +42,9 @@ fn posConst() S {
 let f = kase == "negctl" ? negCtl : (kase == "posconst" ? posConst : negConst);
 let name = "neg_abs_" $ kase $ "_" $ mode;
 if (mode == "x") {
-	f defSynthX(name) await;
+	f defSynth(name) await;
 } else {
-	f defSynthX(name) await;
+	f defSynth(name) await;
 }
 safetyLimiter(false);
 begin();

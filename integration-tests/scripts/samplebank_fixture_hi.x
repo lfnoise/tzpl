@@ -9,7 +9,7 @@ fn sineHi() S {
 	sinosc(660.0) outlet
 }
 
-defSynthX(sineHi, "sbFixHi");
+defSynth(sineHi, "sbFixHi");
 begin();
 newNode("sbFixHi", 100);
 connect(100, 0, 0, 0);
