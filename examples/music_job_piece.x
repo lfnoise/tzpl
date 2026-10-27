@@ -22,6 +22,12 @@
 --     scream'   the same with the lead inverted and the bass line reversed
 --     collapse  the riff at half speed, a last ringing tritone
 --
+-- A small drum kit (drumKit, below) plays in every section but drift: two
+-- distant kicks in the drone, kick patterns that follow the bass in grind
+-- and scream, hats in dotted eighths against the bar in machine, and fills
+-- into the last bar of grind and scream. scream' moves the snare off the
+-- beat.
+--
 -- Form (a music.job Coll):
 --
 --     drone
@@ -30,13 +36,14 @@
 --     one of { 2 x { grind | machine +6 } | drift +6, scream +1 }
 --     collapse
 --
--- Graph: the bass is distorted and stays dry; the lead is distorted and
--- echoed; the pluck, pad and lead meet at a shared reverb.
+-- Graph: the bass and the drums are distorted and stay dry; the lead is
+-- distorted and echoed; the pluck, pad and lead meet at a shared reverb.
 --
---     wtLead(401) -> gain(411) -> fxDistortion(421) -> fxEcho(422) -\
---     ksPluck(402) -> gain(412) -> fxFilter(425), low-pass -------------+-> fxReverb(424) -> out
---     resonBank(403) -> gain(413) ----------------------------------/
---     wtLead(404) -> gain(414) -> fxDistortion(423) ------------------------------> out
+--     wtLead(401)    -> gain(411) -> fxDistortion(421) -> fxEcho(422) -\
+--     ksPluck(402)   -> gain(412) -> fxFilter(425), low-pass ----------+-> fxReverb(424) -> out
+--     resonBank(403) -> gain(413) ------------------------------------/
+--     wtLead(404)    -> gain(414) -> fxDistortion(423) ---------------------------------> out
+--     drumKit(405)   -> gain(415) -> fxDistortion(426) ---------------------------------> out
 --
 -- Run interactively:
 --   ./build/app/tzpl_app --nogui --wait -I lang/modules -I bridge/modules \
@@ -49,6 +56,7 @@ import synthdef.*;
 import synthc.compile.*;
 import wavetables.*;
 import common_ugens.*;
+import filters.*;
 import instruments.*;
 import effects.*;
 import clock.*;
@@ -68,7 +76,31 @@ fn partGain() S {
 	(x * lvl) outlet
 }
 
+-- A small drum kit: one voicer whose per-note params choose the drum. A
+-- sine body falling `sweep` octaves (the kick and tom thump) blends into
+-- high-passed noise (snare and hats) by `noise`; both decay over `decay`
+-- seconds.
+fn drumKit() S {
+	voicer(12, fn() S {
+		let f = noteFreq();
+		let a = noteAmp();
+		let noise = noteParam("noise", ControlSpec { lo: 0.0, hi: 1.0, init: 0.0,
+		                                             warp: ControlWarp.linear });
+		let dcy = noteParam("decay", ControlSpec { lo: 0.01, hi: 2.0, init: 0.2,
+		                                           warp: ControlWarp.exponential }) max(0.01);
+		let sweep = noteParam("sweep", ControlSpec { lo: 0.0, hi: 6.0, init: 0.0,
+		                                             warp: ControlWarp.linear });
+		let ncut = noteParam("ncut", ControlSpec { lo: 100.0, hi: 15000.0, init: 2000.0,
+		                                           warp: ControlWarp.exponential }) max(100.0);
+		let t = gate() tr;
+		let body = sinosc(f * (sweep * t decay2(0.0005, 0.04)) exp2) * (1.0 - noise);
+		let hiss = white() hpf(ncut) * noise;
+		(body + hiss) * t decay2(0.001, dcy) * a
+	}) sum outlet
+}
+
 let cGain  = partGain defSynth("partGain");
+let cDrums = drumKit defSynth("drumKit");
 let cLead  = wtLead() defSynth("wtLead");
 let cPluck = ksPluck(12) defSynth("ksPluck12");
 let cBank  = resonBank() defSynth("resonBank");
@@ -76,7 +108,7 @@ let cDist  = fxDistortion defSynth("fxDistortion");
 let cFilt  = fxFilter defSynth("fxFilter");
 let cEcho  = fxEcho defSynth("fxEcho");
 let cVerb  = fxReverb defSynth("fxReverb");
-await cGain; await cLead; await cPluck; await cBank;
+await cGain; await cDrums; await cLead; await cPluck; await cBank;
 await cDist; await cFilt; await cEcho; await cVerb;
 
 ---------------------------------------------------------------------------
@@ -95,6 +127,9 @@ const kEcho     = 422;
 const kBassDist = 423;
 const kVerb     = 424;
 const kPluckLP   = 425;
+const kDrumDist  = 426;
+const kDrums  = 405;
+const kGDrums = 415;
 
 engineStart();
 masterGain(0.7);
@@ -115,6 +150,9 @@ newNode("fxEcho", kEcho);
 newNode("fxDistortion", kBassDist);
 newNode("fxReverb", kVerb);
 newNode("fxFilter", kPluckLP);
+newNode("drumKit", kDrums);
+newNode("partGain", kGDrums);
+newNode("fxDistortion", kDrumDist);
 connect(kLead, 0, kGLead, 0);
 connect(kGLead, 0, kLeadDist, 0);
 connect(kLeadDist, 0, kEcho, 0);
@@ -122,6 +160,9 @@ connect(kEcho, 0, kVerb, 0);
 connect(kPluck, 0, kGPluck, 0);
 connect(kGPluck, 0, kPluckLP, 0);
 connect(kPluckLP, 0, kVerb, 0);
+connect(kDrums, 0, kGDrums, 0);
+connect(kGDrums, 0, kDrumDist, 0);
+connect(kDrumDist, 0, 0, 0);
 connect(kPad, 0, kGPad, 0);
 connect(kGPad, 0, kVerb, 0);
 connect(kVerb, 0, 0, 0);
@@ -172,12 +213,19 @@ setInput(kGLead, "level", 1.0);
 setInput(kGPluck, "level", 8.0);
 setInput(kGPad, "level", 0.4);
 setInput(kGBass, "level", 1.0);
+setInput(kGDrums, "level", 1.0);
+-- drums: a little grit, no reverb
+setInput(kDrumDist, "drive", 8.0);
+setInput(kDrumDist, "tone", 0.5);
+setInput(kDrumDist, "level", 0.5);
 sched(0);
 
 let leadV  = freqVoice(kLead, 8);
 let bassV  = freqVoice(kBass, 8);
 let pluckV = freqVoice(kPluck, 12);
 let padV   = freqVoice(kPad, 8);
+let drumV  = voice(kDrums, ['freq, 'amp, 'noise, 'decay, 'sweep, 'ncut],
+                    [100.0, 0.5, 0.0, 0.2, 0.0, 2000.0], 12);
 
 -- degree 0 is E3 (165 Hz); the scale is all twelve semitones
 let keyE = transposeRoot(et12, -17.0);
@@ -192,6 +240,8 @@ slider("pad", ControlSpec { lo: 0.0, hi: 8.0, init: 0.4, warp: ControlWarp.linea
 	bindInput(kGPad, "level");
 slider("bass", ControlSpec { lo: 0.0, hi: 8.0, init: 1.0, warp: ControlWarp.linear })
 	bindInput(kGBass, "level");
+slider("drums", ControlSpec { lo: 0.0, hi: 12.0, init: 1.0, warp: ControlWarp.linear })
+	bindInput(kGDrums, "level");
 meter("reverb bus", kVerb);
 panel("");
 
@@ -206,6 +256,7 @@ struct Section {
     pluck [Shape],
     pad [Shape],
     lead [Shape],
+    drums [Shape],
     bassDrive Float,    -- fxDistortion drive at the section's start
     bassLevel Float,    -- and its output level, which falls as drive rises
     leadDrive Float,
@@ -278,6 +329,44 @@ let screamLead = cell([[1.0, 12.0, 0.7], [1.0, 13.0, 0.7], [2.0, 18.0, 0.8],
                        [4.0, 24.0, 0.9], [2.0, 25.0, 0.8], [2.0, 18.0, 0.7],
                        [2.0, 12.0, 0.6]]);
 
+-- Drums. Rows are [dur, hz, amp, noise, decay, sweep, ncut]; each drum is
+-- the [hz, noise, decay, sweep, ncut] part.
+let drumDims = ['dur, 'hz, 'amp, 'noise, 'decay, 'sweep, 'ncut];
+let drKick    = [48.0, 0.08, 0.4, 2.5, 4000.0];
+let drSnare   = [180.0, 0.7, 0.16, 0.7, 1200.0];
+let drHat     = [300.0, 1.0, 0.045, 0.0, 7000.0];
+let drOpenHat = [300.0, 1.0, 0.25, 0.0, 6000.0];
+let drTom     = [95.0, 0.15, 0.3, 1.0, 2000.0];
+
+-- one drum at the given onsets within `len` beats; amps cycle
+fn drumHits(drum [Float], onsets [Float], amps [Float], len Float) Shape {
+    var rows = [[Float]]();
+    if (onsets[0] > 0.0) { rows push!([onsets[0], 100.0, 0.0, 0.0, 0.1, 0.0, 1000.0]); }
+    var i = 0;
+    while (i < onsets length) {
+        let next = i + 1 < onsets length ? onsets[i + 1] : len;
+        rows push!([next - onsets[i], drum[0], amps[i % amps length],
+                    drum[1], drum[2], drum[3], drum[4]]);
+        i = i + 1;
+    }
+    shape(rows, drumDims)
+}
+
+-- the same one-bar pattern n times
+fn drumBars(drum [Float], onsets [Float], amps [Float], n Int) Shape =
+    loopShape(drumHits(drum, onsets, amps, 4.0), n);
+
+-- onsets every `step` beats up to `len`
+fn onsetGrid(step Float, len Float) [Float] {
+    var out = [Float]();
+    var t = 0.0;
+    while (t < len - 0.001) { out push!(t); t = t + step; }
+    out
+}
+
+let hats8  = onsetGrid(0.5, 4.0);
+let hats16 = onsetGrid(0.25, 4.0);
+
 -- 64 sixteenths = 16 beats; the 3-note cell needs 21 1/3 repeats, so
 -- 21 of them plus one note
 let ostinatoBlock = catShapes(loopShape(ostinato, 21), cell([[0.25, 0.0, 0.8]]));
@@ -289,6 +378,7 @@ let sections = [
         pluck: [cell([[4.0, 0.0, 0.0], [6.0, 13.0, 0.6], [3.0, 7.0, 0.5], [3.0, 12.0, 0.5]])],
         pad: held(16.0, [0.0, 1.0, 6.0], 0.5),
         lead: [Shape](),
+        drums: [drumHits(drKick, [0.0, 8.0], [0.6, 0.5], 16.0)],
         bassDrive: 6.0, bassLevel: 1.0, leadDrive: 10.0, leadLevel: 0.5, verbMix: 0.3,
     },
     Section {
@@ -297,6 +387,12 @@ let sections = [
         pluck: [loopShape(stabLo, 4), loopShape(stabHi, 4)],
         pad: [Shape](),
         lead: [Shape](),
+        drums: [catShapes(drumBars(drKick, [0.0, 0.75, 2.0, 2.75], [1.0, 0.7, 0.9, 0.7], 3),
+                          drumHits(drKick, [0.0], [1.0], 4.0)),
+                catShapes(drumBars(drSnare, [1.0, 3.0], [0.8], 3),
+                          drumHits(drSnare, [1.0, 2.0, 2.5, 3.0, 3.25, 3.5, 3.75],
+                                   [0.6, 0.6, 0.7, 0.7, 0.8, 0.9, 1.0], 4.0)),
+                drumBars(drHat, hats8, [0.5, 0.3], 4)],
         bassDrive: 26.0, bassLevel: 0.25, leadDrive: 10.0, leadLevel: 0.5, verbMix: 0.15,
     },
     Section {
@@ -305,6 +401,9 @@ let sections = [
         pluck: [ostinatoBlock],
         pad: [Shape](),
         lead: [machineLead],
+        drums: [drumBars(drKick, [0.0, 2.5], [0.9, 0.7], 4),
+                drumHits(drHat, onsetGrid(0.75, 16.0), [0.6, 0.35, 0.35], 16.0),
+                drumHits(drTom, [15.0, 15.5], [0.7, 0.9], 16.0)],
         bassDrive: 12.0, bassLevel: 0.73, leadDrive: 14.0, leadLevel: 0.64, verbMix: 0.2,
     },
     Section {
@@ -317,6 +416,7 @@ let sections = [
               cell([[8.0, 5.0, 0.4], [8.0, 8.0, 0.4]])],
         lead: [cell([[2.0, 0.0, 0.0], [3.0, 24.0, 0.35], [1.0, 23.0, 0.3],
                      [4.0, 18.0, 0.35], [6.0, 0.0, 0.0]])],
+        drums: [Shape](),
         bassDrive: 4.0, bassLevel: 0.5, leadDrive: 6.0, leadLevel: 1.0, verbMix: 0.4,
     },
     Section {
@@ -325,6 +425,11 @@ let sections = [
         pluck: [ostinatoBlock],
         pad: held(16.0, [0.0, 1.0, 6.0], 0.4),
         lead: [screamLead],
+        drums: [drumBars(drKick, [0.0, 1.5, 2.0, 3.5], [1.0, 0.7, 1.0, 0.7], 4),
+                catShapes(drumBars(drSnare, [1.0, 3.0], [1.0], 3),
+                          drumHits(drSnare, [1.0, 3.0, 3.25, 3.5, 3.75],
+                                   [1.0, 0.7, 0.8, 0.9, 1.0], 4.0)),
+                drumBars(drHat, hats16, [0.55, 0.25, 0.35, 0.25], 4)],
         bassDrive: 32.0, bassLevel: 0.21, leadDrive: 30.0, leadLevel: 0.25, verbMix: 0.2,
     },
     Section {
@@ -333,6 +438,10 @@ let sections = [
         pluck: [ostinatoBlock],
         pad: held(16.0, [0.0, 1.0, 6.0], 0.4),
         lead: [screamLead invertDim('degree, 18.0)],
+        drums: [drumBars(drKick, [0.0, 0.75, 2.0, 2.75], [1.0, 0.7, 1.0, 0.7], 4),
+                drumBars(drSnare, [1.5, 3.0], [0.9, 1.0], 4),
+                catShapes(drumBars(drHat, hats16, [0.55, 0.25, 0.35, 0.25], 3),
+                          drumHits(drOpenHat, [0.0, 2.0], [0.6], 4.0))],
         bassDrive: 32.0, bassLevel: 0.21, leadDrive: 30.0, leadLevel: 0.25, verbMix: 0.2,
     },
     Section {
@@ -342,6 +451,8 @@ let sections = [
                 cell([[12.0, 0.0, 0.0], [4.0, 7.0, 0.6]])],
         pad: held(16.0, [0.0, 1.0, 6.0], 0.3),
         lead: [Shape](),
+        drums: [drumHits(drKick, [0.0, 4.0, 8.0], [1.0, 0.8, 1.0], 16.0),
+                drumHits(drSnare, [6.0], [0.7], 16.0)],
         bassDrive: 20.0, bassLevel: 0.41, leadDrive: 10.0, leadLevel: 0.5, verbMix: 0.35,
     },
 ];
@@ -420,6 +531,7 @@ fn runPiece() Void {
         play(partEvents(marks, fn(s Section) [Shape] { s.pluck }, 0.5), pluckV, keyE, chroma);
         play(partEvents(marks, fn(s Section) [Shape] { s.pad }, 1.0), padV, keyE, chroma);
         play(partEvents(marks, fn(s Section) [Shape] { s.lead }, 0.95), leadV, keyE, chroma);
+        play(partEvents(marks, fn(s Section) [Shape] { s.drums }, 0.5), drumV, keyE, chroma);
 
         -- each section sets its distortion drives and levels and the reverb amount
         let b0 = getBeats() + getLatency();
