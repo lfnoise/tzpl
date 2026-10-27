@@ -63,6 +63,10 @@ for what changed and the code to change.
 
 **Fixed**
 
+- A `let` or `var` inside a function whose name matched a global also
+  overwrote that global. When the global held an object this crashed the
+  app (running the cookbook chapters, then `sc2_examples_1.x`); otherwise
+  the global silently changed. Present since before v0.1.0.
 - A crash in long renders and live sessions that play scores
   (`music.play`): a list built from a coroutine (`coro toList`, which
   `score` uses) could be freed by the garbage collector before it was
