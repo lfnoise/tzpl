@@ -84,8 +84,10 @@ for what changed and the code to change.
   recorded in the history, and the shipped notebooks were re-saved.
 - The example notebooks are ported to the block engine, and each cookbook
   chapter runs on its own: chapters 3 and 4 define the synths they play
-  (they were silent unless chapter 2 had run), and chapters 5 and 6 play on
-  their own nodes (501 and 600) instead of colliding with other chapters'.
+  (they were silent unless chapter 2 had run), and chapters 5 to 8 and 10
+  play on their own nodes (501, 600, 701, 801, 1001 and 1002) instead of
+  colliding with chapter 3's node 101 (`errNodeIDAlreadyTaken`). Their stop
+  cells free the nodes, so a chapter can be run again.
 - Links in the body text of the migration guide, SynthDef guide, Builtin
   Functions, Music Libraries and Standard Library pages use the page's
   accent color instead of the browser's default dark blue, which was hard
