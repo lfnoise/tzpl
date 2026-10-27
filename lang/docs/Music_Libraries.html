@@ -547,6 +547,12 @@ p enqueue(realize(form));         <span class="cmt">-- a different reading follo
 
 <span class="hl-kw">let</span> big = Coll.rpt((<span class="hl-num">10000</span>, Coll.sel((Behavior.shuffled, riffs))));
 play(realizeCo(big), v);          <span class="cmt">-- incremental: selects as it plays</span></code></pre>
+            <p><code>synthdef</code> also defines a <code>Shape</code> (a signal&rsquo;s tensor shape). A script that imports both <code>synthdef.*</code> and <code>music.job.*</code> (or <code>music.shape.*</code>) gets a compile error where it writes <code>Shape</code>, because the name could mean either one. Import the one you mean by name, which takes precedence over the wildcards, or import a module under an alias:</p>
+            <pre><code><span class="hl-kw">import</span> synthdef.*;
+<span class="hl-kw">import</span> music.job.*;
+<span class="hl-kw">import</span> music.shape.{Shape};   <span class="cmt">-- Shape means music.shape's</span>
+
+<span class="hl-kw">fn</span> riff() Shape = shape([[<span class="hl-num">0.5</span>, <span class="hl-num">0.0</span>, <span class="hl-num">0.6</span>], [<span class="hl-num">0.5</span>, <span class="hl-num">2.0</span>, <span class="hl-num">0.5</span>]]);</code></pre>
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
 
