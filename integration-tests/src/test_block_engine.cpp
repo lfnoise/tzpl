@@ -667,6 +667,13 @@ void testSilosTapsLimiter() {
         r.renderTo(2000);
         check(std::fabs(tapPeak(r.e, 77) - 0.5f) < 1e-6, std::format("tap peak {}", tapPeak(r.e, 77)));
         check(std::fabs(tapRms(r.e, 77) - 0.5f) < 1e-5, std::format("tap rms {}", tapRms(r.e, 77)));
+        // Cut off from the output, the node stops running: its tap reads
+        // silence, not the 0.5 left in its buffer.
+        r.now([&] { disconnectOutput({20, 0}); });
+        r.renderTo(4000);
+        check(tapPeak(r.e, 77) == 0.f && tapRms(r.e, 77) == 0.f,
+              std::format("tap on a node that stopped running: peak {} rms {}",
+                          tapPeak(r.e, 77), tapRms(r.e, 77)));
     }
     gCase = "safety limiter";
     {

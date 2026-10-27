@@ -131,10 +131,14 @@ void Silo::processTaps(int lo, int hi) {
         RTTap& t = rt_taps_[i];
         TapSlot* ts = t.slot;
         int chans = t.chans;
+        // A node that did not run these samples (not feeding the output, or
+        // not yet connected) is silent: its buffers hold whatever it last
+        // wrote. The input node's are filled every block.
+        bool ran = t.node == inputNode_ || t.node->ranTo_ == blockStart_ + hi;
 
         f32 pk = ts->accumPeak;
         f32 sq = 0.0f;
-        for (int c = 0; c < chans; ++c) {
+        for (int c = 0; c < chans && ran; ++c) {
             f32 const* buf = static_cast<f32 const*>(t.bufs[c]);
             for (int k = lo; k < hi; ++k) {
                 f32 v = buf[k];
@@ -160,7 +164,7 @@ void Silo::processTaps(int lo, int hi) {
             for (int k = lo; k < hi; ++k) {
                 if (ts->fifo.space() < chans) break;
                 for (int c = 0; c < chans; ++c)
-                    ts->fifo.push(static_cast<f32 const*>(t.bufs[c])[k]);
+                    ts->fifo.push(ran ? static_cast<f32 const*>(t.bufs[c])[k] : 0.0f);
             }
         }
     }
