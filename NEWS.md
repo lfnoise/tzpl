@@ -9,6 +9,12 @@ documentation site as the Changelog page.
 
 ### Changed
 
+- `ksPluck` (instruments.x) plays about 10 dB louder, as loud as `wtLead`
+  at the same amp; it was 11 dB quieter than `wtLead` and 17 dB quieter
+  than `resonBank`. Existing scripts that use it get 10 dB louder; to keep
+  an old balance, scale its amps or its gain by 0.3. The noise attack peaks
+  about 17 dB above the ringing string, so a chord of loud notes can reach
+  full scale.
 - The music libraries demo (`examples/music_fx_demos.x`) is replaced by
   two pieces: `examples/music_media_piece.x`, a through-composed piece in A
   minor written with `music.media`, and `examples/music_job_piece.x`, a

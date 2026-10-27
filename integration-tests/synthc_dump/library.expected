@@ -888,7 +888,7 @@ OUT 0 out f32 1
      52   60 [59              ]  1  0 Audio    Sink      f32     1 delay_write
      53    4 [                ]  0  1 Block    Input     f32     1 noteParam(amp@2)
      54   61 [47 4            ]  2  1 Audio    None      f32     1 *
-     55   62 [                ]  0  1 Const    None      f32     1 0.5f
+     55   62 [                ]  0  1 Const    None      f32     1 1.6f
      56   63 [61 62           ]  2  1 Audio    Temp      f32     1 *
      57   64 [63              ]  1  0 Audio    Phi       f32     1 PhiNode
      58   65 [                ]  0  1 Audio    Temp      f32     8 voicer
@@ -975,7 +975,7 @@ OUT 0 out f32 1
       0    4 [                ]  0  1 Block    Input     f32     1 noteParam(amp@2)
     TREE 25   [16 24] Audio  Temp      f32     1
       0   61 [47 4            ]  2  1 Audio    None      f32     1 *
-      1   62 [                ]  0  1 Const    None      f32     1 0.5f
+      1   62 [                ]  0  1 Const    None      f32     1 1.6f
       2   63 [61 62           ]  2  1 Audio    Temp      f32     1 *
     TREE 26   [25] Audio  Phi       f32     1
       0   64 [63              ]  1  0 Audio    Phi       f32     1 PhiNode
@@ -1089,7 +1089,7 @@ GRAPH 1
       5   60 [59              ]  1  0 Audio    Sink      f32     1 delay_write
     TREE 25   [16 24] Audio  Temp      f32     1
       0   61 [47 4            ]  2  1 Audio    None      f32     1 *
-      1   62 [                ]  0  1 Const    None      f32     1 0.5f
+      1   62 [                ]  0  1 Const    None      f32     1 1.6f
       2   63 [61 62           ]  2  1 Audio    Temp      f32     1 *
     TREE 26   [25] Audio  Phi       f32     1
       0   64 [63              ]  1  0 Audio    Phi       f32     1 PhiNode
@@ -1188,7 +1188,7 @@ OUT 0 out f32 1
      52   60 [59              ]  1  0 Audio    Sink      f32     1 delay_write
      53    4 [                ]  0  1 Block    Input     f32     1 noteParam(amp@2)
      54   61 [47 4            ]  2  1 Audio    None      f32     1 *
-     55   62 [                ]  0  1 Const    None      f32     1 0.5f
+     55   62 [                ]  0  1 Const    None      f32     1 1.6f
      56   63 [61 62           ]  2  1 Audio    Temp      f32     1 *
      57   64 [63              ]  1  0 Audio    Phi       f32     1 PhiNode
      58   65 [                ]  0  1 Audio    Temp      f32    12 voicer
@@ -1275,7 +1275,7 @@ OUT 0 out f32 1
       0    4 [                ]  0  1 Block    Input     f32     1 noteParam(amp@2)
     TREE 25   [16 24] Audio  Temp      f32     1
       0   61 [47 4            ]  2  1 Audio    None      f32     1 *
-      1   62 [                ]  0  1 Const    None      f32     1 0.5f
+      1   62 [                ]  0  1 Const    None      f32     1 1.6f
       2   63 [61 62           ]  2  1 Audio    Temp      f32     1 *
     TREE 26   [25] Audio  Phi       f32     1
       0   64 [63              ]  1  0 Audio    Phi       f32     1 PhiNode
@@ -1389,7 +1389,7 @@ GRAPH 1
       5   60 [59              ]  1  0 Audio    Sink      f32     1 delay_write
     TREE 25   [16 24] Audio  Temp      f32     1
       0   61 [47 4            ]  2  1 Audio    None      f32     1 *
-      1   62 [                ]  0  1 Const    None      f32     1 0.5f
+      1   62 [                ]  0  1 Const    None      f32     1 1.6f
       2   63 [61 62           ]  2  1 Audio    Temp      f32     1 *
     TREE 26   [25] Audio  Phi       f32     1
       0   64 [63              ]  1  0 Audio    Phi       f32     1 PhiNode

@@ -267,6 +267,8 @@ fn resonBank(maxVoices Int = kMaxVoices) () S {
 -- 6. Karplus-Strong pluck: ksString excited by a noise burst with an
 --    exponential decay envelope of `pluck` seconds. decay is the string's
 --    ring time; damp darkens it. Note-off is ignored (the string rings).
+--    The output scale (1.6) puts a note about as loud as wtLead at the same
+--    amp; the noise attack peaks some 17 dB above the ringing body.
 --    noteOn params: [freq, amp]
 --    controls: 0 pluck, 1 decay, 2 damp
 fn ksPluck(maxVoices Int = kMaxVoices) () S {
@@ -279,7 +281,7 @@ fn ksPluck(maxVoices Int = kMaxVoices) () S {
 			let a = noteAmp();
 			let g = gate();
 			let exc = white() * g tr decay2(0.0005, pluckT);
-			exc ksString(f, dcy, damp) * a * 0.5
+			exc ksString(f, dcy, damp) * a * 1.6
 		}) sum outlet
 	}
 }

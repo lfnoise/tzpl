@@ -216,8 +216,7 @@ setInput(kEcho, "mix", 0.25);
 setInput(kVerb, "decay", 3.0);
 setInput(kVerb, "mix", 0.25);
 setInput(kGLead, "level", 0.8);
--- the plucked strings, filtered, are about 18 dB quieter than the other defs
-setInput(kGPluck, "level", 3.4);
+setInput(kGPluck, "level", 1.06);
 setInput(kGPad, "level", 0.17);
 setInput(kGBass, "level", 1.0);
 setInput(kGDrums, "level", 1.4);
@@ -242,7 +241,7 @@ let chroma = chromatic(12);
 panel("mixer");
 slider("lead", ControlSpec { lo: 0.0, hi: 8.0, init: 0.8, warp: ControlWarp.linear })
 	bindInput(kGLead, "level");
-slider("pluck", ControlSpec { lo: 0.0, hi: 12.0, init: 3.4, warp: ControlWarp.linear })
+slider("pluck", ControlSpec { lo: 0.0, hi: 4.0, init: 1.06, warp: ControlWarp.linear })
 	bindInput(kGPluck, "level");
 slider("pad", ControlSpec { lo: 0.0, hi: 8.0, init: 0.17, warp: ControlWarp.linear })
 	bindInput(kGPad, "level");

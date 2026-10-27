@@ -143,7 +143,7 @@ setInput(kVerb, "mix", 0.22);
 -- draft balance, from solo renders: pluck 3 dB under the bass, lead 1 dB
 -- under, pad 6 dB under (RMS while each part plays)
 setInput(kGLead, "level", 1.2);
-setInput(kGPluck, "level", 2.0);
+setInput(kGPluck, "level", 1.25);
 setInput(kGPad, "level", 0.27);
 setInput(kGBass, "level", 0.76);
 sched(0);
@@ -159,7 +159,7 @@ let keyA = transposeRoot(et12, -12.0);
 panel("mixer");
 slider("lead", ControlSpec { lo: 0.0, hi: 4.0, init: 1.2, warp: ControlWarp.linear })
 	bindInput(kGLead, "level");
-slider("pluck", ControlSpec { lo: 0.0, hi: 4.0, init: 2.0, warp: ControlWarp.linear })
+slider("pluck", ControlSpec { lo: 0.0, hi: 4.0, init: 1.25, warp: ControlWarp.linear })
 	bindInput(kGPluck, "level");
 slider("pad", ControlSpec { lo: 0.0, hi: 4.0, init: 0.27, warp: ControlWarp.linear })
 	bindInput(kGPad, "level");
@@ -299,9 +299,7 @@ fn runPiece() Void {
     go(coro fn() Float {
         setTempo(0, 96.0);
         play(bassPart perform(0.0, 0.95), bassV, keyA, minor);
-        -- the strings are quiet for their peak level: play them at twice the
-        -- default note amplitude
-        play((pluckPart dyn(2.0)) perform, pluckV, keyA, minor);
+        play(pluckPart perform, pluckV, keyA, minor);
         play(padPart perform(0.0, 1.0), padV, keyA, minor);
         play(leadPart perform(0.0, 0.92), leadV, keyA, minor);
         yield (pluckPart mdur + 6.0);
