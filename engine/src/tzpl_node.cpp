@@ -24,6 +24,7 @@
 #include "tzpl_node.hpp"
 #include "tzpl_engine.hpp"
 #include "tzpl_note_voicer.hpp"
+#include <algorithm>
 #include <cstring>
 #include <print>
 
@@ -453,39 +454,42 @@ void Node::zeroOutputs(int from, int to) {
     }
 }
 
-void Node::runBlock(Silo* s, int n) {
-    for (InPort& p : ins) p.render(s, n);
-
-    if (eventsStamp_ != s->blockStart_ || numEvents_ == 0) {
-        funs.process(synth, 0, n);
-        return;
-    }
-    beginSpans(s, n);
-    runSpan(0, n);
-    endSpans();
+void Node::runRange(Silo* s, int lo, int hi) {
+    for (InPort& p : ins) p.render(s, hi);
+    runSpans(s, lo, hi);
+    ranTo_ = s->blockStart_ + hi;
 }
 
-void Node::beginSpans(Silo* s, int n) {
+void Node::runSpans(Silo* s, int lo, int hi) {
+    if (eventsStamp_ != s->blockStart_ || numEvents_ == 0) {
+        funs.process(synth, lo, hi - lo);
+        return;
+    }
+    if (spanStamp_ != s->blockStart_) beginSpans(s);
+    runSpan(lo, hi);
+}
+
+void Node::beginSpans(Silo* s) {
+    spanStamp_ = s->blockStart_;
     spanEv_ = 0;
-    spanN_ = n;
-    spanEvents_ = eventsStamp_ == s->blockStart_ && numEvents_ > 0;
+    spanN_ = s->blockLen_;
+    spanEvents_ = numEvents_ > 0;
     // A node starting mid-block outputs 0 before its start; a node freed
     // mid-block outputs 0 after it.
     spanRunning_ = true;
-    if (spanEvents_) {
-        for (int k = 0; k < numEvents_; ++k) {
-            if (events_[k].kind == nodeEvStart) { spanRunning_ = false; break; }
-        }
+    for (int k = 0; k < numEvents_; ++k) {
+        if (events_[k].kind == nodeEvStart) { spanRunning_ = false; break; }
     }
 }
 
 // Split [lo, hi) at each event in it. An event at the block's end (offset
-// n) belongs to the last span.
+// n) belongs to the last span. An event before lo (samples this node did not
+// run) takes effect at lo.
 void Node::runSpan(int lo, int hi) {
     int pos = lo;
     while (spanEvents_ && spanEv_ < numEvents_) {
         NodeEvent const& ev = events_[spanEv_];
-        int off = std::min(ev.offset, spanN_);
+        int off = std::clamp(ev.offset, lo, spanN_);
         if (!(off < hi || (hi == spanN_ && off <= hi))) break;
         ++spanEv_;
         switch (ev.kind) {

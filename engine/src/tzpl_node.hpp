@@ -137,7 +137,6 @@ struct ChanStage {
     int renderedTo = 0;    // samples [0, renderedTo) of the block are written
     bool touched = false;  // the buffer is not one value for this block
     bool dirty = true;     // the buffer must be refilled from sample 0
-    u64 fbLast = 0;        // feedback edge: the source's last sample (raw bits)
 };
 
 struct InPort {
@@ -280,10 +279,15 @@ struct Node {
     bool started_ = false;   // has run (or been scheduled to start) a block
     bool freeing_ = false;   // a free event is pending in this block
     // runSpan state for the current block
+    i64 spanStamp_ = -1;     // block start the span state belongs to
     int spanEv_ = 0;
     int spanN_ = 0;
     bool spanRunning_ = true;
     bool spanEvents_ = false;
+    // Absolute sample time the outputs are written up to (exclusive): a
+    // feedback input reads its source's previous sample only from a source
+    // that has been running.
+    i64 ranTo_ = -1;
     Node* pendingFreeNext_ = nullptr;
 
     // Voiced defs: the engine-side voice allocator and the `notes` input.
@@ -300,15 +304,15 @@ struct Node {
 
     // Queue a discrete event at block offset `off` of the current block.
     void addEvent(Silo* s, int off, NodeEventKind kind, int arg = 0);
-    // Run one block of n samples: render input stages, then process the
-    // segments between this block's events.
-    void runBlock(Silo* s, int n);
-    // runBlock in pieces (a cycle runs its nodes a sample at a time): after
-    // beginSpans, runSpan(lo, hi) processes samples [lo, hi) and the events
-    // in them; the spans must cover [0, n) in order.
-    void beginSpans(Silo* s, int n);
+    // Run samples [lo, hi) of the block: render the input stages, then
+    // process. The silo runs a block in parts when graph edits split it.
+    void runRange(Silo* s, int lo, int hi);
+    // Process samples [lo, hi), split at this block's events in them. Calls
+    // in a block go forward in time; they may skip samples (a node out of
+    // the graph for part of the block), whose events still take effect.
+    void runSpans(Silo* s, int lo, int hi);
+    void beginSpans(Silo* s);
     void runSpan(int lo, int hi);
-    void endSpans() { numEvents_ = 0; }
     // Zero samples [from, to) of every output.
     void zeroOutputs(int from, int to);
 

@@ -131,20 +131,25 @@ Per audio callback (one device buffer of N frames), `processFrames()` processes 
 in chunks of up to one block (`blockSize_`, default 64; the last chunk may be shorter, and
 synths handle any n, so this adds no latency). `processBlock(off, n)`:
 
-1. **Process RT commands**: Pop command lists from `from_nrt_` FIFO. Immediate commands
+1. Deinterleave the hardware input into the input node's outlet.
+2. **Process RT commands**: Pop command lists from `from_nrt_` FIFO. Immediate commands
    execute directly. Scheduled commands are queued on their TempoClock slot.
-2. **Collect and run the block's events** (`collectAndRunEvents`): every clock-scheduled
+3. **Collect and run the block's events** (`collectAndRunEvents`): every clock-scheduled
    command due in `[T0, T0+n)` and every RT task wakeup, in time order. Each is resolved
    to a (fractional) sample time in the block and applied to the state it targets:
    input changes go to the input's per-channel value stages; node start/free and voice
-   resets go to the node's per-block event list.
-3. Deinterleave the hardware input into the input node's outlet.
-4. `sortNodes()` — Re-run topological sort if connections changed.
-5. `runNodes()` — Walk the sorted list; for each node, render its input stages
+   resets go to the node's per-block event list. A **graph edit** (`connect`, `unlink`,
+   `removeNode`) at offset t first runs steps 4-6 over `[ranTo_, t)` under the graph as
+   it stands (`runToEdit`), so each part of the block runs under its own graph and sort
+   order.
+4. `runTo(n)`: `sortNodes()` — re-run the topological sort if connections changed —
+   then `runNodes(lo, hi)`: walk the sorted list; for each node, render its input stages
    (steps, ramps, impulses written into the input's own buffers; `isConst`/`version`
    set per channel), then call `process(off, len)` for each segment between the node's
    discrete events.
-6. Taps; interleave the output node's input into the silo's output buffer.
+5. Taps over the part just run.
+6. Interleave the output node's input into the silo's output buffer for that part (the
+   input reads its source's buffers, and an edit can change the source mid-block).
 7. `finishBlock()`: retire finished crossfaders, remove nodes freed in this block, and
    hand the block's commands to the NRT thread; then `sampleTime_ += n`.
 
@@ -168,7 +173,9 @@ Nodes are sorted via depth-first traversal starting from the `outputNode_`:
   `Silo::runCycle` runs a cycle per the silo's `feedbackMode`: `sample` (default) runs its
   nodes a sample at a time (`Node::runSpan`, events at their sample) and fills each
   closing input with its source's previous sample, the per-sample engine's one-sample
-  delay; `block` runs whole blocks with the closing inputs a block late.
+  delay, read from the source's buffer (at a part's first sample, only if the source
+  has run up to it, `Node::ranTo_`; otherwise 0); `block` runs whole blocks with the
+  closing inputs a block late.
 
 The sort only runs when `needsSort_` is true (set by connect/disconnect operations). It is
 generation-stamped (`sortGen_`) and never walks the previous sorted list, which may hold

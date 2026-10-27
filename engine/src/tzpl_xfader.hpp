@@ -30,8 +30,7 @@
 //  N) sources can be audible at once. When the inner fader retires it hands
 //  its new source to whatever its output fed -- the outer fader's in0.
 //
-//  A fade of 0 samples is a step at its start time. Scheduled graph edits
-//  use one to take effect mid-block.
+//  A fade of 0 samples is a step at its start time.
 //
 
 #ifndef tzpl_xfader_hpp

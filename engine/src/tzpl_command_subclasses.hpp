@@ -26,6 +26,7 @@
 
 #include "tzpl_silo.hpp"
 #include <cstring>
+#include <utility>
 #include "tzpl_engine.hpp"
 #include "tzpl_xfader.hpp"
 #include "tzpl_mixer.hpp"
@@ -95,18 +96,6 @@ struct RemoveAllNodesCmd : Command
     }
 };
 
-// Discard a pre-allocated step fader (a 0-length fade) when the event lands
-// on the block start, where a plain edit is already exact.
-inline Node* useFader(Silo* s, Node*& fader, bool isStep) {
-    Node* f = fader;
-    fader = nullptr;
-    if (f && isStep && s->eventOffset() == 0) {
-        s->pushDeadNode(f);
-        return nullptr;
-    }
-    return f;
-}
-
 struct ConnectCmd : Command
 {
     PortAddr src_;
@@ -115,14 +104,11 @@ struct ConnectCmd : Command
     Node* mixerNode_;      // pre-allocated mixer (null if not needed)
     Node* adaptNode_;      // pre-allocated fold adapter (null if the shapes broadcast)
     FadeCurve curve_;
-    bool stepFader_;       // xfaderNode_ is a 0-length fade for a mid-block edit
 
     ConnectCmd(PortAddr src, PortAddr dst, Node* xfaderNode, FadeCurve curve,
-               Node* mixerNode = nullptr, Node* adaptNode = nullptr,
-               bool stepFader = false)
+               Node* mixerNode = nullptr, Node* adaptNode = nullptr)
         : src_(src), dst_(dst), xfaderNode_(xfaderNode),
-          mixerNode_(mixerNode), adaptNode_(adaptNode), curve_(curve),
-          stepFader_(stepFader)
+          mixerNode_(mixerNode), adaptNode_(adaptNode), curve_(curve)
     {}
 
     // Never ran: hidden nodes (nodeID -1) are in no table; plain delete.
@@ -155,7 +141,7 @@ struct ConnectCmd : Command
     }
 
     void connectTo(Silo* s, OutPort* src, InPort* dst) {
-        Node* xfader = useFader(s, xfaderNode_, stepFader_);
+        Node* xfader = std::exchange(xfaderNode_, nullptr);
 
         // A source larger than the destination in some dimension: splice the
         // fold adapter in right at the source, and let everything
@@ -255,12 +241,9 @@ struct ReconnectOutputCmd : Command
     PortAddr newSrc_;
     Node* xfaderNode_;
     FadeCurve curve_;
-    bool stepFader_;
 
-    ReconnectOutputCmd(PortAddr oldSrc, PortAddr newSrc, Node* xfaderNode, FadeCurve curve,
-                       bool stepFader = false)
-        : oldSrc_(oldSrc), newSrc_(newSrc), xfaderNode_(xfaderNode), curve_(curve),
-          stepFader_(stepFader)
+    ReconnectOutputCmd(PortAddr oldSrc, PortAddr newSrc, Node* xfaderNode, FadeCurve curve)
+        : oldSrc_(oldSrc), newSrc_(newSrc), xfaderNode_(xfaderNode), curve_(curve)
     {}
 
     ~ReconnectOutputCmd() override { if (stage_ == 0) delete xfaderNode_; }
@@ -275,7 +258,7 @@ struct ReconnectOutputCmd : Command
             xfaderNode_ = nullptr;
             return;
         }
-        Node* xfader = useFader(s, xfaderNode_, stepFader_);
+        Node* xfader = std::exchange(xfaderNode_, nullptr);
         if (xfader) {
             err_ = setupXFader(s, xfader, oldSrc, newSrc);
         } else {
@@ -289,10 +272,9 @@ struct DisconnectInputCmd : Command
     PortAddr dst_;
     Node* xfaderNode_;
     FadeCurve curve_;
-    bool stepFader_;
 
-    DisconnectInputCmd(PortAddr dst, Node* xfaderNode, FadeCurve curve, bool stepFader = false)
-        : dst_(dst), xfaderNode_(xfaderNode), curve_(curve), stepFader_(stepFader)
+    DisconnectInputCmd(PortAddr dst, Node* xfaderNode, FadeCurve curve)
+        : dst_(dst), xfaderNode_(xfaderNode), curve_(curve)
     {}
 
     ~DisconnectInputCmd() override { if (stage_ == 0) delete xfaderNode_; }
@@ -305,7 +287,7 @@ struct DisconnectInputCmd : Command
             xfaderNode_ = nullptr;
             return;
         }
-        Node* xfader = useFader(s, xfaderNode_, stepFader_);
+        Node* xfader = std::exchange(xfaderNode_, nullptr);
 
         // Tear down the hidden mixer chain if present
         freeMixerChain(s, dst);
@@ -325,11 +307,9 @@ struct DisconnectSourceCmd : Command
     PortAddr dst_;
     Node* xfaderNode_;
     FadeCurve curve_;
-    bool stepFader_;
 
-    DisconnectSourceCmd(PortAddr src, PortAddr dst, Node* xfaderNode, FadeCurve curve,
-                        bool stepFader = false)
-        : src_(src), dst_(dst), xfaderNode_(xfaderNode), curve_(curve), stepFader_(stepFader)
+    DisconnectSourceCmd(PortAddr src, PortAddr dst, Node* xfaderNode, FadeCurve curve)
+        : src_(src), dst_(dst), xfaderNode_(xfaderNode), curve_(curve)
     {}
 
     ~DisconnectSourceCmd() override { if (stage_ == 0) delete xfaderNode_; }
@@ -344,7 +324,7 @@ struct DisconnectSourceCmd : Command
             xfaderNode_ = nullptr;
             return;
         }
-        Node* xfader = useFader(s, xfaderNode_, stepFader_);
+        Node* xfader = std::exchange(xfaderNode_, nullptr);
 
         if (!dst->mixerNode_) {
             // No mixer -- just disconnect the direct connection

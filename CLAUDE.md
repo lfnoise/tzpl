@@ -138,7 +138,7 @@ Syntax essentials for reading and writing `.x` files:
 
 - **Real-time safety**: The lang VM, engine audio thread, and generated plugins never call the system allocator or any potentially blocking system call.
 - **Lock-free communication**: All RT/NRT thread communication uses SPSC atomic FIFOs.
-- **Sample-accurate scheduling**: The engine processes blocks (default 64 samples; plugin ABI v3). Scheduled commands are applied in time order before the block's nodes run: value changes are rendered into input buffers at their sample, and discrete events (node start/free, voice reset) split the node's block there.
+- **Sample-accurate scheduling**: The engine processes blocks (default 64 samples; plugin ABI v3). Scheduled commands are applied in time order: value changes are rendered into input buffers at their sample, discrete events (node start/free, voice reset) split the node's block there, and a graph edit mid-block runs the nodes up to it first, so each part of the block runs under its own graph.
 - **Untagged values**: The VM stores values in 64-bit `Word` unions; types are statically known at compile time.
 - **Direct-threaded dispatch**: VM opcodes are function pointers; each handler tail-calls the next via `[[clang::musttail]]`.
 - **Feedback between nodes**: a connection may close a cycle; the silo runs the cycle's nodes a sample at a time with the closing connection a sample late (`feedbackMode` sample, default) or a block at a time (`block`).

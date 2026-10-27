@@ -396,7 +396,7 @@ void testXFades() {
               "input left unconnected, holding the constant");
     }
 
-    gCase = "scheduled cut (step fader)";
+    gCase = "scheduled cut";
     {
         Rig r(64, 64);
         addRec(r, "rec", tzpl::shapeRow(1), 10);
@@ -477,6 +477,88 @@ void testCycles() {
         std::vector<f64> want(400);
         for (int k = 0; k < 400; ++k) want[k] = k + (k >= 64 ? want[k - 64] : 0.);
         checkSeries(rec("y"), 0, 384, [&](int k) { return want[k]; }, 0., "y = k + y[k-64]");
+    }
+}
+
+// Graph edits scheduled inside a block: the silo runs each part of the block
+// under the graph as it stands then. Here A feeds B from 10 and B feeds A
+// from 40 -- opposite sort orders, which no one ordering of the block
+// satisfies -- and neither link may come out a sample (or a block) late.
+void testEditOrders() {
+    for (FeedbackMode mode : {FeedbackMode::sample, FeedbackMode::block}) {
+        for (int dev : {64, 37}) {
+            gCase = std::format("edits needing opposite orders, {} mode, device {}",
+                                mode == FeedbackMode::sample ? "sample" : "block", dev);
+            Rig r(64, dev);
+            feedbackMode(r.e, 0, mode);
+            addRec(r, "ya", tzpl::shapeRow(1), 20);
+            addRec(r, "yb", tzpl::shapeRow(1), 21);
+            addPass(r, "pa", tzpl::shapeRow(1), 12);
+            addPass(r, "pb", tzpl::shapeRow(1), 13);
+            r.now([&] {
+                newNode("counter", 11);
+                connect({11, 0}, {12, 0});
+                connect({12, 0}, {20, 0});
+                connect({13, 0}, {21, 0});
+                setAll(13, 0, {-1.});
+            });
+            r.at(10., [&] { connect({12, 0}, {13, 0}); });
+            r.at(40., [&] { disconnectInput({13, 0}); disconnectInput({12, 0}); connect({13, 0}, {12, 0}); });
+            r.renderTo(200);
+            checkSeries(rec("ya"), 0, 200, [](int k) { return k < 40 ? (f64)k : -1.; }, 0.,
+                        "A: the counter, then B from 40");
+            checkSeries(rec("yb"), 0, 200, [](int k) { return k >= 10 && k < 40 ? (f64)k : -1.; }, 0.,
+                        "B: -1, then A from 10 to 40");
+        }
+    }
+
+    // Audio Out reads its source's buffers directly. A second source
+    // connected mid-block puts a fan-in mixer there, which runs only from
+    // the edit: the samples before it still come from the first source.
+    {
+        gCase = "Audio Out fed mid-block";
+        Rig r(64, 64);
+        addPass(r, "pa", tzpl::shapeRow(1), 12);
+        addPass(r, "pb", tzpl::shapeRow(1), 13);
+        r.now([&] { setAll(12, 0, {0.25}); setAll(13, 0, {0.5}); connect({12, 0}, kOut); });
+        r.at(30.5, [&] { connect({13, 0}, kOut); });
+        r.renderTo(128);
+        bool ok = true;
+        for (int k = 0; k < 128; ++k)
+            ok = ok && r.outAt(k, 0) == (k < 31 ? 0.25f : 0.75f) && r.outAt(k, 1) == r.outAt(k, 0);
+        check(ok, std::format("0.25 to 31, then 0.75 on both channels; got {} at 0, {} at 40",
+                              r.outAt(0, 0), r.outAt(40, 0)));
+    }
+
+    // An edit inside a cycle, mid-block: a pass node spliced into the loop
+    // of "cycle through two nodes" keeps it one sample long, so the integral
+    // carries straight through the edit.
+    for (int block : {64, 7}) {
+        gCase = std::format("scheduled edit inside a cycle, block {}", block);
+        Rig r(block, 64);
+        createAddOpNode(r.e);
+        createPassNode(r.e, "p2", tzpl::shapeRow(2));
+        addRec(r, "y", tzpl::shapeRow(2), 10);
+        r.now([&] {
+            newNode("counter", 11);
+            newNode("+", 12);
+            newNode("p2", 13);
+            connect({11, 0}, {12, 0});
+            connect({12, 0}, {13, 0});
+            connect({13, 0}, {12, 1});
+            connect({13, 0}, {10, 0});
+        });
+        r.at(100.5, [&] {
+            newNode("p2", 14);
+            connect({13, 0}, {14, 0});
+            disconnectInput({12, 1});
+            connect({14, 0}, {12, 1});
+        });
+        r.renderTo(300);
+        auto const& y = rec("y");
+        bool lagged = y.size() > 2 && y[1] == 0.f;
+        checkSeries(y, 0, 300, [&](int k) { return lagged ? 0.5 * k * (k - 1) : 0.5 * k * (k + 1); }, 0.,
+                    "integral through the edit at 100.5");
     }
 }
 
@@ -614,6 +696,7 @@ int main(int argc, char** argv) {
     testBroadcast();
     testXFades();
     testCycles();
+    testEditOrders();
     testVoices();
     testTasks();
     testSilosTapsLimiter();

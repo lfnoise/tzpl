@@ -121,12 +121,18 @@ struct Silo
     std::atomic<int> feedbackMode_{0};
 
     // ---- The current block (RT) ----
-    // Commands and tasks are applied in time order before any node runs.
-    // Each runs with now_ set to its time: a fractional absolute sample time
-    // (sub-sample fade starts) and nowOffset_, the first sample of the block
-    // at or after it (discrete events).
+    // Commands and tasks are applied in time order. Each runs with now_ set
+    // to its time: a fractional absolute sample time (sub-sample fade
+    // starts) and nowOffset_, the first sample of the block at or after it
+    // (discrete events). Value changes and node events need no help to land
+    // at their sample; a graph edit first runs the nodes up to it (runTo),
+    // so each part of the block runs under its own graph.
     i64 blockStart_ = 0;
     int blockLen_ = 0;
+    int prevBlockLen_ = 0;
+    // The nodes have run samples [0, ranTo_) of the block.
+    int ranTo_ = 0;
+    int frameOffset_ = 0;   // the block's first frame in the device buffer
     bool inBlock_ = false;
     f64 now_ = 0.;
     int nowOffset_ = 0;
@@ -228,8 +234,9 @@ struct Silo
     void sortVisitNode(Node* node, Node*& lastSorted);
     void sortAppend(Node* node, Node*& lastSorted);
     void sortNodes();
-    // A cycle's nodes (first and the len - 1 after it in the sorted list).
-    void runCycle(Node* first, int len, int n);
+    // A cycle's nodes (first and the len - 1 after it in the sorted list),
+    // over samples [lo, hi) of the block.
+    void runCycle(Node* first, int len, int lo, int hi);
     void sortedListRemove(Node* node);
 
     void unlink(InPort* dst);
@@ -260,7 +267,14 @@ struct Silo
     void processFrames();
     void processBlock(int frameOffset, int n);
     void collectAndRunEvents(int n);
-    void runNodes(int n);
+    // Before a graph edit: run the nodes, taps and output up to the edit's
+    // offset under the graph as it stands.
+    void runToEdit() { if (inBlock_ && nowOffset_ > ranTo_) runTo(nowOffset_); }
+    // Run samples [ranTo_, hi) of the block: sort if the graph changed, run
+    // the nodes, the taps and this silo's share of the output.
+    void runTo(int hi);
+    void runNodes(int lo, int hi);
+    void writeOutput(int lo, int hi);
     void finishBlock();
     void mixDown(int numFrames, f32* out);
 
@@ -275,7 +289,7 @@ struct Silo
     void eraseTapAt(int i);
     void removeTap(i64 tapID);
     void clearTapsForNode(Node* node);
-    void processTaps(int n);
+    void processTaps(int lo, int hi);
 
     static void workLoop(Silo* s);
 

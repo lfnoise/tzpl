@@ -1166,16 +1166,6 @@ void sendCmds(Engine* e, Silo* s, Command* cmd) noexcept {
 // as the eager builders used to.
 // ----------------------------------------------------------------------------
 
-// Set while a bundle replays for sched(): its edits may land mid-block, so
-// graph edits pre-allocate a 0-length (step) fader to take effect at the
-// exact sample. Immediate bundles always land on a block start and need none.
-static thread_local bool tApplyScheduled = false;
-
-static Node* stepFaderFor(Engine* e, Silo* s, tzpl_SignalType type) {
-    if (!tApplyScheduled || !isFloat(type.elem)) return nullptr;
-    return newXFaderNode(e, s, 0., fadeLinear, type);
-}
-
 static tzpl_SErr applyNewNode(Engine* e, Silo* s, CommandList& out,
                               ShadowEdits& edits,
                               char const* name, i64 nodeID) {
@@ -1240,14 +1230,10 @@ static tzpl_SErr applyConnect(Engine* e, Silo* s, CommandList& out,
     Node* mixerNode = newMixerNode(e, s, type, 4);
 
     Node* xfaderNode = nullptr;
-    bool step = false;
     if (xfadeTime > 0. && isFloat(type.elem)) {
         xfaderNode = newXFaderNode(e, s, xfadeTime, curve, type);
-    } else {
-        xfaderNode = stepFaderFor(e, s, type);
-        step = xfaderNode != nullptr;
     }
-    out.add(new ConnectCmd(src, dst, xfaderNode, curve, mixerNode, adaptNode, step));
+    out.add(new ConnectCmd(src, dst, xfaderNode, curve, mixerNode, adaptNode));
     edits.push_back({ShadowEdit::AddConn,
                      {src.nodeID, src.index, dst.nodeID, dst.index}});
     return tzpl_errNone;
@@ -1270,15 +1256,11 @@ static tzpl_SErr applyReconnectOutput(Engine* e, Silo* s, CommandList& out,
     if (err != tzpl_errNone) return err;
 
     Node* xfaderNode = nullptr;
-    bool step = false;
     tzpl_SignalType type = newSrcPort->type_;
     if (xfadeTime > 0. && isFloat(type.elem)) {
         xfaderNode = newXFaderNode(e, s, xfadeTime, curve, type);
-    } else {
-        xfaderNode = stepFaderFor(e, s, type);
-        step = xfaderNode != nullptr;
     }
-    out.add(new ReconnectOutputCmd(oldSrc, newSrc, xfaderNode, curve, step));
+    out.add(new ReconnectOutputCmd(oldSrc, newSrc, xfaderNode, curve));
     edits.push_back({ShadowEdit::RewriteSrc,
                      {oldSrc.nodeID, oldSrc.index, newSrc.nodeID, newSrc.index}});
     return tzpl_errNone;
@@ -1365,15 +1347,11 @@ static tzpl_SErr applyDisconnectInput(Engine* e, Silo* s, CommandList& out,
     if (err != tzpl_errNone) return err;
 
     Node* xfaderNode = nullptr;
-    bool step = false;
     tzpl_SignalType type = port->type_;
     if (xfadeTime > 0. && isFloat(type.elem)) {
         xfaderNode = newXFaderNode(e, s, xfadeTime, curve, type);
-    } else {
-        xfaderNode = stepFaderFor(e, s, type);
-        step = xfaderNode != nullptr;
     }
-    out.add(new DisconnectInputCmd(dst, xfaderNode, curve, step));
+    out.add(new DisconnectInputCmd(dst, xfaderNode, curve));
     edits.push_back({ShadowEdit::RemoveConnsToDst, {0, 0, dst.nodeID, dst.index}});
     return tzpl_errNone;
 }
@@ -1391,15 +1369,11 @@ static tzpl_SErr applyDisconnectSource(Engine* e, Silo* s, CommandList& out,
     if (err != tzpl_errNone) return err;
 
     Node* xfaderNode = nullptr;
-    bool step = false;
     tzpl_SignalType type = dstPort->type_;
     if (xfadeTime > 0. && isFloat(type.elem)) {
         xfaderNode = newXFaderNode(e, s, xfadeTime, curve, type);
-    } else {
-        xfaderNode = stepFaderFor(e, s, type);
-        step = xfaderNode != nullptr;
     }
-    out.add(new DisconnectSourceCmd(src, dst, xfaderNode, curve, step));
+    out.add(new DisconnectSourceCmd(src, dst, xfaderNode, curve));
     edits.push_back({ShadowEdit::DisconnectSrc,
                      {src.nodeID, src.index, dst.nodeID, dst.index}});
     return tzpl_errNone;
@@ -1879,7 +1853,6 @@ tzpl_SErr sched(int silo, int clock, f64 beat, SchedPolicy policy) {
     // shadow journal is discarded with them (nothing was committed).
     CommandList cmds;
     ShadowEdits edits;
-    tApplyScheduled = policy != schedImmediate;
     for (BundleOp* op = tBundle.head; op; op = op->next_) {
         tzpl_SErr err = op->apply(e, s, cmds, edits);
         if (err != tzpl_errNone) {

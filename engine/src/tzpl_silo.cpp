@@ -126,7 +126,7 @@ void Silo::clearTapsForNode(Node* node) {
     }
 }
 
-void Silo::processTaps(int n) {
+void Silo::processTaps(int lo, int hi) {
     for (int i = 0; i < numTaps_; ++i) {
         RTTap& t = rt_taps_[i];
         TapSlot* ts = t.slot;
@@ -136,7 +136,7 @@ void Silo::processTaps(int n) {
         f32 sq = 0.0f;
         for (int c = 0; c < chans; ++c) {
             f32 const* buf = static_cast<f32 const*>(t.bufs[c]);
-            for (int k = 0; k < n; ++k) {
+            for (int k = lo; k < hi; ++k) {
                 f32 v = buf[k];
                 f32 a = std::fabs(v);
                 if (a > pk) pk = a;
@@ -145,7 +145,7 @@ void Silo::processTaps(int n) {
         }
         ts->accumPeak = pk;
         ts->accumSq += sq / (f32)chans;
-        ts->accumCount += n;
+        ts->accumCount += hi - lo;
         if (ts->accumCount >= ts->publishPeriod) {
             ts->peak.store(ts->accumPeak, std::memory_order_relaxed);
             ts->rms.store(std::sqrt(ts->accumSq / (f32)ts->accumCount),
@@ -157,7 +157,7 @@ void Silo::processTaps(int n) {
         if (ts->mode == tapScope) {
             // Whole interleaved frames or nothing, so a full FIFO drops
             // frames without slipping channel alignment.
-            for (int k = 0; k < n; ++k) {
+            for (int k = lo; k < hi; ++k) {
                 if (ts->fifo.space() < chans) break;
                 for (int c = 0; c < chans; ++c)
                     ts->fifo.push(static_cast<f32 const*>(t.bufs[c])[k]);
@@ -166,16 +166,41 @@ void Silo::processTaps(int n) {
     }
 }
 
-void Silo::runNodes(int n) {
+void Silo::runNodes(int lo, int hi) {
     for (Node* node = rt_sortedNodeList_; node; ) {
         if (node->sccLen_ > 0) {
             int len = node->sccLen_;
-            runCycle(node, len, n);
+            runCycle(node, len, lo, hi);
             for (int k = 0; k < len; ++k) node = node->sorted_next;
         } else {
-            node->runBlock(this, n);
+            node->runRange(this, lo, hi);
             node = node->sorted_next;
         }
+    }
+}
+
+void Silo::runTo(int hi) {
+    int lo = ranTo_;
+    sortNodes();
+    runNodes(lo, hi);
+    processTaps(lo, hi);
+    writeOutput(lo, hi);
+    ranTo_ = hi;
+}
+
+// Interleave the output node's input into this silo's device buffer. The
+// input reads its source's buffers directly, and an edit can change the
+// source mid-block, so each part of the block is copied as it is run.
+void Silo::writeOutput(int lo, int hi) {
+    f32* out = index_ > 0 ? outbuf_ : engine_->out_;
+    int outChannels = engine_->streamParams_.channels;
+    int offset = std::min(channelOffset_, outChannels);
+    InPort& op = outputNode_->ins[0];
+    int nc = std::min(op.chans_, outChannels - offset);
+    f32* outp = out + (usize)frameOffset_ * outChannels + offset;
+    for (int c = 0; c < nc; ++c) {
+        f32 const* src = static_cast<f32 const*>(op.chanPtrs_[c]);
+        for (int k = lo; k < hi; ++k) outp[(usize)k * outChannels + c] = src[k];
     }
 }
 
@@ -295,14 +320,15 @@ Command* Silo::takeAllScheduled() {
 
 void Silo::processBlock(int frameOffset, int n) {
     blockStart_ = sampleTime_;
+    prevBlockLen_ = blockLen_;
     blockLen_ = n;
+    ranTo_ = 0;
+    frameOffset_ = frameOffset;
     inBlock_ = true;
     setNow((f64)blockStart_, 0);
 
-    processRTCommands();
-    collectAndRunEvents(n);
-
     // Hardware input: deinterleave this chunk into the input node's outlet.
+    // First, since a graph edit mid-block runs the nodes up to it.
     int inputChannels = engine_->streamParams_.inputChannels;
     if (engine_->in_ && inputChannels > 0 && !inputNode_->outs.empty()) {
         OutPort& ip = inputNode_->outs[0];
@@ -314,21 +340,9 @@ void Silo::processBlock(int frameOffset, int n) {
         }
     }
 
-    sortNodes();
-    runNodes(n);
-    processTaps(n);
-
-    // Interleave the output node's input into this silo's device buffer.
-    f32* out = index_ > 0 ? outbuf_ : engine_->out_;
-    int outChannels = engine_->streamParams_.channels;
-    int offset = std::min(channelOffset_, outChannels);
-    InPort& op = outputNode_->ins[0];
-    int nc = std::min(op.chans_, outChannels - offset);
-    f32* outp = out + (usize)frameOffset * outChannels + offset;
-    for (int c = 0; c < nc; ++c) {
-        f32 const* src = static_cast<f32 const*>(op.chanPtrs_[c]);
-        for (int k = 0; k < n; ++k) outp[(usize)k * outChannels + c] = src[k];
-    }
+    processRTCommands();
+    collectAndRunEvents(n);
+    runTo(n);
 
     finishBlock();
     sampleTime_ += n;
@@ -476,6 +490,7 @@ tzpl_SErr Silo::connect(OutPort* src, InPort* dst) {
     if (err != tzpl_errNone) return err;
     if (!tzpl::broadcastsTo(src->type_.shape, dst->type_.shape)) return tzpl_errChanMismatch;
 
+    runToEdit();
     if (dst->srcPort_) {
         unlink(dst);
     }
@@ -538,6 +553,7 @@ void Silo::disconnectNode(Node* node) {
 }
 
 void Silo::unlink(InPort* dst) {
+    runToEdit();
     // remove from list
     OutPort* src = dst->srcPort_;
     if (dst->next_) dst->next_->prev_ = dst->prev_;
@@ -587,6 +603,7 @@ tzpl_SErr Silo::addNode(Node* node) {
 tzpl_SErr Silo::removeNode(Node* node) {
     if (!node->rt_active) return tzpl_errAlreadyRemoved;
 
+    runToEdit();
     clearTapsForNode(node);
     disconnectNode(node);
 
@@ -783,12 +800,13 @@ void Silo::sortVisitNode(Node* node, Node*& lastSorted) {
     if (len > 1 || selfLoop) first->sccLen_ = len;
 }
 
-// A cycle (MF). Sample mode: every node runs one sample in turn, a closing
-// input receiving its source's previous sample just before. Block mode: the
-// nodes run whole blocks in order, a closing input holding its source's
-// previous block. Inputs fed from inside the cycle are not constant: their
-// sources have not run this block when the inputs render.
-void Silo::runCycle(Node* first, int len, int n) {
+// A cycle (MF), over samples [lo, hi) of the block. Sample mode: every node
+// runs one sample in turn, a closing input receiving its source's previous
+// sample just before. Block mode: the nodes run [lo, hi) in order, a closing
+// input holding its source's samples from the previous block. Inputs fed from
+// inside the cycle are not constant: their sources have not run these
+// samples when the inputs render.
+void Silo::runCycle(Node* first, int len, int lo, int hi) {
     bool sampleMode = feedbackMode_.load(std::memory_order_relaxed) == 0;
     Node* end = first;
     for (int k = 0; k < len; ++k) end = end->sorted_next;
@@ -798,57 +816,51 @@ void Silo::runCycle(Node* first, int len, int n) {
     };
     for (Node* m = first; m != end; m = m->sorted_next) {
         for (InPort& p : m->ins) {
-            p.render(this, n);
+            p.render(this, hi);
             if (p.srcPort_ && inCycle(p.srcPort_->node_))
                 for (int c = 0; c < p.chans_; ++c) p.isConst_[c] = 0;
         }
     }
     if (!sampleMode) {
-        for (Node* m = first; m != end; m = m->sorted_next) {
-            if (m->eventsStamp_ != blockStart_ || m->numEvents_ == 0) {
-                m->funs.process(m->synth, 0, n);
-            } else {
-                m->beginSpans(this, n);
-                m->runSpan(0, n);
-                m->endSpans();
-            }
-        }
+        for (Node* m = first; m != end; m = m->sorted_next) m->runSpans(this, lo, hi);
         // the closing inputs' next block is this one
         for (Node* m = first; m != end; m = m->sorted_next) {
+            m->ranTo_ = blockStart_ + hi;
             for (InPort& p : m->ins) {
                 if (!p.fbEdge_) continue;
                 int es = elemSize(p.type_.elem);
                 for (int c = 0; c < p.chans_; ++c)
-                    std::memcpy(p.ownBufs_[c], p.srcPort_->bufs_[p.srcMap_[c]], (usize)n * es);
+                    std::memcpy(static_cast<u8*>(p.ownBufs_[c]) + (usize)lo * es,
+                                static_cast<u8 const*>(p.srcPort_->bufs_[p.srcMap_[c]]) + (usize)lo * es,
+                                (usize)(hi - lo) * es);
             }
         }
         return;
     }
-    for (Node* m = first; m != end; m = m->sorted_next) m->beginSpans(this, n);
-    for (int i = 0; i < n; ++i) {
+    for (int i = lo; i < hi; ++i) {
         for (Node* m = first; m != end; m = m->sorted_next) {
             for (InPort& p : m->ins) {
                 if (!p.fbEdge_) continue;
+                // The source's previous sample is still in its buffer: this
+                // part's i - 1, or, at its first sample, where the source
+                // last ran up to -- if that is here (a source that was not
+                // running gives 0). The last block's final sample is at
+                // prevBlockLen_ - 1.
+                Node* src = p.srcPort_->node_;
+                int prev = i > lo ? i - 1
+                         : src->ranTo_ != blockStart_ + i ? -1
+                         : i > 0 ? i - 1 : prevBlockLen_ - 1;
                 int es = elemSize(p.type_.elem);
                 for (int c = 0; c < p.chans_; ++c) {
                     u8* dst = static_cast<u8*>(p.ownBufs_[c]) + (usize)i * es;
-                    if (i == 0) std::memcpy(dst, &p.stages_[c].fbLast, es);
-                    else std::memcpy(dst, static_cast<u8 const*>(p.srcPort_->bufs_[p.srcMap_[c]]) + (usize)(i - 1) * es, es);
+                    if (prev < 0) std::memset(dst, 0, es);
+                    else std::memcpy(dst, static_cast<u8 const*>(p.srcPort_->bufs_[p.srcMap_[c]]) + (usize)prev * es, es);
                 }
             }
-            m->runSpan(i, i + 1);
+            m->runSpans(this, i, i + 1);
         }
     }
-    for (Node* m = first; m != end; m = m->sorted_next) {
-        m->endSpans();
-        for (InPort& p : m->ins) {
-            if (!p.fbEdge_) continue;
-            int es = elemSize(p.type_.elem);
-            for (int c = 0; c < p.chans_; ++c)
-                std::memcpy(&p.stages_[c].fbLast,
-                            static_cast<u8 const*>(p.srcPort_->bufs_[p.srcMap_[c]]) + (usize)(n - 1) * es, es);
-        }
-    }
+    for (Node* m = first; m != end; m = m->sorted_next) m->ranTo_ = blockStart_ + hi;
 }
 
 //=============================================================================================

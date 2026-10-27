@@ -7,6 +7,19 @@ documentation site as the Changelog page.
 
 ## Unreleased
 
+### Fixed
+
+- Graph edits scheduled inside one block land at their exact sample in
+  every case. The engine now runs the nodes up to each edit before applying
+  it, instead of sorting the whole block once. Before, two edits in one block
+  that needed opposite node orders (A feeding B, then B feeding A) made a
+  false feedback loop, and one link came out a sample late (a block late
+  with `feedbackMode` block). Edits on integer signals, `disconnectOutput`,
+  `disconnectNode` and `freeAllNodes` now land at their sample too, instead
+  of at the block start.
+- A scheduled edit inside a feedback loop no longer drops a sample into the
+  loop at the start of its block; an integrator lost its whole sum there.
+
 ## v0.3.0 (26 October 2026)
 
 **The block engine** -- the audio engine and the synth compiler were

@@ -1057,6 +1057,16 @@ Deviations and notes:
   and disconnect pre-allocate a 0-length (step) fader, so a cut lands on its exact
   sample on float ports. Integer ports, `disconnectOutput`, `disconnectNode` and
   `freeAllNodes` apply at the block start.
+  - *Superseded (2026-10-27):* the block was sorted once over the union of the old
+    and new links, so two edits in one block needing opposite node orders made a
+    false cycle, and one link came out a sample (sample mode) or a block (block
+    mode) late. Now a graph edit at offset t first runs the nodes, taps and output
+    over [ranTo_, t) (`Silo::runToEdit`, called by `connect`, `unlink` and
+    `removeNode`); each part of the block runs under its own graph and sort. Step
+    faders are gone, and every edit, on any element type, lands at its sample.
+    Feedback inputs read their source's previous sample from its buffer (dropping
+    `ChanStage::fbLast`), so a closing connection that moves in a re-sort no
+    longer reads a stale value. Tests: `testEditOrders` in `test_block_engine`.
 - **Freeing a node at offset t** zeroes its outputs from t on. Inputs it fed revert
   to their stage values from the next block.
 - **The offset rule** for a clock event is the first sample whose beat has reached
