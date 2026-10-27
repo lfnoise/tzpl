@@ -132,7 +132,14 @@ const kDrums  = 405;
 const kGDrums = 415;
 
 engineStart();
-masterGain(0.7);
+-- The safety limiter acts BEFORE the master gain, at 0 dBFS, and holds its
+-- gain down after each peak; a mix that hits it pumps on every drum hit.
+-- So the trims and the distortion output levels below keep the mix about
+-- 1 dB under full scale (measured with the limiter off), and the master
+-- stays at unity. The bass, lead and drums are set by their distortion
+-- levels: their trims feed saturating stages, so lowering a trim mostly
+-- changes the drive, not the level.
+masterGain(1.2);
 
 begin();
 newNode("wtLead", kLead);
@@ -210,15 +217,15 @@ setInput(kVerb, "decay", 3.0);
 setInput(kVerb, "mix", 0.25);
 setInput(kGLead, "level", 0.8);
 -- the plucked strings, filtered, are about 18 dB quieter than the other defs
-setInput(kGPluck, "level", 8.0);
-setInput(kGPad, "level", 0.4);
+setInput(kGPluck, "level", 3.4);
+setInput(kGPad, "level", 0.17);
 setInput(kGBass, "level", 1.0);
 setInput(kGDrums, "level", 1.4);
 -- drums: a little grit, no reverb. tone 1 keeps the distortion's low-pass
 -- at 8 kHz -- any lower and it filters out the hats and snare
 setInput(kDrumDist, "drive", 4.0);
 setInput(kDrumDist, "tone", 1.0);
-setInput(kDrumDist, "level", 1.0);
+setInput(kDrumDist, "level", 0.42);
 sched(0);
 
 let leadV  = freqVoice(kLead, 8);
@@ -235,9 +242,9 @@ let chroma = chromatic(12);
 panel("mixer");
 slider("lead", ControlSpec { lo: 0.0, hi: 8.0, init: 0.8, warp: ControlWarp.linear })
 	bindInput(kGLead, "level");
-slider("pluck", ControlSpec { lo: 0.0, hi: 12.0, init: 8.0, warp: ControlWarp.linear })
+slider("pluck", ControlSpec { lo: 0.0, hi: 12.0, init: 3.4, warp: ControlWarp.linear })
 	bindInput(kGPluck, "level");
-slider("pad", ControlSpec { lo: 0.0, hi: 8.0, init: 0.4, warp: ControlWarp.linear })
+slider("pad", ControlSpec { lo: 0.0, hi: 8.0, init: 0.17, warp: ControlWarp.linear })
 	bindInput(kGPad, "level");
 slider("bass", ControlSpec { lo: 0.0, hi: 8.0, init: 1.0, warp: ControlWarp.linear })
 	bindInput(kGBass, "level");
@@ -380,7 +387,7 @@ let sections = [
         pad: held(16.0, [0.0, 1.0, 6.0], 0.5),
         lead: [Shape](),
         drums: [drumHits(drKick, [0.0, 8.0], [0.6, 0.5], 16.0)],
-        bassDrive: 6.0, bassLevel: 1.0, leadDrive: 10.0, leadLevel: 0.5, verbMix: 0.3,
+        bassDrive: 6.0, bassLevel: 0.425, leadDrive: 10.0, leadLevel: 0.17, verbMix: 0.3,
     },
     Section {
         name: "grind",
@@ -394,7 +401,7 @@ let sections = [
                           drumHits(drSnare, [1.0, 2.0, 2.5, 3.0, 3.25, 3.5, 3.75],
                                    [0.6, 0.6, 0.7, 0.7, 0.8, 0.9, 1.0], 4.0)),
                 drumBars(drHat, hats8, [0.5, 0.3], 4)],
-        bassDrive: 26.0, bassLevel: 0.25, leadDrive: 10.0, leadLevel: 0.5, verbMix: 0.15,
+        bassDrive: 26.0, bassLevel: 0.106, leadDrive: 10.0, leadLevel: 0.17, verbMix: 0.15,
     },
     Section {
         name: "machine",
@@ -405,7 +412,7 @@ let sections = [
         drums: [drumBars(drKick, [0.0, 2.5], [0.9, 0.7], 4),
                 drumHits(drHat, onsetGrid(0.75, 16.0), [0.9, 0.55, 0.55], 16.0),
                 drumHits(drTom, [15.0, 15.5], [0.7, 0.9], 16.0)],
-        bassDrive: 12.0, bassLevel: 0.73, leadDrive: 14.0, leadLevel: 0.64, verbMix: 0.2,
+        bassDrive: 12.0, bassLevel: 0.31, leadDrive: 14.0, leadLevel: 0.218, verbMix: 0.2,
     },
     Section {
         name: "drift",
@@ -418,7 +425,7 @@ let sections = [
         lead: [cell([[2.0, 0.0, 0.0], [3.0, 24.0, 0.35], [1.0, 23.0, 0.3],
                      [4.0, 18.0, 0.35], [6.0, 0.0, 0.0]])],
         drums: [Shape](),
-        bassDrive: 4.0, bassLevel: 0.5, leadDrive: 6.0, leadLevel: 1.0, verbMix: 0.4,
+        bassDrive: 4.0, bassLevel: 0.212, leadDrive: 6.0, leadLevel: 0.34, verbMix: 0.4,
     },
     Section {
         name: "scream",
@@ -431,7 +438,7 @@ let sections = [
                           drumHits(drSnare, [1.0, 3.0, 3.25, 3.5, 3.75],
                                    [1.0, 0.7, 0.8, 0.9, 1.0], 4.0)),
                 drumBars(drHat, hats16, [0.55, 0.25, 0.35, 0.25], 4)],
-        bassDrive: 32.0, bassLevel: 0.21, leadDrive: 30.0, leadLevel: 0.25, verbMix: 0.2,
+        bassDrive: 32.0, bassLevel: 0.0892, leadDrive: 30.0, leadLevel: 0.085, verbMix: 0.2,
     },
     Section {
         name: "scream'",
@@ -443,7 +450,7 @@ let sections = [
                 drumBars(drSnare, [1.5, 3.0], [0.9, 1.0], 4),
                 catShapes(drumBars(drHat, hats16, [0.55, 0.25, 0.35, 0.25], 3),
                           drumHits(drOpenHat, [0.0, 2.0], [0.6], 4.0))],
-        bassDrive: 32.0, bassLevel: 0.21, leadDrive: 30.0, leadLevel: 0.25, verbMix: 0.2,
+        bassDrive: 32.0, bassLevel: 0.0892, leadDrive: 30.0, leadLevel: 0.085, verbMix: 0.2,
     },
     Section {
         name: "collapse",
@@ -454,7 +461,7 @@ let sections = [
         lead: [Shape](),
         drums: [drumHits(drKick, [0.0, 4.0, 8.0], [1.0, 0.8, 1.0], 16.0),
                 drumHits(drSnare, [6.0], [0.7], 16.0)],
-        bassDrive: 20.0, bassLevel: 0.41, leadDrive: 10.0, leadLevel: 0.5, verbMix: 0.35,
+        bassDrive: 20.0, bassLevel: 0.174, leadDrive: 10.0, leadLevel: 0.17, verbMix: 0.35,
     },
 ];
 
