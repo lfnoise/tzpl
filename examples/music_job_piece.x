@@ -1,0 +1,404 @@
+-- music_job_piece.x -- a dissonant, distorted piece whose FORM is chosen
+-- at random each time it plays (32 bars, about 75 seconds at 108 bpm), written
+-- with the music.job hierarchical forms over music.shape sections.
+--
+-- The notes are all written out. What varies is the structure: a
+-- music.job Coll of four-bar section markers picks the order of the middle
+-- sections, their transpositions (unison, a semitone, a tritone), the
+-- climax variant, and how the piece winds down. Every run is a different
+-- reading; set TZPL_LANG_SEED to repeat one. The chosen form is printed.
+--
+-- The sections (16 beats each), in E, chromatic:
+--
+--     drone     bass pedal, a semitone-and-tritone cluster on the pad,
+--               a few plucked notes
+--     grind     a distorted bass riff in 3+3+2 sixteenths, with
+--               offbeat tritone stabs
+--     machine   a 3-note pluck ostinato in sixteenths against the 4/4 bar,
+--               the bass sinking by semitones, a slow lead line
+--     drift     clusters on the pad, high harmonics, a quiet lead
+--     scream    everything at once, the lead heavily driven
+--     scream'   the same with the lead inverted and the riff reversed
+--     collapse  the riff at half speed, a last ringing tritone
+--
+-- Form (a music.job Coll):
+--
+--     drone
+--     3 x shuffled { grind (0, +1 or +6) | machine (0 or -2) | drift }
+--     one of { scream | scream' }               (weighted 60/40)
+--     one of { 2 x { grind | machine +6 } | drift +6, scream +1 }
+--     collapse
+--
+-- Graph: the bass is distorted and stays dry; the lead is distorted and
+-- echoed; the pluck, pad and lead meet at a shared reverb.
+--
+--     wtLead(401) -> gain(411) -> fxDistortion(421) -> fxEcho(422) -\
+--     ksPluck(402) -> gain(412) ------------------------------------+-> fxReverb(424) -> out
+--     resonBank(403) -> gain(413) ----------------------------------/
+--     wtLead(404) -> gain(414) -> fxDistortion(423) ------------------------------> out
+--
+-- Run interactively:
+--   ./build/app/tzpl_app --nogui --wait -I lang/modules -I bridge/modules \
+--       examples/music_job_piece.x
+-- or render it:
+--   ./build/app/tzpl_app --nrt piece.wav -I lang/modules -I bridge/modules \
+--       examples/music_job_piece.x
+
+import synthdef.*;
+import synthc.compile.*;
+import wavetables.*;
+import common_ugens.*;
+import instruments.*;
+import effects.*;
+import clock.*;
+import audio_engine.*;
+import music.job.*;
+import music.shape.{Shape};   -- synthdef also defines a Shape
+import music.play.*;
+import ui.*;
+
+---------------------------------------------------------------------------
+-- A per-part gain trim: stereo in, one smoothed level control, out.
+
+fn partGain() S {
+	let x = inlet(FLOAT32, 2);
+	let lvl = control("level", ControlSpec { lo: 0.0, hi: 8.0, init: 1.0,
+	                                         warp: ControlWarp.linear }) lag(0.02);
+	(x * lvl) outlet
+}
+
+let cGain  = partGain defSynth("partGain");
+let cLead  = wtLead() defSynth("wtLead");
+let cPluck = ksPluck(12) defSynth("ksPluck12");
+let cBank  = resonBank() defSynth("resonBank");
+let cDist  = fxDistortion defSynth("fxDistortion");
+let cEcho  = fxEcho defSynth("fxEcho");
+let cVerb  = fxReverb defSynth("fxReverb");
+await cGain; await cLead; await cPluck; await cBank;
+await cDist; await cEcho; await cVerb;
+
+---------------------------------------------------------------------------
+-- Engine and graph.
+
+const kLead  = 401;
+const kPluck = 402;
+const kPad   = 403;
+const kBass  = 404;
+const kGLead  = 411;
+const kGPluck = 412;
+const kGPad   = 413;
+const kGBass  = 414;
+const kLeadDist = 421;
+const kEcho     = 422;
+const kBassDist = 423;
+const kVerb     = 424;
+
+engineStart();
+masterGain(0.7);
+
+begin();
+newNode("wtLead", kLead);
+fillBuffer(kLead, 0, 1, sawTables(1.0));
+newNode("wtLead", kBass);
+fillBuffer(kBass, 0, 1, sawTables(1.0));
+newNode("ksPluck12", kPluck);
+newNode("resonBank", kPad);
+newNode("partGain", kGLead);
+newNode("partGain", kGPluck);
+newNode("partGain", kGPad);
+newNode("partGain", kGBass);
+newNode("fxDistortion", kLeadDist);
+newNode("fxEcho", kEcho);
+newNode("fxDistortion", kBassDist);
+newNode("fxReverb", kVerb);
+connect(kLead, 0, kGLead, 0);
+connect(kGLead, 0, kLeadDist, 0);
+connect(kLeadDist, 0, kEcho, 0);
+connect(kEcho, 0, kVerb, 0);
+connect(kPluck, 0, kGPluck, 0);
+connect(kGPluck, 0, kVerb, 0);
+connect(kPad, 0, kGPad, 0);
+connect(kGPad, 0, kVerb, 0);
+connect(kVerb, 0, 0, 0);
+connect(kBass, 0, kGBass, 0);
+connect(kGBass, 0, kBassDist, 0);
+connect(kBassDist, 0, 0, 0);
+
+-- lead: a resonant, nasal saw, held notes
+setInput(kLead, "attack", 0.02);
+setInput(kLead, "decay", 0.5);
+setInput(kLead, "sustain", 0.7);
+setInput(kLead, "release", 0.4);
+setInput(kLead, "cutoff", 1200.0);
+setInput(kLead, "envOct", 1.5);
+setInput(kLead, "res", 0.25);
+setInput(kLead, "fdecay", 0.6);
+-- bass: a saw with a hard filter snap, for the distortion to bite on
+setInput(kBass, "attack", 0.003);
+setInput(kBass, "decay", 0.25);
+setInput(kBass, "sustain", 0.6);
+setInput(kBass, "release", 0.08);
+setInput(kBass, "cutoff", 300.0);
+setInput(kBass, "envOct", 3.0);
+setInput(kBass, "res", 0.4);
+setInput(kBass, "fdecay", 0.12);
+-- pluck: bright, metallic, short
+setInput(kPluck, "pluck", 0.003);
+setInput(kPluck, "decay", 1.2);
+setInput(kPluck, "damp", 0.1);
+-- pad: bowed clusters, slow in and out
+setInput(kPad, "attack", 1.0);
+setInput(kPad, "release", 1.5);
+setInput(kPad, "decay", 4.0);
+-- distortion tone: dark on the bass, open on the lead
+setInput(kBassDist, "tone", 0.3);
+setInput(kLeadDist, "tone", 0.6);
+-- echo a dotted eighth at 108 bpm
+setInput(kEcho, "time", 0.417);
+setInput(kEcho, "feedback", 0.35);
+setInput(kEcho, "mix", 0.25);
+setInput(kVerb, "decay", 3.0);
+setInput(kVerb, "mix", 0.25);
+setInput(kGLead, "level", 1.0);
+-- the plucked strings are about 16 dB quieter than the other defs
+setInput(kGPluck, "level", 6.3);
+setInput(kGPad, "level", 0.4);
+setInput(kGBass, "level", 1.0);
+sched(0);
+
+let leadV  = freqVoice(kLead, 8);
+let bassV  = freqVoice(kBass, 8);
+let pluckV = freqVoice(kPluck, 12);
+let padV   = freqVoice(kPad, 8);
+
+-- degree 0 is E3 (165 Hz); the scale is all twelve semitones
+let keyE = transposeRoot(et12, -17.0);
+let chroma = chromatic(12);
+
+panel("mixer");
+slider("lead", ControlSpec { lo: 0.0, hi: 8.0, init: 1.0, warp: ControlWarp.linear })
+	bindInput(kGLead, "level");
+slider("pluck", ControlSpec { lo: 0.0, hi: 8.0, init: 6.3, warp: ControlWarp.linear })
+	bindInput(kGPluck, "level");
+slider("pad", ControlSpec { lo: 0.0, hi: 8.0, init: 0.4, warp: ControlWarp.linear })
+	bindInput(kGPad, "level");
+slider("bass", ControlSpec { lo: 0.0, hi: 8.0, init: 1.0, warp: ControlWarp.linear })
+	bindInput(kGBass, "level");
+meter("reverb bus", kVerb);
+panel("");
+
+---------------------------------------------------------------------------
+-- Sections. Each part is a list of shapes played together (one per voice
+-- of a chord); an empty list is tacet. Shape frames are [dur, degree, amp]
+-- in beats and semitones above E3; amp 0 is a rest.
+
+struct Section {
+    name String,
+    bass [Shape],
+    pluck [Shape],
+    pad [Shape],
+    lead [Shape],
+    bassDrive Float,    -- fxDistortion drive at the section's start
+    bassLevel Float,    -- and its output level, which falls as drive rises
+    leadDrive Float,
+    leadLevel Float,
+    verbMix Float,
+}
+
+fn cell(rows [[Float]]) Shape = shape(rows);
+
+fn loopShape(sh Shape, n Int) Shape {
+    var s = sh;
+    var i = 1;
+    while (i < n) { s = catShapes(s, sh); i = i + 1; }
+    s
+}
+
+-- one held shape per chord tone
+fn held(beats Float, degs [Float], amp Float) [Shape] {
+    var out = [Shape]();
+    for (d : degs) { out push!(cell([[beats, d, amp]])); }
+    out
+}
+
+-- the riff: E E F E Bb A, one bar of 3+3+2 sixteenths, twice
+let riff = cell([[0.75, -24.0, 0.8], [0.75, -24.0, 0.6], [0.5, -23.0, 0.7],
+                 [0.75, -24.0, 0.8], [0.75, -18.0, 0.7], [0.5, -19.0, 0.6]]);
+
+-- offbeat tritone stabs, F and B, one bar
+let stabLo = cell([[1.5, 0.0, 0.0], [0.5, 1.0, 0.7], [1.0, 0.0, 0.0], [1.0, 1.0, 0.6]]);
+let stabHi = cell([[1.5, 0.0, 0.0], [0.5, 7.0, 0.7], [1.0, 0.0, 0.0], [1.0, 7.0, 0.6]]);
+
+-- three sixteenths against four: E Bb F, accented on the first
+let ostinato = cell([[0.25, 0.0, 0.8], [0.25, 6.0, 0.4], [0.25, 1.0, 0.5]]);
+
+let machineLead = cell([[3.0, 13.0, 0.5], [1.0, 12.0, 0.45], [4.0, 19.0, 0.5],
+                        [2.0, 18.0, 0.5], [2.0, 17.0, 0.45], [4.0, 13.0, 0.5]]);
+
+let screamLead = cell([[1.0, 12.0, 0.7], [1.0, 13.0, 0.7], [2.0, 18.0, 0.8],
+                       [0.5, 19.0, 0.8], [0.5, 18.0, 0.7], [1.0, 13.0, 0.7],
+                       [4.0, 24.0, 0.9], [2.0, 25.0, 0.8], [2.0, 18.0, 0.7],
+                       [2.0, 12.0, 0.6]]);
+
+-- 64 sixteenths = 16 beats; the 3-note cell needs 21 1/3 repeats, so
+-- 21 of them plus one note
+let ostinatoBlock = catShapes(loopShape(ostinato, 21), cell([[0.25, 0.0, 0.8]]));
+
+let sections = [
+    Section {
+        name: "drone",
+        bass: [cell([[16.0, -24.0, 0.6]])],
+        pluck: [cell([[4.0, 0.0, 0.0], [6.0, 13.0, 0.6], [3.0, 7.0, 0.5], [3.0, 12.0, 0.5]])],
+        pad: held(16.0, [0.0, 1.0, 6.0], 0.5),
+        lead: [Shape](),
+        bassDrive: 6.0, bassLevel: 1.0, leadDrive: 10.0, leadLevel: 0.5, verbMix: 0.3,
+    },
+    Section {
+        name: "grind",
+        bass: [loopShape(riff, 4)],
+        pluck: [loopShape(stabLo, 4), loopShape(stabHi, 4)],
+        pad: [Shape](),
+        lead: [Shape](),
+        bassDrive: 26.0, bassLevel: 0.25, leadDrive: 10.0, leadLevel: 0.5, verbMix: 0.15,
+    },
+    Section {
+        name: "machine",
+        bass: [cell([[4.0, -24.0, 0.6], [4.0, -25.0, 0.6], [4.0, -26.0, 0.6], [4.0, -27.0, 0.6]])],
+        pluck: [ostinatoBlock],
+        pad: [Shape](),
+        lead: [machineLead],
+        bassDrive: 12.0, bassLevel: 0.73, leadDrive: 14.0, leadLevel: 0.64, verbMix: 0.2,
+    },
+    Section {
+        name: "drift",
+        bass: [Shape](),
+        pluck: [cell([[1.0, 0.0, 0.0], [0.5, 19.0, 0.4], [2.5, 0.0, 0.0], [0.5, 25.0, 0.4],
+                      [3.5, 0.0, 0.0], [0.5, 18.0, 0.4], [7.5, 0.0, 0.0]])],
+        pad: [cell([[8.0, -1.0, 0.45], [8.0, 2.0, 0.45]]),
+              cell([[8.0, 0.0, 0.45], [8.0, 3.0, 0.45]]),
+              cell([[8.0, 5.0, 0.4], [8.0, 8.0, 0.4]])],
+        lead: [cell([[2.0, 0.0, 0.0], [3.0, 24.0, 0.35], [1.0, 23.0, 0.3],
+                     [4.0, 18.0, 0.35], [6.0, 0.0, 0.0]])],
+        bassDrive: 4.0, bassLevel: 0.5, leadDrive: 6.0, leadLevel: 1.0, verbMix: 0.4,
+    },
+    Section {
+        name: "scream",
+        bass: [loopShape(riff, 4)],
+        pluck: [ostinatoBlock],
+        pad: held(16.0, [0.0, 1.0, 6.0], 0.4),
+        lead: [screamLead],
+        bassDrive: 32.0, bassLevel: 0.21, leadDrive: 30.0, leadLevel: 0.25, verbMix: 0.2,
+    },
+    Section {
+        name: "scream'",
+        bass: [loopShape(riff retrograde, 4)],
+        pluck: [ostinatoBlock],
+        pad: held(16.0, [0.0, 1.0, 6.0], 0.4),
+        lead: [screamLead invertDim('degree, 18.0)],
+        bassDrive: 32.0, bassLevel: 0.21, leadDrive: 30.0, leadLevel: 0.25, verbMix: 0.2,
+    },
+    Section {
+        name: "collapse",
+        bass: [catShapes(riff scaleDim('dur, 2.0), cell([[8.0, -24.0, 0.5]]))],
+        pluck: [cell([[12.0, 0.0, 0.0], [4.0, 1.0, 0.6]]),
+                cell([[12.0, 0.0, 0.0], [4.0, 7.0, 0.6]])],
+        pad: held(16.0, [0.0, 1.0, 6.0], 0.3),
+        lead: [Shape](),
+        bassDrive: 20.0, bassLevel: 0.41, leadDrive: 10.0, leadLevel: 0.5, verbMix: 0.35,
+    },
+];
+
+const kDrone = 0;
+const kGrind = 1;
+const kMachine = 2;
+const kDrift = 3;
+const kScream = 4;
+const kScreamInv = 5;
+const kCollapse = 6;
+
+---------------------------------------------------------------------------
+-- The form: a music.job Coll of section markers. Each marker is a
+-- one-frame shape [dur, sec, tr]; realizing the Coll gives one event per
+-- section, carrying the section and its transposition as params.
+
+fn blk(sec Int, tr Int) Coll =
+    Coll.leaf(shape([[16.0, sec toFloat, tr toFloat]], ['dur, 'sec, 'tr]));
+
+let form = Coll.seqc([
+    blk(kDrone, 0),
+    Coll.rpt((3, Coll.sel((Behavior.shuffled, [
+        Coll.sel((Behavior.atRandom, [blk(kGrind, 0), blk(kGrind, 1), blk(kGrind, 6)])),
+        Coll.sel((Behavior.atRandom, [blk(kMachine, 0), blk(kMachine, -2)])),
+        blk(kDrift, 0)])))),
+    Coll.sel((Behavior.weighted([0.6, 0.4]), [blk(kScream, 0), blk(kScreamInv, 0)])),
+    Coll.sel((Behavior.atRandom, [
+        Coll.rpt((2, Coll.sel((Behavior.atRandom, [blk(kGrind, 0), blk(kMachine, 6)])))),
+        Coll.seqc([blk(kDrift, 6), blk(kScream, 1)])])),
+    blk(kCollapse, 0)]);
+
+fn param(e Event, k Symbol) Float {
+    for (p : e.params) { if (p.0 == k) { return p.1; } }
+    0.0
+}
+
+fn sectionOf(e Event) Section = sections[param(e, 'sec) toInt];
+
+fn audible(es List<Event>) List<Event> {
+    var keep = [Event]();
+    for (e : es) { if (e.amp > 0.0) { keep push!(e); } }
+    keep toList
+}
+
+-- One part's events across the whole form: each section's shapes for that
+-- part, transposed and placed at the section's start. Rests (amp 0) drop.
+fn partEvents(marks List<Event>, pick (Section) [Shape], legato Float) List<Event> {
+    var out List<Event> = nil;
+    for (m : marks) {
+        var blkEvents List<Event> = nil;
+        for (sh : pick(m sectionOf)) {
+            let es = (sh transposeDim('degree, param(m, 'tr))) shapeEvents(m.t, legato);
+            blkEvents = merge(blkEvents, es audible);
+        }
+        out = cat(out, blkEvents);
+    }
+    out
+}
+
+---------------------------------------------------------------------------
+-- Realize one reading of the form and play it.
+
+fn runPiece() Void {
+    go(coro fn() Float {
+        setTempo(0, 108.0);
+        let marks = form realize;
+        var total = 0.0;
+        for (m : marks) {
+            let tr = param(m, 'tr) toInt;
+            ("bar %^  %^%^" fmt((m.t / 4.0) toInt + 1, (m sectionOf).name,
+                            tr == 0 ? "" : " (" $ (tr > 0 ? "+" : "") $ tr toString $ ")")) println;
+            total = m.t + m.dur;
+        }
+        play(partEvents(marks, fn(s Section) [Shape] { s.bass }, 0.9), bassV, keyE, chroma);
+        play(partEvents(marks, fn(s Section) [Shape] { s.pluck }, 0.5), pluckV, keyE, chroma);
+        play(partEvents(marks, fn(s Section) [Shape] { s.pad }, 1.0), padV, keyE, chroma);
+        play(partEvents(marks, fn(s Section) [Shape] { s.lead }, 0.95), leadV, keyE, chroma);
+
+        -- each section sets its distortion drives and levels and the reverb amount
+        let b0 = getBeats() + getLatency();
+        for (m : marks) {
+            let s = m sectionOf;
+            bundle()
+                setInput(kBassDist, "drive", s.bassDrive)
+                setInput(kBassDist, "level", s.bassLevel)
+                setInput(kLeadDist, "drive", s.leadDrive)
+                setInput(kLeadDist, "level", s.leadLevel)
+                setInput(kVerb, "mix", s.verbMix)
+                sched(0, 0, b0 + m.t);
+        }
+        yield (total + 8.0);
+        stopAll();
+        "piece done" println;
+    }());
+}
+
+runPiece();
