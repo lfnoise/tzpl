@@ -208,16 +208,17 @@ setInput(kEcho, "feedback", 0.35);
 setInput(kEcho, "mix", 0.25);
 setInput(kVerb, "decay", 3.0);
 setInput(kVerb, "mix", 0.25);
-setInput(kGLead, "level", 1.0);
+setInput(kGLead, "level", 0.8);
 -- the plucked strings, filtered, are about 18 dB quieter than the other defs
 setInput(kGPluck, "level", 8.0);
 setInput(kGPad, "level", 0.4);
 setInput(kGBass, "level", 1.0);
-setInput(kGDrums, "level", 1.0);
--- drums: a little grit, no reverb
-setInput(kDrumDist, "drive", 8.0);
-setInput(kDrumDist, "tone", 0.5);
-setInput(kDrumDist, "level", 0.5);
+setInput(kGDrums, "level", 1.4);
+-- drums: a little grit, no reverb. tone 1 keeps the distortion's low-pass
+-- at 8 kHz -- any lower and it filters out the hats and snare
+setInput(kDrumDist, "drive", 4.0);
+setInput(kDrumDist, "tone", 1.0);
+setInput(kDrumDist, "level", 1.0);
 sched(0);
 
 let leadV  = freqVoice(kLead, 8);
@@ -232,7 +233,7 @@ let keyE = transposeRoot(et12, -17.0);
 let chroma = chromatic(12);
 
 panel("mixer");
-slider("lead", ControlSpec { lo: 0.0, hi: 8.0, init: 1.0, warp: ControlWarp.linear })
+slider("lead", ControlSpec { lo: 0.0, hi: 8.0, init: 0.8, warp: ControlWarp.linear })
 	bindInput(kGLead, "level");
 slider("pluck", ControlSpec { lo: 0.0, hi: 12.0, init: 8.0, warp: ControlWarp.linear })
 	bindInput(kGPluck, "level");
@@ -240,7 +241,7 @@ slider("pad", ControlSpec { lo: 0.0, hi: 8.0, init: 0.4, warp: ControlWarp.linea
 	bindInput(kGPad, "level");
 slider("bass", ControlSpec { lo: 0.0, hi: 8.0, init: 1.0, warp: ControlWarp.linear })
 	bindInput(kGBass, "level");
-slider("drums", ControlSpec { lo: 0.0, hi: 12.0, init: 1.0, warp: ControlWarp.linear })
+slider("drums", ControlSpec { lo: 0.0, hi: 12.0, init: 1.4, warp: ControlWarp.linear })
 	bindInput(kGDrums, "level");
 meter("reverb bus", kVerb);
 panel("");
@@ -334,7 +335,7 @@ let screamLead = cell([[1.0, 12.0, 0.7], [1.0, 13.0, 0.7], [2.0, 18.0, 0.8],
 let drumDims = ['dur, 'hz, 'amp, 'noise, 'decay, 'sweep, 'ncut];
 let drKick    = [48.0, 0.08, 0.4, 2.5, 4000.0];
 let drSnare   = [180.0, 0.7, 0.16, 0.7, 1200.0];
-let drHat     = [300.0, 1.0, 0.045, 0.0, 7000.0];
+let drHat     = [300.0, 1.0, 0.045, 0.0, 6000.0];
 let drOpenHat = [300.0, 1.0, 0.25, 0.0, 6000.0];
 let drTom     = [95.0, 0.15, 0.3, 1.0, 2000.0];
 
@@ -402,7 +403,7 @@ let sections = [
         pad: [Shape](),
         lead: [machineLead],
         drums: [drumBars(drKick, [0.0, 2.5], [0.9, 0.7], 4),
-                drumHits(drHat, onsetGrid(0.75, 16.0), [0.6, 0.35, 0.35], 16.0),
+                drumHits(drHat, onsetGrid(0.75, 16.0), [0.9, 0.55, 0.55], 16.0),
                 drumHits(drTom, [15.0, 15.5], [0.7, 0.9], 16.0)],
         bassDrive: 12.0, bassLevel: 0.73, leadDrive: 14.0, leadLevel: 0.64, verbMix: 0.2,
     },
