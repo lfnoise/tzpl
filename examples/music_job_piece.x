@@ -12,13 +12,14 @@
 --
 --     drone     bass pedal, a semitone-and-tritone cluster on the pad,
 --               a few plucked notes
---     grind     a distorted bass riff in 3+3+2 sixteenths, with
---               offbeat tritone stabs
+--     grind     a distorted bass riff in 3+3+2 sixteenths, developed over
+--               four bars, with offbeat tritone stabs
 --     machine   a 3-note pluck ostinato in sixteenths against the 4/4 bar,
---               the bass sinking by semitones, a slow lead line
+--               the bass leaping octaves and tritones as it sinks by
+--               semitones, a slow lead line
 --     drift     clusters on the pad, high harmonics, a quiet lead
 --     scream    everything at once, the lead heavily driven
---     scream'   the same with the lead inverted and the riff reversed
+--     scream'   the same with the lead inverted and the bass line reversed
 --     collapse  the riff at half speed, a last ringing tritone
 --
 -- Form (a music.job Coll):
@@ -33,7 +34,7 @@
 -- echoed; the pluck, pad and lead meet at a shared reverb.
 --
 --     wtLead(401) -> gain(411) -> fxDistortion(421) -> fxEcho(422) -\
---     ksPluck(402) -> gain(412) ------------------------------------+-> fxReverb(424) -> out
+--     ksPluck(402) -> gain(412) -> fxFilter(425), low-pass -------------+-> fxReverb(424) -> out
 --     resonBank(403) -> gain(413) ----------------------------------/
 --     wtLead(404) -> gain(414) -> fxDistortion(423) ------------------------------> out
 --
@@ -62,7 +63,7 @@ import ui.*;
 
 fn partGain() S {
 	let x = inlet(FLOAT32, 2);
-	let lvl = control("level", ControlSpec { lo: 0.0, hi: 8.0, init: 1.0,
+	let lvl = control("level", ControlSpec { lo: 0.0, hi: 12.0, init: 1.0,
 	                                         warp: ControlWarp.linear }) lag(0.02);
 	(x * lvl) outlet
 }
@@ -72,10 +73,11 @@ let cLead  = wtLead() defSynth("wtLead");
 let cPluck = ksPluck(12) defSynth("ksPluck12");
 let cBank  = resonBank() defSynth("resonBank");
 let cDist  = fxDistortion defSynth("fxDistortion");
+let cFilt  = fxFilter defSynth("fxFilter");
 let cEcho  = fxEcho defSynth("fxEcho");
 let cVerb  = fxReverb defSynth("fxReverb");
 await cGain; await cLead; await cPluck; await cBank;
-await cDist; await cEcho; await cVerb;
+await cDist; await cFilt; await cEcho; await cVerb;
 
 ---------------------------------------------------------------------------
 -- Engine and graph.
@@ -92,6 +94,7 @@ const kLeadDist = 421;
 const kEcho     = 422;
 const kBassDist = 423;
 const kVerb     = 424;
+const kPluckLP   = 425;
 
 engineStart();
 masterGain(0.7);
@@ -111,12 +114,14 @@ newNode("fxDistortion", kLeadDist);
 newNode("fxEcho", kEcho);
 newNode("fxDistortion", kBassDist);
 newNode("fxReverb", kVerb);
+newNode("fxFilter", kPluckLP);
 connect(kLead, 0, kGLead, 0);
 connect(kGLead, 0, kLeadDist, 0);
 connect(kLeadDist, 0, kEcho, 0);
 connect(kEcho, 0, kVerb, 0);
 connect(kPluck, 0, kGPluck, 0);
-connect(kGPluck, 0, kVerb, 0);
+connect(kGPluck, 0, kPluckLP, 0);
+connect(kPluckLP, 0, kVerb, 0);
 connect(kPad, 0, kGPad, 0);
 connect(kGPad, 0, kVerb, 0);
 connect(kVerb, 0, 0, 0);
@@ -142,10 +147,13 @@ setInput(kBass, "cutoff", 300.0);
 setInput(kBass, "envOct", 3.0);
 setInput(kBass, "res", 0.4);
 setInput(kBass, "fdecay", 0.12);
--- pluck: bright, metallic, short
-setInput(kPluck, "pluck", 0.003);
+-- pluck: a softer, darker string, then a low-pass to take the edge off
+setInput(kPluck, "pluck", 0.006);
 setInput(kPluck, "decay", 1.2);
-setInput(kPluck, "damp", 0.1);
+setInput(kPluck, "damp", 0.45);
+setInput(kPluckLP, "type", 0.0);         -- low-pass
+setInput(kPluckLP, "freq", 1800.0);
+setInput(kPluckLP, "rq", 0.9);
 -- pad: bowed clusters, slow in and out
 setInput(kPad, "attack", 1.0);
 setInput(kPad, "release", 1.5);
@@ -160,8 +168,8 @@ setInput(kEcho, "mix", 0.25);
 setInput(kVerb, "decay", 3.0);
 setInput(kVerb, "mix", 0.25);
 setInput(kGLead, "level", 1.0);
--- the plucked strings are about 16 dB quieter than the other defs
-setInput(kGPluck, "level", 6.3);
+-- the plucked strings, filtered, are about 18 dB quieter than the other defs
+setInput(kGPluck, "level", 8.0);
 setInput(kGPad, "level", 0.4);
 setInput(kGBass, "level", 1.0);
 sched(0);
@@ -178,7 +186,7 @@ let chroma = chromatic(12);
 panel("mixer");
 slider("lead", ControlSpec { lo: 0.0, hi: 8.0, init: 1.0, warp: ControlWarp.linear })
 	bindInput(kGLead, "level");
-slider("pluck", ControlSpec { lo: 0.0, hi: 8.0, init: 6.3, warp: ControlWarp.linear })
+slider("pluck", ControlSpec { lo: 0.0, hi: 12.0, init: 8.0, warp: ControlWarp.linear })
 	bindInput(kGPluck, "level");
 slider("pad", ControlSpec { lo: 0.0, hi: 8.0, init: 0.4, warp: ControlWarp.linear })
 	bindInput(kGPad, "level");
@@ -225,6 +233,36 @@ fn held(beats Float, degs [Float], amp Float) [Shape] {
 let riff = cell([[0.75, -24.0, 0.8], [0.75, -24.0, 0.6], [0.5, -23.0, 0.7],
                  [0.75, -24.0, 0.8], [0.75, -18.0, 0.7], [0.5, -19.0, 0.6]]);
 
+-- grind's bass develops the riff over four bars: as written; ending a
+-- semitone low; answered a tritone up; broken into a run
+let grindBass = cell([
+    [0.75, -24.0, 0.8], [0.75, -24.0, 0.6], [0.5, -23.0, 0.7],
+    [0.75, -24.0, 0.8], [0.75, -18.0, 0.7], [0.5, -19.0, 0.6],
+    [0.75, -24.0, 0.8], [0.75, -24.0, 0.6], [0.5, -23.0, 0.7],
+    [0.75, -24.0, 0.8], [0.75, -25.0, 0.7], [0.5, -26.0, 0.6],
+    [0.75, -18.0, 0.8], [0.75, -18.0, 0.6], [0.5, -17.0, 0.7],
+    [0.75, -18.0, 0.8], [0.75, -12.0, 0.7], [0.5, -13.0, 0.6],
+    [0.5, -24.0, 0.9], [0.5, 0.0, 0.0], [0.25, -24.0, 0.7], [0.25, -23.0, 0.7],
+    [0.25, -21.0, 0.7], [0.25, -20.0, 0.7], [0.5, -19.0, 0.8], [0.5, -18.0, 0.8],
+    [1.0, 0.0, 0.0]]);
+
+-- machine's bass: root, octave, tritone in dotted quarters, sinking a
+-- semitone each bar
+let machineBass = cell([
+    [1.5, -24.0, 0.7], [1.5, -12.0, 0.5], [1.0, -18.0, 0.6],
+    [1.5, -25.0, 0.7], [1.5, -13.0, 0.5], [1.0, -19.0, 0.6],
+    [1.5, -26.0, 0.7], [1.5, -14.0, 0.5], [1.0, -20.0, 0.6],
+    [1.5, -27.0, 0.7], [1.5, -15.0, 0.5], [1.0, -21.0, 0.6]]);
+
+-- scream's bass: syncopated octave leaps, a bar on F, a falling run
+let screamBass = cell([
+    [1.0, -24.0, 0.9], [0.5, -12.0, 0.7], [0.5, -13.0, 0.7], [1.0, -24.0, 0.9], [1.0, -18.0, 0.8],
+    [1.0, -24.0, 0.9], [0.5, -12.0, 0.7], [0.5, -13.0, 0.7], [0.5, -24.0, 0.9], [0.5, -23.0, 0.8],
+    [1.0, -17.0, 0.8],
+    [1.5, -23.0, 0.9], [0.5, -11.0, 0.7], [1.0, -23.0, 0.8], [1.0, -18.0, 0.8],
+    [0.5, -12.0, 0.8], [0.5, -13.0, 0.8], [0.5, -15.0, 0.8], [0.5, -16.0, 0.8],
+    [0.5, -18.0, 0.8], [0.5, -19.0, 0.8], [1.0, -24.0, 0.9]]);
+
 -- offbeat tritone stabs, F and B, one bar
 let stabLo = cell([[1.5, 0.0, 0.0], [0.5, 1.0, 0.7], [1.0, 0.0, 0.0], [1.0, 1.0, 0.6]]);
 let stabHi = cell([[1.5, 0.0, 0.0], [0.5, 7.0, 0.7], [1.0, 0.0, 0.0], [1.0, 7.0, 0.6]]);
@@ -255,7 +293,7 @@ let sections = [
     },
     Section {
         name: "grind",
-        bass: [loopShape(riff, 4)],
+        bass: [grindBass],
         pluck: [loopShape(stabLo, 4), loopShape(stabHi, 4)],
         pad: [Shape](),
         lead: [Shape](),
@@ -263,7 +301,7 @@ let sections = [
     },
     Section {
         name: "machine",
-        bass: [cell([[4.0, -24.0, 0.6], [4.0, -25.0, 0.6], [4.0, -26.0, 0.6], [4.0, -27.0, 0.6]])],
+        bass: [machineBass],
         pluck: [ostinatoBlock],
         pad: [Shape](),
         lead: [machineLead],
@@ -283,7 +321,7 @@ let sections = [
     },
     Section {
         name: "scream",
-        bass: [loopShape(riff, 4)],
+        bass: [screamBass],
         pluck: [ostinatoBlock],
         pad: held(16.0, [0.0, 1.0, 6.0], 0.4),
         lead: [screamLead],
@@ -291,7 +329,7 @@ let sections = [
     },
     Section {
         name: "scream'",
-        bass: [loopShape(riff retrograde, 4)],
+        bass: [screamBass retrograde],
         pluck: [ostinatoBlock],
         pad: held(16.0, [0.0, 1.0, 6.0], 0.4),
         lead: [screamLead invertDim('degree, 18.0)],
