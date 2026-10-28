@@ -178,43 +178,42 @@ connect(kGBass, 0, kBassDist, 0);
 connect(kBassDist, 0, 0, 0);
 
 -- lead: a resonant, nasal saw, held notes
-setInput(kLead, "attack", 0.02);
-setInput(kLead, "decay", 0.5);
-setInput(kLead, "sustain", 0.7);
-setInput(kLead, "release", 0.4);
-setInput(kLead, "cutoff", 1200.0);
-setInput(kLead, "envOct", 1.5);
-setInput(kLead, "res", 0.25);
-setInput(kLead, "fdecay", 0.6);
+kLead setInput([
+    'attack: 0.02,
+    'decay: 0.5,
+    'sustain: 0.7,
+    'release: 0.4,
+    'cutoff: 1200.0,
+    'envOct: 1.5,
+    'res: 0.25,
+    'fdecay: 0.6,
+]);
 -- bass: a saw with a hard filter snap, for the distortion to bite on
-setInput(kBass, "attack", 0.003);
-setInput(kBass, "decay", 0.25);
-setInput(kBass, "sustain", 0.6);
-setInput(kBass, "release", 0.08);
-setInput(kBass, "cutoff", 300.0);
-setInput(kBass, "envOct", 3.0);
-setInput(kBass, "res", 0.4);
-setInput(kBass, "fdecay", 0.12);
+kBass setInput([
+    'attack: 0.003,
+    'decay: 0.25,
+    'sustain: 0.6,
+    'release: 0.08,
+    'cutoff: 300.0,
+    'envOct: 3.0,
+    'res: 0.4,
+    'fdecay: 0.12,
+]);
 -- pluck: a softer, darker string, then a low-pass to take the edge off
-setInput(kPluck, "pluck", 0.006);
-setInput(kPluck, "decay", 1.2);
-setInput(kPluck, "damp", 0.45);
-setInput(kPluckLP, "type", 0.0);         -- low-pass
-setInput(kPluckLP, "freq", 1800.0);
-setInput(kPluckLP, "rq", 0.9);
+kPluck setInput(['pluck: 0.006, 'decay: 1.2, 'damp: 0.45]);
+kPluckLP setInput([
+    'type: 0.0,     -- low-pass
+    'freq: 1800.0,
+    'rq: 0.9,
+]);
 -- pad: bowed clusters, slow in and out
-setInput(kPad, "attack", 1.0);
-setInput(kPad, "release", 1.5);
-setInput(kPad, "decay", 4.0);
+kPad setInput(['attack: 1.0, 'release: 1.5, 'decay: 4.0]);
 -- distortion tone: dark on the bass, open on the lead
 setInput(kBassDist, "tone", 0.3);
 setInput(kLeadDist, "tone", 0.6);
 -- echo a dotted eighth at 108 bpm
-setInput(kEcho, "time", 0.417);
-setInput(kEcho, "feedback", 0.35);
-setInput(kEcho, "mix", 0.25);
-setInput(kVerb, "decay", 3.0);
-setInput(kVerb, "mix", 0.25);
+kEcho setInput(['time: 0.417, 'feedback: 0.35, 'mix: 0.25]);
+kVerb setInput(['decay: 3.0, 'mix: 0.25]);
 setInput(kGLead, "level", 0.8);
 setInput(kGPluck, "level", 1.06);
 setInput(kGPad, "level", 0.17);
@@ -222,9 +221,7 @@ setInput(kGBass, "level", 1.0);
 setInput(kGDrums, "level", 1.4);
 -- drums: a little grit, no reverb. tone 1 keeps the distortion's low-pass
 -- at 8 kHz -- any lower and it filters out the hats and snare
-setInput(kDrumDist, "drive", 4.0);
-setInput(kDrumDist, "tone", 1.0);
-setInput(kDrumDist, "level", 0.42);
+kDrumDist setInput(['drive: 4.0, 'tone: 1.0, 'level: 0.42]);
 sched(0);
 
 let leadV  = freqVoice(kLead, 8);
@@ -547,10 +544,8 @@ fn runPiece() Void {
         for (m : marks) {
             let s = m sectionOf;
             bundle()
-                setInput(kBassDist, "drive", s.bassDrive)
-                setInput(kBassDist, "level", s.bassLevel)
-                setInput(kLeadDist, "drive", s.leadDrive)
-                setInput(kLeadDist, "level", s.leadLevel)
+                setInput(kBassDist, ['drive: s.bassDrive, 'level: s.bassLevel])
+                setInput(kLeadDist, ['drive: s.leadDrive, 'level: s.leadLevel])
                 setInput(kVerb, "mix", s.verbMix)
                 sched(0, 0, b0 + m.t);
         }

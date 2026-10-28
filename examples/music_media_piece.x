@@ -132,14 +132,12 @@ kBass setInput([
     'fdecay: 0.15,
 ]);
 -- pluck: a bright string with a medium ring, harp-like under the arpeggio
-setInput(kPluck, "decay", 2.5);
-setInput(kPluck, "damp", 0.25);
+kPluck setInput(['decay: 2.5, 'damp: 0.25]);
 -- pad: bowed, slow in and out
 kPad setInput(['attack: 0.6, 'release: 1.0, 'decay: 3.0]);
 -- echo a dotted eighth at 96 bpm, kept low; a medium room
 kEcho setInput(['time: 0.469, 'feedback: 0.25, 'mix: 0.18]);
-setInput(kVerb, "decay", 2.5);
-setInput(kVerb, "mix", 0.22);
+kVerb setInput(['decay: 2.5, 'mix: 0.22]);
 -- draft balance, from solo renders: pluck 3 dB under the bass, lead 1 dB
 -- under, pad 6 dB under (RMS while each part plays)
 setInput(kGLead, "level", 1.2);
