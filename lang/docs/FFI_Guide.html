@@ -3663,6 +3663,7 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
 <table>
   <tr><th>Function</th><th>Description</th></tr>
   <tr><td><code>setInput(nodeID Int, port, value, rampTime Float = 0.0, curve = fadeLinear) Int</code></td><td>Set the whole input to a value: a step, or with <code>rampTime &gt; 0</code> a ramp from the current value. On a connected input this changes the value it reverts to when disconnected.</td></tr>
+  <tr><td><code>setInput(nodeID Int, inputs [Symbol: Float], rampTime Float = 0.0, curve = fadeLinear) Int</code></td><td>Several inputs at once, by name: <code>node setInput(['cutoff: 900.0, 'res: 0.5])</code> sets each as above (string keys work too). Returns the first error, after trying every input.</td></tr>
   <tr><td><code>setInputAt(nodeID Int, port, first Int, values, rampTime Float = 0.0, curve = fadeLinear) Int</code></td><td>Set channels <code>first</code> .. <code>first + n - 1</code> only (flat, row-major channel index), where <code>n</code> is the number of values.</td></tr>
   <tr><td><code>setInputBox(nodeID Int, port, offset [Int], extent [Int], values, rampTime Float = 0.0, curve = fadeLinear) Int</code></td><td>Set a box region of a shaped input, in shape coordinates: <code>offset</code> and <code>extent</code> per dimension (an extent of 0 runs to the end of that dimension). For a 4&times;3 input, <code>setInputBox(n, "gains", [0, 1], [0, 1], 0.5)</code> sets column 1 of every row.</td></tr>
   <tr><td><code>setInputX(nodeID Int, port, value, xfadeTime Float, curve = fadeLinear) Int</code></td><td>Crossfade the input to a value over <code>xfadeTime</code> seconds. A connected input fades its signal out and is left holding the value.</td></tr>
@@ -3674,6 +3675,7 @@ collector <span class="fn">spawn</span>(Msg.int(<span class="num">0</span>)) <sp
 
 <span class="fn">begin</span>();
 <span class="fn">setInput</span>(<span class="num">101</span>, <span class="str">"cutoff"</span>, <span class="num">800.0</span>, <span class="num">0.25</span>);          <span class="cmt">-- ramp to 800 over 0.25 s</span>
+<span class="num">101</span> <span class="fn">setInput</span>([<span class="str">'attack</span>: <span class="num">0.01</span>, <span class="str">'release</span>: <span class="num">0.3</span>]);   <span class="cmt">-- several by name</span>
 <span class="fn">setInputAt</span>(<span class="num">101</span>, <span class="str">"pan"</span>, <span class="num">1</span>, [<span class="num">-0.5</span>]);            <span class="cmt">-- element 1 of a multichannel input</span>
 <span class="fn">impulseInput</span>(<span class="num">101</span>, <span class="str">"retrig"</span>, <span class="num">1.0</span>);             <span class="cmt">-- fire a trigger</span>
 <span class="fn">go</span>(<span class="num">0</span>);</code></pre>

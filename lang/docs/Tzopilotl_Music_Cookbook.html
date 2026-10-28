@@ -855,7 +855,8 @@ model:</p>
   Everything panel-like &mdash; envelope segments, cutoff, damping &mdash; is a
   node-level <em>control</em>, shared by all voices like the panel of a
   hardware synth: set it by name with <code>setInput(node, name, value)</code>
-  (a bundle command; add a ramp time to glide), using the names in the table.</li>
+  (a bundle command; add a ramp time to glide), or several at once with
+  <code>node setInput(['cutoff: 900.0, 'res: 0.5])</code>, using the names in the table.</li>
 </ul>
 <p>The plucked string, end to end &mdash; compile, instantiate, play a chord,
 then turn the panel:</p>
@@ -884,8 +885,10 @@ then turn the panel:</p>
 
 <span class="cmt">-- turn the panel: darker, shorter strings -- then re-run the chord block</span>
 <span class="fn">begin</span>();
-<span class="fn">setInput</span>(<span class="num">210</span>, <span class="str">"damp"</span>, <span class="num">0.8</span>);    <span class="cmt">-- roll the highs off the string loop</span>
-<span class="fn">setInput</span>(<span class="num">210</span>, <span class="str">"decay"</span>, <span class="num">1.0</span>);   <span class="cmt">-- ring time down to 1 s</span>
+<span class="num">210</span> <span class="fn">setInput</span>([
+    <span class="str">'damp</span>: <span class="num">0.8</span>,     <span class="cmt">-- roll the highs off the string loop</span>
+    <span class="str">'decay</span>: <span class="num">1.0</span>,    <span class="cmt">-- ring time down to 1 s</span>
+]);
 <span class="fn">sched</span>(<span class="num">0</span>);</code></pre>
 <p>And to stop:</p>
 <pre><code><span class="fn">begin</span>();
