@@ -257,7 +257,9 @@ static void test_command_bundling() {
 // fillBuffer outside a bundle must return errNoActiveBundle (and free the
 // staged buffer); malformed shapes (numChans < 1, or a data length not
 // divisible by numChans) must return errInternal. The script prints one
-// bool per case; the captured output must be all-true.
+// bool per case. Each rejected call also reports its error on the VM's
+// error output, which is the print stream when that isn't stdout (so the
+// app's output pane shows it), so the diagnostics are captured in order.
 static void test_fill_buffer_args() {
     std::print("Test: fillBuffer FFI argument and bundle checking\n");
 
@@ -298,7 +300,10 @@ static void test_fill_buffer_args() {
     bool ok = compileAndRun(compiler, vm, source, "fill_buffer_args.x", &moduleCompiler);
     fflush(mem);
     fclose(mem);
-    check(ok && outBuf && std::string_view(outBuf) == "true\ntrue\ntrue\n",
+    check(ok && outBuf && std::string_view(outBuf) ==
+              "audio_engine.fillBuffer: errNoActiveBundle\ntrue\n"
+              "audio_engine.fillBuffer: errInternal\ntrue\n"
+              "audio_engine.fillBuffer: errInternal\ntrue\n",
           "fillBuffer rejects no-bundle and malformed-shape calls");
     free(outBuf);
 
