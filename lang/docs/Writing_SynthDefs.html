@@ -1775,6 +1775,9 @@ n stop;</code></pre>
                 <tr><td><code>dust(density, chans = 1)</code> / <code>dust2(density, chans = 1)</code></td><td>Random-amplitude impulses at <code>density</code> per second; unipolar / bipolar amplitudes.</td></tr>
                 <tr><td><code>pandust(density, chans = 1)</code></td><td><code>chans</code> dust generators, each randomly panned to a stereo pair. Output is a 2&times;<code>chans</code> matrix, row 0 left and row 1 right &mdash; <code>sum(cols)</code> mixes it to stereo (see the example in <a href="#vecops">&sect;5</a>).</td></tr>
                 <tr><td><code>dustep(freq, chans = 1)</code></td><td>Stepped noise: white noise sampled-and-held at velvet-noise times, <code>freq</code> steps per second on average.</td></tr>
+                <tr><td><code>lfnoise0(freq, chans)</code></td><td>Step noise: a new bipolar random value <code>freq</code> times per second, held between (SC's LFNoise0).</td></tr>
+                <tr><td><code>lfnoise1(freq, chans)</code></td><td>Ramp noise: straight lines between random values reached <code>freq</code> times per second (SC's LFNoise1).</td></tr>
+                <tr><td><code>lfnoise3(freq, chans)</code></td><td>Smooth noise: a cubic (Catmull-Rom) curve through random values <code>freq</code> times per second, one period behind. Use it where SC code has LFNoise2.</td></tr>
                 <tr><td><code>exprand(a, b, chans = 1, rate = Rate.audio)</code></td><td>Exponentially distributed random values in [a, b] (see <a href="#random">&sect;8</a>).</td></tr>
             </table>
 
