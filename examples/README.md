@@ -20,6 +20,14 @@ evaluate it (Cmd+Return), or paste it into a notebook code cell.
   library (oscillators, noise colors, pause/pull graphs, delays, verbs),
   plus `playExamples()` / `renderExamples()` to audition them all in
   sequence. Run with audio on.
+- `spectral_synthdefs.x` -- spectral (short-time FFT) effects built on
+  `spectralChain`: brick-wall band-pass, spectral tilt EQ, per-bin noise
+  gate, spectral contrast, robot and whisper, bin-shift frequency
+  shifter, spectral blur and freeze (frame-to-frame state), and
+  cross-synthesis of two signals in one frame. Each effect is a function
+  of its input with a demo synthdef on a synthetic source;
+  `playSpectralExamples()` plays the demos in turn. Run with audio on.
+  Explained in Writing_SynthDefs §13.
 - `instrument_synthdefs.x` -- ten voicer-based polyphonic instruments
   (organ, FM bell/brass, saw lead, PWM pad, Karplus-Strong pluck, modal
   bell, kick, snare, sub bass), each triggered with `noteOn`/`noteOff`.

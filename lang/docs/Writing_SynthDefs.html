@@ -338,7 +338,15 @@
                 <li><a href="#buffers">10. Sample Buffers</a></li>
                 <li><a href="#controlflow">11. Control Flow</a></li>
                 <li><a href="#voicer">12. Polyphony: voicer, noteParam, gate</a></li>
-                <li><a href="#spectral">13. Spectral Processing</a></li>
+                <li><a href="#spectral">13. Spectral Processing</a>
+                    <ul>
+                        <li><a href="#spec-frame">13.1 The frame</a></li>
+                        <li><a href="#spec-body">13.2 Writing a body</a></li>
+                        <li><a href="#spec-shift">13.3 Moving bins</a></li>
+                        <li><a href="#spec-state">13.4 State across frames</a></li>
+                        <li><a href="#spec-multi">13.5 Several signals in one frame</a></li>
+                        <li><a href="#spec-sizes">13.6 Choosing sizes</a></li>
+                    </ul></li>
                 <li><a href="#compile">14. Compiling, Tagging, and Playing</a></li>
                 <li><a href="#ugens">15. common_ugens Reference</a>
                     <ul>
@@ -486,9 +494,9 @@ beep defSynth(<span class="hl-str">"beep"</span>) await;      <span class="cmt">
 
             <p>A plain <code>inlet</code> (one without a spec) is treated as an audio signal, since
             it is usually patched from another node; math on it runs every sample. Inside
-            <code>if_</code>/<code>switch</code> branches (<a href="#controlflow">&sect;11</a>) and
-            spectral bodies (<a href="#spectral">&sect;13</a>), block-rate math is computed every
-            sample too.</p>
+            <code>if_</code>/<code>switch</code> branches (<a href="#controlflow">&sect;11</a>),
+            block-rate math is computed every sample too; inside spectral bodies
+            (<a href="#spectral">&sect;13</a>), once per frame.</p>
 
             <p>Note parameters are columns of the voiced synth's <code>notes</code> input
             (<a href="#voicer">&sect;12</a>), so they behave the same way: math derived purely from
@@ -1520,20 +1528,225 @@ n stop;</code></pre>
         <div class="section" id="spectral">
             <h2>13. Spectral Processing</h2>
 
-            <p><code>spectralChain(input, fftSize, hopSize, bodyFn)</code> windows and FFTs
-            <code>input</code>, hands each spectral frame to <code>bodyFn</code> (a
-            <code>fn(S) S</code> whose argument is the frame signal), and overlap-adds the processed
-            frames back to a time-domain output. <code>fftSize</code> is the frame length in samples
-            (a power of two); <code>hopSize</code> is the analysis stride. Operations inside the body
-            apply to the frame's bins.</p>
+            <p><code>spectralChain(input, fftSize, hopSize, bodyFn)</code> is a short-time Fourier
+            transform process. Every <code>hopSize</code> samples it takes the last
+            <code>fftSize</code> samples of each channel of <code>input</code>, applies a
+            sqrt-Hann window and an FFT, and hands the resulting frame to <code>bodyFn</code>, a
+            <code>fn(S) S</code> that returns the processed frame. Each processed frame is inverse
+            transformed, windowed again and overlap-added into the output. A body that returns its
+            frame unchanged gives back exactly the input (to float precision), delayed by
+            <code>fftSize</code> samples.</p>
 
-<pre><code><span class="cmt">-- process the spectrum: the body maps each analysis frame</span>
-<span class="hl-kw">fn</span> spectralFx() S {
-    <span class="hl-kw">let</span> x = inlet(FLOAT32);
-    spectralChain(x, <span class="hl-num">1024</span>, <span class="hl-num">256</span>, <span class="hl-kw">fn</span>(frame S) S {
-        frame * frame        <span class="cmt">-- e.g. square the bins (spectral contrast)</span>
+<pre><code><span class="cmt">-- A spectral lowpass as a stereo insert effect: zero every bin above the cutoff.</span>
+<span class="hl-kw">fn</span> spectralLowpass() S {
+    <span class="hl-kw">let</span> x = inlet(FLOAT32, <span class="hl-num">2</span>);
+    <span class="hl-kw">let</span> cutoff = control(<span class="hl-str">"cutoff"</span>, espec(<span class="hl-num">100.0</span>, <span class="hl-num">10000.0</span>, <span class="hl-num">1000.0</span>));
+    spectralChain(x, <span class="hl-num">1024</span>, <span class="hl-num">256</span>, <span class="hl-kw">fn</span>(frame S) {
+        frame * (specBinFreqs(<span class="hl-num">1024</span>) &lt; cutoff)
     }) |&gt; outlet
+}
+spectralLowpass defSynth(<span class="hl-str">"spectralLowpass"</span>) <span class="hl-kw">await</span>;</code></pre>
+
+            <table>
+                <tr><th>Argument</th><th>Description</th></tr>
+                <tr><td><code>input</code></td><td>The signal to process, of any shape. Each channel is transformed separately; the output has the input's shape.</td></tr>
+                <tr><td><code>fftSize</code></td><td>Frame length in samples: a power of two, at least 4. It sets the frequency resolution (bins <code>fs / fftSize</code> Hz apart) and the latency (<code>fftSize</code> samples).</td></tr>
+                <tr><td><code>hopSize</code></td><td>Samples between frames: a power of two, at most <code>fftSize / 2</code>. <code>fftSize / hopSize</code> is the overlap.</td></tr>
+                <tr><td><code>bodyFn</code></td><td>Called once, at graph-build time, with the frame signal. The graph it returns is the body. It runs once per hop, not once per sample, so its math is computed once per frame.</td></tr>
+            </table>
+
+            <p>Other sizes stop the script with an error naming the size.</p>
+
+            <h3 id="spec-frame">13.1 The frame</h3>
+
+            <p>The frame has one spectrum per input channel. Each spectrum is two rows of
+            <code>fftSize / 2</code> bins: row 0 holds the real parts, row 1 the imaginary parts. A
+            mono input gives a 2&times;<code>fftSize/2</code> frame, and a stereo one a
+            2&times;2&times;<code>fftSize/2</code> frame (channel, part, bin).</p>
+
+            <ul>
+                <li>Bin <code>k</code> is centered on <code>k * fs / fftSize</code> Hz.</li>
+                <li>Bin 0 is <em>packed</em>: its real part is DC and its imaginary part is the Nyquist
+                bin (both are purely real). Operations that treat each bin as one complex number,
+                such as magnitude and phase, combine the two there. For audio that rarely matters.</li>
+                <li>The values are an unnormalized DFT of the windowed frame. A sinusoid of amplitude
+                <code>a</code> centered on a bin has a magnitude of about <code>a * fftSize / &pi;</code>
+                there. <code>specAmps</code> divides that out, so it reads <code>a</code>.</li>
+            </ul>
+
+            <p>The helpers below (in <code>synthdef</code>) take the frame apart and put it back
+            together. Each works on a frame of any channel count. For a mono frame,
+            <code>specRe</code> and <code>specMag</code> are rows of <code>fftSize / 2</code>; for a
+            stereo one they are 2&times;<code>fftSize/2</code>.</p>
+
+            <table>
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><code>frame specRe</code> &nbsp;/&nbsp; <code>frame specIm</code></td><td>The real / imaginary parts of every bin.</td></tr>
+                <tr><td><code>specComplex(re, im)</code></td><td>A frame from real and imaginary parts (either may be a scalar, such as <code>0.0</code>).</td></tr>
+                <tr><td><code>frame specMag</code> &nbsp;/&nbsp; <code>frame specPhase</code></td><td>Each bin's magnitude, and its phase in radians (&minus;&pi;..&pi;).</td></tr>
+                <tr><td><code>specPolar(mag, phase)</code></td><td>A frame from magnitudes and phases (either may be a scalar).</td></tr>
+                <tr><td><code>frame specAmps(fftSize)</code></td><td>Magnitudes as amplitudes: a sinusoid of amplitude <code>a</code> reads <code>a</code> in its bin. Compare against <code>dbamp</code> levels for thresholds.</td></tr>
+                <tr><td><code>specBins(fftSize)</code></td><td>The bin numbers <code>0 .. fftSize/2 - 1</code>, as a constant row.</td></tr>
+                <tr><td><code>specBinFreqs(fftSize)</code></td><td>The bins' center frequencies in Hz at the running sample rate.</td></tr>
+            </table>
+
+            <h3 id="spec-body">13.2 Writing a body</h3>
+
+            <p>The body returns a frame of the same shape as the one it was given, or a scalar,
+            which fills every bin (<code>0.0</code> silences the chain). Anything else is a compile
+            error such as <em>spectralChain: the body returned a [512] signal; it must return the
+            frame's shape [2, 512] (or a scalar)</em>. The usual cause is returning
+            <code>frame specMag</code> or <code>specRe</code> where a whole frame was meant.</p>
+
+            <p>Inside the body, ordinary signal math applies bin by bin, and broadcasting
+            (<a href="#broadcast">&sect;2.4</a>) does the rest. A row of <code>fftSize / 2</code>
+            per-bin gains lines up with the bins, so it scales the real and imaginary rows alike, in
+            every channel. That is all a spectral filter needs. A brick-wall band-pass keeps the bins
+            between two frequencies:</p>
+
+<pre><code><span class="cmt">-- The examples below are from examples/spectral_synthdefs.x, which runs</span>
+<span class="cmt">-- every chain at one size:</span>
+<span class="hl-kw">const</span> N = <span class="hl-num">1024</span>;
+<span class="hl-kw">const</span> HOP = <span class="hl-num">256</span>;
+<span class="hl-kw">fn</span> spec(x S, body GraphFn1) S = spectralChain(x, N, HOP, body);
+
+<span class="hl-kw">fn</span> spBandPass(x S, lo AsSignal, hi AsSignal) S = x spec(<span class="hl-kw">fn</span>(frame S) {
+    <span class="hl-kw">let</span> f = specBinFreqs(N);
+    frame * ((f &gt;= lo) * (f &lt;= hi))
+});</code></pre>
+
+            <p>Controls and other signals from outside the body can be used in it directly; the body
+            reads their value at the sample its frame ends on. Here a tilt control turns per-bin
+            gains into an exact spectral EQ, with no filter ripple or phase shift:</p>
+
+<pre><code><span class="hl-kw">fn</span> spTilt(x S, dbPerOct AsSignal) S = x spec(<span class="hl-kw">fn</span>(frame S) {
+    <span class="hl-kw">let</span> octaves = specBinFreqs(N) max(<span class="hl-num">20.0</span>) / <span class="hl-num">1000.0</span> |&gt; log2;
+    frame * (octaves * dbPerOct |&gt; dbamp)
+});</code></pre>
+
+            <p>Comparisons give 0 or 1, so a test makes a mask. This noise gate zeroes every bin
+            quieter than a threshold. A tone's few strong bins pass, and hiss, which is spread thin
+            over all the bins, mostly does not:</p>
+
+<pre><code><span class="hl-kw">fn</span> spGate(x S, threshDb AsSignal) S = x spec(<span class="hl-kw">fn</span>(frame S) {
+    frame * (frame specAmps(N) &gt; (threshDb dbamp))
+});</code></pre>
+
+            <p>To treat channels differently, give a value one entry per channel and size-1 part and
+            bin axes. <code>[1.0, 0.5] reshape([2, 1, 1])</code> scales a stereo frame's right
+            channel by half. A plain <code>[1.0, 0.5]</code> row would line up with the
+            <em>bins</em>, not the channels, and halve every other bin.</p>
+
+            <p>Polar processing takes the frame apart into magnitude and phase. Keeping the
+            magnitudes and replacing the phases gives the classic robot and whisper effects. A phase
+            of <code>&pi;k</code> in bin <code>k</code> makes every frame a symmetric pulse centered
+            in its window, so the result buzzes at the frame rate (<code>fs / hopSize</code>)
+            whatever the input's pitch. (Zero phase would put the pulse at the frame's edges, where
+            the window is near zero, and lose 6 dB or more.) Random phase dissolves pitch into
+            breath. Random signals in a body draw new values every frame:</p>
+
+<pre><code><span class="hl-kw">fn</span> spRobot(x S) S = x spec(<span class="hl-kw">fn</span>(frame S) { specPolar(frame specMag, specBins(N) * pi) });
+
+<span class="hl-kw">fn</span> spWhisper(x S) S = x spec(<span class="hl-kw">fn</span>(frame S) {
+    specPolar(frame specMag, urand(N // <span class="hl-num">2</span>) * twopi)
+});</code></pre>
+
+            <h3 id="spec-shift">13.3 Moving bins</h3>
+
+            <p>The shape operations of <a href="#vecops">&sect;5</a> work along the bins (the last
+            axis). <code>rotate</code> shifts them, <code>reverse</code> mirrors the spectrum, and
+            <code>at</code> with a row of indices remaps it. Moving content between bins needs
+            care with phase: a partial moved up <code>s</code> bins must advance
+            <code>2&pi; &middot; s &middot; hopSize / fftSize</code> radians more per frame than it
+            did. Shifting in multiples of <code>fftSize / hopSize</code> bins makes that a whole
+            number of turns, so no correction is needed. This frequency shifter (the same number of
+            Hz added to every partial, so harmonic sounds become inharmonic) moves in such steps.
+            The bins that wrap around are masked off:</p>
+
+<pre><code><span class="hl-kw">fn</span> spShift(x S, steps AsSignal) S = x spec(<span class="hl-kw">fn</span>(frame S) {
+    <span class="hl-kw">let</span> shift = steps asSignal round * (N // HOP) |&gt; i32;
+    <span class="hl-kw">let</span> k = specBins(N);
+    frame rotate(<span class="hl-num">0</span> - shift) * ((k &gt;= shift) * (k &lt; N // <span class="hl-num">2</span> + shift))
+});</code></pre>
+
+            <h3 id="spec-state">13.4 State across frames</h3>
+
+            <p>A <code>delayVar</code> declared inside the body runs at the frame rate: the body
+            writes it once per frame, and <code>d read(1)</code> is what was written one frame ago.
+            It can hold a whole frame's worth of values. One-pole smoothing of the magnitudes from
+            frame to frame blurs transients into a wash:</p>
+
+<pre><code><span class="hl-kw">fn</span> spBlur(x S, amount AsSignal) S = x spec(<span class="hl-kw">fn</span>(frame S) {
+    <span class="hl-kw">let</span> m = frame specMag;
+    <span class="hl-kw">let</span> d = delayVar();
+    <span class="hl-kw">let</span> prev = d read(<span class="hl-num">1</span>);   <span class="cmt">-- the smoothed magnitudes one frame ago</span>
+    <span class="hl-kw">let</span> sm = prev + ((m - prev) * (<span class="hl-num">1.0</span> - amount));
+    sm -&gt; d;
+    specPolar(sm, frame specPhase)
+});</code></pre>
+
+            <p>Holding the magnitudes instead gives a freeze. Holding the phases as well would
+            repeat one frame, a buzz at the frame rate, so the held magnitudes get fresh random
+            phases each frame:</p>
+
+<pre><code><span class="hl-kw">fn</span> spFreeze(x S, freeze AsSignal) S = x spec(<span class="hl-kw">fn</span>(frame S) {
+    <span class="hl-kw">let</span> frozen = freeze asSignal &gt; <span class="hl-num">0.5</span>;
+    <span class="hl-kw">let</span> d = delayVar();
+    <span class="hl-kw">let</span> held = select2(frozen, d read(<span class="hl-num">1</span>), frame specMag);
+    held -&gt; d;
+    select2(frozen, specPolar(held, urand(N // <span class="hl-num">2</span>) * twopi), frame)
+});</code></pre>
+
+            <h3 id="spec-multi">13.5 Several signals in one frame</h3>
+
+            <p>Because every channel's spectrum is in the same frame, a body can combine signals:
+            run the chain on <code>[a, b] join</code> and take the frame apart with
+            <code>at(channel, 0)</code>. Cross-synthesis scales each bin of a carrier by a
+            modulator's amplitude in that bin, imposing the modulator's moving spectral envelope on
+            the carrier. The body must still return a two-channel frame, so it returns the result
+            in both channels:</p>
+
+<pre><code><span class="hl-kw">fn</span> spCross(carrier S, modulator S, gain AsSignal) S {
+    <span class="hl-kw">let</span> both = spec([carrier, modulator] join, <span class="hl-kw">fn</span>(frame S) {
+        <span class="hl-kw">let</span> car = frame at(<span class="hl-num">0</span>, <span class="hl-num">0</span>);
+        <span class="hl-kw">let</span> mod = frame at(<span class="hl-num">1</span>, <span class="hl-num">0</span>);
+        <span class="hl-kw">let</span> out = car * (mod specAmps(N) * gain);
+        [out, out] stack
+    });
+    both at(<span class="hl-num">0</span>)
 }</code></pre>
+
+            <h3 id="spec-sizes">13.6 Choosing sizes</h3>
+
+            <p>Larger frames resolve frequency more finely, at the cost of latency and of time
+            smearing within a frame:</p>
+
+            <table>
+                <tr><th><code>fftSize</code></th><th>Bin spacing at 48 kHz</th><th>Latency at 48 kHz</th></tr>
+                <tr><td>256</td><td>187.5 Hz</td><td>5.3 ms</td></tr>
+                <tr><td>512</td><td>93.8 Hz</td><td>10.7 ms</td></tr>
+                <tr><td>1024</td><td>46.9 Hz</td><td>21.3 ms</td></tr>
+                <tr><td>2048</td><td>23.4 Hz</td><td>42.7 ms</td></tr>
+                <tr><td>4096</td><td>11.7 Hz</td><td>85.3 ms</td></tr>
+            </table>
+
+            <p><code>hopSize = fftSize / 2</code> reconstructs exactly and is the cheapest. Bodies
+            that change magnitudes or phases a lot sound smoother with more overlap: 4&times;
+            (<code>fftSize / 4</code>) is a good default, and 8&times; helps heavy phase
+            manipulation. The cost is proportional to the overlap: each frame costs one FFT and one
+            inverse FFT per channel, plus the body.</p>
+
+            <p>A frame's whole cost lands in the sample where it completes, so the processing load
+            arrives in bursts, one every <code>hopSize</code> samples, rather than evenly.</p>
+
+            <div class="note">
+                <code>examples/spectral_synthdefs.x</code> has every effect in this section as a
+                function of its input signal (<code>spBandPass</code>, <code>spTilt</code>,
+                <code>spGate</code>, <code>spContrast</code>, <code>spRobot</code>,
+                <code>spWhisper</code>, <code>spShift</code>, <code>spBlur</code>,
+                <code>spFreeze</code>, <code>spCross</code>), each with a demo synthdef on a
+                synthetic source. <code>playSpectralExamples()</code> plays the demos in turn.
+            </div>
 
             <a href="#top" class="back-to-top">&uarr; Back to top</a>
         </div>
