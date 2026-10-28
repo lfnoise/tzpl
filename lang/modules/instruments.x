@@ -37,6 +37,7 @@
 -- control (an input with a spec), as on a physical synth: node-level,
 -- shared by all voices, set by name with
 --     setInput(nodeID, "cutoff", value);
+--     nodeID setInput(['cutoff: 900.0, 'res: 0.5]);    -- several at once
 -- (or by input index: controls come first, in declaration order,
 -- documented per def below).
 --

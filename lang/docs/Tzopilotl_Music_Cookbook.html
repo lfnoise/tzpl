@@ -1815,7 +1815,7 @@ definition, by name. Values are remembered on the proxy and re-applied after
 every redefinition whose definition still declares that control (a value whose
 control disappeared is kept and simply waits):</p>
 <pre><code>drone set(<span class="str">"freq"</span>, <span class="num">165.0</span>);
-drone &lt;- [<span class="str">"freq"</span>: <span class="num">220.0</span>];        <span class="cmt">-- map form: several at once</span></code></pre>
+drone &lt;- [<span class="str">'freq</span>: <span class="num">220.0</span>];         <span class="cmt">-- map form: several at once, in one bundle</span></code></pre>
 
 <h3 id="live-notes">12.4 Notes into proxies</h3>
 <p>A proxy whose definition uses <code>voicer</code> and <code>noteParam</code> is

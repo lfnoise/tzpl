@@ -44,6 +44,13 @@ drone <- ["freq": 120.0];
 assertNear(get((*drone.state).params, "freq", 0.0), 120.0, 0.0001,
            "<- map stores params");
 
+-- symbol keys too; a key the source doesn't declare is stored, not sent
+drone <- ['freq: 130.0, 'cutoff: 900.0];
+assertNear(get((*drone.state).params, "freq", 0.0), 130.0, 0.0001,
+           "<- symbol map stores params");
+assertNear(get((*drone.state).params, "cutoff", 0.0), 900.0, 0.0001,
+           "<- stores an undeclared param");
+
 -- redefine: fresh source node, stored param re-applied (freq exists)
 okOr(define(drone, fn() S {
     let f = control("freq", espec(40.0, 800.0, 220.0));

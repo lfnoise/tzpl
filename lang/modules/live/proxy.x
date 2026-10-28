@@ -257,9 +257,27 @@ fn call(p Proxy) S = p sig;
 fn <-(p Proxy, f GraphFn) Void { define(p, f); }
 fn ->(f GraphFn, p Proxy) Void { define(p, f); }
 
--- Bulk param set: p <- ["freq": 165.0, "cutoff": 800.0];
+-- Bulk param set: p <- ['freq: 165.0, 'cutoff: 800.0]; (or string keys).
+-- Every value is stored; the ones the current source declares go out in
+-- one bundle.
 fn <-(p Proxy, ps [String: Float]) Void {
-    for (k : ps keys) { set(p, k, get(ps, k, 0.0)); }
+    let s = *p.state;
+    let stored = s.params;
+    var live [String: Float] = [:];
+    for (k : ps keys) {
+        let v = get(ps, k, 0.0);
+        stored[k] = v;
+        if (s.ctlNames contains(k)) { live[k] = v; }
+    }
+    if (s.src != 0 && !(live isEmpty)) {
+        bundle() setInput(s.src, live) go(p.silo);
+    }
+}
+
+fn <-(p Proxy, ps [Symbol: Float]) Void {
+    var named [String: Float] = [:];
+    for (k : ps keys) { named[k toString] = get(ps, k, 0.0); }
+    p <- named;
 }
 
 -- Awaitable form of `<-` for scripts and tests. While a build is in
