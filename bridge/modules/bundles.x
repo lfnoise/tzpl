@@ -163,6 +163,20 @@ fn setInput<P, V>(b Bundle, node Int, port P, value V, rampTime Float = 0.0,
 	b add(EngineCmd.input(node, _portIndex(port), _portName(port), 0, 0, [Int](), [Int](),
 	                      _values(value), rampTime, curve, kInputStep));
 
+-- Several inputs at once, by name: b setInput(node, ['cutoff: 900.0, 'res: 0.5]),
+-- with Symbol or String keys.
+fn setInput(b Bundle, node Int, inputs [String: Float], rampTime Float = 0.0,
+            curve FadeCurve = FadeCurve.fadeLinear) Bundle {
+	for (k : inputs keys) { setInput(b, node, k, get(inputs, k, 0.0), rampTime, curve); }
+	b
+}
+
+fn setInput(b Bundle, node Int, inputs [Symbol: Float], rampTime Float = 0.0,
+            curve FadeCurve = FadeCurve.fadeLinear) Bundle {
+	for (k : inputs keys) { setInput(b, node, k toString, get(inputs, k, 0.0), rampTime, curve); }
+	b
+}
+
 fn setInputAt<P, V>(b Bundle, node Int, port P, first Int, value V, rampTime Float = 0.0,
                     curve FadeCurve = FadeCurve.fadeLinear) Bundle {
 	let vs = _values(value);

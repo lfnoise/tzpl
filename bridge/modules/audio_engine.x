@@ -73,6 +73,9 @@ enum Err {
 --
 --   setInput(node, port, value)              step the whole input
 --   setInput(node, port, value, rampTime)    ramp from the current value
+--   node setInput(['cutoff: 900.0, ...])      several inputs by name (a map
+--                                            with Symbol or String keys;
+--                                            optional rampTime, curve)
 --   setInputAt(node, port, first, values)    flat channels [first, first+n)
 --   setInputBox(node, port, offset, extent, values)
 --                                            a box in shape coordinates
@@ -98,6 +101,30 @@ fn setInput<P, V>(nodeID Int, port P, value V, rampTime Float = 0.0,
                   curve FadeCurve = FadeCurve.fadeLinear) Int =
 	inputOp(nodeID, _portIndex(port), _portName(port), 0, 0, _inputValues(value),
 	        rampTime, curve ordinal, 0);
+
+-- Several inputs at once, by name: node setInput(["cutoff": 900.0, "res": 0.5])
+-- (or with symbol keys, below).
+-- Returns the first error, after attempting every input.
+fn setInput(nodeID Int, inputs [String: Float], rampTime Float = 0.0,
+            curve FadeCurve = FadeCurve.fadeLinear) Int {
+	var err = 0;
+	for (k : inputs keys) {
+		let e = setInput(nodeID, k, get(inputs, k, 0.0), rampTime, curve);
+		if (err == 0) { err = e; }
+	}
+	err
+}
+
+-- The same with symbol names: node setInput(['cutoff: 900.0, 'res: 0.5]).
+fn setInput(nodeID Int, inputs [Symbol: Float], rampTime Float = 0.0,
+            curve FadeCurve = FadeCurve.fadeLinear) Int {
+	var err = 0;
+	for (k : inputs keys) {
+		let e = setInput(nodeID, k toString, get(inputs, k, 0.0), rampTime, curve);
+		if (err == 0) { err = e; }
+	}
+	err
+}
 
 fn setInputAt<P, V>(nodeID Int, port P, first Int, value V, rampTime Float = 0.0,
                     curve FadeCurve = FadeCurve.fadeLinear) Int {

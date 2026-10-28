@@ -925,6 +925,8 @@ x reshape([<span class="hl-num">6</span>, -<span class="hl-num">1</span>])  <spa
                 <tr><th>Call</th><th>Effect</th></tr>
                 <tr><td><code>setInput(node, port, value)</code><br><code>setInput(node, port, value, rampTime, curve)</code></td>
                     <td>Step the whole input to <code>value</code>, or ramp to it over <code>rampTime</code> seconds (<code>curve</code> is a <code>FadeCurve</code>, linear by default).</td></tr>
+                <tr><td><code>node setInput(['cutoff: 900.0, 'res: 0.5])</code><br><code>node setInput(inputs, rampTime, curve)</code></td>
+                    <td>Several inputs at once, by name: a map from input name (a symbol, or a string) to value, each set (or ramped) as above.</td></tr>
                 <tr><td><code>setInputAt(node, port, first, values, rampTime)</code></td>
                     <td>The same for the channels <code>first</code> .. <code>first + n - 1</code> of a multichannel input (row-major order); the others keep their values.</td></tr>
                 <tr><td><code>setInputBox(node, port, offset, extent, values, rampTime)</code></td>

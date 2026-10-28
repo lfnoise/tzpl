@@ -110,34 +110,34 @@ connect(kBass, 0, kGBass, 0);
 connect(kGBass, 0, 0, 0);
 
 -- lead: a soft attack, a gentle filter bloom on each note
-setInput(kLead, "attack", 0.01);
-setInput(kLead, "decay", 0.4);
-setInput(kLead, "sustain", 0.6);
-setInput(kLead, "release", 0.35);
-setInput(kLead, "cutoff", 900.0);
-setInput(kLead, "envOct", 2.0);
-setInput(kLead, "res", 0.5);
-setInput(kLead, "fdecay", 0.3);
+kLead setInput([
+    'attack: 0.01,
+    'decay: 0.4,
+    'sustain: 0.6,
+    'release: 0.35,
+    'cutoff: 900.0,
+    'envOct: 2.0,
+    'res: 0.5,
+    'fdecay: 0.3,
+]);
 -- bass: a dark, round saw with a short filter blip
-setInput(kBass, "attack", 0.005);
-setInput(kBass, "decay", 0.3);
-setInput(kBass, "sustain", 0.8);
-setInput(kBass, "release", 0.15);
-setInput(kBass, "cutoff", 220.0);
-setInput(kBass, "envOct", 1.5);
-setInput(kBass, "res", 0.7);
-setInput(kBass, "fdecay", 0.15);
+kBass setInput([
+    'attack: 0.005,
+    'decay: 0.3,
+    'sustain: 0.8,
+    'release: 0.15,
+    'cutoff: 220.0,
+    'envOct: 1.5,
+    'res: 0.7,
+    'fdecay: 0.15,
+]);
 -- pluck: a bright string with a medium ring, harp-like under the arpeggio
 setInput(kPluck, "decay", 2.5);
 setInput(kPluck, "damp", 0.25);
 -- pad: bowed, slow in and out
-setInput(kPad, "attack", 0.6);
-setInput(kPad, "release", 1.0);
-setInput(kPad, "decay", 3.0);
+kPad setInput(['attack: 0.6, 'release: 1.0, 'decay: 3.0]);
 -- echo a dotted eighth at 96 bpm, kept low; a medium room
-setInput(kEcho, "time", 0.469);
-setInput(kEcho, "feedback", 0.25);
-setInput(kEcho, "mix", 0.18);
+kEcho setInput(['time: 0.469, 'feedback: 0.25, 'mix: 0.18]);
 setInput(kVerb, "decay", 2.5);
 setInput(kVerb, "mix", 0.22);
 -- draft balance, from solo renders: pluck 3 dB under the bass, lead 1 dB
