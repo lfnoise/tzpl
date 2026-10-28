@@ -969,14 +969,14 @@ n stop;</code></pre>
                 <tr><th>Function</th><th>Kind</th><th>Description</th></tr>
                 <tr><td><code>control(name, spec, chans = 1)</code><br><code>control(name, spec, shape)</code></td><td>continuous</td>
                     <td>Ranged value; UIs render a slider.</td></tr>
-                <tr><td><code>trigger(name, chans = 1)</code></td><td>trigger</td>
+                <tr><td><code>trigger(name, chans = 1)</code><br><code>trigger(name, shape)</code></td><td>trigger</td>
                     <td>Momentary input (0..1, init 0). Fire it with <code>impulseInput</code>: the value lasts one sample, then the input returns to 0 &mdash; retrigger an envelope, reset a phase. UIs render a button.</td></tr>
-                <tr><td><code>toggle(name, init = 0.0, chans = 1)</code></td><td>boolean</td>
+                <tr><td><code>toggle(name, init = 0.0, chans = 1)</code><br><code>toggle(name, init, shape)</code></td><td>boolean</td>
                     <td>Latched 0/1 state. UIs render a toggle.</td></tr>
-                <tr><td><code>choice(name, numChoices, init = 0, chans = 1)</code></td><td>select</td>
+                <tr><td><code>choice(name, numChoices, init = 0, chans = 1)</code><br><code>choice(name, numChoices, init, shape)</code></td><td>select</td>
                     <td>Integer choice 0 .. numChoices-1 in unit steps. UIs render a number box. Pairs naturally with <code>switch</code> (<a href="#controlflow">&sect;11</a>).</td></tr>
-                <tr><td><code>noteParam(name, spec, chans = 1)</code></td><td>&mdash;</td>
-                    <td>Per-note parameter inside a voicer body: <code>chans</code> columns of the synth's <code>notes</code> input, not an input of its own (<a href="#voicer">&sect;12</a>).</td></tr>
+                <tr><td><code>noteParam(name, spec, chans = 1)</code><br><code>noteParam(name, spec, shape)</code></td><td>&mdash;</td>
+                    <td>Per-note parameter inside a voicer body: <code>chans</code> columns of the synth's <code>notes</code> input (with a shape, as many columns as it has channels, read as that shape), not an input of its own (<a href="#voicer">&sect;12</a>).</td></tr>
                 <tr><td><code>gate()</code></td><td>&mdash;</td>
                     <td>The per-note gate: column 0 of <code>notes</code>, set by the engine &mdash; 1 while the note is held, 0 after note-off.</td></tr>
             </table>
@@ -1058,7 +1058,8 @@ n stop;</code></pre>
         <div class="section" id="random">
             <h2>8. Random Signals</h2>
 
-            <p>Random sources take a channel count and a rate. At <code>Rate.audio</code> (the default)
+            <p>Random sources take a channel count and a rate. In place of the count, each also
+            takes a shape: <code>urand([2, 3])</code> is a 2&times;3 matrix of independent values. At <code>Rate.audio</code> (the default)
             they produce a new value every sample per channel &mdash; noise. At <code>Rate.init</code>
             they produce values once per synth instance &mdash; randomized fixed parameters, different in
             every node you create. Each synth instance seeds its own RNG.</p>
@@ -1756,6 +1757,9 @@ n stop;</code></pre>
             </table>
 
             <h3 id="ug-noise">15.8 Noise generators</h3>
+            <p>Every generator here except <code>pandust</code> also takes a shape in place of
+            <code>chans</code>, with independent noise in each channel: <code>pink([2, 3])</code>,
+            <code>dust(10, [4, 2])</code>.</p>
             <table>
                 <tr><th>Function</th><th>Description</th></tr>
                 <tr><td><code>white(chans = 1)</code></td><td>White noise (= <code>birand(chans)</code>).</td></tr>

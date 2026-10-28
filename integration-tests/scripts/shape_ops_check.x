@@ -252,6 +252,36 @@ add("lit_cyclic", fn() S { tensor([2, 3], [1.0, 2.0]) * one() }, ([1.0, 2.0, 1.0
 add("fill_dims", fn() S { fill([2, 2], 0.5) * one() }, ([0.5, 0.5, 0.5, 0.5], [2, 2]));
 add("ctl_dims", fn() S { control("g", lspec(0.0, 1.0, 0.25), [2, 3]) * one() },
 	([0.25, 0.25, 0.25, 0.25, 0.25, 0.25], [2, 3]));
+add("trig_dims", fn() S { trigger("t", [2, 3]) * one() }, ([0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [2, 3]));
+add("toggle_dims", fn() S { toggle("b", 1.0, [3, 2]) * one() }, ([1.0, 1.0, 1.0, 1.0, 1.0, 1.0], [3, 2]));
+add("choice_dims", fn() S { choice("c", 4, 2, [2, 2]) * one() }, ([2.0, 2.0, 2.0, 2.0], [2, 2]));
+-- The driver plays voice 0 (gate on), so the voices sum to the init value.
+add("noteparam_dims", fn() S {
+	voicer(2, fn() S { noteParam("p", lspec(0.0, 1.0, 0.5), [2, 3]) * gate() }) sum(0) * one()
+}, ([0.5, 0.5, 0.5, 0.5, 0.5, 0.5], [2, 3]));
+-- Random generators with shapes: 1 wherever a channel is in the
+-- generator's range, so the whole result is ones of the shape.
+fn inRange(x S, lo Float, hi Float) S = (x >= lo) * (x <= hi);
+let ones23 = ([1.0, 1.0, 1.0, 1.0, 1.0, 1.0], [2, 3]);
+add("frand_dims", fn() S { inRange(frand(2.0, 3.0, [2, 3]), 2.0, 3.0) * one() }, ones23);
+add("irand_dims", fn() S { inRange(irand(2, 5, [2, 3]), 2.0, 5.0) * one() }, ones23);
+add("exprand_dims", fn() S { inRange(exprand(100.0, 1000.0, [2, 3]), 99.9, 1000.1) * one() }, ones23);
+add("white_dims", fn() S { inRange(white([2, 3]), -1.0, 1.0) * one() }, ones23);
+add("violet_dims", fn() S { inRange(violet([2, 3]), -1.0, 1.0) * one() }, ones23);
+add("red_dims", fn() S { inRange(red([2, 3]), -1.0, 1.0) * one() }, ones23);
+add("gray_dims", fn() S { inRange(gray([2, 3]), -1.0, 1.0) * one() }, ones23);
+add("pinkf_dims", fn() S { inRange(pinkf([2, 3]), -4.0, 4.0) * one() }, ones23);
+add("pinkfe_dims", fn() S { inRange(pinkfe([2, 3]), -4.0, 4.0) * one() }, ones23);
+add("blue_dims", fn() S { inRange(blue([2, 3]), -16.0, 16.0) * one() }, ones23);
+add("pink_dims", fn() S { inRange(pink([2, 3]), -4.0, 4.0) * one() }, ones23);
+add("coin_dims", fn() S { inRange(coin(0.5, [2, 3]), 0.0, 1.0) * one() }, ones23);
+add("velvet_dims", fn() S { inRange(velvet(1000.0, [2, 3]), 0.0, 1.0) * one() }, ones23);
+add("dust_dims", fn() S { inRange(dust(1000.0, [2, 3]), 0.0, 1.0) * one() }, ones23);
+add("dust2_dims", fn() S { inRange(dust2(1000.0, [2, 3]), -1.0, 1.0) * one() }, ones23);
+add("dustep_dims", fn() S { inRange(dustep(1000.0, [2, 3]), -1.0, 1.0) * one() }, ones23);
+add("lfnoise0_dims", fn() S { inRange((50.0 asSignal) lfnoise0([2, 3]), -1.0, 1.0) * one() }, ones23);
+add("lfnoise1_dims", fn() S { inRange((50.0 asSignal) lfnoise1([2, 3]), -1.0, 1.0) * one() }, ones23);
+add("lfnoise3_dims", fn() S { inRange((50.0 asSignal) lfnoise3([2, 3]), -2.0, 2.0) * one() }, ones23);
 add("transpose_r2", fn() S { live(x34, d34) transpose }, refPermute(x34, d34, [1, 0]));
 add("transpose_r3", fn() S { live(x234, d234) transpose }, refPermute(x234, d234, [2, 1, 0]));
 add("permute_r3", fn() S { live(x234, d234) transpose([1, 2, 0]) }, refPermute(x234, d234, [1, 2, 0]));

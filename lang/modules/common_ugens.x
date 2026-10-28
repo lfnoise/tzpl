@@ -785,22 +785,24 @@ fn xline(lo, hi, dur) S = lo * (hi / lo) pow(ramp(dur));
 -- the output continuous -- the same trick the original delay-indexed
 -- version used.
 
-fn lfnoise0(freq S, chans Int) S {
+fn lfnoise0(freq S, chans Int) S = lfnoise0(freq, chansShape(chans max(1)));
+fn lfnoise0(freq S, sh AsShape) S {
 	let trig = freq phasor eoc;
-	let y = delayVar() init(1, birand(chans, Rate.init));
-	if_((trig sum) > 0, fn(){ y <- select2(trig, white(chans), y(1)) });
+	let y = delayVar() init(1, birand(sh, Rate.init));
+	if_((trig sum) > 0, fn(){ y <- select2(trig, white(sh), y(1)) });
 	y(1)
 }
 
-fn lfnoise1(freq S, chans Int) S {
+fn lfnoise1(freq S, chans Int) S = lfnoise1(freq, chansShape(chans max(1)));
+fn lfnoise1(freq S, sh AsShape) S {
 	let p = freq phasor;
 	let trig = p eoc;
-	let a = delayVar() init(1, birand(chans, Rate.init));  -- segment start
-	let b = delayVar() init(1, birand(chans, Rate.init));  -- segment end
+	let a = delayVar() init(1, birand(sh, Rate.init));  -- segment start
+	let b = delayVar() init(1, birand(sh, Rate.init));  -- segment end
 	if_((trig sum) > 0, fn(){
 		let b1 = b(1);
 		a <- select2(trig, b1, a(1));
-		b <- select2(trig, white(chans), b1)
+		b <- select2(trig, white(sh), b1)
 	});
 	let q = z1(p);
 	let a1 = a(1);
@@ -810,13 +812,14 @@ fn lfnoise1(freq S, chans Int) S {
 -- Cubic (Catmull-Rom) noise, one period of latency so the curve has a point
 -- ahead of it. Stands in for SC's LFNoise2 (parabolic) when translating SC
 -- examples, since only the cubic variant is available here.
-fn lfnoise3(freq S, chans Int) S {
+fn lfnoise3(freq S, chans Int) S = lfnoise3(freq, chansShape(chans max(1)));
+fn lfnoise3(freq S, sh AsShape) S {
 	let p = freq phasor;
 	let trig = p eoc;
-	let y0 = delayVar() init(1, birand(chans, Rate.init));  -- newest
-	let y1 = delayVar() init(1, birand(chans, Rate.init));
-	let y2 = delayVar() init(1, birand(chans, Rate.init));
-	let y3 = delayVar() init(1, birand(chans, Rate.init));  -- oldest
+	let y0 = delayVar() init(1, birand(sh, Rate.init));  -- newest
+	let y1 = delayVar() init(1, birand(sh, Rate.init));
+	let y2 = delayVar() init(1, birand(sh, Rate.init));
+	let y3 = delayVar() init(1, birand(sh, Rate.init));  -- oldest
 	if_((trig sum) > 0, fn(){
 		let v0 = y0(1);
 		let v1 = y1(1);
@@ -824,7 +827,7 @@ fn lfnoise3(freq S, chans Int) S {
 		y3 <- select2(trig, v2, y3(1));
 		y2 <- select2(trig, v1, v2);
 		y1 <- select2(trig, v0, v1);
-		y0 <- select2(trig, white(chans), v0)
+		y0 <- select2(trig, white(sh), v0)
 	});
 	let q = z1(p);
 	let n0 = y0(1);
@@ -890,28 +893,35 @@ fn pinkmfe(chans Int = 1) S = 0.25 * white(chans) pinkingFilterEcoMat;
 
 
 fn white(chans Int = 1) S = birand(chans);
+fn white(sh AsShape) S = birand(sh);
 
 -- Measured at fs = 48 kHz: 1/f within +/-0.05 dB from 100 Hz to Nyquist
 -- (+/-0.2 dB from 20 Hz); flattens to white below ~10 Hz (lowest pole).
 fn pinkf(chans Int = 1) S = 0.25 * white(chans) pinkingFilter;
+fn pinkf(sh AsShape) S = 0.25 * white(sh) pinkingFilter;
 
 -- Measured at fs = 48 kHz: 1/f within +/-0.6 dB over 20 Hz-20 kHz;
 -- flattens to white below ~20 Hz.
 fn pinkfe(chans Int = 1) S = 0.25 * white(chans) pinkingFilterEco;
+fn pinkfe(sh AsShape) S = 0.25 * white(sh) pinkingFilterEco;
 
 
 fn violet(chans Int = 1) S = 0.5 * white(chans) diff;
+fn violet(sh AsShape) S = 0.5 * white(sh) diff;
 
 fn blue(chans Int = 1) S = 2.0 * pinkf(chans) diff;
+fn blue(sh AsShape) S = 2.0 * pinkf(sh) diff;
 
-fn red(chans Int = 1, a=0.05) S {
+fn red(chans Int = 1, a=0.05) S = red(chansShape(chans max(1)), a);
+fn red(sh AsShape, a Float = 0.05) S {
 	let y = delayVar();
-	y <- (y(1) + chans birand * a) bfold_cheaper
+	y <- (y(1) + sh birand * a) bfold_cheaper
 }
 
-fn gray(chans Int = 1) S {
-	let r = delayVar() init(1, rand64(chans, Rate.init));
-	(r <- r(1) ^ (1 << (rand64(chans) & 63))) f64 * 1.084202172485504434e-19 |> f32
+fn gray(chans Int = 1) S = gray(chansShape(chans max(1)));
+fn gray(sh AsShape) S {
+	let r = delayVar() init(1, rand64(sh, Rate.init));
+	(r <- r(1) ^ (1 << (rand64(sh) & 63))) f64 * 1.084202172485504434e-19 |> f32
 }
 
 -- pink noise: the SuperCollider PinkNoise algorithm (Voss-McCartney with
@@ -968,26 +978,38 @@ fn pink(chans Int = 1) S {
 	for (i : (1..chans)) { v push!(_pink1()); }
 	v join
 }
+-- Independent generators for each channel of the shape.
+fn pink(sh AsShape) S {
+	let s = sh asShape;
+	let p = pink(s chans);
+	s.rank <= 1 ? p : p reshape(s)
+}
 
 -- 1 with probability `prob`, else zero, each sample.
 fn coin(prob AsSignal, chans Int = 1) S = urand(chans) < prob;
+fn coin(prob AsSignal, sh AsShape) S = urand(sh) < prob;
 
 -- velvet noise = `density` 1's each second (on average), otherwise zero.
 fn velvet(density AsSignal, chans Int = 1) S = coin(density * T(), chans);
+fn velvet(density AsSignal, sh AsShape) S = coin(density * T(), sh);
 
 -- dust = `density` values of random unipolar values each second (on average), otherwise zero.
 fn dust(density AsSignal, chans Int = 1) S = urand(chans) * velvet(density, chans);
+fn dust(density AsSignal, sh AsShape) S = urand(sh) * velvet(density, sh);
 
 -- dust2 = `density` values of random bipolar values each second (on average), otherwise zero.
 fn dust2(density AsSignal, chans Int = 1) S = birand(chans) * velvet(density, chans);
+fn dust2(density AsSignal, sh AsShape) S = birand(sh) * velvet(density, sh);
 
 -- randomly panned, randomly timed, random amplitude impulses: a 2 x chans
 -- matrix (row 0 left, row 1 right); `sum(cols)` mixes it to stereo.
 fn pandust(density AsSignal, chans Int = 1) S = urand(chans) panfuns stack * velvet(density, chans);
 
 fn dustep(freq AsSignal, chans Int = 1) S = white(chans) sampleAndHold(velvet(freq, chans));
+fn dustep(freq AsSignal, sh AsShape) S = white(sh) sampleAndHold(velvet(freq, sh));
 
 fn exprand(a AsSignal, b AsSignal, chans Int = 1, rate = Rate.audio) S = urand(chans, rate) uniexp(a, b);
+fn exprand(a AsSignal, b AsSignal, sh AsShape, rate = Rate.audio) S = urand(sh, rate) uniexp(a, b);
 
 
 -- mouse input

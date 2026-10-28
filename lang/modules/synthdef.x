@@ -803,11 +803,17 @@ fn control(name String, spec ControlSpec, sh AsShape) S =
 fn trigger(name String, chans Int = 1) S =
     _specInlet(name, ControlSpec { lo: 0.0, hi: 1.0, init: 0.0, warp: ControlWarp.linear },
                ControlKind.trigger, chansShape(chans max(1)));
+fn trigger(name String, sh AsShape) S =
+    _specInlet(name, ControlSpec { lo: 0.0, hi: 1.0, init: 0.0, warp: ControlWarp.linear },
+               ControlKind.trigger, sh asShape);
 
 -- Latched on/off control (0 or 1). UIs render a toggle.
 fn toggle(name String, init Float = 0.0, chans Int = 1) S =
     _specInlet(name, ControlSpec { lo: 0.0, hi: 1.0, init: init, warp: ControlWarp.linear },
                ControlKind.boolean, chansShape(chans max(1)));
+fn toggle(name String, init Float, sh AsShape) S =
+    _specInlet(name, ControlSpec { lo: 0.0, hi: 1.0, init: init, warp: ControlWarp.linear },
+               ControlKind.boolean, sh asShape);
 
 -- Integer choice control: 0 .. numChoices-1 in unit steps. UIs render a
 -- number box.
@@ -815,12 +821,23 @@ fn choice(name String, numChoices Int, init Int = 0, chans Int = 1) S =
     _specInlet(name, ControlSpec { lo: 0.0, hi: (numChoices - 1) toFloat, init: init toFloat,
                                    warp: ControlWarp.step(1.0) },
                ControlKind.select, chansShape(chans max(1)));
+fn choice(name String, numChoices Int, init Int, sh AsShape) S =
+    _specInlet(name, ControlSpec { lo: 0.0, hi: (numChoices - 1) toFloat, init: init toFloat,
+                                   warp: ControlWarp.step(1.0) },
+               ControlKind.select, sh asShape);
 
 -- A note parameter of the enclosing voicer: `chans` columns of its voiced
 -- synth's `notes` input (gate is column 0; the others follow in the order
 -- they are declared). Set per note by noteOn / noteSetParams.
 fn noteParam(name String, spec ControlSpec, chans Int = 1) S {
     SignalExprKind.noteParam(spec, chans max(1) pow2Compat, name) _newSignalExpr
+}
+-- A shaped note parameter: as many columns as the shape has channels,
+-- read as that shape.
+fn noteParam(name String, spec ControlSpec, sh AsShape) S {
+    let s = sh asShape;
+    let p = noteParam(name, spec, s chans);
+    s.rank <= 1 ? p : p reshape(s)
 }
 
 fn gate() S {
@@ -873,11 +890,15 @@ fn debug(input S, label String = "debug", period Int = 4096, consecutive Int = 1
 -- synthdef compiler") and urand's lowering is already exercised end-to-end.
 fn frand(lo Float, hi Float, chans Int = 1, rate Rate = Rate.audio) S =
     lo + (hi - lo) * urand(chans, rate);
+fn frand(lo Float, hi Float, sh AsShape, rate Rate = Rate.audio) S =
+    lo + (hi - lo) * urand(sh, rate);
 -- Uniform integer in [lo, hi] inclusive. Same urand-based construction as
 -- frand above, for the same reason (no synthc lowering for RandOp.irand);
 -- the min() guards the one-in-2^24 f32 case where u*(n) rounds up to n.
 fn irand(lo Int, hi Int, chans Int = 1, rate Rate = Rate.audio) S =
     (lo + min(hi - lo, (urand(chans, rate) * (hi - lo + 1)) floor)) i32;
+fn irand(lo Int, hi Int, sh AsShape, rate Rate = Rate.audio) S =
+    (lo + min(hi - lo, (urand(sh, rate) * (hi - lo + 1)) floor)) i32;
 fn urand(chans Int = 1, rate Rate = Rate.audio) S = urand(chansShape(chans max(1)), rate);
 fn birand(chans Int = 1, rate Rate = Rate.audio) S = birand(chansShape(chans max(1)), rate);
 fn rand64(chans Int = 1, rate Rate = Rate.audio) S = rand64(chansShape(chans max(1)), rate);
