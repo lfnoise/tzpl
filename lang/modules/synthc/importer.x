@@ -43,10 +43,6 @@ fn importGraph(g SignalGraph, name String, applyRewrites Bool = false,
 	var `scOutletSerials Int = 0;
 	var `scRandSerials Int = 0;
 	var `scDebugSerials Int = 0;
-	-- The most recently imported SpectralFrameInput node, so the enclosing
-	-- spectral_chain can set its shape (= inputChans * fftSize) once the input is
-	-- known (mirrors the C++ spectral_chain() setting frame->chans afterwards).
-	var `scLastSpectralFrame Int = NONE;
 
 	for (e : g.exprs) {
 		_importExpr(e);
@@ -995,28 +991,27 @@ fn _importExpr(e SignalExpr) Void {
 			ctx.voicerSilence push!(silence);
 		}
 		spectralFrame(fftSize): {
-			-- The packed split-complex FFT frame: a source node (no inputs), type
-			-- f32. Its chans (inputChans * fftSize) is set by the enclosing
-			-- spectral_chain once its input is known; default to fftSize (mono).
-			let n = _addExprNode(NodeKind.spectralFrameK(fftSize), [Int](), Rate.audio, FLOAT32, row(fftSize));
-			`scLastSpectralFrame = n;
+			-- The FFT frame: a source node (no inputs) of type f32, made inside
+			-- the chain's body graph. Its shape depends on the chain's input
+			-- channel count, so the enclosing spectral_chain sets it; mono until then.
+			let n = _addExprNode(NodeKind.spectralFrameK(fftSize), [Int](), Rate.audio, FLOAT32, spectralFrameShape(1, fftSize));
 			_mapId(e.id, n);
 		}
 		spectralChain(fftSize, hopSize, bodySg): {
 			-- SpectralChainExpr is a ControlFlowExpr with one subgraph (the body,
 			-- operating on the frame). rate/type from the input; chans = input chans.
 			let ins = e _resolveIns;                  -- [input]
-			let frame = `scLastSpectralFrame;
 			let bodyPhi = _importSubgraph(bodySg);
 			var ctx Ctx = `scCtx;
 			let r = max(_maxRateOf(ins), ctx.nrate[bodyPhi]);
 			let sh = ctx.shape[ins[0]];
-			-- The frame's shape is inputChans * fftSize.
-			if (frame != NONE) {
-				ctx.shape[frame] = row(sh chans * fftSize);
-				ctx.chans[frame] = sh chans * fftSize;
-			}
 			let scNode = _addCFNode(NodeKind.spectralChainK(fftSize, hopSize), ins, [bodyPhi], r, FLOAT32, sh);
+			let frame = ctx spectralFrameOf(scNode);
+			if (frame != NONE) {
+				let fsh = spectralFrameShape(sh chans, fftSize);
+				ctx.shape[frame] = fsh;
+				ctx.chans[frame] = fsh chans;
+			}
 			_linkPhi(bodyPhi, scNode, r);
 			_mapId(e.id, scNode);
 		}

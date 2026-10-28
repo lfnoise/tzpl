@@ -865,11 +865,52 @@ fn doneWhen(x S, cond S) S {
     x
 }
 
+-- Short-time spectral processing. Every `hopSize` samples the last `fftSize`
+-- samples of each channel of `input` are windowed (sqrt-Hann) and FFT'd, the
+-- frames go through `bodyFn`, and the result is inverse FFT'd, windowed again
+-- and overlap-added: an identity body gives back `input`, delayed by
+-- `fftSize` samples. The frame the body gets is a [chans, 2, fftSize/2]
+-- tensor ([2, fftSize/2] for a mono input): row 0 holds the real parts of
+-- the bins, row 1 the imaginary parts, except that bin 0 packs DC (real) and
+-- Nyquist (imaginary). The body returns a frame of the same shape (or a
+-- scalar, which fills every bin). fftSize is a power of two >= 4; hopSize a
+-- power of two no more than fftSize/2.
 fn spectralChain(input S, fftSize Int, hopSize Int, bodyFn GraphFn1) S {
-	let frameExpr S = SignalExprKind.spectralFrame(fftSize) _newSignalExpr;
-	let bodyGraph SignalGraph = bodyFn _makeSubGraph1(frameExpr);
+	let isPow2 = fn(n Int) Bool { n > 0 && (n & (n - 1)) == 0 };
+	if (!isPow2(fftSize) || fftSize < 4) {
+		panic("spectralChain: fftSize must be a power of two >= 4 (got %^)" fmt(fftSize));
+	}
+	if (!isPow2(hopSize) || hopSize > fftSize // 2) {
+		panic("spectralChain: hopSize must be a power of two <= fftSize/2 (got %^ for fftSize %^)" fmt(hopSize, fftSize));
+	}
+	-- The frame is made inside the body graph, so the body reads it after
+	-- the hop's FFT has filled it.
+	let bodyGraph SignalGraph = _makeSubGraph(fn() S {
+		bodyFn(SignalExprKind.spectralFrame(fftSize) _newSignalExpr)
+	});
 	SignalExprKind.spectralChain(fftSize, hopSize, bodyGraph) _newSignalExpr([input])
 }
+
+-- Spectral frame parts (see spectralChain). The real and imaginary parts are
+-- [chans, fftSize/2] ([fftSize/2] for mono); specComplex puts them back
+-- together. Bin 0 is DC in the real part and Nyquist in the imaginary part,
+-- so polar operations treat those two as one bin.
+fn specRe(frame S) S = frame at(0, -2);   -- -2: the rows axis
+fn specIm(frame S) S = frame at(1, -2);
+fn specComplex(re AsSignal, im AsSignal) S = [re asSignal, im asSignal] stack(-2);
+fn specMag(frame S) S = hypot(frame specRe, frame specIm);
+fn specPhase(frame S) S = atan2(frame specIm, frame specRe);
+-- The bins' magnitudes as amplitudes: a sinusoid of amplitude a centered on
+-- a bin reads a there (the sqrt-Hann window sums to 2 fftSize / pi).
+fn specAmps(frame S, fftSize Int) S = frame specMag * (3.14159265358979 / fftSize);
+fn specPolar(mag AsSignal, phase AsSignal) S {
+	let m = mag asSignal;
+	let ph = phase asSignal;
+	specComplex(m * (ph cos), m * (ph sin))
+}
+-- The bin numbers 0 .. fftSize/2 - 1, and the bins' center frequencies in Hz.
+fn specBins(fftSize Int) S = (0 .. fftSize // 2 - 1) toArray asSignal;
+fn specBinFreqs(fftSize Int) S = specBins(fftSize) * (fs() / fftSize);
 
 -- Periodically prints the value of a signal to stderr.
 -- `period` is in samples; every `period` samples, the next `consecutive` samples

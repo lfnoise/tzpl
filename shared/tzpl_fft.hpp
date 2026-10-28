@@ -45,6 +45,9 @@ struct JscsFFTSetup {
     int log2n;
 #ifdef __APPLE__
     FFTSetup vdspSetup;
+    // Split-complex scratch for the inverse (allocated here, so the inverse
+    // allocates nothing and keeps no fftSize-sized array on the stack).
+    std::vector<float> scratch;
 #else
     // Precomputed bit-reversal permutation and twiddles for the portable path.
     std::vector<int> rev;
@@ -63,6 +66,7 @@ inline JscsFFTSetup* tzpl_fft_create(int fftSize) {
     while (tmp > 1) { tmp >>= 1; s->log2n++; }
 #ifdef __APPLE__
     s->vdspSetup = vDSP_create_fftsetup(s->log2n, FFT_RADIX2);
+    s->scratch.resize((size_t)fftSize);
 #else
     // The real-input transform runs as a complex FFT of length N/2, so all
     // tables are sized for that.
@@ -194,9 +198,10 @@ inline void tzpl_fft_inverse(JscsFFTSetup* s, const float* input, float* output)
     int halfN = N / 2;
 
 #ifdef __APPLE__
-    // Copy input to output buffer (vDSP works in-place on split complex)
-    float* realp = output;
-    float* imagp = output + halfN;
+    // vDSP works in place on split complex: copy into the scratch, transform,
+    // then interleave realp[k] / imagp[k] (the even / odd samples) into output.
+    float* realp = s->scratch.data();
+    float* imagp = realp + halfN;
     for (int k = 0; k < halfN; ++k) {
         realp[k] = input[k];
         imagp[k] = input[halfN + k];
@@ -204,18 +209,7 @@ inline void tzpl_fft_inverse(JscsFFTSetup* s, const float* input, float* output)
 
     DSPSplitComplex sc = { realp, imagp };
     vDSP_fft_zrip(s->vdspSetup, &sc, 1, s->log2n, FFT_INVERSE);
-
-    // Unpack split-complex to interleaved real output
-    // After inverse, realp[k] and imagp[k] represent the even/odd real samples
-    float tmpR[halfN], tmpI[halfN];
-    for (int k = 0; k < halfN; ++k) {
-        tmpR[k] = realp[k];
-        tmpI[k] = imagp[k];
-    }
-    for (int k = 0; k < halfN; ++k) {
-        output[2 * k]     = tmpR[k];
-        output[2 * k + 1] = tmpI[k];
-    }
+    vDSP_ztoc(&sc, 1, reinterpret_cast<DSPComplex*>(output), 2, halfN);
 
     // vDSP inverse FFT returns (N/2)x the standard IDFT; scale by 1/(N/2)
     float scale = 1.0f / (float)halfN;

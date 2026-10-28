@@ -597,6 +597,38 @@ fn newCtx(name String) Ctx {
 
 fn numNodes(ctx Ctx) Int = ctx.kind length;
 
+-- The spectral frame of a spectral chain: the spectralFrameK node in the
+-- chain's body graph (NONE if the body never reads its frame).
+fn spectralFrameOf(ctx Ctx, chain NIdx) Int {
+	let g = ctx.graphOf[ctx.subs[chain][0]];
+	var i = 0;
+	while (i < ctx numNodes) {
+		if (ctx.graphOf[i] == g) {
+			match (ctx.kind[i]) { spectralFrameK(_): { return i; } _: {} }
+		}
+		i = i + 1;
+	}
+	NONE
+}
+
+-- The spectral chain whose body graph holds `frame`.
+fn spectralChainOfFrame(ctx Ctx, frame NIdx) Int {
+	var i = 0;
+	while (i < ctx numNodes) {
+		match (ctx.kind[i]) {
+			spectralChainK(_, _): { if (ctx.graphOf[ctx.subs[i][0]] == ctx.graphOf[frame]) { return i; } }
+			_: {}
+		}
+		i = i + 1;
+	}
+	NONE
+}
+
+-- The shape of a spectral chain's frame for an input of `chans` channels:
+-- per channel, a row of real parts and a row of imaginary parts.
+fn spectralFrameShape(chans Int, fftSize Int) Shape =
+	chans == 1 ? matrix(2, fftSize // 2) : cuboid(chans, 2, fftSize // 2);
+
 -- True if the control-flow node `n` (if/switch/for/voicer/spectralChain)
 -- guards a side-effecting write (delayWrite, bufWrite, outlet, ...) in one of
 -- its branch/body subgraphs, even when the node's own result value has no

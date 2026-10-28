@@ -1076,6 +1076,16 @@ fn _genVecPutAxis(ctx Ctx, root NIdx) String {
 	parts join("\n")
 }
 
+-- For a stack, each input's channels per outer block (a one-channel input
+-- broadcasts to this many); 0 for a join.
+fn _stackSlab(ctx Ctx, root NIdx, outer Int) Int = match (ctx.kind[root]) {
+	vecK(vop): match (vop) {
+		join(_, isStack): isStack ? ctx.chans[root] // (outer * ctx.ins[root] length) : 0;
+		_: 0;
+	};
+	_: 0;
+};
+
 -- join(inputs): concatenate inputs into the output array (scalar inputs are plain
 -- assignments, multichannel use memcpy); zero-fill any power-of-two padding.
 -- A gets_own_loop block (mirror the C++ VecJoin).
@@ -1092,9 +1102,18 @@ fn _genVecJoinBlocks(ctx Ctx, root NIdx, d Int) String {
 	let outv = `cgFlatOwnLoop ? "%^ + i * %^" fmt(_varName(ctx, root), out chans) : _varName(ctx, root);
 	var parts [String] = [];
 	var offset = 0;
+	let stackSlab = ctx _stackSlab(root, outer);
 	for (x : ins) {
 		let xc = ctx.chans[x];
 		if (xc == 0) { continue; }
+		if (xc == 1 && stackSlab > 1) {
+			-- a stacked scalar fills its slab of every block
+			let xs = `cgFlatOwnLoop ? ctx _voiceElem(x) : ctx _scalarRef(x);
+			parts push!(t $ "for (int _o = 0; _o < %^; ++_o) for (int _n = 0; _n < %^; ++_n) %^[_o * %^ + %^ + _n] = %^;"
+				fmt(outer, stackSlab, outv, outBlock, offset, xs));
+			offset = offset + stackSlab;
+			continue;
+		}
 		let slab = xc // outer;
 		let xv = `cgFlatOwnLoop ? ctx _voiceArr(x) : _varName(ctx, x);
 		parts push!(t $ "for (int _o = 0; _o < %^; ++_o) memcpy(%^ + _o * %^ + %^, %^ + _o * %^, %^ * sizeof(%^));"
@@ -1139,9 +1158,14 @@ fn _genVecJoin(ctx Ctx, root NIdx) String {
 		}
 		return parts join("\n");
 	}
+	let stackSlab = ctx _stackSlab(root, 1);
 	for (x : ins) {
 		let xc = ctx.chans[x];
-		if (xc == 1) {
+		if (xc == 1 && stackSlab > 1) {
+			-- a stacked scalar fills its slab
+			parts push!(t $ "for (int _n = 0; _n < %^; ++_n) %^[%^ + _n] = %^;" fmt(stackSlab, outv, offset, ctx _scalarRef(x)));
+			offset = offset + stackSlab;
+		} else if (xc == 1) {
 			parts push!(t $ "%^[%^] = %^;" fmt(outv, offset, ctx _scalarRef(x)));
 		} else {
 			parts push!(t $ "memcpy(%^ + %^, %^, %^ * sizeof(%^));" fmt(outv, offset, _varName(ctx, x), xc, ty));
@@ -2229,14 +2253,10 @@ fn _spectralChains(ctx Ctx) [Int] {
 	out
 }
 
--- The chain serial owning a frame node (matched by fftSize: each chain builds one
--- frame with its own fftSize).
+-- The chain serial owning a frame node (the chain whose body graph holds it).
 fn _frameChainSerial(ctx Ctx, frameNode NIdx) Int {
-	let fft = match (ctx.kind[frameNode]) { spectralFrameK(f): f; _: 0; };
-	for (c : ctx.sorted) {
-		match (ctx.kind[c]) { spectralChainK(cf, _): { if (cf == fft) { return ctx.serial[c]; } } _: {} }
-	}
-	NONE
+	let c = ctx spectralChainOfFrame(frameNode);
+	c == NONE ? NONE : ctx.serial[c]
 }
 
 fn _genSpectral(ctx Ctx, root NIdx, fft Int, hop Int) String {
@@ -2274,15 +2294,28 @@ fn _genSpectral(ctx Ctx, root NIdx, fft Int, hop Int) String {
 	s = s $ t1 $ "// spectral subgraph\n";
 	-- body subgraph audio loops, indented one deeper
 	s = s $ _genSpectralBody(ctx, bg, cur + 1);
+	-- The body's phi wrote the processed frame into fftbuf (free once the
+	-- forward FFTs are done, and never aliasing the frame the body reads);
+	-- the inverse goes back into the frame. tzpl_fft_inverse returns 2x the
+	-- signal, and the sqrt-Hann windows overlap-add to fftSize/(2 hop), so
+	-- hop/fftSize makes an identity body unity gain.
 	s = s $ t1 $ "for (int ch = 0; ch < %^; ++ch) {\n" fmt(ic);
-	s = s $ t2 $ "tzpl_fft_inverse(p->spec%^_fftsetup, p->spec%^_frame + ch * %^, p->spec%^_fftbuf + ch * %^);\n" fmt(cs, cs, fft, cs, fft);
+	s = s $ t2 $ "tzpl_fft_inverse(p->spec%^_fftsetup, p->spec%^_fftbuf + ch * %^, p->spec%^_frame + ch * %^);\n" fmt(cs, cs, fft, cs, fft);
 	s = s $ t2 $ "for (int k = 0; k < %^; ++k) {\n" fmt(fft);
 	s = s $ t3 $ "int idx = (p->spec%^_wrpos + k) & %^;\n" fmt(cs, mask);
-	s = s $ t3 $ "p->spec%^_outbuf[ch][idx] += p->spec%^_fftbuf[ch * %^ + k] * p->spec%^_window[k];\n" fmt(cs, cs, fft, cs);
+	s = s $ t3 $ "p->spec%^_outbuf[ch][idx] += p->spec%^_frame[ch * %^ + k] * (p->spec%^_window[k] * %^f);\n" fmt(cs, cs, fft, cs, _olaGainLiteral(hop, fft));
 	s = s $ t2 $ "}\n";
 	s = s $ t1 $ "}\n";
 	s = s $ t $ "}\n";
 	s
+}
+
+-- hop/fftSize as a C++ float literal (both are powers of two, so it is exact).
+fn _olaGainLiteral(hop Int, fft Int) String {
+	var e = 0;
+	var r = fft // hop;
+	while (r > 1) { r = r // 2; e = e + 1; }
+	"0x1p-%^" fmt(e)
 }
 
 -- The body subgraph's audio loops, emitted at the given indent.
@@ -2408,6 +2441,15 @@ fn genTree(ctx Ctx, treeIdx Int, cel String) String {
 				let voiceCel = vChans == 1 ? `cgVoiceIdx
 					: "(%^ * %^ + (%^))" fmt(`cgVoiceIdx, vChans, cel);
 				return _tabs(`cgIndent) $ "%^ = %^;\n" fmt(_varRef(ctx, target, voiceCel), ctx _voicerOutValue(target, root, voiceCel, cel));
+			}
+			-- A spectral body's result is the processed frame: into fftbuf,
+			-- which the chain inverse-transforms after the body.
+			match (ctx.kind[target]) {
+				spectralChainK(_, _): {
+					return _tabs(`cgIndent) $ "p->spec%^_fftbuf[%^] = %^;\n"
+						fmt(ctx.serial[target], cel, genExpr(ctx, ctx.ins[root][0], cel));
+				}
+				_: {}
 			}
 			let val = isVoicerTarget ? ctx _voicerOutValue(target, root, cel, cel) : genExpr(ctx, ctx.ins[root][0], cel);
 			return _tabs(`cgIndent) $ "%^ = %^;\n" fmt(_varRef(ctx, target, cel), val);
@@ -5661,6 +5703,7 @@ fn _localizeDelays(ctx Ctx, texts [String], plain [Bool], rest String) Void {
 		let ring = d.allocSize >= 2 && d.allocSize <= 8 && d.chans <= 16;
 		let multi = d.chans > 1 && d.allocSize == 1 && d.chans <= 64;
 		if (d.allocSize != 1 && !ring) { continue; }
+		if (d.allocSize == 1 && d.chans > 1 && !multi) { continue; }   -- wider registers (a spectral frame's) stay in p
 		let nm = "p->d%^" fmt(d.serial);
 		let wp = nm $ "_wrpos";
 		if (_usesName(rest, nm) || _usesName(rest, wp)) { continue; }

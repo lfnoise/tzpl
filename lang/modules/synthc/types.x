@@ -184,19 +184,23 @@ fn _joinShape(shs [Shape], ax Int) (Shape, String) {
 	(out withDim(d, total), "")
 }
 
--- Signals of one shape along a new axis (`axis` of the result).
+-- Signals of one shape along a new axis (`axis` of the result). A
+-- one-channel signal broadcasts to the others' shape.
 fn _stackShape(shs [Shape], ax Int) (Shape, String) {
 	var s = noShapeOfRank(1);
 	var n = 0;
 	for (x : shs) {
-		if (x chans == 0) { continue; }
+		if (x chans <= 1) { continue; }
 		if (n == 0) { s = x; }
 		else if (x != s) {
 			return (s, "stack: shapes %^ and %^ differ" fmt(s toString, x toString));
 		}
 		n = n + 1;
 	}
-	if (n == 0) { return (s, ""); }
+	if (n == 0) {
+		for (x : shs) { if (x chans == 1) { s = x; n = 1; break; } }
+		if (n == 0) { return (s, ""); }
+	}
 	if (s.rank >= MAX_RANK) { return (s, "stack: a rank-%^ signal has no room for a new axis" fmt(MAX_RANK)); }
 	let r = s.rank + 1;
 	let k = ax < 0 ? ax + r : ax;
@@ -318,7 +322,7 @@ fn calcShapeOf(ctx Ctx, n NIdx) Shape {
 		forK:                _cfShape(ctx, n);
 		voicerK(mv):         _voicerShape(ctx, n, mv);
 		spectralChainK(_, _): ctx.shape[ctx.ins[n][0]];   -- output = input shape
-		spectralFrameK(_):    ctx.shape[n];               -- inputChans * fftSize, set at import
+		spectralFrameK(fft):  _spectralFrameShapeOf(ctx, n, fft);
 		phiK(t):             _phiShape(ctx, n, t);
 		varK(_):             ctx.shape[n];   -- unset: broadcasts to its use
 		debugK(_, _, _, _):  scalarShape();
@@ -343,10 +347,28 @@ fn _voicerShape(ctx Ctx, n NIdx, maxVoices Int) Shape {
 	prependDim(ctx.shape[bodyRoot], maxVoices)
 }
 
+-- A spectral frame is [chans, 2, fftSize/2] over the chain's input channels.
+fn _spectralFrameShapeOf(ctx Ctx, n NIdx, fft Int) Shape {
+	let chain = ctx spectralChainOfFrame(n);
+	if (chain == NONE) { return ctx.shape[n]; }
+	spectralFrameShape(ctx.shape[ctx.ins[chain][0]] chans, fft)
+}
+
 -- PhiNode shape: broadcast(current, target, input). A voicer target has a
--- voice dimension the phi (one voice's output) does not, so it is skipped.
+-- voice dimension the phi (one voice's output) does not, so it is skipped;
+-- a spectral body's phi is the chain's frame.
 fn _phiShape(ctx Ctx, n NIdx, target Int) Shape {
 	var sh = ctx.shape[n];
+	-- A spectral body's result is a whole frame (a scalar result fills it),
+	-- not the chain's time-domain output.
+	if (target != NONE) {
+		match (ctx.kind[target]) {
+			spectralChainK(fft, _): {
+				return spectralFrameShape(ctx.shape[ctx.ins[target][0]] chans, fft);
+			}
+			_: {}
+		}
+	}
 	if (target != NONE && !(ctx.kind[target] isVoicerKind)) {
 		sh = broadcast(sh, ctx.shape[target]);
 	}
@@ -453,7 +475,7 @@ fn updateTypeOf(ctx Ctx, n NIdx, wl WorkList) Void {
 		switchK(_):          { _updateCF(ctx, n, wl); }
 		forK:                { _updateCF(ctx, n, wl); }
 		voicerK(_):          { _updateCF(ctx, n, wl); }   -- no test input; narrows from body phi
-		spectralChainK(_, _): { _updateCF(ctx, n, wl); } -- f32 chain, narrows from body phi
+		spectralChainK(_, _): {}   -- f32 output from the overlap-add buffer; the body phi writes the f32 frame
 		phiK(target):        { _updatePhi(ctx, n, target, wl); }
 		delayFixReadK(d, _): { _updateDelayRead(ctx, n, d, wl); }
 		delayVarReadK(d, _): { _updateDelayRead(ctx, n, d, wl); }

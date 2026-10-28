@@ -385,7 +385,11 @@ fn shapeInference(ctx Ctx) Void {
 				switchK(_): { for (s : ctx.subs[n]) { wl wlPush(s); } }
 				forK:       { for (s : ctx.subs[n]) { wl wlPush(s); } }
 				voicerK(_): { for (s : ctx.subs[n]) { wl wlPush(s); } }
-				spectralChainK(_, _): { for (s : ctx.subs[n]) { wl wlPush(s); } }
+				spectralChainK(_, _): {
+					for (s : ctx.subs[n]) { wl wlPush(s); }
+					let fr = ctx spectralFrameOf(n);
+					if (fr != NONE) { wl wlPush(fr); }
+				}
 				_: {}
 			}
 		}
@@ -1275,6 +1279,26 @@ fn analyzeM0(ctx Ctx) Ctx {
 	ctx
 }
 
+-- A spectral body must return a whole frame (or a scalar, which fills it):
+-- anything else would leave bins unwritten or cycle a smaller tensor over
+-- the frame.
+fn checkSpectralBodies(ctx Ctx) Void {
+	for (n : ctx.sorted) {
+		match (ctx.kind[n]) {
+			spectralChainK(fft, _): {
+				let phi = ctx.subs[n][0];
+				let got = ctx.shape[ctx.ins[phi][0]];
+				let want = ctx.shape[phi];
+				if (got chans != 1 && got chans != want chans) {
+					ctx.errors push!("spectralChain: the body returned a %^ signal; it must return the frame's shape %^ (or a scalar)"
+						fmt(got dimsInUse, want dimsInUse));
+				}
+			}
+			_: {}
+		}
+	}
+}
+
 -- Analysis up to (and including) type inference and rates.
 fn analyzeTypes(ctx Ctx) Ctx {
 	ctx mergeDelays;
@@ -1282,6 +1306,7 @@ fn analyzeTypes(ctx Ctx) Ctx {
 	ctx collectConsumers;
 	ctx calcDelayLengths;
 	ctx shapeInference;
+	ctx checkSpectralBodies;
 	ctx typeInferenceWithWidening;
 	ctx setNonConcreteTypesToDefault;
 	ctx findGraphCuts;
@@ -1338,6 +1363,7 @@ fn analyzeForCodegen(ctx Ctx) Ctx {
 	ctx collectConsumers;
 	ctx calcDelayLengths;
 	ctx shapeInference;
+	ctx checkSpectralBodies;
 	ctx typeInferenceWithWidening;
 	ctx setNonConcreteTypesToDefault;
 	ctx restrictBlockRate;

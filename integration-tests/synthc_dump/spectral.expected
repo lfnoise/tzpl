@@ -18,8 +18,8 @@ OUT 0 out f32 1
      13   13 [2               ]  1  1 Audio    None      f32     1 cast_f32
      14   15 [14 13           ]  2  1 Audio    None      f32     1 *
      15   19 [18 15           ]  2  1 Audio    None      f32     1 +
-     16   20 [                ]  0  1 Audio    Graph     f32   256 spectral_frame(256)
-     17   21 [20              ]  1  0 Audio    Phi       f32   256 PhiNode
+     16   20 [                ]  0  1 Audio    Temp      f32 2x128 spectral_frame(256)
+     17   21 [20              ]  1  0 Audio    Phi       f32 2x128 PhiNode
      18   22 [19              ]  1  1 Audio    ControlFlow f32     1 spectral_chain(256, 128)
      19   23 [22              ]  1  0 Audio    Sink      f32     1 outlet
 -- TREES
@@ -39,10 +39,10 @@ OUT 0 out f32 1
       0    9 [8               ]  1  1 Audio    None      f64     1 floor
       1   10 [8 9             ]  2  1 Audio    None      f64     1 -
       2   11 [10              ]  1  0 Audio    Sink      f64     1 delay_write
-    TREE 6    [] Audio  Graph     f32   256
-      0   20 [                ]  0  1 Audio    Graph     f32   256 spectral_frame(256)
-    TREE 7    [6] Audio  Phi       f32   256
-      0   21 [20              ]  1  0 Audio    Phi       f32   256 PhiNode
+    TREE 6    [] Audio  Temp      f32 2x128
+      0   20 [                ]  0  1 Audio    Temp      f32 2x128 spectral_frame(256)
+    TREE 7    [6] Audio  Phi       f32 2x128
+      0   21 [20              ]  1  0 Audio    Phi       f32 2x128 PhiNode
     TREE 8    [1 7*] Audio  ControlFlow f32     1
       0   18 [                ]  0  1 Const    None      f32     1 -1.0f
       1   14 [                ]  0  1 Const    None      f32     1 2.0f
@@ -76,10 +76,7 @@ GRAPH 0
       0    9 [8               ]  1  1 Audio    None      f64     1 floor
       1   10 [8 9             ]  2  1 Audio    None      f64     1 -
       2   11 [10              ]  1  0 Audio    Sink      f64     1 delay_write
-  LOOP  3 [] Audio  256
-    TREE 6    [] Audio  Graph     f32   256
-      0   20 [                ]  0  1 Audio    Graph     f32   256 spectral_frame(256)
-  LOOP  5 [0 4] Audio  1
+  LOOP  4 [0 3] Audio  1
     TREE 8    [1 7*] Audio  ControlFlow f32     1
       0   18 [                ]  0  1 Const    None      f32     1 -1.0f
       1   14 [                ]  0  1 Const    None      f32     1 2.0f
@@ -87,13 +84,15 @@ GRAPH 0
       3   15 [14 13           ]  2  1 Audio    None      f32     1 *
       4   19 [18 15           ]  2  1 Audio    None      f32     1 +
       5   22 [19              ]  1  1 Audio    ControlFlow f32     1 spectral_chain(256, 128)
-  LOOP  6 [5] Audio  1
+  LOOP  5 [4] Audio  1
     TREE 9    [8] Audio  Sink      f32     1
       0   23 [22              ]  1  0 Audio    Sink      f32     1 outlet
 GRAPH 1
-  LOOP  4 [3] Audio  256
-    TREE 7    [6] Audio  Phi       f32   256
-      0   21 [20              ]  1  0 Audio    Phi       f32   256 PhiNode
+  LOOP  3 [] Audio  256
+    TREE 6    [] Audio  Temp      f32 2x128
+      0   20 [                ]  0  1 Audio    Temp      f32 2x128 spectral_frame(256)
+    TREE 7    [6] Audio  Phi       f32 2x128
+      0   21 [20              ]  1  0 Audio    Phi       f32 2x128 PhiNode
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
@@ -123,10 +122,10 @@ OUT 0 out f32 1
      13   13 [2               ]  1  1 Audio    None      f32     1 cast_f32
      14   15 [14 13           ]  2  1 Audio    None      f32     1 *
      15   19 [18 15           ]  2  1 Audio    None      f32     1 +
-     16   20 [                ]  0  1 Audio    Graph     f32   256 spectral_frame(256)
+     16   20 [                ]  0  1 Audio    None      f32 2x128 spectral_frame(256)
      17   21 [                ]  0  1 Const    None      f32     1 0.5f
-     18   22 [20 21           ]  2  1 Audio    Temp      f32   256 *
-     19   23 [22              ]  1  0 Audio    Phi       f32   256 PhiNode
+     18   22 [20 21           ]  2  1 Audio    Temp      f32 2x128 *
+     19   23 [22              ]  1  0 Audio    Phi       f32 2x128 PhiNode
      20   24 [19              ]  1  1 Audio    ControlFlow f32     1 spectral_chain(256, 128)
      21   25 [24              ]  1  0 Audio    Sink      f32     1 outlet
 -- TREES
@@ -146,21 +145,20 @@ OUT 0 out f32 1
       0    9 [8               ]  1  1 Audio    None      f64     1 floor
       1   10 [8 9             ]  2  1 Audio    None      f64     1 -
       2   11 [10              ]  1  0 Audio    Sink      f64     1 delay_write
-    TREE 6    [] Audio  Graph     f32   256
-      0   20 [                ]  0  1 Audio    Graph     f32   256 spectral_frame(256)
-    TREE 7    [6] Audio  Temp      f32   256
-      0   21 [                ]  0  1 Const    None      f32     1 0.5f
-      1   22 [20 21           ]  2  1 Audio    Temp      f32   256 *
-    TREE 8    [7] Audio  Phi       f32   256
-      0   23 [22              ]  1  0 Audio    Phi       f32   256 PhiNode
-    TREE 9    [1 8*] Audio  ControlFlow f32     1
+    TREE 6    [] Audio  Temp      f32 2x128
+      0   20 [                ]  0  1 Audio    None      f32 2x128 spectral_frame(256)
+      1   21 [                ]  0  1 Const    None      f32     1 0.5f
+      2   22 [20 21           ]  2  1 Audio    Temp      f32 2x128 *
+    TREE 7    [6] Audio  Phi       f32 2x128
+      0   23 [22              ]  1  0 Audio    Phi       f32 2x128 PhiNode
+    TREE 8    [1 7*] Audio  ControlFlow f32     1
       0   18 [                ]  0  1 Const    None      f32     1 -1.0f
       1   14 [                ]  0  1 Const    None      f32     1 2.0f
       2   13 [2               ]  1  1 Audio    None      f32     1 cast_f32
       3   15 [14 13           ]  2  1 Audio    None      f32     1 *
       4   19 [18 15           ]  2  1 Audio    None      f32     1 +
       5   24 [19              ]  1  1 Audio    ControlFlow f32     1 spectral_chain(256, 128)
-    TREE 10   [9] Audio  Sink      f32     1
+    TREE 9    [8] Audio  Sink      f32     1
       0   25 [24              ]  1  0 Audio    Sink      f32     1 outlet
 -- INIT
   LOOP  1 [] Init   0
@@ -186,27 +184,25 @@ GRAPH 0
       0    9 [8               ]  1  1 Audio    None      f64     1 floor
       1   10 [8 9             ]  2  1 Audio    None      f64     1 -
       2   11 [10              ]  1  0 Audio    Sink      f64     1 delay_write
-  LOOP  3 [] Audio  256
-    TREE 6    [] Audio  Graph     f32   256
-      0   20 [                ]  0  1 Audio    Graph     f32   256 spectral_frame(256)
-  LOOP  5 [0 4] Audio  1
-    TREE 9    [1 8*] Audio  ControlFlow f32     1
+  LOOP  4 [0 3] Audio  1
+    TREE 8    [1 7*] Audio  ControlFlow f32     1
       0   18 [                ]  0  1 Const    None      f32     1 -1.0f
       1   14 [                ]  0  1 Const    None      f32     1 2.0f
       2   13 [2               ]  1  1 Audio    None      f32     1 cast_f32
       3   15 [14 13           ]  2  1 Audio    None      f32     1 *
       4   19 [18 15           ]  2  1 Audio    None      f32     1 +
       5   24 [19              ]  1  1 Audio    ControlFlow f32     1 spectral_chain(256, 128)
-  LOOP  6 [5] Audio  1
-    TREE 10   [9] Audio  Sink      f32     1
+  LOOP  5 [4] Audio  1
+    TREE 9    [8] Audio  Sink      f32     1
       0   25 [24              ]  1  0 Audio    Sink      f32     1 outlet
 GRAPH 1
-  LOOP  4 [3] Audio  256
-    TREE 7    [6] Audio  Temp      f32   256
-      0   21 [                ]  0  1 Const    None      f32     1 0.5f
-      1   22 [20 21           ]  2  1 Audio    Temp      f32   256 *
-    TREE 8    [7] Audio  Phi       f32   256
-      0   23 [22              ]  1  0 Audio    Phi       f32   256 PhiNode
+  LOOP  3 [] Audio  256
+    TREE 6    [] Audio  Temp      f32 2x128
+      0   20 [                ]  0  1 Audio    None      f32 2x128 spectral_frame(256)
+      1   21 [                ]  0  1 Const    None      f32     1 0.5f
+      2   22 [20 21           ]  2  1 Audio    Temp      f32 2x128 *
+    TREE 7    [6] Audio  Phi       f32 2x128
+      0   23 [22              ]  1  0 Audio    Phi       f32 2x128 PhiNode
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
@@ -236,10 +232,10 @@ OUT 0 out f32 2
      13   13 [2               ]  1  1 Audio    None      f32     2 cast_f32
      14   15 [14 13           ]  2  1 Audio    None      f32     2 *
      15   19 [18 15           ]  2  1 Audio    None      f32     2 +
-     16   20 [                ]  0  1 Audio    Graph     f32   512 spectral_frame(512)
+     16   20 [                ]  0  1 Audio    None      f32 2x2x256 spectral_frame(512)
      17   21 [                ]  0  1 Const    None      f32     1 0.5f
-     18   22 [20 21           ]  2  1 Audio    Temp      f32   512 *
-     19   23 [22              ]  1  0 Audio    Phi       f32   512 PhiNode
+     18   22 [20 21           ]  2  1 Audio    Temp      f32 2x2x256 *
+     19   23 [22              ]  1  0 Audio    Phi       f32 2x2x256 PhiNode
      20   24 [19              ]  1  1 Audio    ControlFlow f32     2 spectral_chain(512, 256)
      21   25 [24              ]  1  0 Audio    Sink      f32     2 outlet
 -- TREES
@@ -260,21 +256,20 @@ OUT 0 out f32 2
       0    9 [8               ]  1  1 Audio    None      f64     2 floor
       1   10 [8 9             ]  2  1 Audio    None      f64     2 -
       2   11 [10              ]  1  0 Audio    Sink      f64     2 delay_write
-    TREE 7    [] Audio  Graph     f32   512
-      0   20 [                ]  0  1 Audio    Graph     f32   512 spectral_frame(512)
-    TREE 8    [7] Audio  Temp      f32   512
-      0   21 [                ]  0  1 Const    None      f32     1 0.5f
-      1   22 [20 21           ]  2  1 Audio    Temp      f32   512 *
-    TREE 9    [8] Audio  Phi       f32   512
-      0   23 [22              ]  1  0 Audio    Phi       f32   512 PhiNode
-    TREE 10   [1 9*] Audio  ControlFlow f32     2
+    TREE 7    [] Audio  Temp      f32 2x2x256
+      0   20 [                ]  0  1 Audio    None      f32 2x2x256 spectral_frame(512)
+      1   21 [                ]  0  1 Const    None      f32     1 0.5f
+      2   22 [20 21           ]  2  1 Audio    Temp      f32 2x2x256 *
+    TREE 8    [7] Audio  Phi       f32 2x2x256
+      0   23 [22              ]  1  0 Audio    Phi       f32 2x2x256 PhiNode
+    TREE 9    [1 8*] Audio  ControlFlow f32     2
       0   18 [                ]  0  1 Const    None      f32     1 -1.0f
       1   14 [                ]  0  1 Const    None      f32     1 2.0f
       2   13 [2               ]  1  1 Audio    None      f32     2 cast_f32
       3   15 [14 13           ]  2  1 Audio    None      f32     2 *
       4   19 [18 15           ]  2  1 Audio    None      f32     2 +
       5   24 [19              ]  1  1 Audio    ControlFlow f32     2 spectral_chain(512, 256)
-    TREE 11   [10] Audio  Sink      f32     2
+    TREE 10   [9] Audio  Sink      f32     2
       0   25 [24              ]  1  0 Audio    Sink      f32     2 outlet
 -- INIT
   LOOP  1 [] Init   0
@@ -302,27 +297,25 @@ GRAPH 0
       0    9 [8               ]  1  1 Audio    None      f64     2 floor
       1   10 [8 9             ]  2  1 Audio    None      f64     2 -
       2   11 [10              ]  1  0 Audio    Sink      f64     2 delay_write
-  LOOP  4 [] Audio  512
-    TREE 7    [] Audio  Graph     f32   512
-      0   20 [                ]  0  1 Audio    Graph     f32   512 spectral_frame(512)
-  LOOP  6 [0 5] Audio  2
-    TREE 10   [1 9*] Audio  ControlFlow f32     2
+  LOOP  5 [0 4] Audio  2
+    TREE 9    [1 8*] Audio  ControlFlow f32     2
       0   18 [                ]  0  1 Const    None      f32     1 -1.0f
       1   14 [                ]  0  1 Const    None      f32     1 2.0f
       2   13 [2               ]  1  1 Audio    None      f32     2 cast_f32
       3   15 [14 13           ]  2  1 Audio    None      f32     2 *
       4   19 [18 15           ]  2  1 Audio    None      f32     2 +
       5   24 [19              ]  1  1 Audio    ControlFlow f32     2 spectral_chain(512, 256)
-  LOOP  7 [6] Audio  2
-    TREE 11   [10] Audio  Sink      f32     2
+  LOOP  6 [5] Audio  2
+    TREE 10   [9] Audio  Sink      f32     2
       0   25 [24              ]  1  0 Audio    Sink      f32     2 outlet
 GRAPH 1
-  LOOP  5 [4] Audio  512
-    TREE 8    [7] Audio  Temp      f32   512
-      0   21 [                ]  0  1 Const    None      f32     1 0.5f
-      1   22 [20 21           ]  2  1 Audio    Temp      f32   512 *
-    TREE 9    [8] Audio  Phi       f32   512
-      0   23 [22              ]  1  0 Audio    Phi       f32   512 PhiNode
+  LOOP  4 [] Audio  1024
+    TREE 7    [] Audio  Temp      f32 2x2x256
+      0   20 [                ]  0  1 Audio    None      f32 2x2x256 spectral_frame(512)
+      1   21 [                ]  0  1 Const    None      f32     1 0.5f
+      2   22 [20 21           ]  2  1 Audio    Temp      f32 2x2x256 *
+    TREE 8    [7] Audio  Phi       f32 2x2x256
+      0   23 [22              ]  1  0 Audio    Phi       f32 2x2x256 PhiNode
 -- PARAMETER GROUPS
 -- CYCLES
 CYCLE 0 weight 1 recurrence nodes [2 8 9 10] delays [2<-10:1]
