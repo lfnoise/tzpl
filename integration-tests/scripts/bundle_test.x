@@ -54,3 +54,22 @@ let forms = bundle()
 	impulseInputAt(505, "trig", 3, 1.0)
 	noteSetParams(505, 7, 0, [330.0], 0.25);
 println(forms toString);
+
+-- Several inputs at once from a map, by name: one input command per entry,
+-- with Symbol or String keys.
+let byMap = bundle()
+	newNode("sinosc", 506)
+	setInput(506, ['freq: 330.0, 'amp: 0.1])
+	setInput(506, ["freq": 440.0], 0.25)
+	freeNode(506);
+"map length: %^ (expect 5)" fmt(byMap length) println;
+"map bundle err: %^ (expect 0)" fmt(byMap go(0)) println;
+"map unknown input err: %^ (expect nonzero)" fmt(bundle() newNode("sinosc", 507)
+	setInput(507, ['freq: 330.0, 'nosuch: 1.0]) go(0)) println;
+
+-- The direct form records into the open bundle.
+begin();
+newNode("sinosc", 508);
+"direct map setInput err: %^ (expect 0)" fmt(508 setInput(['freq: 330.0, 'amp: 0.1])) println;
+freeNode(508);
+"direct map go err: %^ (expect 0)" fmt(go(0)) println;
