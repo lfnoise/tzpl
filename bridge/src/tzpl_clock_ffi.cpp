@@ -99,7 +99,7 @@ static void ffi_after(ts::VM& vm, u16 dst, u16, u16 argBase) {
     if (!sched) { vm.reg(dst).i = -1; return; }
     f64 deltaBeats = vm.reg(argBase).f;
     ts::Obj* handler = vm.reg(argBase + 1).o;
-    vm.reg(dst).i = sched->sched(kClockSlot, deltaBeats, handler);
+    vm.reg(dst).i = sched->sched(kClockSlot, deltaBeats, handler, /*oneShot=*/true);
 }
 
 // fn at(beat Float, handler Fn() Void) Int
@@ -109,7 +109,7 @@ static void ffi_at(ts::VM& vm, u16 dst, u16, u16 argBase) {
     if (!sched) { vm.reg(dst).i = -1; return; }
     f64 beat = vm.reg(argBase).f;
     ts::Obj* handler = vm.reg(argBase + 1).o;
-    vm.reg(dst).i = sched->schedAbs(kClockSlot, beat, handler);
+    vm.reg(dst).i = sched->schedAbs(kClockSlot, beat, handler, /*oneShot=*/true);
 }
 
 // fn delayReal(seconds Float) Future<Void>
