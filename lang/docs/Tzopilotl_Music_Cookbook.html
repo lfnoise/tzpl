@@ -1679,7 +1679,8 @@ spanEvents take(<span class="num">4</span>) showEvents;</code></pre>
 <code>play</code> groups simultaneous commands into single command bundles
 (section&nbsp;3.2) scheduled at absolute beats on the engine's TempoClock &mdash;
 chords atomic, timing sample-accurate. The returned <code>Player</code> is a live
-handle: <code>replace</code> swaps what's playing, <code>enqueue</code> queues what
+handle: <code>replace</code> swaps what's playing (<code>p replace(events, 4.0)</code>
+waits for the next 4-beat bar), <code>enqueue</code> queues what
 follows, <code>stop</code> releases everything, and <code>stopAll()</code> stops
 every player started so far &mdash; the recovery when the <code>p</code> binding
 was overwritten by re-running the play block (<code>stopFirst()</code> and
