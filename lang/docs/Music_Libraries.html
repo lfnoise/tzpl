@@ -453,8 +453,8 @@ randSeed(<span class="hl-num">2026</span>);
                 <tr><td><code>eventParams(e, v, t, s)</code></td><td>Resolve one event to positional <code>[Float]</code>: <code>'freq</code> &rarr; <code>pitchHz</code> through the tuning; <code>'pitch</code> &rarr; the equivalent (fractional) note number, so any tuning survives a note-number synth exactly; <code>'amp</code> &rarr; the event amp; other names look up <code>e.params</code>, then the default.</td></tr>
                 <tr><td><code>score(events, v, t = et12, s = major, idBase = 0)</code></td><td>Lazy <code>List&lt;(Float, NoteCmd)&gt;</code> &mdash; the golden-test surface. <code>idBase</code> offsets the note IDs, so two scores sounding on one node at once do not release each other's notes (<code>play</code> picks a fresh base per player).</td></tr>
                 <tr><td><code>showScore(sc)</code></td><td>One <code>beat: command</code> line per entry.</td></tr>
-                <tr><td><code>play(events, v, t = et12, s = major, silo = 0, clock = 0)</code></td><td>Compile and start playing; returns a <code>Player</code> handle.</td></tr>
-                <tr><td><code>stop(p)</code> / <code>replace(p, events)</code> / <code>enqueue(p, events)</code></td><td>Stop (releases held notes); swap the playing sequence at the next wake; queue a sequence to follow the current one.</td></tr>
+                <tr><td><code>play(events, v, t = et12, s = major, silo = 0, clock = 0, quant = 0.0)</code></td><td>Compile and start playing at the next beat on a grid of <code>quant</code> beats (0: now); returns a <code>Player</code> handle.</td></tr>
+                <tr><td><code>stop(p)</code> / <code>replace(p, events, quant = 0.0)</code> / <code>enqueue(p, events)</code></td><td>Stop (releases held notes); swap the playing sequence at the next beat on a grid of <code>quant</code> beats (0: now) &mdash; the old sequence plays up to that beat and its notes are released there, so an endless stream can be swapped on the beat or the bar; queue a sequence to follow the current one.</td></tr>
                 <tr><td><code>stopAll()</code></td><td>Stop every player started by <code>play</code> and not yet stopped &mdash; the recovery when a <code>Player</code> binding was overwritten and the old player plays on.</td></tr>
                 <tr><td><code>stopFirst()</code> / <code>stopLast()</code></td><td>Stop one running player: the oldest (first started) or the newest (undo the latest <code>play</code>). Return true if one was stopped.</td></tr>
                 <tr><td><code>voiceBundle(v, defName)</code></td><td>Node-graph setup (create the voiced synth's node as <code>v.node</code>, connect it to the output) as a reusable <code>Bundle</code>.</td></tr>
@@ -471,7 +471,7 @@ engineStart();
 voiceBundle(v, <span class="hl-str">"voicer"</span>) go(<span class="hl-num">0</span>);   <span class="cmt">-- the engine's built-in [pitch, amp] synth</span>
 
 <span class="hl-kw">let</span> p = play(tune, v, et12, pentMinor);   <span class="cmt">-- sample-accurate Bundles on the beat</span>
-p replace(melody);                        <span class="cmt">-- swap what's playing</span>
+p replace(melody, <span class="hl-num">4.0</span>);                   <span class="cmt">-- swap what's playing at the next 4-beat bar</span>
 p stop;                                   <span class="cmt">-- stop and release every held note</span>
 
 <span class="cmt">-- or render offline, in any tuning:</span>
