@@ -507,6 +507,19 @@ running into slots. When one source is left the chain collapses back to a direct
 connection (deferred while a fade is still in flight, since the fader reads a slot's
 buffer).
 
+A mixer never outlives its destination. To the inlet it feeds, the mixer is just its
+source, so a fade on the inlet (`setInputX`, a faded `disconnectInput`) fades the whole
+sum out like any single source: starting the fade moves the mixer onto the crossfader and
+clears `mixerNode_`. A source that connects while the fade runs finds the crossfader in
+the inlet and splices a new mixer with the crossfader and itself as inputs. When a fade to
+constant values ends, any hidden-node input it feeds (a mixer slot, or the start side of a
+later fade on the same inlet) takes over those values, so the faded-to value carries on; a
+user inlet keeps its own stage value. A hidden mixer
+or crossfader whose output loses its last destination retires (`retireIfOrphaned`, from
+`Silo::unlink`), and the cut cascades upstream: when the fade ends, the old mixer goes,
+then any chain links below it and any faders running into its slots. Cutting an inlet
+outright, or freeing its node, retires its chain the same way.
+
 ### Channel Adaptation (`tzpl_chanadapt.hpp/cpp`)
 
 Any outlet can drive any inlet of the same element type. Shapes combine per dimension:
@@ -524,7 +537,8 @@ Any outlet can drive any inlet of the same element type. Shapes combine per dime
 Channel counts are exact; nothing is rounded to a power of two.
 
 An adapter belongs to exactly one connection and retires itself (disconnects and goes to
-the dead-node queue) as soon as either end is unlinked. `Silo::unlink` is the single
+the dead-node queue) as soon as either end is unlinked (mixers and crossfaders retire the
+same way once their output feeds nothing). `Silo::unlink` is the single
 funnel where that is detected, which imposes one rule on the rest of the engine: when
 re-routing a source, **connect the new link before breaking the old one**, or an adapter
 in that source's path will retire out from under the rewire.

@@ -355,16 +355,20 @@ void Silo::processBlock(int frameOffset, int n) {
 
 void Silo::finishBlock() {
     // Faders that reached their end retire now: nothing reads this block's
-    // buffers any more. Collected first: retiring one can drop other hidden
-    // nodes (adapters) from the list being walked. Any beyond the batch stay
-    // done and retire after the next block.
+    // buffers any more. One at a time, re-walking the list each time:
+    // retiring one can retire other hidden nodes -- adapters, and the mixer
+    // chain it was fading out along with faders running into that chain --
+    // and those leave the list (pushDeadNode), so a pointer collected
+    // earlier could already be dead. Any beyond the cap stay done and retire
+    // after the next block.
     constexpr int kMaxRetire = 256;
-    Node* done[kMaxRetire];
-    int numDone = 0;
-    for (Node* node = rt_sortedNodeList_; node && numDone < kMaxRetire; node = node->sorted_next) {
-        if (node->isXFader_ && node->faderDone_) done[numDone++] = node;
+    for (int i = 0; i < kMaxRetire; ++i) {
+        Node* node = rt_sortedNodeList_;
+        while (node && !(node->isXFader_ && node->faderDone_ && !node->retiring_))
+            node = node->sorted_next;
+        if (!node) break;
+        retireXFader(this, node);
     }
-    for (int i = 0; i < numDone; ++i) retireXFader(this, done[i]);
     while (pendingFree_) {
         Node* node = pendingFree_;
         pendingFree_ = node->pendingFreeNext_;
@@ -576,6 +580,14 @@ void Silo::unlink(InPort* dst) {
     // -- retires it, so no orphan is left summing into a dead inlet.
     retireAdapter(this, dst->node_);
     retireAdapter(this, src->node_);
+
+    // Likewise a hidden mixer exists only to feed its destination and a
+    // crossfader only to feed what it fades into: one whose output just lost
+    // its last destination retires, and the cut cascades upstream through
+    // whatever existed only to feed it (a chain's lower mixers, faders
+    // running into its slots). An inlet whose mixer this was forgets it.
+    if (dst->mixerNode_ == src->node_) dst->mixerNode_ = nullptr;
+    retireIfOrphaned(this, src->node_);
 }
 
 //=============================================================================================

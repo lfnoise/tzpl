@@ -543,12 +543,13 @@ static void test_mixer_fanin() {
         check(mixer->ins[0].srcPort_ == &A->outs[0], "2nd connect: mixer.in[0] = A");
         check(mixer->ins[1].srcPort_ == &B->outs[0], "2nd connect: mixer.in[1] = B");
 
-        // Clean up
-        silo.disconnectNode(mixer);
-        silo.disconnectNode(A);
-        silo.disconnectNode(B);
-        dst->mixerNode_ = nullptr;
-        delete mixer; delete A; delete B;
+        // Clean up: cutting the inlet orphans the mixer, which retires
+        // (pushDeadNode) and lets go of its sources.
+        silo.disconnect(dst);
+        check(dst->mixerNode_ == nullptr, "cut inlet forgets its mixer");
+        check(A->outs[0].dstList_ == nullptr && B->outs[0].dstList_ == nullptr,
+              "orphaned mixer retired, releasing its sources");
+        delete A; delete B;
     }
 
     // --- Test 2: 3+ source fan-in ---
@@ -570,12 +571,10 @@ static void test_mixer_fanin() {
         check(mixer->ins[slot.slot].srcPort_ == &C->outs[0], "3rd connect: mixer.in[slot] = C");
         check(countActiveMixerInputs(mixer) == 3, "3rd connect: 3 active inputs");
 
-        silo.disconnectNode(mixer);
-        silo.disconnectNode(A);
-        silo.disconnectNode(B);
-        silo.disconnectNode(C);
-        dst->mixerNode_ = nullptr;
-        delete mixer; delete A; delete B; delete C;
+        silo.disconnect(dst);   // the mixer retires (see test 1)
+        check(A->outs[0].dstList_ == nullptr && B->outs[0].dstList_ == nullptr
+              && C->outs[0].dstList_ == nullptr, "orphaned mixer released its sources");
+        delete A; delete B; delete C;
     }
 
     // --- Test 3: Remove source, collapse to direct ---
@@ -651,12 +650,10 @@ static void test_mixer_fanin() {
         check(mixer->ins[0].srcPort_ == &C->outs[0], "after reconnect: C on slot 0");
         check(mixer->ins[1].srcPort_ == &B->outs[0], "after reconnect: B still on slot 1");
 
-        silo.disconnectNode(mixer);
-        silo.disconnectNode(A);
-        silo.disconnectNode(B);
-        silo.disconnectNode(C);
-        dst->mixerNode_ = nullptr;
-        delete mixer; delete A; delete B; delete C;
+        silo.disconnect(dst);   // the mixer retires (see test 1)
+        check(A->outs[0].dstList_ == nullptr && B->outs[0].dstList_ == nullptr
+              && C->outs[0].dstList_ == nullptr, "orphaned mixer released its sources");
+        delete A; delete B; delete C;
     }
 
     // --- Test 6: findFreeMixerSlot and countActiveMixerInputs ---

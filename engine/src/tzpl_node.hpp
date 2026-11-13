@@ -268,7 +268,8 @@ struct Node {
     bool isMixer_ = false;
     bool isXFader_ = false;
     bool isAdapter_ = false;
-    bool retiring_ = false; // adapter is being reclaimed (see retireAdapter)
+    bool retiring_ = false; // hidden node is being reclaimed (retireAdapter,
+                            // retireIfOrphaned, retireXFader)
     bool faderDone_ = false; // fader finished this block; retire after it
 
     // Discrete events in the current block, in time order.

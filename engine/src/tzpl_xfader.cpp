@@ -199,6 +199,9 @@ tzpl_SErr setupXFader(Silo* s, Node* sub, OutPort* oldSrc, OutPort* newSrc) {
 
 void retireXFader(Silo* s, Node* sub) {
     sub->faderDone_ = false;
+    // Claimed first: handing its destinations to the new source leaves it
+    // feeding nothing, which would otherwise retire it from Silo::unlink.
+    sub->retiring_ = true;
     // Hand the new source to everything the fader fed, then unlink: connect
     // before disconnecting, so a hidden adapter feeding the fade always has
     // a destination. With a constant new value the destinations revert to
@@ -210,6 +213,19 @@ void retireXFader(Silo* s, Node* sub) {
             InPort* next = dst->next_;
             s->connect(newSrc, dst);
             dst = next;
+        }
+    } else {
+        // The fade may have come to feed a hidden node's input instead of
+        // the inlet it started on: a mixer slot (a source joined the inlet
+        // mid-fade) or a later fade's start side. Those inputs have no
+        // stage value of their own, so they take over the fade's end value
+        // and the faded-to constant carries on. A user inlet keeps its own
+        // stage value: the command that started the fade (or a later
+        // setInput) set it.
+        InPort const& end = sub->ins[1];
+        for (InPort* dst = sub->outs[0].dstList_; dst; dst = dst->next_) {
+            if (!(dst->node_->isMixer_ || dst->node_->isXFader_)) continue;
+            holdConstants(s, *dst, &end, nullptr);
         }
     }
     s->disconnectNode(sub);
