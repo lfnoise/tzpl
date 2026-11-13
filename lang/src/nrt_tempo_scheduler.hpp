@@ -178,7 +178,17 @@ public:
 
     // Advance the logical clock to `seconds` (since epoch) and fire any
     // entries whose fire-time has come. Manual mode only; no-op otherwise.
-    void tickTo(f64 seconds);
+    //
+    // `lookahead` (seconds) also fires beat entries due before
+    // seconds + lookahead -- an NRT renderer passes the duration of the
+    // block it is about to render, so a handler due inside that block runs
+    // before it is rendered and a bundle it schedules at its beat lands on
+    // that beat's sample (with no lookahead it ran after the block, and the
+    // bundle landed late, on the next block boundary). The clock itself
+    // stays at `seconds`. Wall-clock (delayReal) deadlines fire exactly,
+    // without lookahead. Unlike latency(), nothing is added to scheduled
+    // beats: the handler still sees its exact logical beat.
+    void tickTo(f64 seconds, f64 lookahead = 0.);
 
     // True iff the scheduler queue holds no pending entries. Useful for the
     // NRT renderer to detect "no more work to drive" idle conditions.

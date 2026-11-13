@@ -330,8 +330,9 @@ void NRTTempoScheduler::resolvePendingDelays() {
     vm_->vm.runReadyAsyncIfIdle();
 }
 
-void NRTTempoScheduler::tickTo(f64 seconds) {
+void NRTTempoScheduler::tickTo(f64 seconds, f64 lookahead) {
     if (!manualMode_) return;
+    if (!(lookahead > 0.)) lookahead = 0.;
     firingThread_.store(std::this_thread::get_id(), std::memory_order_relaxed);
 
     // Advance the logical clock first so handlers reading beats()/getStreamTime
@@ -389,7 +390,9 @@ void NRTTempoScheduler::tickTo(f64 seconds) {
                 }
                 if (i == 0 || fs < beatFire) { beatFire = fs; beatIdx = i; }
             }
-            if (!queue_.empty() && beatFire <= manualSeconds_) {
+            // Due now, or (lookahead) inside the block about to render.
+            if (!queue_.empty() &&
+                (beatFire <= manualSeconds_ || beatFire < manualSeconds_ + lookahead)) {
                 next = queue_[beatIdx];
                 haveBeat = true;
             }
