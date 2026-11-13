@@ -200,11 +200,20 @@ fn triple(x Int) Int = x * 3;      -- expression-body form
 -- Template functions
 fn identity<T>(x T) T { x }
 
--- Structs (optional trailing semicolon)
+-- Structs (optional trailing semicolon; `,` also separates fields)
 struct Point { x Float; y Float; }
+let p = Point { 1.0, 2.0 };          -- or Point { x: 1.0, y: 2.0 }
 
--- Enums (sum types)
-enum Option<T> { case Some(T); case None; }
+-- Enums (sum types): comma-separated cases, lowercase by convention
+enum Shape { circle Float, rect(Float, Float), empty }
+let s = Shape.rect(2.0, 3.0);        -- Option<T> { some T, none } is built in
+
+-- Pattern matching: parenthesized subject, `pattern: expr;` arms
+match (s) {
+    circle(r): 3.0 * r * r;          -- or Shape.circle(r)
+    Shape.rect(w, h): w * h;         -- the `Shape.` qualifier is optional
+    _: 0.0;
+}
 
 -- Private functions start with underscore
 fn _helper(x Int) Int { x * 2 }

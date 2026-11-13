@@ -94,19 +94,24 @@ Syntax essentials for reading and writing `.x` files:
     -- @ operator for explicit mapping and Cartesian products
     [[1,2], [3,4]] @ reverse;      -- [[2,1], [4,3]]
 
-    -- Pattern matching
-    match value {
-        case .Some(x) => x;
-        case .None => 0;
-    }
-
     -- Modules
     import math.*;
     import utils.foo, utils.bar;
 
     -- Structs and enums
-    struct Point { x Float; y Float; }
-    enum Option<T> { case Some(T); case None; }
+    struct Point { x Float; y Float; }   -- `,` also separates fields
+    let p = Point { 1.0, 2.0 };          -- or Point { x: 1.0, y: 2.0 }
+    enum Shape { circle Float, rect(Float, Float), empty }   -- comma-separated cases
+    let s = Shape.rect(2.0, 3.0);
+    let o = Option.some(42);             -- Option<T> { some T, none } is built in
+
+    -- Pattern matching: parenthesized subject, `pattern: expr;` arms
+    match (s) {
+        circle(r): 3.0 * r * r;
+        Shape.rect(w, h): w * h;         -- the `Shape.` qualifier is optional
+        _: 0.0;
+    }
+    let v = match (o) { Option.some(x): x; none: 0; };   -- match is an expression
 
     -- Lambdas
     let f = fn(x Int) Int { x * 2 };

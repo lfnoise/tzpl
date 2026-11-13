@@ -226,8 +226,23 @@ void TypeChecker::checkPattern(Pattern* pat, Type* subjType, bool isMutable, boo
                     found = true;
                     Type* caseType = etype->cases_[i].type;
                     if (ep->innerPattern) {
+                        // Name.caseName(a, b) parses to an anonymous tuple
+                        // sub-pattern: report a mismatch in terms of the case,
+                        // as the unqualified caseName(a, b) form does.
+                        auto* tupPat = ep->innerPattern->kind == Pattern::TuplePat
+                            ? static_cast<TuplePattern*>(ep->innerPattern.get()) : nullptr;
+                        auto* caseTuple = dynamic_cast<TupleType*>(caseType);
                         if (caseType == compiler_.voidType()) {
                             error(pat->loc, "Enum case '" + ep->caseName + "' has no data");
+                        } else if (tupPat && tupPat->structName.empty() && !caseTuple) {
+                            error(pat->loc, "Enum case '" + ep->caseName +
+                                  "' has a single field; match it with one pattern");
+                        } else if (tupPat && tupPat->structName.empty() && !tupPat->hasRest &&
+                                   tupPat->elements.size() != caseTuple->fields_.size()) {
+                            error(pat->loc, "Enum case pattern has " +
+                                  std::to_string(tupPat->elements.size()) +
+                                  " elements but case data has " +
+                                  std::to_string(caseTuple->fields_.size()) + " fields");
                         } else {
                             checkPattern(ep->innerPattern.get(), caseType, isMutable, inMatch);
                         }

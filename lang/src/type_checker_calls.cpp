@@ -1441,7 +1441,7 @@ Type* TypeChecker::inferCall(CallExpr_* expr) {
                     // If no concrete match, try template resolution
                     if (!resolved) {
                         resolved = tryResolveModuleTemplate(
-                            fe->field, entry.funcOverloads, argTypes, expr);
+                            fe->field, entry.funcOverloads, argTypes, expr, mod);
                     }
                     if (!resolved && !entry.funcOverloads.empty()) {
                         // Fall back to first non-template overload if single

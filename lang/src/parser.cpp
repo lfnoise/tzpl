@@ -2717,14 +2717,24 @@ PatternPtr Parser::parsePrimaryPattern() {
             advance(); // consume .
             Token caseTok = expect(TokenKind::Identifier, "Expected case name after '.'");
 
+            // One sub-pattern matches the case data as a whole; several (or a
+            // rest) destructure tuple data, as the unqualified `caseName(a, b)`
+            // form does: Name.caseName(a, b) == Name.caseName((a, b)).
             PatternPtr innerPat;
             if (check(TokenKind::LParen)) {
                 SourceRange epOpenLoc = currentLoc();
                 advance(); // consume (
-                if (!check(TokenKind::RParen)) {
-                    innerPat = parsePattern();
-                }
+                std::vector<PatternPtr> elements;
+                bool hasRest = false;
+                std::string restName;
+                parsePatternElements(elements, hasRest, restName);
                 expectClosing(TokenKind::RParen, "(", epOpenLoc);
+                if (elements.size() == 1 && !hasRest) {
+                    innerPat = std::move(elements[0]);
+                } else if (!elements.empty() || hasRest) {
+                    innerPat = std::make_unique<TuplePattern>(
+                        epOpenLoc, std::move(elements), hasRest, std::move(restName));
+                }
             }
 
             return std::make_unique<EnumPattern>(
@@ -2739,31 +2749,7 @@ PatternPtr Parser::parsePrimaryPattern() {
             std::vector<PatternPtr> elements;
             bool hasRest = false;
             std::string restName;
-            if (!check(TokenKind::RParen)) {
-                while (true) {
-                    if (check(TokenKind::Ellipsis)) {
-                        advance();
-                        hasRest = true;
-                        if (check(TokenKind::Identifier) && current_.text != "_") {
-                            restName = current_.text;
-                            advance();
-                        }
-                        break;
-                    }
-                    elements.push_back(parsePattern());
-                    if (!match(TokenKind::Comma)) {
-                        if (check(TokenKind::Ellipsis)) {
-                            advance();
-                            hasRest = true;
-                            if (check(TokenKind::Identifier) && current_.text != "_") {
-                                restName = current_.text;
-                                advance();
-                            }
-                        }
-                        break;
-                    }
-                }
-            }
+            parsePatternElements(elements, hasRest, restName);
             expectClosing(TokenKind::RParen, "(", tspOpenLoc);
             return std::make_unique<TuplePattern>(loc, std::move(elements),
                 hasRest, std::move(restName), nameTok.text);
@@ -2803,6 +2789,27 @@ PatternPtr Parser::parsePrimaryPattern() {
 
     error("Expected pattern");
     return std::make_unique<WildcardPattern>(currentLoc());
+}
+
+void Parser::parsePatternElements(std::vector<PatternPtr>& elements, bool& hasRest,
+                                  std::string& restName) {
+    auto parseRest = [&] {
+        advance(); // consume ...
+        hasRest = true;
+        if (check(TokenKind::Identifier) && current_.text != "_") {
+            restName = current_.text;
+            advance();
+        }
+    };
+    if (check(TokenKind::RParen)) return;
+    while (true) {
+        if (check(TokenKind::Ellipsis)) { parseRest(); return; }
+        elements.push_back(parsePattern());
+        if (!match(TokenKind::Comma)) {
+            if (check(TokenKind::Ellipsis)) parseRest();
+            return;
+        }
+    }
 }
 
 // --- Tentative type arg parsing ---

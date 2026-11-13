@@ -85,6 +85,10 @@ private:
 
     // Patterns (for switch/case)
     PatternPtr parsePattern();
+    // Comma-separated sub-patterns up to (not consuming) the closing ')',
+    // with an optional trailing `...` or `...name` rest.
+    void parsePatternElements(std::vector<PatternPtr>& elements, bool& hasRest,
+                              std::string& restName);
     PatternPtr parsePrimaryPattern();
 
     // Expressions (Pratt parsing)
