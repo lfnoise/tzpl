@@ -1,0 +1,25 @@
+Type error [tests/errors/enum_qualified_pattern_arity.x:6:9]
+  |
+6 |         Shape.rect(a, b, c): a;
+  |         ^---^
+  Enum case pattern has 3 elements but case data has 2 fields
+
+Type error [tests/errors/enum_qualified_pattern_arity.x:6:30]
+  |
+6 |         Shape.rect(a, b, c): a;
+  |                              ^
+  Undeclared identifier 'a'
+  Did you mean 's'?
+
+Type error [tests/errors/enum_qualified_pattern_arity.x:7:9]
+  |
+7 |         Shape.circle(x, y): x;
+  |         ^---^
+  Enum case 'circle' has a single field; match it with one pattern
+
+Type error [tests/errors/enum_qualified_pattern_arity.x:7:29]
+  |
+7 |         Shape.circle(x, y): x;
+  |                             ^
+  Undeclared identifier 'x'
+  Did you mean 's'?
