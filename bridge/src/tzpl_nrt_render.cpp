@@ -95,7 +95,11 @@ struct RenderJob {
 static bool renderOneBlock(RenderJob* job) {
     if (job->framesRendered >= job->maxFrames) return false;
     double logicalSeconds = double(job->framesRendered) / job->sampleRate;
-    job->sched->tickTo(logicalSeconds);
+    // Look ahead over the block about to render: a handler due inside it
+    // fires first, so a bundle it schedules at its own beat lands on that
+    // sample instead of on the next block boundary.
+    double blockSeconds = double(job->bufferFrames) / job->sampleRate;
+    job->sched->tickTo(logicalSeconds, blockSeconds);
     engine::renderNRTBlock(job->eng.get(), job->blockBuf.data());
     int64_t remaining = job->maxFrames - job->framesRendered;
     int framesThisBlock = int(std::min<int64_t>(job->bufferFrames, remaining));
