@@ -906,7 +906,12 @@ FuncInfo* TypeChecker::tryResolveTemplate(const std::string& name,
     };
     std::vector<Match> matches;
 
-    for (auto& fi : it->second) {
+    // Index, don't iterate: the defining-module scope guard below appends
+    // to this deque (and may rehash functions_), which invalidates
+    // iterators but not references.
+    auto& overloads = it->second;
+    for (size_t oi = 0; oi < overloads.size(); ++oi) {
+        auto& fi = overloads[oi];
         if (!fi.isTemplate) continue;
 
         // Built-in template: use the resolver callback (no AST node needed)
@@ -1051,6 +1056,14 @@ FuncInfo* TypeChecker::tryResolveTemplate(const std::string& name,
             if ((int)argTypes.size() < minRequired || (int)argTypes.size() > numParams) continue;
         }
 
+        // An imported template's parameter types, default arguments and
+        // where-constraints are written in its defining module's scope:
+        // match it there, as monomorphize instantiates it there. Otherwise
+        // a type the caller never imported (`c FadeCurve = .fadeLinear` in
+        // bundles.setInput, called without importing audio_engine) fails.
+        std::optional<ImportedModuleScopeGuard> defScope;
+        if (fi.sourceModule) defScope.emplace(*this, fi.sourceModule);
+
         // For variadic templates, build a synthetic argTypes list for type inference
         // by constructing a TupleType from excess args (including single-arg case)
         std::vector<Type*> inferArgTypes;
@@ -1170,7 +1183,8 @@ FuncInfo* TypeChecker::tryResolveModuleTemplate(
     const std::string& name,
     const std::deque<FuncInfo>& overloads,
     const std::vector<Type*>& argTypes,
-    CallExpr_* callExpr) {
+    CallExpr_* callExpr,
+    ModuleInfo* home) {
 
     struct Match {
         FuncInfo* fi;
@@ -1223,6 +1237,15 @@ FuncInfo* TypeChecker::tryResolveModuleTemplate(
             if ((int)argTypes.size() < minRequired || (int)argTypes.size() > numParams) continue;
         }
 
+        // Match in the defining module's scope (see tryResolveTemplate).
+        // An export entry of a function `home` defines itself carries no
+        // sourceModule; one `home` re-exports carries its original module.
+        // `overloads` is that module's export list, not functions_, so the
+        // guard's additions don't disturb this loop.
+        ModuleInfo* defModule = fi.sourceModule ? fi.sourceModule : home;
+        std::optional<ImportedModuleScopeGuard> defScope;
+        if (defModule) defScope.emplace(*this, defModule);
+
         std::unordered_map<std::string, Type*> bindings;
         if (inferTypeParams(fi.typeParams, fi.declNode->params, argTypes, bindings)) {
             std::vector<Type*> typeArgs;
@@ -1263,6 +1286,9 @@ FuncInfo* TypeChecker::tryResolveModuleTemplate(
     // Copy before monomorphize -- it may push_back into the overloads
     // vector, invalidating best->fi.
     FuncInfo bestFI = *best->fi;
+    // Instantiate in the defining module's scope too (monomorphize keys
+    // its guard, and codegen's body recheck, off sourceModule).
+    if (!bestFI.sourceModule) bestFI.sourceModule = home;
     return monomorphize(bestFI, best->bindings, best->typeArgs, callExpr);
 }
 

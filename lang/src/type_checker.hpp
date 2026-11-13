@@ -632,10 +632,13 @@ private:
     FuncInfo* tryResolveTemplate(const std::string& name,
                                  const std::vector<Type*>& argTypes,
                                  CallExpr_* callExpr);
+    // `home` is the module the call names (`home.f(...)`): the defining
+    // module of any overload that doesn't record its own sourceModule.
     FuncInfo* tryResolveModuleTemplate(const std::string& name,
                                        const std::deque<FuncInfo>& overloads,
                                        const std::vector<Type*>& argTypes,
-                                       CallExpr_* callExpr);
+                                       CallExpr_* callExpr,
+                                       ModuleInfo* home);
     FuncInfo* monomorphize(FuncInfo& templateFI,
                            const std::unordered_map<std::string, Type*>& bindings,
                            const std::vector<Type*>& typeArgs,
