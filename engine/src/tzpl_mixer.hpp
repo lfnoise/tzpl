@@ -73,10 +73,13 @@ bool removeFromMixer(Silo* s, Node* head, OutPort* src);
 // while a crossfader is still running into one of the slots.
 void collapseMixer(Silo* s, InPort* dst);
 
-// RT: Unconditionally tear down dst's whole mixer chain, along with any
-// crossfaders left fading into it (they become unreachable). Used when the
-// destination inlet is disconnected outright.
-void freeMixerChain(Silo* s, InPort* dst);
+// RT: Retire a hidden mixer or crossfader whose output feeds nothing (called
+// from Silo::unlink whenever a connection is cut). A mixer never outlives
+// its destination: cutting an inlet's connection to its mixer -- a plain
+// disconnect, or a crossfade that took the mixer over and has now ended --
+// deletes the chain, and with it any faders running into its slots, which
+// would otherwise be unreachable and never finish. No-op for other nodes.
+void retireIfOrphaned(Silo* s, Node* node);
 
 // Find an unconnected input slot anywhere in the chain. Falsy if all full.
 MixerSlot findFreeMixerSlot(Node* head);

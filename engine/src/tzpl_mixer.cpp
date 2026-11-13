@@ -234,27 +234,15 @@ static OutPort* firstChainSource(Node* head) {
     return nullptr;
 }
 
-// Unlink and kill every mixer in the chain.
-static void teardownChain(Silo* s, InPort* dst, bool freeFaders) {
-    Node* m = dst->mixerNode_;
-    while (m) {
-        Node* next = mixerLink(m); // before disconnecting clears the link
-        if (freeFaders) {
-            for (auto& in : m->ins) {
-                Node* src = in.srcPort_ ? in.srcPort_->node_ : nullptr;
-                if (src && src->isXFader_) {
-                    // A crossfader fading into this chain: once the chain is
-                    // gone nothing reaches it, so it would never self-remove.
-                    s->disconnectNode(src);
-                    s->pushDeadNode(src);
-                }
-            }
-        }
-        s->disconnectNode(m);
-        s->pushDeadNode(m);
-        m = next;
-    }
-    dst->mixerNode_ = nullptr;
+void retireIfOrphaned(Silo* s, Node* node) {
+    if (!node || node->retiring_ || !(node->isMixer_ || node->isXFader_)) return;
+    if (node->outs[0].dstList_) return; // still feeding something
+    // Claimed first: disconnecting its inputs re-enters through Silo::unlink
+    // (which retires whatever upstream this was the last destination of),
+    // and must not reclaim this node twice.
+    node->retiring_ = true;
+    s->disconnectNode(node);
+    s->pushDeadNode(node);
 }
 
 void collapseMixer(Silo* s, InPort* dst) {
@@ -265,19 +253,14 @@ void collapseMixer(Silo* s, InPort* dst) {
     // chain in place is harmless -- a lone source just sums with zeroes.
     if (hasPendingFade(head)) return;
 
-    // Restore the direct connection BEFORE tearing the chain down. The
-    // survivor may reach the mixer through a hidden channel adapter, and an
-    // adapter that momentarily loses every destination retires itself.
+    // Restore the direct connection: the survivor takes dst from the head,
+    // which leaves the chain feeding nothing, so it retires (Silo::unlink).
+    // Connect before the chain goes: the survivor may reach the mixer
+    // through a hidden channel adapter, and an adapter that momentarily
+    // loses every destination retires itself.
     OutPort* remaining = firstChainSource(head);
-    if (remaining) {
-        s->connect(remaining, dst);
-    }
-    teardownChain(s, dst, /*freeFaders=*/false);
-}
-
-void freeMixerChain(Silo* s, InPort* dst) {
-    if (!dst->mixerNode_) return;
-    teardownChain(s, dst, /*freeFaders=*/true);
+    if (remaining) s->connect(remaining, dst);
+    else s->disconnect(dst);
 }
 
 } // namespace engine

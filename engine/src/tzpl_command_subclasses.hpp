@@ -289,9 +289,8 @@ struct DisconnectInputCmd : Command
         }
         Node* xfader = std::exchange(xfaderNode_, nullptr);
 
-        // Tear down the hidden mixer chain if present
-        freeMixerChain(s, dst);
-
+        // A fan-in mixer goes like a single source: cut, it retires at once;
+        // faded, it retires when the fade ends (Silo::unlink).
         if (xfader) {
             // Fade out to the input's own stage values.
             err_ = setupXFader(s, xfader, nullptr, dst, nullptr);
@@ -429,9 +428,11 @@ struct SetInputCmd : Command
             s->impulseInputValues(dst, n, chans_.data(), values_.data());
             return;
         }
-        if (xfaderNode_ && dst->srcPort_ && !dst->mixerNode_) {
+        if (xfaderNode_ && dst->srcPort_) {
             // A connected input: crossfade its signal out to the new
             // constants, which become its stage values once the fade is done.
+            // A fan-in mixer is faded out like any other source: the fade
+            // detaches it from the inlet, and it retires when the fade ends.
             Node* xfader = xfaderNode_;
             xfaderNode_ = nullptr;
             s->setInputValues(dst, n, chans_.data(), values_.data(), 0, curve_);
@@ -440,8 +441,7 @@ struct SetInputCmd : Command
         }
         if (xfaderNode_) s->pushDeadNode(xfaderNode_);
         xfaderNode_ = nullptr;
-        // Unconnected (or fed by a mixer, which keeps playing): a crossfade
-        // between constants is a ramp on the curve.
+        // Unconnected: a crossfade between constants is a ramp on the curve.
         s->setInputValues(dst, n, chans_.data(), values_.data(), rampCount_, curve_);
     }
 };

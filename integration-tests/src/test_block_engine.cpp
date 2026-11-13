@@ -396,6 +396,122 @@ void testXFades() {
               "input left unconnected, holding the constant");
     }
 
+    // Fan-in: a hidden mixer feeding an inlet is a source like any other.
+    // A fade on the inlet takes the mixer over (detaching it from the
+    // inlet); when the fade ends the mixer feeds nothing and retires,
+    // releasing every source it summed.
+    auto unfed = [](Rig& r, i64 id) {
+        return r.e->silos_[0].nrt_getNode(id)->outs[0].dstList_ == nullptr;
+    };
+
+    gCase = "setInputX on a fan-in input";
+    {
+        Rig r(64, 64);
+        addRec(r, "rec", tzpl::shapeRow(1), 10);
+        addPass(r, "pa", tzpl::shapeRow(1), 11);
+        addPass(r, "pb", tzpl::shapeRow(1), 12);
+        r.now([&] {
+            setAll(11, 0, {1.}); setAll(12, 0, {2.});
+            connect({11, 0}, {10, 0}); connect({12, 0}, {10, 0});
+        });
+        r.at(5.5, [&] { setInputX(PortAddr{10, 0}, Region::all(), std::vector<f64>{7.}, 0.05); });
+        r.renderTo(200);
+        checkSeries(rec("rec"), 0, 200, [](int k) {
+            return 3. + 4. * fadePosition(k, 5.5, 50);
+        }, 1e-5, "summed signal -> constant");
+        InPort const& in = r.e->silos_[0].nrt_getNode(10)->ins[0];
+        check(in.srcPort_ == nullptr && in.mixerNode_ == nullptr,
+              "input left unconnected, holding the constant");
+        check(unfed(r, 11) && unfed(r, 12), "mixer retired with the fade, sources released");
+    }
+
+    gCase = "disconnectInput faded on a fan-in input";
+    {
+        Rig r(64, 64);
+        addRec(r, "rec", tzpl::shapeRow(1), 10);
+        addPass(r, "pa", tzpl::shapeRow(1), 11);
+        addPass(r, "pb", tzpl::shapeRow(1), 12);
+        r.now([&] {
+            setAll(11, 0, {1.}); setAll(12, 0, {2.}); setAll(10, 0, {0.5});
+            connect({11, 0}, {10, 0}); connect({12, 0}, {10, 0});
+        });
+        // Used to cut the mixer at once and "fade" held value to held value.
+        r.at(20., [&] { disconnectInput({10, 0}, 0.1); });
+        r.renderTo(300);
+        checkSeries(rec("rec"), 0, 300, [](int k) {
+            return 3. + (0.5 - 3.) * fadePosition(k, 20, 100);
+        }, 1e-5, "summed signal fades to the held value");
+        check(unfed(r, 11) && unfed(r, 12), "mixer retired with the fade, sources released");
+    }
+
+    gCase = "source joins a fading input";
+    {
+        Rig r(64, 64);
+        addRec(r, "rec", tzpl::shapeRow(1), 10);
+        addPass(r, "pa", tzpl::shapeRow(1), 11);
+        addPass(r, "pb", tzpl::shapeRow(1), 12);
+        r.now([&] { setAll(11, 0, {1.}); setAll(12, 0, {2.}); connect({11, 0}, {10, 0}); });
+        r.at(10., [&] { setInputX(PortAddr{10, 0}, Region::all(), std::vector<f64>{5.}, 0.1); });
+        // A new mixer forms with the fader and B as its sources.
+        r.at(40., [&] { connect({12, 0}, {10, 0}); });
+        r.renderTo(400);
+        checkSeries(rec("rec"), 0, 110, [](int k) {
+            return 1. + 4. * fadePosition(k, 10, 100) + (k >= 40 ? 2. : 0.);
+        }, 1e-5, "fade plus the joined source");
+        // The fader retires into its mixer slot, which holds the faded-to
+        // value: no step at the fade's end, then B plus 5.
+        checkSeries(rec("rec"), 110, 400, [](int) { return 7.; }, 1e-5, "B plus the held value after the fade");
+        check(unfed(r, 11), "A released when the fade ended");
+    }
+
+    gCase = "fade to a constant nested in a later fade";
+    {
+        Rig r(64, 64);
+        addRec(r, "rec", tzpl::shapeRow(1), 10);
+        addPass(r, "pa", tzpl::shapeRow(1), 11);
+        r.now([&] { setAll(11, 0, {1.}); connect({11, 0}, {10, 0}); });
+        // A -> 5 from 10 over 100; at 50, -> 9 over 200. The first fade ends
+        // (and retires) inside the second, whose start side must hold 5.
+        r.at(10., [&] { setInputX(PortAddr{10, 0}, Region::all(), std::vector<f64>{5.}, 0.1); });
+        r.at(50., [&] { setInputX(PortAddr{10, 0}, Region::all(), std::vector<f64>{9.}, 0.2); });
+        r.renderTo(400);
+        checkSeries(rec("rec"), 0, 400, [](int k) {
+            f64 a = 1. + 4. * fadePosition(k, 10, 100);
+            return a + (9. - a) * fadePosition(k, 50, 200);
+        }, 1e-5, "A -> 5 inside -> 9");
+        check(unfed(r, 11), "both faders retired, A released");
+        check(r.e->silos_[0].nrt_getNode(10)->ins[0].srcPort_ == nullptr,
+              "input left unconnected, holding 9");
+    }
+
+    gCase = "inlet cut while a fade runs into its mixer";
+    {
+        Rig r(64, 64);
+        addRec(r, "rec", tzpl::shapeRow(1), 10);
+        addPass(r, "pa", tzpl::shapeRow(1), 11);
+        addPass(r, "pb", tzpl::shapeRow(1), 12);
+        r.now([&] { setAll(11, 0, {1.}); setAll(12, 0, {2.}); connect({11, 0}, {10, 0}); });
+        r.at(10., [&] { connect({12, 0}, {10, 0}, 0.1); });   // B fades into a slot
+        r.at(30., [&] { disconnectInput({10, 0}); });         // cut mid-fade
+        r.renderTo(300);
+        checkSeries(rec("rec"), 0, 300, [](int k) {
+            return k < 30 ? 1. + 2. * fadePosition(k, 10, 100) : 0.;
+        }, 1e-5, "fade in, then cut");
+        check(unfed(r, 11) && unfed(r, 12), "mixer and its slot fader retired");
+    }
+
+    gCase = "freeing a fan-in destination";
+    {
+        Rig r(64, 64);
+        addRec(r, "rec", tzpl::shapeRow(1), 10);
+        addPass(r, "pa", tzpl::shapeRow(1), 11);
+        addPass(r, "pb", tzpl::shapeRow(1), 12);
+        r.now([&] { connect({11, 0}, {10, 0}); connect({12, 0}, {10, 0}); });
+        r.at(20., [&] { freeNode(10); });
+        r.renderTo(200);
+        check(unfed(r, 11) && unfed(r, 12), "mixer retired with its destination");
+    }
+
     gCase = "scheduled cut";
     {
         Rig r(64, 64);
