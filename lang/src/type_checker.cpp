@@ -607,8 +607,22 @@ void TypeChecker::check(Program& program) {
     }
 }
 
+void TypeChecker::rollbackREPLGlobals() {
+    for (auto it = globalVars_.begin(); it != globalVars_.end();) {
+        if (!it->second.sourceModulePath.empty()) { ++it; continue; }  // imported
+        auto prev = replGlobalsSnapshot_.find(it->first);
+        if (prev == replGlobalsSnapshot_.end()) {
+            it = globalVars_.erase(it);
+        } else {
+            it->second = prev->second;
+            ++it;
+        }
+    }
+}
+
 void TypeChecker::checkREPLInput(Program& program) {
     clearErrors();
+    replGlobalsSnapshot_ = globalVars_;
 
     // Register builtins only on first call
     if (!builtinsRegistered_) {

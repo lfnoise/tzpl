@@ -40,6 +40,12 @@ documentation site as the Changelog page.
   cartesian dimension, and a dimension with nothing marked for it (`@2`
   without `@1`) are type errors. Before, they segfaulted or produced garbage
   values, in named functions, lambda values, and binary operators alike.
+- In the REPL and the app editor, an input that fails to compile no longer
+  leaves its bindings behind. Before, they stayed declared without a value:
+  after a failed `let g = f @;`, calling `g` crashed the app; after a failed
+  `let a = 5; let b = 1 + "x";`, `a` read 0; and a failed redefinition of
+  `x` changed its type over the old value. Now each name is undeclared or
+  keeps its previous binding. Imports in a failed input still take effect.
 
 - Graph edits scheduled inside one block land at their exact sample in
   every case. The engine now runs the nodes up to each edit before applying

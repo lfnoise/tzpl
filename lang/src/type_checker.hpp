@@ -167,6 +167,12 @@ public:
 
     // Type-check a REPL input (incremental: preserves state across calls)
     void checkREPLInput(Program& program);
+    // Undo the global bindings the last checkREPLInput declared, after that
+    // input failed to compile: it never ran, so a binding it left behind
+    // would read an unset slot (0, nil, or a null lambda that crashes when
+    // called). Restores a redefined name's previous binding. Imported names
+    // stay, since a failed input's imports are still installed.
+    void rollbackREPLGlobals();
 
     // Set the source file path (for module resolution and error reporting)
     void setSourceFilePath(const std::string& path) { sourceFilePath_ = path; }
@@ -353,6 +359,7 @@ private:
 
     // Global variables
     std::unordered_map<std::string, VarInfo> globalVars_;
+    std::unordered_map<std::string, VarInfo> replGlobalsSnapshot_;  // globalVars_ before the current REPL input
 
     // Function table (supports overloading: multiple FuncInfos per name)
     std::unordered_map<std::string, std::deque<FuncInfo>> functions_;
