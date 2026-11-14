@@ -1,0 +1,11 @@
+Type error [tests/errors/automap_unconsumed.x:5:11]
+  |
+5 | let g = f @;
+  |           ^
+  '@' has nothing to map over here: it marks a call argument, operator operand, or literal element to map a function over, e.g. `xs @ f` or `f(xs @)`. To make a function that maps, write `fn(xs) { xs @ f }`
+
+Type error [tests/errors/automap_unconsumed.x:7:13]
+  |
+7 | let ys = xs @;
+  |             ^
+  '@' has nothing to map over here: it marks a call argument, operator operand, or literal element to map a function over, e.g. `xs @ f` or `f(xs @)`. To make a function that maps, write `fn(xs) { xs @ f }`

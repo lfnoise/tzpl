@@ -276,6 +276,7 @@ AutoMapArg TypeChecker::extractAutoMapAnnotation(Expr* expr) const {
     AutoMapArg result;
     if (expr->kind == ASTNode::AutoMap) {
         auto* am = static_cast<AutoMapExpr*>(expr);
+        am->consumed = true;
         result.depth = am->depth;
         result.cartesianIndex = am->cartesianIndex;
     }

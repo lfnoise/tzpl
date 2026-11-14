@@ -23,6 +23,36 @@ documentation site as the Changelog page.
 
 ### Fixed
 
+- `xs @ f` with an untyped lambda (`let f = fn(j) { ... }`) maps `f` over
+  the elements. Before, the `@` was ignored and `f` received the whole
+  array, so a body like `if (j > 0.0) ...` failed with "If condition must be
+  bool or int".
+- In the REPL and the app editor, re-running a call to an untyped lambda
+  whose body failed to type-check reports the error again. Before, the second
+  run skipped the check and ran the ill-typed body, giving wrong results (an
+  `if` on an array always took its `then` branch).
+- Cartesian `@1`/`@2` on a lambda value (`h(xs @1, ys @2)`) builds the
+  nested product, as it does for named functions. Before, it silently zipped.
+- A bare `@` with nothing to map over (`let g = f @;`, `let ys = xs @;`) is
+  a type error. Before, the `@` was dropped and `g` was simply `f`. To make a
+  mapping function, write `fn(xs) { xs @ f }`.
+- Cartesian `@1`/`@2` mapping over a `List`, an `@@` depth combined with a
+  cartesian dimension, and a dimension with nothing marked for it (`@2`
+  without `@1`) are type errors. Before, they segfaulted or produced garbage
+  values, in named functions, lambda values, and binary operators alike.
+- In the REPL and the app editor, an input that fails to compile no longer
+  leaves its bindings behind. Before, they stayed declared without a value:
+  after a failed `let g = f @;`, calling `g` crashed the app; after a failed
+  `let a = 5; let b = 1 + "x";`, `a` read 0; and a failed redefinition of
+  `x` changed its type over the old value. Now each name is undeclared or
+  keeps its previous binding. Imports in a failed input still take effect.
+- Element-wise `&&` and `||` give correct results. `[true, false] @ && true`
+  gave `[true, true]`: each element pair was added as integers instead of
+  and-ed. Without `@`, `bs && true` over an array of Bools returned a single
+  `true` instead of mapping; it now maps one level, as comparisons do. A
+  collection whose elements are not Bool or Int is a type error. Scalar
+  `&&` and `||` still short-circuit.
+
 - Graph edits scheduled inside one block land at their exact sample in
   every case. The engine now runs the nodes up to each edit before applying
   it, instead of sorting the whole block once. Before, two edits in one block

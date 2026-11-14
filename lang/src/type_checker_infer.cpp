@@ -214,6 +214,7 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                     Expr* elem = static_cast<Expr*>(lit->elements[i].get());
                     if (elem->kind == ASTNode::AutoMap) {
                         auto* am = static_cast<AutoMapExpr*>(elem);
+                        am->consumed = true;
                         autoMap[i].depth = am->depth;
                         autoMap[i].cartesianIndex = am->cartesianIndex;
                         anyAutoMap = true;
@@ -435,6 +436,7 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                 Expr* elem = static_cast<Expr*>(lit->elements[i].get());
                 if (elem->kind == ASTNode::AutoMap) {
                     auto* am = static_cast<AutoMapExpr*>(elem);
+                    am->consumed = true;
                     autoMap[i].depth = am->depth;
                     autoMap[i].cartesianIndex = am->cartesianIndex;
                     anyAutoMap = true;
@@ -555,6 +557,8 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
                         std::vector<Type*> fieldTypes;
                         for (size_t i = 0; i < lit->fields.size(); ++i) {
                             Expr* fv = static_cast<Expr*>(lit->fields[i].value.get());
+                            if (fv->kind == ASTNode::AutoMap)
+                                static_cast<AutoMapExpr*>(fv)->consumed = true;
                             Type* ft = inferExpr(fv);
                             // An explicit @ requests auto-mapping: bind the type
                             // parameter from the element type (peel `depth`
@@ -851,6 +855,12 @@ Type* TypeChecker::inferExpr(Expr* expr, Type* expectedType) {
             // The AutoMapExpr itself resolves to the inner expression's type;
             // the actual unwrapping/wrapping happens at the call site in inferCall.
             auto* am = static_cast<AutoMapExpr*>(expr);
+            if (!am->consumed) {
+                error(am->loc, "'@' has nothing to map over here: it marks a call "
+                      "argument, operator operand, or literal element to map a "
+                      "function over, e.g. `xs @ f` or `f(xs @)`. To make a "
+                      "function that maps, write `fn(xs) { xs @ f }`");
+            }
             result = inferExpr(static_cast<Expr*>(am->inner.get()));
             break;
         }

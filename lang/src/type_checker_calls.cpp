@@ -451,6 +451,7 @@ Type* TypeChecker::detectStructLiteralAutoMap(StructLiteralExpr* lit, StructType
         AutoMapArg explicitAM;
         if (fieldExpr->kind == ASTNode::AutoMap) {
             auto* am = static_cast<AutoMapExpr*>(fieldExpr);
+            am->consumed = true;
             explicitAM.depth = am->depth;
             explicitAM.cartesianIndex = am->cartesianIndex;
         }
@@ -571,6 +572,7 @@ Type* TypeChecker::tryInferEnumConstruct(CallExpr_* expr, FieldExpr_* fe, Identi
                     int amDepth = 0, amCart = 0;
                     if (arg0->kind == ASTNode::AutoMap) {
                         auto* am = static_cast<AutoMapExpr*>(arg0);
+                        am->consumed = true;
                         amDepth = am->depth;
                         amCart = am->cartesianIndex;
                     }
@@ -689,6 +691,7 @@ Type* TypeChecker::tryInferEnumConstruct(CallExpr_* expr, FieldExpr_* fe, Identi
             int amDepth = 0, amCart = 0;
             if (arg0->kind == ASTNode::AutoMap) {
                 auto* am = static_cast<AutoMapExpr*>(arg0);
+                am->consumed = true;
                 amDepth = am->depth;
                 amCart = am->cartesianIndex;
             }
@@ -770,6 +773,7 @@ Type* TypeChecker::tryInferTupleStructConstruct(CallExpr_* expr, IdentifierExpr*
                 Expr* arg = static_cast<Expr*>(expr->args[i].get());
                 if (arg->kind == ASTNode::AutoMap) {
                     auto* am = static_cast<AutoMapExpr*>(arg);
+                    am->consumed = true;
                     autoMap[i].depth = am->depth;
                     autoMap[i].cartesianIndex = am->cartesianIndex;
                 }
@@ -863,6 +867,7 @@ Type* TypeChecker::tryInferTupleStructConstruct(CallExpr_* expr, IdentifierExpr*
                 Expr* arg = static_cast<Expr*>(expr->args[i].get());
                 if (arg->kind == ASTNode::AutoMap) {
                     auto* am = static_cast<AutoMapExpr*>(arg);
+                    am->consumed = true;
                     autoMap[i].depth = am->depth;
                     autoMap[i].cartesianIndex = am->cartesianIndex;
                 }
@@ -1014,16 +1019,8 @@ Type* TypeChecker::inferIndirectCall(CallExpr_* expr) {
         return funcType->returnType_;
     }
     // Template lambda: monomorphize based on argument types
-    auto* tmplLambda = dynamic_cast<TemplateLambdaType*>(calleeType);
-    if (tmplLambda) {
-        std::vector<Type*> callArgTypes;
-        for (auto& arg : expr->args)
-            callArgTypes.push_back(inferExpr(static_cast<Expr*>(arg.get())));
-        LambdaType* concreteLT = monomorphizeTemplateLambda(tmplLambda, callArgTypes, expr->loc);
-        if (!concreteLT) return compiler_.intType();
-        expr->resolvedTemplateLambdaType = concreteLT;
-        return concreteLT->returnType_;
-    }
+    if (auto* tmplLambda = dynamic_cast<TemplateLambdaType*>(calleeType))
+        return inferTemplateLambdaCall(expr, tmplLambda);
     // Not a function type -- try callable object via `call` function
     if (functions_.find("call") == functions_.end()) {
         std::vector<Type*> argTypes;
@@ -1064,6 +1061,130 @@ bool TypeChecker::isEmptyCollectionLiteral(Expr* expr) {
     }
 }
 
+bool TypeChecker::unwrapExplicitAutoMapArgs(CallExpr_* expr, std::vector<Type*>& argTypes,
+                                            std::vector<AutoMapArg>& autoMap,
+                                            bool& anyList, bool& anyPVec) {
+    bool ok = true;
+    for (size_t i = 0; i < argTypes.size(); ++i) {
+        int d = autoMap[i].depth;
+        if (d <= 0) continue;
+        Type* t = argTypes[i];
+        for (int level = 0; level < d && t; ++level) {
+            if (auto* arrT = dynamic_cast<ArrayType*>(t)) {
+                t = arrT->elemType_;
+            } else if (auto* listT = dynamic_cast<ListType*>(t)) {
+                t = listT->elemType_;
+                autoMap[i].isList = true;
+                anyList = true;
+            } else if (auto* pvT = dynamic_cast<PersistentVectorType*>(t)) {
+                t = pvT->elemType_;
+                autoMap[i].isPVec = true;
+                anyPVec = true;
+            } else {
+                error(expr->args[i]->loc,
+                      "Explicit '@' requires Array, List, or persistent vector type");
+                t = nullptr;
+                ok = false;
+            }
+        }
+        if (t) argTypes[i] = t;
+    }
+    return ok;
+}
+
+bool TypeChecker::rejectUnsupportedCartesian(std::vector<AutoMapArg> const& autoMap,
+                                             std::vector<SourceRange> const& locs) {
+    bool hasCartesian = false;
+    for (auto& am : autoMap) hasCartesian |= am.cartesianIndex > 0;
+    if (!hasCartesian) return false;
+    bool rejected = false;
+    for (size_t i = 0; i < autoMap.size() && i < locs.size(); ++i) {
+        if (!autoMap[i]) continue;
+        if (autoMap[i].isList) {
+            error(locs[i], "Cartesian '@1'/'@2' mapping over a List is not "
+                  "supported; use an Array or persistent vector");
+            rejected = true;
+        } else if (autoMap[i].depth > 1) {
+            error(locs[i], "'@@' depth mapping cannot be combined with cartesian "
+                  "'@1'/'@2' mapping in the same call");
+            rejected = true;
+        }
+    }
+    // Each dimension 1..max needs an arg to supply its length; a plain `@`
+    // supplies dimension 1.
+    int maxDim = 0;
+    std::vector<bool> present(autoMap.size() + 10, false);
+    for (auto& am : autoMap) {
+        if (!am) continue;
+        int dim = am.cartesianIndex > 0 ? am.cartesianIndex : 1;
+        maxDim = std::max(maxDim, dim);
+        if ((size_t)dim < present.size()) present[dim] = true;
+    }
+    for (int dim = 1; dim <= maxDim && !rejected; ++dim) {
+        if (present[dim]) continue;
+        SourceRange loc = locs.empty() ? SourceRange{} : locs[0];
+        for (size_t i = 0; i < autoMap.size() && i < locs.size(); ++i)
+            if (autoMap[i] && autoMap[i].cartesianIndex == maxDim) loc = locs[i];
+        error(loc, std::format("Cartesian dimensions must be numbered from '@1' with "
+                               "no gaps: '@{}' is used but nothing is marked '@{}'",
+                               maxDim, dim));
+        rejected = true;
+    }
+    return rejected;
+}
+
+bool TypeChecker::rejectUnsupportedCartesian(CallExpr_* expr,
+                                             std::vector<AutoMapArg> const& autoMap) {
+    std::vector<SourceRange> locs;
+    for (auto& arg : expr->args) locs.push_back(arg->loc);
+    return rejectUnsupportedCartesian(autoMap, locs);
+}
+
+Type* TypeChecker::wrapAutoMapResult(Type* retType, std::vector<AutoMapArg> const& autoMap,
+                                     bool anyList, bool anyPVec) {
+    if (!retType) return retType;
+    bool hasCartesian = false;
+    int maxCartesian = 0;
+    for (auto& am : autoMap) {
+        hasCartesian |= am.cartesianIndex > 0;
+        maxCartesian = std::max(maxCartesian, am.cartesianIndex);
+    }
+    // Cartesian `@1`/`@2` nests one level per dimension; plain `@`/`@@` wraps
+    // once per depth.
+    return computeAutoMapReturnType(retType, autoMap, {}, hasCartesian, maxCartesian,
+                                    anyList, anyPVec);
+}
+
+Type* TypeChecker::inferTemplateLambdaCall(CallExpr_* expr, TemplateLambdaType* tmplLambda) {
+    std::vector<Type*> callArgTypes;
+    std::vector<AutoMapArg> autoMap(expr->args.size());
+    bool hasExplicitAutoMap = false;
+    for (size_t i = 0; i < expr->args.size(); ++i) {
+        Expr* arg = static_cast<Expr*>(expr->args[i].get());
+        if (arg->kind == ASTNode::AutoMap) {
+            auto* am = static_cast<AutoMapExpr*>(arg);
+            am->consumed = true;
+            autoMap[i].depth = am->depth;
+            autoMap[i].cartesianIndex = am->cartesianIndex;
+            hasExplicitAutoMap = true;
+        }
+        callArgTypes.push_back(inferExpr(arg));
+    }
+    // Under `@` the lambda sees one element at a time, so instantiate it at
+    // the element types rather than the collection types.
+    bool anyList = false, anyPVec = false;
+    if (hasExplicitAutoMap &&
+        (!unwrapExplicitAutoMapArgs(expr, callArgTypes, autoMap, anyList, anyPVec) ||
+         rejectUnsupportedCartesian(expr, autoMap)))
+        return compiler_.intType();
+    LambdaType* concreteLT = monomorphizeTemplateLambda(tmplLambda, callArgTypes, expr->loc);
+    if (!concreteLT) return compiler_.intType();
+    expr->resolvedTemplateLambdaType = concreteLT;
+    if (!hasExplicitAutoMap) return concreteLT->returnType_;
+    expr->autoMapArgs = std::move(autoMap);
+    return wrapAutoMapResult(concreteLT->returnType_, expr->autoMapArgs, anyList, anyPVec);
+}
+
 Type* TypeChecker::tryInferVariableCall(CallExpr_* expr, IdentifierExpr* ident) {
     VarInfo* calleeVar = lookupVar(ident->name);
     if (!calleeVar) return nullptr;
@@ -1100,17 +1221,8 @@ Type* TypeChecker::tryInferVariableCall(CallExpr_* expr, IdentifierExpr* ident) 
     }
 
     // Template lambda called directly: monomorphize based on argument types
-    auto* tmplLambda = dynamic_cast<TemplateLambdaType*>(calleeVar->type);
-    if (tmplLambda) {
-        std::vector<Type*> callArgTypes;
-        for (auto& arg : expr->args) {
-            callArgTypes.push_back(inferExpr(static_cast<Expr*>(arg.get())));
-        }
-        LambdaType* concreteLT = monomorphizeTemplateLambda(tmplLambda, callArgTypes, expr->loc);
-        if (!concreteLT) return compiler_.intType();
-        expr->resolvedTemplateLambdaType = concreteLT;
-        return concreteLT->returnType_;
-    }
+    if (auto* tmplLambda = dynamic_cast<TemplateLambdaType*>(calleeVar->type))
+        return inferTemplateLambdaCall(expr, tmplLambda);
 
     auto* funcType = dynamic_cast<FunctionType*>(calleeVar->type);
     if (funcType) {
@@ -1129,6 +1241,7 @@ Type* TypeChecker::tryInferVariableCall(CallExpr_* expr, IdentifierExpr* ident) 
             Expr* arg = static_cast<Expr*>(expr->args[i].get());
             if (arg->kind == ASTNode::AutoMap) {
                 auto* am = static_cast<AutoMapExpr*>(arg);
+                am->consumed = true;
                 explicitAutoMap[i].depth = am->depth;
                 explicitAutoMap[i].cartesianIndex = am->cartesianIndex;
                 hasExplicitAutoMap = true;
@@ -1143,34 +1256,10 @@ Type* TypeChecker::tryInferVariableCall(CallExpr_* expr, IdentifierExpr* ident) 
         // Handle explicit @ auto-mapping on lambda calls
         if (hasExplicitAutoMap) {
             bool anyListArg = false, anyPVecArg = false;
-            std::vector<Type*> unwrappedTypes;
-            for (size_t i = 0; i < argTypes.size(); ++i) {
-                if (explicitAutoMap[i].depth > 0) {
-                    Type* t = argTypes[i];
-                    int d = explicitAutoMap[i].depth;
-                    for (int level = 0; level < d; ++level) {
-                        if (auto* arrT = dynamic_cast<ArrayType*>(t)) {
-                            t = arrT->elemType_;
-                        } else if (auto* listT = dynamic_cast<ListType*>(t)) {
-                            t = listT->elemType_;
-                            explicitAutoMap[i].isList = true;
-                            anyListArg = true;
-                        } else if (auto* pvT = dynamic_cast<PersistentVectorType*>(t)) {
-                            t = pvT->elemType_;
-                            explicitAutoMap[i].isPVec = true;
-                            anyPVecArg = true;
-                        } else {
-                            error(expr->args[i]->loc,
-                                  "Explicit '@' requires Array, List, or persistent vector type");
-                            t = nullptr;
-                            break;
-                        }
-                    }
-                    unwrappedTypes.push_back(t ? t : argTypes[i]);
-                } else {
-                    unwrappedTypes.push_back(argTypes[i]);
-                }
-            }
+            std::vector<Type*> unwrappedTypes = argTypes;
+            unwrapExplicitAutoMapArgs(expr, unwrappedTypes, explicitAutoMap,
+                                      anyListArg, anyPVecArg);
+            rejectUnsupportedCartesian(expr, explicitAutoMap);
             // Check unwrapped types against param types
             for (size_t i = 0; i < unwrappedTypes.size() && i < funcType->argTypes_.size(); ++i) {
                 if (unwrappedTypes[i] && !typesEqual(unwrappedTypes[i], funcType->argTypes_[i])) {
@@ -1180,19 +1269,8 @@ Type* TypeChecker::tryInferVariableCall(CallExpr_* expr, IdentifierExpr* ident) 
                 }
             }
             expr->autoMapArgs = std::move(explicitAutoMap);
-            Type* retType = funcType->returnType_;
-            if (retType != compiler_.voidType()) {
-                int maxDepth = 0;
-                for (auto& am : expr->autoMapArgs) {
-                    if (am.depth > maxDepth) maxDepth = am.depth;
-                }
-                for (int d = 0; d < maxDepth; ++d) {
-                    if (anyListArg)      retType = compiler_.listType(retType);
-                    else if (anyPVecArg) retType = compiler_.persistentVectorType(retType);
-                    else                 retType = compiler_.arrayType(retType);
-                }
-            }
-            return retType;
+            return wrapAutoMapResult(funcType->returnType_, expr->autoMapArgs,
+                                     anyListArg, anyPVecArg);
         }
 
         // Direct type check
@@ -1563,6 +1641,7 @@ Type* TypeChecker::inferCall(CallExpr_* expr) {
         Expr* arg = static_cast<Expr*>(expr->args[i].get());
         if (arg->kind == ASTNode::AutoMap) {
             auto* am = static_cast<AutoMapExpr*>(arg);
+            am->consumed = true;
             explicitAutoMap[i].depth = am->depth;
             explicitAutoMap[i].cartesianIndex = am->cartesianIndex;
             hasExplicitAutoMap = true;
@@ -1931,6 +2010,7 @@ Type* TypeChecker::inferCall(CallExpr_* expr) {
             if (!func) return compiler_.intType();
         }
 
+        if (rejectUnsupportedCartesian(expr, explicitAutoMap)) return compiler_.intType();
         expr->autoMapArgs = std::move(explicitAutoMap);
         Type* retType = finalizeResolvedCall(expr, func, ident->name, unwrappedTypes);
 

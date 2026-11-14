@@ -1,0 +1,38 @@
+Type error [<repl>:1:11]
+  |
+1 | let g = f @;
+  |           ^
+  '@' has nothing to map over here: it marks a call argument, operator operand, or literal element to map a function over, e.g. `xs @ f` or `f(xs @)`. To make a function that maps, write `fn(xs) { xs @ f }`
+Type error [<repl>:1:3]
+  |
+1 | 1 g println;
+  |   ^
+  Undeclared function 'g'
+  Did you mean 'gc'?
+Type error [<repl>:1:22]
+  |
+1 | let a = 5; let b = 1 + "x";
+  |                      ^
+  No matching overload for '+'
+    Supplied types: (Int, String)
+    Built-in forms: numeric operands, element-wise over collections and tuples
+    To support these types, declare: fn +(a Int, b String) R { ... }
+Type error [<repl>:1:1]
+  |
+1 | a println;
+  | ^
+  Undeclared identifier 'a'
+  Did you mean 'f'?
+Type error [<repl>:1:21]
+  |
+1 | let x = fn(j) { j } @;
+  |                     ^
+  '@' has nothing to map over here: it marks a call argument, operator operand, or literal element to map a function over, e.g. `xs @ f` or `f(xs @)`. To make a function that maps, write `fn(xs) { xs @ f }`
+Type error [<repl>:1:33]
+  |
+1 | import std.strings.*; let c = 1 + "x";
+  |                                 ^
+  No matching overload for '+'
+    Supplied types: (Int, String)
+    Built-in forms: numeric operands, element-wise over collections and tuples
+    To support these types, declare: fn +(a Int, b String) R { ... }

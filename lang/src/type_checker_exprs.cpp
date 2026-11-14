@@ -611,7 +611,9 @@ LambdaType* TypeChecker::monomorphizeTemplateLambda(TemplateLambdaType* tmplType
     }
 
     // Check body
+    size_t errorsBefore = errors_.size();
     checkNode(expr->body.get());
+    bool bodyChecked = errors_.size() == errorsBefore;
 
     // A declared return type binds each instantiation just as it binds a plain
     // lambda; without this the body's value is reinterpreted as the declared
@@ -662,8 +664,11 @@ LambdaType* TypeChecker::monomorphizeTemplateLambda(TemplateLambdaType* tmplType
 
     auto* lambdaType = new LambdaType(std::move(argTypesVec), retType, std::move(freeVarTypes));
 
-    // Cache the monomorphization
-    tmplType->addMono(typeArgs, lambdaType);
+    // Cache the monomorphization -- only if its body type-checked. A failed
+    // instantiation must not be reused: a later call with the same types (a
+    // REPL re-run, after the failed statement was discarded) would hit the
+    // cache, skip the body check, and compile the ill-typed body.
+    if (bodyChecked) tmplType->addMono(typeArgs, lambdaType);
 
     return lambdaType;
 }
@@ -890,6 +895,9 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
             if (rightAM.isPVec) anyPVec = true;
         }
 
+        if (rejectUnsupportedCartesian({leftAM, rightAM}, {expr->left->loc, expr->right->loc}))
+            return compiler_.intType();
+
         // Store annotations on the AST node
         expr->leftAutoMap = leftAM;
         expr->rightAutoMap = rightAM;
@@ -922,6 +930,15 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
             if (Type* scalarResult = concatResultType(unwrappedLeft, unwrappedRight, expr->loc)) {
                 return wrapAutoMapResult(scalarResult, leftAM, rightAM, anyList, anyPVec);
             }
+        }
+
+        // Element-wise `&&` / `||` take truth values (Bool, or Int as in `if`).
+        if (expr->op == BinaryOpExpr::And || expr->op == BinaryOpExpr::Or) {
+            if (isTruthScalar(unwrappedLeft) && isTruthScalar(unwrappedRight))
+                return wrapAutoMapResult(compiler_.boolType(), leftAM, rightAM, anyList, anyPVec);
+            error(expr->loc, std::format("'{}' needs Bool operands",
+                                         expr->op == BinaryOpExpr::And ? "&&" : "||"));
+            return compiler_.boolType();
         }
 
         // Try built-in ops with unwrapped types
@@ -1116,8 +1133,36 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
             break;  // Fall through to operator overload lookup
 
         case BinaryOpExpr::And:
-        case BinaryOpExpr::Or:
-            return compiler_.boolType();
+        case BinaryOpExpr::Or: {
+            // A collection operand auto-maps one level, as comparisons do:
+            // `bs && true` over bs : [Bool] is element-wise. It used to type
+            // as a scalar Bool and test the array pointer's truthiness.
+            auto collElem = [](Type* t) -> Type* {
+                if (auto* a = dynamic_cast<ArrayType*>(t)) return a->elemType_;
+                if (auto* l = dynamic_cast<ListType*>(t)) return l->elemType_;
+                if (auto* p = dynamic_cast<PersistentVectorType*>(t)) return p->elemType_;
+                return nullptr;
+            };
+            Type* leftElem = collElem(leftType);
+            Type* rightElem = collElem(rightType);
+            if (!leftElem && !rightElem) return compiler_.boolType();
+            if (!isTruthScalar(leftElem ? leftElem : leftType) ||
+                !isTruthScalar(rightElem ? rightElem : rightType)) {
+                error(expr->loc, std::format("'{}' needs Bool operands",
+                                             expr->op == BinaryOpExpr::And ? "&&" : "||"));
+                return compiler_.boolType();
+            }
+            bool anyList = false, anyPVec = false;
+            auto mark = [&](Type* t, AutoMapArg& am) {
+                if (dynamic_cast<ArrayType*>(t)) am = AutoMapArg{1, 0, false};
+                else if (dynamic_cast<ListType*>(t)) { am = AutoMapArg{1, 0, true}; anyList = true; }
+                else if (dynamic_cast<PersistentVectorType*>(t)) { am = AutoMapArg{1, 0, false, true}; anyPVec = true; }
+            };
+            mark(leftType, expr->leftAutoMap);
+            mark(rightType, expr->rightAutoMap);
+            return wrapAutoMapResult(compiler_.boolType(), expr->leftAutoMap, expr->rightAutoMap,
+                                     anyList, anyPVec);
+        }
 
         case BinaryOpExpr::BitAnd:
         case BinaryOpExpr::BitOr:
@@ -1309,6 +1354,14 @@ Type* TypeChecker::inferUnaryOp(UnaryOpExpr* expr) {
     expr->resolvedFuncGlobalIndex = -1;
     expr->isBuiltinCall = false;
     expr->builtinAcceptsInlineArgs = false;
+
+    // `-(xs @)`: the arithmetic/logical unary operators auto-map over a
+    // collection operand anyway, so an explicit `@` on one is accepted.
+    if (expr->op == UnaryOpExpr::Neg || expr->op == UnaryOpExpr::Not ||
+        expr->op == UnaryOpExpr::BitNot) {
+        if (expr->operand->kind == ASTNode::AutoMap)
+            static_cast<AutoMapExpr*>(expr->operand.get())->consumed = true;
+    }
 
     Type* operandType = inferExpr(static_cast<Expr*>(expr->operand.get()));
     if (!operandType) return compiler_.intType();

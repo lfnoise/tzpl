@@ -1,0 +1,53 @@
+Type error [tests/errors/automap_cartesian_unsupported.x:10:14]
+   |
+10 | let a = k(ys @1, [10, 20] @2);
+   |              ^^
+   Cartesian '@1'/'@2' mapping over a List is not supported; use an Array or persistent vector
+
+Type error [tests/errors/automap_cartesian_unsupported.x:11:14]
+   |
+11 | let b = h(ys @1, [10, 20] @2);
+   |              ^^
+   Cartesian '@1'/'@2' mapping over a List is not supported; use an Array or persistent vector
+
+Type error [tests/errors/automap_cartesian_unsupported.x:12:12]
+   |
+12 | let c = ys @1 + [10, 20] @2;
+   |            ^^
+   Cartesian '@1'/'@2' mapping over a List is not supported; use an Array or persistent vector
+
+Type error [tests/errors/automap_cartesian_unsupported.x:13:25]
+   |
+13 | let d = k([[1], [2, 3]] @@, [1] @2);
+   |                         ^^
+   '@@' depth mapping cannot be combined with cartesian '@1'/'@2' mapping in the same call
+
+Type error [tests/errors/automap_cartesian_unsupported.x:14:25]
+   |
+14 | let e = h([[1], [2, 3]] @@, [1] @2);
+   |                         ^^
+   '@@' depth mapping cannot be combined with cartesian '@1'/'@2' mapping in the same call
+
+Type error [tests/errors/automap_cartesian_unsupported.x:15:23]
+   |
+15 | let g = [[1], [2, 3]] @@ + [1] @2;
+   |                       ^^
+   '@@' depth mapping cannot be combined with cartesian '@1'/'@2' mapping in the same call
+
+Type error [tests/errors/automap_cartesian_unsupported.x:16:23]
+   |
+16 | let i = k(1, [10, 20] @2);
+   |                       ^^
+   Cartesian dimensions must be numbered from '@1' with no gaps: '@2' is used but nothing is marked '@1'
+
+Type error [tests/errors/automap_cartesian_unsupported.x:17:23]
+   |
+17 | let j = h(1, [10, 20] @2);
+   |                       ^^
+   Cartesian dimensions must be numbered from '@1' with no gaps: '@2' is used but nothing is marked '@1'
+
+Type error [tests/errors/automap_cartesian_unsupported.x:18:27]
+   |
+18 | let m = [1, 2] + [10, 20] @2;
+   |                           ^^
+   Cartesian dimensions must be numbered from '@1' with no gaps: '@2' is used but nothing is marked '@1'

@@ -1,0 +1,10 @@
+Type error [<repl>:1:23]
+  |
+1 | f(x);
+  |                       ^
+  If condition must be bool or int
+Type error [<repl>:1:23]
+  |
+1 | f(x);
+  |                       ^
+  If condition must be bool or int

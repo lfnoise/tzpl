@@ -209,6 +209,7 @@ REPLSession::EvalResult REPLSession::eval(const std::string& input) {
 
         if (codegen.hasErrors()) {
             result.errors = codegen.errors();
+            impl_->typeChecker.rollbackREPLGlobals();
             impl_->installPendingGlobals();
             impl_->runPendingModuleInits();
             return result;
@@ -239,6 +240,7 @@ REPLSession::EvalResult REPLSession::eval(const std::string& input) {
 
     if (typeError) {
         result.errors = impl_->typeChecker.errors();
+        impl_->typeChecker.rollbackREPLGlobals();
         return result;
     }
 
