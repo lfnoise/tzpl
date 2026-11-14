@@ -170,15 +170,29 @@ private:
     u16 emitPVecCallLevel(CallExpr_* expr, const FuncInfo* funcInfo, Type* returnT,
                           std::vector<u16> argRegs, std::vector<Type*> argTypes,
                           const std::vector<bool>& argMapped, PersistentVectorType* resPV);
-    u16 genAutoMapLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* funcType);
-    u16 genAutoMapLambdaCallList(CallExpr_* expr, u16 calleeReg, FunctionType* funcType);
+    // Auto-mapped lambda-value calls. `tmplLT` is non-null when the callee is a
+    // template lambda: each element call then runs that instantiation's
+    // CodeBlock (op_call_template_lambda) instead of the Lambda's own.
+    u16 genAutoMapLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* funcType,
+                             LambdaType* tmplLT = nullptr);
+    u16 genAutoMapLambdaCallList(CallExpr_* expr, u16 calleeReg, FunctionType* funcType,
+                                 LambdaType* tmplLT = nullptr);
+    // Cartesian (`@1`/`@2`) auto-map of a lambda-value call over Array and
+    // persistent-vector args: one nested output level per dimension.
+    u16 genCartesianLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* funcType,
+                               LambdaType* tmplLT);
     // Auto-map of a lambda-value call over persistent-vector arg(s) to arbitrary
     // depth (recurses via emitPVecLambdaCallLevel).
     u16 genAutoMapLambdaCallPVec(CallExpr_* expr, u16 calleeReg, FunctionType* funcType,
-                                 PersistentVectorType* resultPVType);
+                                 PersistentVectorType* resultPVType, LambdaType* tmplLT = nullptr);
     u16 emitPVecLambdaCallLevel(CallExpr_* expr, u16 calleeReg, FunctionType* funcType, Type* returnT,
                                 std::vector<u16> argRegs, std::vector<Type*> argTypes,
-                                const std::vector<bool>& argMapped, PersistentVectorType* resPV);
+                                const std::vector<bool>& argMapped, PersistentVectorType* resPV,
+                                LambdaType* tmplLT = nullptr);
+    // Emit one lambda-value call: op_call_lambda, or op_call_template_lambda
+    // with the instantiation's CodeBlock when `tmplLT` is non-null.
+    void emitLambdaValueCall(u16 resultReg, u16 argc, u16 argBase, u16 calleeReg,
+                             LambdaType* tmplLT);
     u16 genAutoMapCallList(CallExpr_* expr, const FuncInfo* funcInfo);
     u16 genAutoMapCallListVoid(CallExpr_* expr, const FuncInfo* funcInfo);
     u16 genExplicitImplicitAutoMapCall(CallExpr_* expr);

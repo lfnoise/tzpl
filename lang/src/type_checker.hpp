@@ -576,6 +576,25 @@ private:
     Type* detectStructLiteralAutoMap(StructLiteralExpr* lit, StructType* stype);
     Type* tryInferVariableCall(CallExpr_* expr, IdentifierExpr* ident);
     Type* inferIndirectCall(CallExpr_* expr);
+    // Explicit `@` on a lambda-value call: records each arg's mapping in
+    // `autoMap` and replaces mapped entries of `argTypes` with their element
+    // types. Returns false (after reporting) if a mapped arg isn't a collection.
+    bool unwrapExplicitAutoMapArgs(CallExpr_* expr, std::vector<Type*>& argTypes,
+                                   std::vector<AutoMapArg>& autoMap,
+                                   bool& anyList, bool& anyPVec);
+    // Cartesian `@1`/`@2` mapping iterates Array and persistent-vector args
+    // by index, one level per dimension. A List arg, or an `@@` depth mixed
+    // in, is not supported: report it and return true. `locs[i]` is where
+    // `autoMap[i]`'s argument or operand sits.
+    bool rejectUnsupportedCartesian(std::vector<AutoMapArg> const& autoMap,
+                                    std::vector<SourceRange> const& locs);
+    bool rejectUnsupportedCartesian(CallExpr_* expr, std::vector<AutoMapArg> const& autoMap);
+    // Wrap a per-element result type in the collection the mapping produces.
+    Type* wrapAutoMapResult(Type* retType, std::vector<AutoMapArg> const& autoMap,
+                            bool anyList, bool anyPVec);
+    // Call of a template lambda value: instantiate it at the argument types --
+    // the element types for args under an explicit `@` -- and map the call.
+    Type* inferTemplateLambdaCall(CallExpr_* expr, TemplateLambdaType* tmplLambda);
 
     Type* inferIdentifier(IdentifierExpr* expr);
     Type* inferLambdaExpr(LambdaExprNode* expr);

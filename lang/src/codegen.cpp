@@ -4421,6 +4421,10 @@ u16 CodeGen::genCall(CallExpr_* expr) {
                 compileTemplateLambdaBody(tmplType->astNode_, concreteLT);
             }
 
+            // Explicit `@`: the instantiation is at the element types; map it.
+            if (!expr->autoMapArgs.empty())
+                return genAutoMapLambdaCall(expr, calleeReg, concreteLT, concreteLT);
+
             // Generate args into consecutive registers (Phase 4f: multi-word).
             u16 argBase = nextReg_;
             u32 cumOffset = 0;
@@ -4559,6 +4563,10 @@ u16 CodeGen::genCall(CallExpr_* expr) {
         if (tmplExpr) {
             compileTemplateLambdaBody(tmplExpr, concreteLT);
         }
+
+        // Explicit `@`: the instantiation is at the element types; map it.
+        if (!expr->autoMapArgs.empty())
+            return genAutoMapLambdaCall(expr, calleeReg, concreteLT, concreteLT);
 
         // Generate args into consecutive registers (Phase 4f: multi-word).
         u16 argBase = nextReg_;
@@ -6340,7 +6348,20 @@ u16 CodeGen::genAutoMapCall(CallExpr_* expr) {
     return emitArrayBuildLoop(minLenReg, resultArrayType, emitCallElem);
 }
 
-u16 CodeGen::genAutoMapLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* funcType) {
+void CodeGen::emitLambdaValueCall(u16 resultReg, u16 argc, u16 argBase, u16 calleeReg,
+                                  LambdaType* tmplLT) {
+    if (tmplLT) {
+        emitOp(op_call_template_lambda);
+        emitRegs(resultReg, argc, argBase, calleeReg);
+        emitPtr(tmplLT->codeBlock_);
+    } else {
+        emitOp(op_call_lambda);
+        emitRegs(resultReg, argc, argBase, calleeReg);
+    }
+}
+
+u16 CodeGen::genAutoMapLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* funcType,
+                                  LambdaType* tmplLT) {
     u16 argc = (u16)expr->args.size();
     bool isVoidReturn = (funcType->returnType_ == compiler_.voidType());
 
@@ -6356,7 +6377,12 @@ u16 CodeGen::genAutoMapLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* 
         }
     }
     if (anyListArg) {
-        return genAutoMapLambdaCallList(expr, calleeReg, funcType);
+        return genAutoMapLambdaCallList(expr, calleeReg, funcType, tmplLT);
+    }
+
+    for (auto& am : expr->autoMapArgs) {
+        if (am.cartesianIndex > 0)
+            return genCartesianLambdaCall(expr, calleeReg, funcType, tmplLT);
     }
 
     // Persistent-vector result (always depth 1 -- the type checker restricts
@@ -6364,7 +6390,7 @@ u16 CodeGen::genAutoMapLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* 
     // through temporary arrays; the deep-loop machinery below is array/list only.
     if (!isVoidReturn) {
         if (auto* resPV = dynamic_cast<PersistentVectorType*>(expr->resolvedType)) {
-            return genAutoMapLambdaCallPVec(expr, calleeReg, funcType, resPV);
+            return genAutoMapLambdaCallPVec(expr, calleeReg, funcType, resPV, tmplLT);
         }
     }
 
@@ -6536,8 +6562,7 @@ u16 CodeGen::genAutoMapLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* 
 
         u16 callResultReg = allocReg();
         clearArgRegTypes(callArgBase, callResultReg);
-        emitOp(op_call_lambda);
-        emitRegs(callResultReg, argc, callArgBase, calleeReg);
+        emitLambdaValueCall(callResultReg, argc, callArgBase, calleeReg, tmplLT);
         emitReturnPcStackMap(callResultReg,
                             innerResultArrayType ? innerResultArrayType->elemType_ : nullptr);
         return callResultReg;
@@ -6576,8 +6601,103 @@ u16 CodeGen::genAutoMapLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* 
     return prevResultReg;
 }
 
+u16 CodeGen::genCartesianLambdaCall(CallExpr_* expr, u16 calleeReg, FunctionType* funcType,
+                                   LambdaType* tmplLT) {
+    // Mirrors genCartesianCall, with the leaf a lambda-value call.
+    u16 argc = (u16)expr->args.size();
+    std::vector<u16> argRegs;
+    for (auto& arg : expr->args) argRegs.push_back(genExpr(static_cast<Expr*>(arg.get())));
+
+    // Mapped persistent-vector args are read through a temporary array.
+    std::vector<ArrayType*> argArrType(argc, nullptr);
+    for (u16 i = 0; i < argc; ++i) {
+        if (!expr->autoMapArgs[i]) continue;
+        Type* at = expr->args[i]->resolvedType;
+        if (auto* arrT = dynamic_cast<ArrayType*>(at)) {
+            argArrType[i] = arrT;
+        } else if (auto* pvT = dynamic_cast<PersistentVectorType*>(at)) {
+            auto* aT = compiler_.arrayType(pvT->elemType_);
+            argRegs[i] = emitPvecToArray(argRegs[i], aT);
+            argArrType[i] = aT;
+        }
+    }
+
+    // Nest depth = largest cartesian dimension; a plain `@` acts as dimension 1.
+    int maxCart = 1;
+    for (auto& am : expr->autoMapArgs) maxCart = std::max(maxCart, am.cartesianIndex);
+    auto dimOf = [](AutoMapArg const& am) { return am.cartesianIndex > 0 ? am.cartesianIndex : 1; };
+
+    // Each dimension's length comes from the first arg supplying it.
+    std::vector<u16> lenRegs(maxCart + 1, 0);
+    for (int level = 1; level <= maxCart; ++level) {
+        for (u16 i = 0; i < argc; ++i) {
+            if (!expr->autoMapArgs[i] || dimOf(expr->autoMapArgs[i]) != level) continue;
+            u16 lr = allocReg();
+            emitOp(opArrayLengthFor(argArrType[i]->elemType_));
+            emitRegs(lr, argRegs[i]);
+            emitPtr(argArrType[i]);
+            lenRegs[level] = lr;
+            break;
+        }
+    }
+
+    bool isVoidReturn = (funcType->returnType_ == compiler_.voidType());
+    Type* leafType = isVoidReturn ? nullptr : funcType->returnType_;
+
+    // The call at one combination of loop indices: a mapped arg reads its
+    // element at its dimension's index; a non-mapped arg is broadcast.
+    auto callAt = [&](std::vector<u16> const& iRegs) -> u16 {
+        u16 callArgBase = nextReg_;
+        for (u16 i = 0; i < argc; ++i) {
+            u16 targetReg = callArgBase + i;
+            if (nextReg_ <= targetReg) {
+                nextReg_ = targetReg + 1;
+                if (nextReg_ > maxReg_) maxReg_ = nextReg_;
+            }
+            Type* paramType = (i < funcType->argTypes_.size()) ? funcType->argTypes_[i] : nullptr;
+            if (expr->autoMapArgs[i]) {
+                ArrayType* arrType = argArrType[i];
+                emitOp(opArrayGetDynFor(arrType->elemType_));
+                emitRegs(targetReg, argRegs[i], iRegs[dimOf(expr->autoMapArgs[i])]);
+                emitPtr(arrType);
+                if (paramType && arrType->elemType_ != paramType) {
+                    u16 promoted = ensureType(targetReg, arrType->elemType_, paramType);
+                    if (promoted != targetReg) emitMov(targetReg, promoted);
+                }
+            } else {
+                Type* argType = expr->args[i]->resolvedType;
+                u16 srcReg = argRegs[i];
+                if (paramType && argType != paramType) srcReg = ensureType(srcReg, argType, paramType);
+                if (srcReg != targetReg) emitMov(targetReg, srcReg);
+            }
+        }
+        u16 callResultReg = allocReg();
+        clearArgRegTypes(callArgBase, callResultReg);
+        emitLambdaValueCall(callResultReg, argc, callArgBase, calleeReg, tmplLT);
+        emitReturnPcStackMap(callResultReg, leafType);
+        return callResultReg;
+    };
+
+    std::vector<u16> iRegs(maxCart + 1, 0);
+    if (isVoidReturn) {
+        // No result container: nest counted loops and call for side effects.
+        u16 lastReg = 0;
+        auto nest = [&](this auto&& self, int level) -> void {
+            emitCountedLoop(lenRegs[level], [&](u16 iReg) {
+                iRegs[level] = iReg;
+                if (level == maxCart) lastReg = callAt(iRegs);
+                else self(level + 1);
+            });
+        };
+        nest(1);
+        return lastReg;
+    }
+    return emitCartesianNest(1, maxCart, expr->resolvedType, iRegs, callAt,
+                             [&](int level) -> u16 { return lenRegs[level]; });
+}
+
 u16 CodeGen::genAutoMapLambdaCallPVec(CallExpr_* expr, u16 calleeReg, FunctionType* funcType,
-                                      PersistentVectorType* resultPVType) {
+                                      PersistentVectorType* resultPVType, LambdaType* tmplLT) {
     u16 argc = (u16)expr->args.size();
     std::vector<u16> argRegs;
     for (auto& arg : expr->args) argRegs.push_back(genExpr(static_cast<Expr*>(arg.get())));
@@ -6601,12 +6721,13 @@ u16 CodeGen::genAutoMapLambdaCallPVec(CallExpr_* expr, u16 calleeReg, FunctionTy
         }
     }
     return emitPVecLambdaCallLevel(expr, calleeReg, funcType, funcType->returnType_,
-                                   argRegs, argTypes, argMapped, resultPVType);
+                                   argRegs, argTypes, argMapped, resultPVType, tmplLT);
 }
 
 u16 CodeGen::emitPVecLambdaCallLevel(CallExpr_* expr, u16 calleeReg, FunctionType* funcType, Type* returnT,
                                      std::vector<u16> argRegs, std::vector<Type*> argTypes,
-                                     const std::vector<bool>& argMapped, PersistentVectorType* resPV) {
+                                     const std::vector<bool>& argMapped, PersistentVectorType* resPV,
+                                     LambdaType* tmplLT) {
     u16 argc = (u16)argRegs.size();
     Type* resElem = resPV->elemType_;
     auto* resElemPV = dynamic_cast<PersistentVectorType*>(resElem);
@@ -6639,7 +6760,7 @@ u16 CodeGen::emitPVecLambdaCallLevel(CallExpr_* expr, u16 calleeReg, FunctionTyp
                 subRegs[i] = s;
                 subTypes[i] = pv->elemType_;
             }
-            return emitPVecLambdaCallLevel(expr, calleeReg, funcType, returnT, subRegs, subTypes, argMapped, resElemPV);
+            return emitPVecLambdaCallLevel(expr, calleeReg, funcType, returnT, subRegs, subTypes, argMapped, resElemPV, tmplLT);
         });
         u16 dst = allocReg(); emitOp(op_pvec_from_array); emitRegs(dst, arrReg); emitPtr(resPV);
         return dst;
@@ -6680,8 +6801,7 @@ u16 CodeGen::emitPVecLambdaCallLevel(CallExpr_* expr, u16 calleeReg, FunctionTyp
         }
         u16 callResultReg = allocReg();
         clearArgRegTypes(callArgBase, callResultReg);
-        emitOp(op_call_lambda);
-        emitRegs(callResultReg, argc, callArgBase, calleeReg);
+        emitLambdaValueCall(callResultReg, argc, callArgBase, calleeReg, tmplLT);
         emitReturnPcStackMap(callResultReg, returnT);
         return callResultReg;
     });
@@ -6693,7 +6813,8 @@ u16 CodeGen::emitPVecLambdaCallLevel(CallExpr_* expr, u16 calleeReg, FunctionTyp
 // Mirrors the structure of genAutoMapCallListVoid but uses op_call_lambda and
 // collects into a result List (via cons-from-right-to-left) for non-Void
 // returns.
-u16 CodeGen::genAutoMapLambdaCallList(CallExpr_* expr, u16 calleeReg, FunctionType* funcType) {
+u16 CodeGen::genAutoMapLambdaCallList(CallExpr_* expr, u16 calleeReg, FunctionType* funcType,
+                                      LambdaType* tmplLT) {
     u16 argc = (u16)expr->args.size();
     bool isVoidReturn = (funcType->returnType_ == compiler_.voidType());
 
@@ -6810,8 +6931,7 @@ u16 CodeGen::genAutoMapLambdaCallList(CallExpr_* expr, u16 calleeReg, FunctionTy
     // --- Phase 5: Call the lambda ---
     u16 callResultReg = isVoidReturn ? allocReg() : allocSlot(resultElemType);
     clearArgRegTypes(callArgBase, callResultReg);
-    emitOp(op_call_lambda);
-    emitRegs(callResultReg, argc, callArgBase, calleeReg);
+    emitLambdaValueCall(callResultReg, argc, callArgBase, calleeReg, tmplLT);
     emitReturnPcStackMap(callResultReg, isVoidReturn ? nullptr : resultElemType);
 
     // Cons the result onto the accumulator (reversed result list).

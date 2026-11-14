@@ -439,6 +439,10 @@ struct AutoMapExpr : Expr {
     ExprPtr inner;
     int depth;           // 1 for @, 2 for @@, 3 for @@@, etc.
     int cartesianIndex;  // 0 for plain @, 1+ for @1, @2, etc.
+    // Set by the type checker where the mapping is applied (a call argument,
+    // an operator operand, a literal element or field). An `@` reached without
+    // it has nothing to map over -- `let g = f @;` -- and is an error.
+    bool consumed = false;
 
     AutoMapExpr(SourceRange l, ExprPtr e, int d, int ci)
         : Expr(AutoMap, l), inner(std::move(e)), depth(d), cartesianIndex(ci) {}

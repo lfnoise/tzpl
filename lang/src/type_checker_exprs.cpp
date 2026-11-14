@@ -611,7 +611,9 @@ LambdaType* TypeChecker::monomorphizeTemplateLambda(TemplateLambdaType* tmplType
     }
 
     // Check body
+    size_t errorsBefore = errors_.size();
     checkNode(expr->body.get());
+    bool bodyChecked = errors_.size() == errorsBefore;
 
     // A declared return type binds each instantiation just as it binds a plain
     // lambda; without this the body's value is reinterpreted as the declared
@@ -662,8 +664,11 @@ LambdaType* TypeChecker::monomorphizeTemplateLambda(TemplateLambdaType* tmplType
 
     auto* lambdaType = new LambdaType(std::move(argTypesVec), retType, std::move(freeVarTypes));
 
-    // Cache the monomorphization
-    tmplType->addMono(typeArgs, lambdaType);
+    // Cache the monomorphization -- only if its body type-checked. A failed
+    // instantiation must not be reused: a later call with the same types (a
+    // REPL re-run, after the failed statement was discarded) would hit the
+    // cache, skip the body check, and compile the ill-typed body.
+    if (bodyChecked) tmplType->addMono(typeArgs, lambdaType);
 
     return lambdaType;
 }
@@ -889,6 +894,9 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
             if (rightAM.isList) anyList = true;
             if (rightAM.isPVec) anyPVec = true;
         }
+
+        if (rejectUnsupportedCartesian({leftAM, rightAM}, {expr->left->loc, expr->right->loc}))
+            return compiler_.intType();
 
         // Store annotations on the AST node
         expr->leftAutoMap = leftAM;
@@ -1309,6 +1317,14 @@ Type* TypeChecker::inferUnaryOp(UnaryOpExpr* expr) {
     expr->resolvedFuncGlobalIndex = -1;
     expr->isBuiltinCall = false;
     expr->builtinAcceptsInlineArgs = false;
+
+    // `-(xs @)`: the arithmetic/logical unary operators auto-map over a
+    // collection operand anyway, so an explicit `@` on one is accepted.
+    if (expr->op == UnaryOpExpr::Neg || expr->op == UnaryOpExpr::Not ||
+        expr->op == UnaryOpExpr::BitNot) {
+        if (expr->operand->kind == ASTNode::AutoMap)
+            static_cast<AutoMapExpr*>(expr->operand.get())->consumed = true;
+    }
 
     Type* operandType = inferExpr(static_cast<Expr*>(expr->operand.get()));
     if (!operandType) return compiler_.intType();
