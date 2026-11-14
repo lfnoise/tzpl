@@ -676,6 +676,10 @@ private:
 
     // Type utilities
     bool isNumeric(Type* t) const;
+    // A truth value for `&&` / `||` (and `if`): Bool, or Int.
+    bool isTruthScalar(Type* t) const {
+        return t == compiler_.boolType() || t == compiler_.intType();
+    }
     bool isBoolComposite(Type* t) const;
     bool isIntComposite(Type* t) const;
     // Returns true if t is Complex, or recursively an Array/List/Tuple whose

@@ -932,6 +932,15 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
             }
         }
 
+        // Element-wise `&&` / `||` take truth values (Bool, or Int as in `if`).
+        if (expr->op == BinaryOpExpr::And || expr->op == BinaryOpExpr::Or) {
+            if (isTruthScalar(unwrappedLeft) && isTruthScalar(unwrappedRight))
+                return wrapAutoMapResult(compiler_.boolType(), leftAM, rightAM, anyList, anyPVec);
+            error(expr->loc, std::format("'{}' needs Bool operands",
+                                         expr->op == BinaryOpExpr::And ? "&&" : "||"));
+            return compiler_.boolType();
+        }
+
         // Try built-in ops with unwrapped types
         if (Type* scalarResult = elementwiseArithType(expr->op, unwrappedLeft, unwrappedRight)) {
             return wrapAutoMapResult(scalarResult, leftAM, rightAM, anyList, anyPVec);
@@ -1124,8 +1133,36 @@ Type* TypeChecker::inferBinaryOp(BinaryOpExpr* expr) {
             break;  // Fall through to operator overload lookup
 
         case BinaryOpExpr::And:
-        case BinaryOpExpr::Or:
-            return compiler_.boolType();
+        case BinaryOpExpr::Or: {
+            // A collection operand auto-maps one level, as comparisons do:
+            // `bs && true` over bs : [Bool] is element-wise. It used to type
+            // as a scalar Bool and test the array pointer's truthiness.
+            auto collElem = [](Type* t) -> Type* {
+                if (auto* a = dynamic_cast<ArrayType*>(t)) return a->elemType_;
+                if (auto* l = dynamic_cast<ListType*>(t)) return l->elemType_;
+                if (auto* p = dynamic_cast<PersistentVectorType*>(t)) return p->elemType_;
+                return nullptr;
+            };
+            Type* leftElem = collElem(leftType);
+            Type* rightElem = collElem(rightType);
+            if (!leftElem && !rightElem) return compiler_.boolType();
+            if (!isTruthScalar(leftElem ? leftElem : leftType) ||
+                !isTruthScalar(rightElem ? rightElem : rightType)) {
+                error(expr->loc, std::format("'{}' needs Bool operands",
+                                             expr->op == BinaryOpExpr::And ? "&&" : "||"));
+                return compiler_.boolType();
+            }
+            bool anyList = false, anyPVec = false;
+            auto mark = [&](Type* t, AutoMapArg& am) {
+                if (dynamic_cast<ArrayType*>(t)) am = AutoMapArg{1, 0, false};
+                else if (dynamic_cast<ListType*>(t)) { am = AutoMapArg{1, 0, true}; anyList = true; }
+                else if (dynamic_cast<PersistentVectorType*>(t)) { am = AutoMapArg{1, 0, false, true}; anyPVec = true; }
+            };
+            mark(leftType, expr->leftAutoMap);
+            mark(rightType, expr->rightAutoMap);
+            return wrapAutoMapResult(compiler_.boolType(), expr->leftAutoMap, expr->rightAutoMap,
+                                     anyList, anyPVec);
+        }
 
         case BinaryOpExpr::BitAnd:
         case BinaryOpExpr::BitOr:

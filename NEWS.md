@@ -46,6 +46,12 @@ documentation site as the Changelog page.
   `let a = 5; let b = 1 + "x";`, `a` read 0; and a failed redefinition of
   `x` changed its type over the old value. Now each name is undeclared or
   keeps its previous binding. Imports in a failed input still take effect.
+- Element-wise `&&` and `||` give correct results. `[true, false] @ && true`
+  gave `[true, true]`: each element pair was added as integers instead of
+  and-ed. Without `@`, `bs && true` over an array of Bools returned a single
+  `true` instead of mapping; it now maps one level, as comparisons do. A
+  collection whose elements are not Bool or Int is a type error. Scalar
+  `&&` and `||` still short-circuit.
 
 - Graph edits scheduled inside one block land at their exact sample in
   every case. The engine now runs the nodes up to each edit before applying

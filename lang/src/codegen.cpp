@@ -518,6 +518,11 @@ u16 CodeGen::ensureExistential(u16 reg, Type* fromType, Type* exType) {
 // --- Get appropriate opcodes for types ---
 
 Operation CodeGen::getArithOp(BinaryOpExpr::Op op, Type* type) {
+    // Element-wise `&&` / `||` (auto-mapped; the scalar form short-circuits
+    // in genBinaryOp). Without these, the per-type tables below fell through
+    // to their `add` default, so `[true, false] @ && true` gave [true, true].
+    if (op == BinaryOpExpr::And) return op_and_bool;
+    if (op == BinaryOpExpr::Or)  return op_or_bool;
     if (type == compiler_.complexType()) {
         switch (op) {
             case BinaryOpExpr::Add: return op_add_complex;
